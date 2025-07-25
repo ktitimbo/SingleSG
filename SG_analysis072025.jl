@@ -890,6 +890,57 @@ println("Running time : ", t_run)
 
 
 
+
+fig=plot(
+    data_framewise[10:end, 1], data_framewise[10:end, 8],
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+    xlims = (0.01,1.0),
+    title = "F=1 Peak Position vs Current",
+    label = "07122025",
+    seriestype = :scatter,
+    marker = (:circle, :white, 4),
+    markerstrokecolor = :black,
+    markerstrokewidth = 2,
+    legend = :bottomright,
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    xticks = :log10,
+    yticks = :log10,
+    framestyle = :box,
+    size=(800,600),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=12,
+)
+plot!(data_framewise[10:end, 1], data_framewise[10:end, 8],
+    ribbon= data_framewise[10:end, 9],
+    label= "Std", 
+    fillalpha=0.5, fillcolor=:grey36, line=(:solid, :grey36, 0.2)
+)
+# from matlab
+Ic_matlab = [0.0, 0.002, 0.004, 0.006, 0.008, 0.01, 0.012, .016, 0.022, 0.032, 0.044, 0.058, 
+                0.074, 0.094, 0.114,  0.134,  0.154,  0.174,  0.195,  0.215,  0.236, 
+                0.26, 0.285,  0.308,  0.341,  0.381,  0.42,  0.46,  0.5,  0.55,  0.609
+]
+pos0_matlab = [ -0.0075, 0.0486, -0.0065, 0.0021, -0.0165, -0.0018, -0.0260, -0.0009, -0.0056, 
+                0.0268, 0.0557, 0.0619, 0.1082, 0.1380, 0.1837, 0.2404, 0.2793, 0.3283, 0.3691, 
+                0.4018, 0.4628, 0.5015, 0.5492, 0.6106, 0.6546, 0.7344, 0.8241, 0.8804, 0.9341, 1.0199, 1.1314
+] # ki=1.58e-6
+plot!(abs.(Ic_matlab[1:end]),abs.(pos0_matlab[1:end]), label=L"$k_{i} = 1.58\times 10^{-6}$")
+vspan!([0.0001,Ic_matlab[9]], color=:yellow, alpha=0.30,label="unresolved")
+
+
+Ic_matlab[10:end]
+pos0_matlab[10:end]
+
+
+
+
+
 function ndgrid(y, x)
     Y = reshape(y, :, 1) .* ones(1, length(x))
     X = ones(length(y), 1) .* reshape(x, 1, :)

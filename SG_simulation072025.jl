@@ -3,44 +3,47 @@
 # California Institute of Technology
 # July 2025
 
-##  Plotting Setup
+#  Plotting Setup
 using Plots; gr()
 Plots.default(
     show=true, dpi=800, fontfamily="Computer Modern", 
     grid=true, minorgrid=true, framestyle=:box, widen=true,
 )
 using Plots.PlotMeasures
-using Interpolations, Roots, Dierckx, Loess
-using BSplineKit
-using Optim, Interpolations, Roots
+# Aesthetics and output formatting
+using Colors, ColorSchemes
+using LaTeXStrings, Printf, PrettyTables
+# Time-stamping/logging
+using Dates
+# Numerical tools
 using LinearAlgebra, DataStructures
+using Interpolations, Roots, Dierckx, Loess, Optim
+using BSplineKit
 using WignerD, LambertW, PolyLog
 using StatsBase
 using Random, Statistics, NaNStatistics, MLBase, Distributions, StaticArrays
-# using DifferentialEquations, OrdinaryDiffEq
-# using ODEInterface, ODEInterfaceDiffEq
 using Alert
+# Data manipulation
 using DelimitedFiles, CSV, DataFrames
-using Colors, LaTeXStrings, Dates, Printf
-using Base.Threads
-LinearAlgebra.BLAS.set_num_threads(4)
-BLAS.get_num_threads();
-Threads.nthreads();
-cd(dirname(@__FILE__)) # Set the working directory to the current location
-## Custom modules
+# Custom modules
 include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
 include("./Modules/MyPolylogarithms.jl");
+# Multithreading setup
+using Base.Threads
+LinearAlgebra.BLAS.set_num_threads(4)
+@info "BLAS threads" count = BLAS.get_num_threads()
+@info "Julia threads" count = Threads.nthreads()
 # Define color palette
 mypalette = palette(:tab10)
 # Set the working directory to the current location
 cd(dirname(@__FILE__)) 
-## General setup
+# General setup
 hostname = gethostname();
 @info "Running on host" hostname=hostname
-## Timestamp start for execution timing
+# Timestamp start for execution timing
 t_start = Dates.now()
-
+# Random seeds
 rng = MersenneTwister(145) #TaskLocalRNG()
 
 filename = "./simulation_data/$(Dates.format(t_start, "yyyymmddTHHMMSS"))" # filename
