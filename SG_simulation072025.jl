@@ -690,7 +690,7 @@ opt_result = optimize(smooth_fn, [minimum(bin_centers_z)], [maximum(bin_centers_
 z_max_fit = Optim.minimizer(opt_result)[1]
 vline!([z_max_fit], label=L"$z_{\mathrm{max}} = %$(round(z_max_fit,digits=6)) \, \mathrm{mm}$", line=(:red,:dot,2))
 
-
+23
 
 function CQD_analysis(Ix,cqd_data::AbstractMatrix; z_upper = 10 , s_bin = 1 , loess_factor = 0.10 )
 
