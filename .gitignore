@@ -1,0 +1,10 @@
+
+# Ignore image files
+*.png
+*.svg
+*.mat
+
+# Ignore folders
+20250712/
+results_data/
+simulation_data/
