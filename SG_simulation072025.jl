@@ -28,14 +28,12 @@ using DelimitedFiles, CSV, DataFrames
 # Custom modules
 include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
-include("./Modules/MyPolylogarithms.jl");
+# include("./Modules/MyPolylogarithms.jl");
 # Multithreading setup
 using Base.Threads
 LinearAlgebra.BLAS.set_num_threads(4)
 @info "BLAS threads" count = BLAS.get_num_threads()
 @info "Julia threads" count = Threads.nthreads()
-# Define color palette
-mypalette = palette(:tab10)
 # Set the working directory to the current location
 cd(dirname(@__FILE__)) 
 # General setup
@@ -46,8 +44,15 @@ t_start = Dates.now()
 # Random seeds
 rng = MersenneTwister(145) #TaskLocalRNG()
 
-filename = "./simulation_data/$(Dates.format(t_start, "yyyymmddTHHMMSS"))" # filename
 println("\n\t\tRunning process on:\t $(Dates.format(t_start, "yyyymmddTHHMMSS")) \n")
+
+# Generate a timestamped directory name for output (e.g., "20250718T153245")
+directoryname = Dates.format(t_start, "yyyymmddTHHMMSS") ;
+# Construct the full directory path (relative to current working directory)
+dir_path = "./simulation_data/$(directoryname)" ;
+# Create the directory (and any necessary parent folders)
+mkpath(dir_path) ;
+@info "Created output directory" dir = dir_path
 
 #################################################################################
 # FUNCTIONS
@@ -89,6 +94,108 @@ function FreedmanDiaconisBins(data_list::Vector{Float64})
     return bins
 end
 
+# Quantum Magnetic Moment μF : electron(1/2)-nucleus(3/2)
+function μF_effective(Ix,II,F,mF)
+    ΔE = 2π*ħ*Ahfs*(II+1/2)
+    normalized_B = (γₑ-γₙ)*ħ / ΔE * BvsI(Ix) 
+    if F==II+1/2 
+        if mF==F
+            μF = gₑ/2 * ( 1 + 2*γₙ/γₑ*II)*μB
+        elseif mF==-F
+            μF = -gₑ/2 * ( 1 + 2*γₙ/γₑ*II)*μB
+        else
+            μF = gₑ*μB* ( mF*γₙ/γₑ + (1-γₙ/γₑ)/sqrt(1-4*mF/(2*II+1)*normalized_B+(normalized_B)^2) * ( mF/(2*II+1)-1/2*normalized_B ) )
+        end
+    elseif F==II-1/2
+        μF = gₑ*μB* ( mF*γₙ/γₑ - (1-γₙ/γₑ)/sqrt(1-4*mF/(2*II+1)*normalized_B+(normalized_B)^2) * ( mF/(2*II+1)-1/2*normalized_B ) )
+    end
+    return μF
+end
+
+# CQD Equations of motion
+function CQDEqOfMotion(t,Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, ki::Float64)
+    tf1 = y_FurnaceToSlit / v0[2]
+    tf2 = (y_FurnaceToSlit + y_SlitToSG ) / v0[2]
+    tf3 = (y_FurnaceToSlit + y_SlitToSG + y_SG ) / v0[2]
+    tF = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen ) / v0[2]
+
+    cqd_sign = sign(θn-θe) 
+    ωL       = abs(γₑ * BvsI(Ix) )
+    acc_0    = μ*GvsI(Ix)/M
+    kω       = cqd_sign*ki*ωL
+
+    if 0.00 <= t && t <= tf1     # Furnace to Slit
+        x = r0[1] + v0[1]*t 
+        y = r0[2] + v0[2]*t 
+        z = r0[3] + v0[3]*t
+        vx , vy , vz = v0[1] , v0[2] , v0[3]
+    elseif tf1 < t && t <= tf2    # Slit to SG apparatus
+        x = r0[1] + v0[1]*t 
+        y = r0[2] + v0[2]*t
+        z = r0[3] + v0[3]*t
+        vx , vy , vz = v0[1] , v0[2] , v0[3]
+    elseif tf2 < t && t <= tf3   # Crossing the SG apparatus
+        vx = v0[1]
+        vy = v0[2]
+        vz = v0[3] + acc_0*(t-tf2) + acc_0/kω * log( cos(θe/2)^2 + exp(-2*kω*(t-tf2))*sin(θe/2)^2 )
+        x = r0[1] + v0[1]*t 
+        y = r0[2] + v0[2]*t
+        z = r0[3] + v0[3]*t + acc_0/2*(t-tf2)^2 + acc_0/kω*log(cos(θe/2)^2)*(t-tf2) + 1/2/(kω)^2 * acc_0 * ( polylog(2,-exp(-2*kω*(t-tf2))*tan(θe/2)^2) - polylog(2,-tan(θe/2)^2) )
+    elseif t > tf3
+        x = r0[1] + v0[1]*t
+        y = r0[2] + v0[2]*t
+        z = r0[3] + v0[3]*t + acc_0/2*( (t-tf2)^2 - (t-tf3)^2) + acc_0/kω*y_SG/v0[2] * ( log(cos(θe/2)^2) + v0[2]/y_SG*log(cos(θe/2)^2+exp(-2*kω*y_SG/v0[2])*sin(θe/2)^2)*(t-tf3) ) + acc_0/2/kω^2*( polylog(2,-exp(-2*kω*y_SG/v0[2])*tan(θe/2)^2) - polylog(2,-tan(θe/2)^2) )
+        vx = v0[1]
+        vy = v0[2]
+        vz = v0[3] + acc_0*y_SG/v0[2] + acc_0/kω*log(cos(θe/2)^2 + exp(-2*kω*y_SG/v0[2])*sin(θe/2)^2)
+    end
+
+    return [x,y,z]
+end
+
+# CQD Screen position
+function CQD_Screen_position(Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, ki::Float64)
+    L1 = y_FurnaceToSlit 
+    L2 = y_SlitToSG
+    Lsg = y_SG
+    Ld = y_SGToScreen
+
+    cqd_sign = sign(θn-θe) 
+    acc_0 = μ * GvsI(Ix) / M
+    ωL = abs(γₑ * BvsI(Ix))
+    kω = cqd_sign * ki * ωL
+
+    x = r0[1] + (L1 + L2 + Lsg + Ld) * v0[1] / v0[2]
+    y = r0[2] +  L1 + L2 + Lsg + Ld
+    z = r0[3] + (L1 + L2 + Lsg + Ld) * v0[3] / v0[2] + acc_0/2/v0[2]^2*((Lsg+Ld)^2-Ld^2) + acc_0/kω*Lsg/v0[2]*( log(cos(θe/2)^2) + Ld/Lsg * log( cos(θe/2)^2 + exp(-2*kω*Lsg/v0[2])*sin(θe/2)^2 ) ) + acc_0/2/kω^2 * ( polylog(2, -exp(-2*kω*Lsg/v0[2])*tan(θe/2)^2) - polylog(2, -tan(θe/2)^2)  )
+    return [x,y,z]
+end
+
+# generate samples post-filtering by the slit
+function generate_samples(Nss, rng)
+    alive_slit = SVector[]  # or appropriate container
+    iteration_count = 0
+
+    @time while length(alive_slit) < Nss
+        iteration_count += 1
+
+        x_initial = x_furnace * (rand(rng) - 0.5)
+        z_initial = z_furnace * (rand(rng) - 0.5)
+
+        v0_x, v0_y, v0_z = AtomicBeamVelocity()
+
+        x_at_slit = x_initial + y_FurnaceToSlit * v0_x / v0_y
+        z_at_slit = z_initial + y_FurnaceToSlit * v0_z / v0_y
+
+        if -x_slit/2 <= x_at_slit <= x_slit/2 && -z_slit/2 <= z_at_slit <= z_slit/2
+            push!(alive_slit, SVector(x_initial, 0.0, z_initial, v0_x, v0_y, v0_z))
+        end
+    end
+
+    println("Total iterations: ", iteration_count)
+    return alive_slit
+end
+
 atom        = "39K"  ;
 ## PHYSICAL CONSTANTS from NIST
 # RSU : Relative Standard Uncertainty
@@ -127,6 +234,8 @@ y_FurnaceToSlit = 224.0e-3 ;
 y_SlitToSG      = 44.0e-3 ;
 y_SG            = 7.0e-2 ;
 y_SGToScreen    = 32.0e-2 ;
+# Sample size: number of atoms arriving to the screen
+Nss=2000000
 
 # Magnetic field gradient interpolation
 GradCurrents = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01];
@@ -179,25 +288,7 @@ fig1= plot(fig1a,fig1b,fig1c,
     left_margin=5mm,bottom_margin=0mm,right_margin=0mm,
 )
 display(fig1)
-savefig(fig1,filename*"_01.svg")
-
-# Quantum Magnetic Moment μF : electron(1/2)-nucleus(3/2)
-function μF_effective(Ix,II,F,mF)
-    ΔE = 2π*ħ*Ahfs*(II+1/2)
-    normalized_B = (γₑ-γₙ)*ħ / ΔE * BvsI(Ix) 
-    if F==II+1/2 
-        if mF==F
-            μF = gₑ/2 * ( 1 + 2*γₙ/γₑ*II)*μB
-        elseif mF==-F
-            μF = -gₑ/2 * ( 1 + 2*γₙ/γₑ*II)*μB
-        else
-            μF = gₑ*μB* ( mF*γₙ/γₑ + (1-γₙ/γₑ)/sqrt(1-4*mF/(2*II+1)*normalized_B+(normalized_B)^2) * ( mF/(2*II+1)-1/2*normalized_B ) )
-        end
-    elseif F==II-1/2
-        μF = gₑ*μB* ( mF*γₙ/γₑ - (1-γₙ/γₑ)/sqrt(1-4*mF/(2*II+1)*normalized_B+(normalized_B)^2) * ( mF/(2*II+1)-1/2*normalized_B ) )
-    end
-    return μF
-end
+savefig(fig1, joinpath(dir_path, "SG_magneticfield.png"))
 
 Irange = collect(0.00009:0.00002:1);
 color8 = palette(:Set1_8);
@@ -239,65 +330,9 @@ vline!([bcrossing], line=(:black,:dot,2), label=L"$I_{0} = %$(round(bcrossing,di
 $\partial_{z}B_{z} = %$(round(GvsI(bcrossing),digits=2))\,\mathrm{T/m}$
 $B_{z} = %$(round(1e3*BvsI(bcrossing),digits=3))\,\mathrm{mT}$");
 display(fig2)
-savefig(fig2,filename*"_02.svg")
+savefig(fig2, joinpath(dir_path, "mu_effective.png"))
 
-# Equations of motion
-function CQDEqOfMotion(t,Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, ki)
-    tf1 = y_FurnaceToSlit / v0[2]
-    tf2 = (y_FurnaceToSlit + y_SlitToSG ) / v0[2]
-    tf3 = (y_FurnaceToSlit + y_SlitToSG + y_SG ) / v0[2]
-    tF = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen ) / v0[2]
 
-    cqd_sign = sign(θn-θe) 
-    ωL       = abs(γₑ * BvsI(Ix) )
-    acc_0    = μ*GvsI(Ix)/M
-    kω       = cqd_sign*ki*ωL
-
-    if 0.00 <= t && t <= tf1     # Furnace to Slit
-        x = r0[1] + v0[1]*t 
-        y = r0[2] + v0[2]*t 
-        z = r0[3] + v0[3]*t
-        vx , vy , vz = v0[1] , v0[2] , v0[3]
-    elseif tf1 < t && t <= tf2    # Slit to SG apparatus
-        x = r0[1] + v0[1]*t 
-        y = r0[2] + v0[2]*t
-        z = r0[3] + v0[3]*t
-        vx , vy , vz = v0[1] , v0[2] , v0[3]
-    elseif tf2 < t && t <= tf3   # Crossing the SG apparatus
-        vx = v0[1]
-        vy = v0[2]
-        vz = v0[3] + acc_0*(t-tf2) + acc_0/kω * log( cos(θe/2)^2 + exp(-2*kω*(t-tf2))*sin(θe/2)^2 )
-        x = r0[1] + v0[1]*t 
-        y = r0[2] + v0[2]*t
-        z = r0[3] + v0[3]*t + acc_0/2*(t-tf2)^2 + acc_0/kω*log(cos(θe/2)^2)*(t-tf2) + 1/2/(kω)^2 * acc_0 * ( polylog(2,-exp(-2*kω*(t-tf2))*tan(θe/2)^2) - polylog(2,-tan(θe/2)^2) )
-    elseif t > tf3
-        x = r0[1] + v0[1]*t
-        y = r0[2] + v0[2]*t
-        z = r0[3] + v0[3]*t + acc_0/2*( (t-tf2)^2 - (t-tf3)^2) + acc_0/kω*y_SG/v0[2] * ( log(cos(θe/2)^2) + v0[2]/y_SG*log(cos(θe/2)^2+exp(-2*kω*y_SG/v0[2])*sin(θe/2)^2)*(t-tf3) ) + acc_0/2/kω^2*( polylog(2,-exp(-2*kω*y_SG/v0[2])*tan(θe/2)^2) - polylog(2,-tan(θe/2)^2) )
-        vx = v0[1]
-        vy = v0[2]
-        vz = v0[3] + acc_0*y_SG/v0[2] + acc_0/kω*log(cos(θe/2)^2 + exp(-2*kω*y_SG/v0[2])*sin(θe/2)^2)
-    end
-
-    return [x,y,z]
-end
-
-function CQD_Screen_position(Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, ki)
-    L1 = y_FurnaceToSlit 
-    L2 = y_SlitToSG
-    Lsg = y_SG
-    Ld = y_SGToScreen
-
-    cqd_sign = sign(θn-θe) 
-    acc_0 = μ * GvsI(Ix) / M
-    ωL = abs(γₑ * BvsI(Ix))
-    kω = cqd_sign * ki * ωL
-
-    x = r0[1] + (L1 + L2 + Lsg + Ld) * v0[1] / v0[2]
-    y = r0[2] +  L1 + L2 + Lsg + Ld
-    z = r0[3] + (L1 + L2 + Lsg + Ld) * v0[3] / v0[2] + acc_0/2/v0[2]^2*((Lsg+Ld)^2-Ld^2) + acc_0/kω*Lsg/v0[2]*( log(cos(θe/2)^2) + Ld/Lsg * log( cos(θe/2)^2 + exp(-2*kω*Lsg/v0[2])*sin(θe/2)^2 ) ) + acc_0/2/kω^2 * ( polylog(2, -exp(-2*kω*Lsg/v0[2])*tan(θe/2)^2) - polylog(2, -tan(θe/2)^2)  )
-    return [x,y,z]
-end
 
 # function QMEqOfMotion(t,Ix,μ,r0::Vector{Float64},v0::Vector{Float64})
 #     tf1 = y_FurnaceToSlit / v0[2]
@@ -387,39 +422,8 @@ function AtomicBeamVelocity()
     return [ v*sin(θ)*sin(ϕ) , v*cos(θ) , v*sin(θ)*cos(ϕ) ]
 end
 
-# Sample size: number of atoms arriving to the screen
-Nss=2000000
+alive_slit = generate_samples(Nss, rng);
 
-# Initialize empty array to store valid rows
-# Pre-allocate storage with size hint for performance
-alive_slit = Vector{SVector{6, Float64}}()  # [x0,y0,z0,v0x,v0y,v0z]
-sizehint!(alive_slit, Nss)
- 
-iteration_count = 0;
-# Generate samples until we get 10 valid ones
-@time while length(alive_slit) < Nss
-
-    iteration_count += 1
-
-    # Generate initial positions
-    x_initial = x_furnace * (rand(rng) - 0.5)
-    z_initial = z_furnace * (rand(rng) - 0.5)
-
-    # Generate initial velocities
-    v0_x , v0_y , v0_z = AtomicBeamVelocity()
-
-    # Calculate positions at the slit
-    x_at_slit = x_initial + y_FurnaceToSlit * v0_x / v0_y
-    y_at_slit = y_FurnaceToSlit
-    z_at_slit = z_initial + y_FurnaceToSlit * v0_z / v0_y
-
-    # Check conditions
-    if -x_slit/2 <= x_at_slit <= x_slit/2 && -z_slit/2 <= z_at_slit <= z_slit/2
-        # Add valid data to the array
-        push!(alive_slit, SVector(x_initial, 0.0, z_initial, v0_x, v0_y, v0_z))
-        # println("Added valid sample #", length(alive_slit))
-    end
-end
 # println("Valid samples:\n", alive_slit)
 println("Total iterations: ", iteration_count)
 

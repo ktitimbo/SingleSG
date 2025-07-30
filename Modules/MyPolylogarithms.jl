@@ -47,7 +47,7 @@ module MyPolylogarithms
                 level=level, accuracy=accuracy, min_iterations=min_iterations, max_iterations=max_iterations)[1] # just output the result
     end
 
-    # this is the main version, but outputs diagnosstics, which I guess most people won't want
+    # this is the main version, but outputs diagnostics, which I guess most people won't want
     """
         polylog(s, z, Diagnostics())
 

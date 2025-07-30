@@ -15,7 +15,7 @@ using MAT
 using LinearAlgebra
 using ImageFiltering, FFTW
 using DataStructures
-using Statistics
+using Statistics, StatsBase
 using BSplineKit, Optim
 # Aesthetics and output formatting
 using Colors, ColorSchemes
@@ -100,7 +100,7 @@ function estimate_shift_fft(img1, img2; Nmethod::String = "none")
     Returns a tuple (dx, dy) in pixels representing how much `img2` is shifted
     relative to `img1`.
     """
-    
+    @assert size(img1) == size(img2) "Images must have the same dimensions"
     # Convert images to Float64 for numerical accuracy
     img1_f = float.(img1)
     img2_f = float.(img2)
@@ -147,10 +147,10 @@ function estimate_shift_fft(img1, img2; Nmethod::String = "none")
 
         # Solve least squares problem A * coeffs ≈ b
         coeffs = A \ b
-        a, b_, c, d, e, _ = coeffs  # unpack coefficients of quadratic fit
+        a, b2, c, d, e, _ = coeffs  # unpack coefficients of quadratic fit
 
         # Compute the gradient and Hessian of the fitted quadratic surface
-        H = [2a c; c 2b_]           # Hessian matrix of second derivatives
+        H = [2a c; c 2b2]           # Hessian matrix of second derivatives
         g = [-d; -e]                # Gradient vector (first derivatives)
 
         # Solve for subpixel offset: H⁻¹ * g gives the location of the peak
@@ -176,6 +176,7 @@ function estimate_1d_shift_fft(signal1::AbstractVector, signal2::AbstractVector;
     Estimate relative shift between two 1D signals using FFT-based cross-correlation.
     Returns subpixel shift (float), representing how much signal2 is shifted relative to signal1.
     """
+    @assert length(signal1) == length(signal2) "Signals must be the same length"
     N = length(signal1)
     # Convert images to Float64 for numerical accuracy
     signal1 = float.(signal1)
@@ -239,61 +240,85 @@ function linear_fit(data::AbstractMatrix)
     return a,b,x -> a * x + b
 end
 
-function process_mean_maxima(signal_key::String, Icoils, matched_files, z_position, bg_signal; save=false)
+# Compute pixel positions after binning, centered
+function pixel_positions(img_size::Int, bin_size::Int, pixel_size::Float64)
+    @assert img_size % bin_size == 0 "img_size must be divisible by bin_size"
+    n_pixels = div(img_size,bin_size)
+    effective_size = bin_size * pixel_size
+    return effective_size .* (1:n_pixels) .- effective_size / 2
+end
+
+function process_mean_maxima(signal_key::String, data, n_bins; save=false)
     """
-    This function processes the mean z-profile of either the F1 or F2 signal across current settings.
+    Processes the mean z-profile of either the F1 or F2 signal across current settings.
+    Arguments:
+    - signal_key: "F1" or "F2"
+    - data: structured dataset containing processed images
+    - n_bins: number of bins for z-position averaging
+    - save: whether to save the plots to disk
+
+    Steps:
     - Averages the intensity per frame
-    - Subtracts the background
     - Fits a smoothing spline
     - Locates the primary peak
     - Plots both raw and processed signals with spline fit
     """
     λ0 = 0.01  # Smoothing parameter for B-spline fitting
+    Icoils = vec(data["data"]["Current_mA"])
     nI = length(Icoils)
-    z_coord = 1e3 .* collect(z_position)  # Convert z_position to mm for fitting
+    
+    # Validate signal_key
+    signal_label = signal_key == "F1" ? "F1ProcessedImages" :
+                   signal_key == "F2" ? "F2ProcessedImages" :
+                   error("Invalid signal_key: choose 'F1' or 'F2'")
 
     peak_positions = zeros(nI)
 
     for j in 1:nI
-        signal = matread(matched_files[j])
-        signal_data = Float64.(signal[signal_key])
+        # Get spatial z-coordinates (in mm)
+        z_coord = 1e3 .* pixel_positions(2560,n_bins,cam_pixelsize)  
 
-        n_sig = size(signal_data, 3)  # Number of frames in the signal
+        # Load 3D image data for current j
+        signal = Float64.(data["data"][signal_label][1,j])
+        n_sig = size(signal, 3)  # Number of frames in the signal
 
-        # @info "Processing data" coil_current = Icoils[j], signal_key = signal_key
+        # Compute signal profile for each frame
+        signal_profiles = [vec(mean(signal[:, :, i], dims=1)) for i in 1:n_sig]
+        signal_profiles = reduce(hcat, signal_profiles)';  # Each row corresponds to one frame
 
-        # Mean intensity along z for each frame (dim 1 and 2 averaged, leaving dim 3 as frames)
-        sig_mean_profiles = [vec(mean(signal_data[:, :, i], dims=1)) for i in 1:n_sig]
-        sig_mean_profiles = reduce(hcat, sig_mean_profiles)';  # Each row corresponds to one frame
-        mean_signal = vec(mean(sig_mean_profiles, dims=1));    # Mean over frames
+        # Compute overall mean signal
+        signal_mean = vec(mean(dropdims(mean(signal,dims=3); dims=3), dims=1))
+        @assert length(signal_mean) % n_bins == 0 "Signal length not divisible by n_bins"
 
-        # Color palette for plotting frames
-        colors = palette(:phase, n_sig)
+        # Bin signal by reshaping and averaging
+        binned = reshape(signal_mean, n_bins, :)  # now shape is (2, 1280)
+        signal_mean = vec(mean(binned, dims=1))
 
-        # Plot raw signals per frame + mean
+        # Optional background subtraction (currently placeholder)
+        processed_signal = signal_mean  # Modify here if subtracting background
+
+        # --- Plot raw signal per frame + mean ---
         fig_00 = plot(
             xlabel = L"$z$ (mm)",
             ylabel = "Intensity (a.u.)",
-            title = L"%$(signal_key) Raw Signal: $I_{c} = %$(1000*Icoils[j])\mathrm{mA}$",
-        )
+            title = L"%$(signal_key) Raw Signal: $I_{c} = %$(round(Icoils[j],digits=3))\mathrm{mA}$",
+        );
+        # Color palette for plotting frames
+        colors = palette(:phase, n_sig);
         for i in 1:n_sig
-            plot!( z_coord, sig_mean_profiles[i, :], label=false, line=(:solid, colors[i], 1))
+            plot!( 1e3 .* pixel_positions(2560,1,cam_pixelsize) , signal_profiles[i, :], label=false, line=(:solid, colors[i], 1))
         end
-        plot!(z_coord, mean_signal, label="mean", line=(:solid, :black, 2))
-        display(fig_00)
+        plot!(z_coord, processed_signal, label="mean (bins=$(n_bins))", line=(:solid, :black, 2));
+        display(fig_00);
         # savefig(fig_00, joinpath(dir_path, "$(signal_key)_I$( @sprintf("%02d", j))_raw.png" ))
 
-        # Background subtraction
-        processed_signal = mean_signal .- bg_signal
-        
-
-        # Fit B-spline with smoothing parameter and weights
+        # --- Fit smoothing spline to processed signal ---
         S_fit = BSplineKit.fit(BSplineOrder(4), z_coord, processed_signal, λ0; weights=compute_weights(z_coord,λ0))
 
         # Define negative spline function for finding maxima via minimization
         negative_spline(x) = -S_fit(x[1])
 
-        # Initial guesses for minima search (using quantiles and extrema)
+        # # Initial guesses for maxima (to increase robustness using quantiles and extrema)
         initial_guesses = sort([
             ceil(minimum(z_coord)),
             quantile(z_coord, 0.4),
@@ -304,7 +329,7 @@ function process_mean_maxima(signal_key::String, Icoils, matched_files, z_positi
             floor(maximum(z_coord))
         ])
 
-        # Find local maxima by minimizing negative spline with bounds
+        # Optimize to find maxima from initial guesses
         minima_candidates = Float64[]
         for guess in initial_guesses
             opt_result = optimize(negative_spline, [minimum(z_coord)], [maximum(z_coord)], [guess], Fminbox(LBFGS()))
@@ -328,11 +353,11 @@ function process_mean_maxima(signal_key::String, Icoils, matched_files, z_positi
         # Store primary peak position (max) 
         peak_positions[j] = minima[1]
 
-        # Plot processed signal with spline fit and peak positions
+        # --- Plot processed signal with spline fit and maximum ---
         fig_01 = plot(
             z_coord,
             processed_signal,
-            title = L"%$(signal_key) Processed Signal: $I_{c} = %$(1000*Icoils[j])\mathrm{mA}$",
+            title = L"%$(signal_key) Processed Signal: $I_{c} = %$(round(Icoils[j],digits=3))\mathrm{mA}$",
             label = "$(signal_key) processed",
             seriestype = :scatter,
             marker = (:white, 2),
@@ -341,13 +366,14 @@ function process_mean_maxima(signal_key::String, Icoils, matched_files, z_positi
             xlabel = L"$z \ (\mathrm{mm})$",
             ylabel = "Intensity (a.u.)",
             legend = :topleft,
-        )
-        xxs = collect(range(minimum(z_coord), maximum(z_coord), length=2000))
-        plot!(xxs, S_fit.(xxs), line=(:solid, :red, 2), label="Spline fitting")
-        vline!([minima[1]], line=(:dash, :black, 1), label=L"$z_{\mathrm{max}}= %$(round(minima[1], digits=3))\mathrm{mm}$")
-        display(fig_01)
+        );
+        xxs = collect(range(minimum(z_coord), maximum(z_coord), length=2000));
+        plot!(xxs, S_fit.(xxs), line=(:solid, :red, 2), label="Spline fitting");
+        vline!([minima[1]], line=(:dash, :black, 1), label=L"$z_{\mathrm{max}}= %$(round(minima[1], digits=3))\mathrm{mm}$");
+        display(fig_01);
         # savefig(fig_01, joinpath(dir_path, "$(signal_key)_I$(@sprintf("%02d", j))_processed.png" ))
 
+        # --- Display side-by-side plot ---
         fig =plot(fig_00,fig_01,
         layout=@layout([a1 a2]),
         size=(900,400),
@@ -356,13 +382,15 @@ function process_mean_maxima(signal_key::String, Icoils, matched_files, z_positi
         # link=:x,
         )
         display(fig)
+        
+        # --- Save if needed ---
         save && savefig(fig, joinpath(dir_path, "m_$(signal_key)_I$(@sprintf("%02d", j)).png" ))
 
     end
     return peak_positions
 end
 
-function process_framewise_maxima(signal_key::String, Icoils, matched_files, z_position, bg_signal; save=false)
+function process_framewise_maxima(signal_key::String, data, n_bins; save=false)
     """
     Process per-frame z-position of intensity maxima for a given signal key (e.g., "F1", "F2").
     - Fits B-splines to the averaged intensity profiles (along x-direction).
@@ -371,24 +399,39 @@ function process_framewise_maxima(signal_key::String, Icoils, matched_files, z_p
     and is NaN if no data exists for that run/current.
     """
     λ0 = 0.01                                # Smoothing parameter for B-spline
+    Icoils = vec(data["data"]["Current_mA"])
     nI = length(Icoils)                      # Number of current settings
-    z_coord = 1e3 .* collect(z_position)     # z-position in mm for readability in plots
+    # Get spatial z-coordinates (in mm)
+    z_coord = 1e3 .* pixel_positions(2560,n_bins,cam_pixelsize)
+
+    # Validate signal_key
+    signal_label = signal_key == "F1" ? "F1ProcessedImages" :
+                   signal_key == "F2" ? "F2ProcessedImages" :
+                   error("Invalid signal_key: choose 'F1' or 'F2'")
+
 
     # Determine maximum number of runs across all files
-    n_runs_max = maximum(size(matread(file)[signal_key], 3) for file in matched_files)
+    n_runs_max = maximum([size(data["data"][signal_label][1,i], 3) for i=1:nI])
     max_position_data = fill(NaN, n_runs_max, nI)
 
-    @info "Processing per-frame maxima" signal_key=signal_key
+    @info "Processing per-frame maxima" signal_label=signal_label
     for j in 1:nI
-        signal = matread(matched_files[j])
-        signal_data = Float64.(signal[signal_key])
-        n_runs = size(signal_data, 3)  # Number of frames in the signal
+
+        signal = Float64.(data["data"][signal_label][1,j])
+        n_runs = size(signal, 3)  # Number of frames in the signal
 
         colors = palette(:phase, n_runs)
 
         for i in 1:n_runs
-            signal_profile = vec(mean(signal_data[:, :, i], dims=1))
-            processed = signal_profile .- bg_signal
+
+            signal_profile = vec(mean(signal[:, :, i], dims=1))
+
+            @assert length(signal_profile) % n_bins == 0 "Signal length not divisible by n_bins"
+            # Bin signal by reshaping and averaging
+            binned = reshape(signal_profile, n_bins, :)  # now shape is (2, 1280)
+            signal_profile = vec(mean(binned, dims=1))
+
+            processed = signal_profile
 
             # Fit B-spline to the processed signal
             S_fit = BSplineKit.fit(
@@ -439,8 +482,8 @@ function process_framewise_maxima(signal_key::String, Icoils, matched_files, z_p
 
             # Plot
             fig_signal = plot(
-                1e3*z_position, processed,
-                title = L"%$(signal_key) Signal: $I_{c} = %$(1000*Icoils[j])\mathrm{mA}$",
+                z_coord, processed,
+                title = L"%$(signal_key) Signal: $I_{c} = %$(round(Icoils[j], digits=3))\mathrm{mA}$",
                 label = "Run $i",
                 seriestype = :scatter,
                 marker = (:white, 2),
@@ -475,7 +518,7 @@ data_JSF = OrderedDict(
 )
 
 # Data Directory
-data_directory = "20250712/" ;
+data_directory = "20250725/" ;
 
 # Generate a timestamped directory name for output (e.g., "20250718T153245")
 directoryname = Dates.format(t_start, "yyyymmddTHHMMSS") ;
@@ -488,77 +531,70 @@ mkpath(dir_path) ;
 # STERN–GERLACH EXPERIMENT SETUP
 # Camera and pixel geometry
 cam_pixelsize = 6.5e-6 ;            # Physical pixel size of camera [m]
-exp_bin = 4 ;                       # Camera binning
+exp_bin = 1 ;                       # Camera binning
 exp_pixelsize = exp_bin*cam_pixelsize ; # Effective pixel size after binning [m]
 # Image dimensions (adjusted for binning)
 x_pixels = Int(2160 / exp_bin)  # Number of x-pixels after binning
 z_pixels = Int(2560 / exp_bin)  # Number of z-pixels after binning
 # Spatial axes shifted to center the pixels
-x_position = exp_bin*cam_pixelsize*(1:1:x_pixels) .- exp_pixelsize/2
-z_position = exp_bin*cam_pixelsize*(1:1:z_pixels) .- exp_pixelsize/2
+x_position = pixel_positions(2160, exp_bin, cam_pixelsize)
+z_position = pixel_positions(2560, exp_bin, cam_pixelsize)
 
-# Use a regex to match filenames
-files = readdir(data_directory; join=true)
-# Extract coil currents (in mA) from filenames using regex
-Icoils = collect(skipmissing(map(files) do f # (mA)
-    m = match(r"I-(\d+)mA", f)
-    m !== nothing ? parse(Int, m.captures[1]) : missing
-end))
-Icoils = Icoils / 1000 ; # Convert to A
-nI = length(Icoils) ;    # Number of valid current files found
+# Read data
+data = matread(joinpath(data_directory, "data.mat")) 
 
+# Extract coil currents (in mA)
+Icoils = vec(data["data"]["Current_mA"]/1000)
+nI = length(Icoils)     # Number of valid current files found
 
-# BACKGROUND SIGNAL
-# Load background data
-background_file = matread(joinpath(data_directory, "background.mat")) ;     # Read background data from .mat file
-bg = Float64.(background_file["Background"]) ;  # Convert to Float64
-bg = dropdims(bg, dims=3) ;     # Removes the 3rd dimension
-n_bg = size(bg, 3) ;          # Number of background frames
+fig_I0 = plot(abs.(reverse(-Icoils)), 
+    seriestype=:scatter,
+    label = "Currents sampled",
+    marker = (:circle, :white, 2),
+    markerstrokecolor = :orangered,
+    markerstrokewidth = 1,
+);
+plot!(    
+    yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$", :log),
+    ylim = (1e-6,1),
+    title = "Coil Currents",
+    label = "20250725",
+    legend = :bottomright,
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    yticks = :log10,
+    framestyle = :box,
+    size=(600,400),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+);
+vspan!([0, findlast(<(0), reverse(-Icoils))+0.5 ], color=:gray, alpha=0.30,label="unresolved" );
+display(fig_I0)
 
-# Generate a perceptual color palette for plotting
-colors = palette(:phase, n_bg) ;
-
-# Preallocate and compute mean intensity along z for each frame
-bg_mean_profiles = [vec(mean(bg[:, :, i], dims=1)) for i in 1:n_bg] ;
-bg_mean_profiles = reduce(hcat, bg_mean_profiles)' ; # Stack as rows
-bg_signal = vec(mean(bg_mean_profiles, dims=1)) ;    # Mean across frames
-
-# Plot Background Signal
-fig_bg = plot(
-    xlabel=L"$z$ (mm)",
-    ylabel="Intensity (a.u.)", 
-    title="Background")
-for i=1:n_bg
-    plot!(1e3*z_position, bg_mean_profiles[i,:], label=false, line=(:solid, colors[i], 1))
-end
-plot!(1e3*z_position, bg_signal, label="Mean", line=(:dot, :black, 2))
-relative_background_variation = (maximum(bg_signal) - minimum(bg_signal)) / maximum(bg_signal)
-variation_str = @sprintf "Relative variation: %.2f%%" 100 * relative_background_variation
-annotate!(fig_bg, 12, minimum(bg_signal), text(variation_str, :black, 10))
-display(fig_bg)
-savefig(fig_bg, joinpath(dir_path, "background.png"))
 
 # SIGNAL
-# Filter relevant .mat files with coil current info in filename
-matched_files = filter(f -> endswith(f, ".mat") && occursin(r"I-\d+mA", basename(f)), files) ; 
-
 ##########################################################################################
 ##########################################################################################
 # Run for F1 and F2 signals: MEAN OF FRAMES
 ##########################################################################################
 ##########################################################################################
 
-f1_data_mean = process_mean_maxima("F1", Icoils, matched_files, z_position, bg_signal)
-f2_data_mean = process_mean_maxima("F2", Icoils, matched_files, z_position, bg_signal)
+f1_data_mean = process_mean_maxima("F1", data, n_bins )
+f2_data_mean = process_mean_maxima("F2", data, n_bins )
 
 data_mean = hcat( # [I_coil (mA), F1_z_peak (mm), F2_z_peak (mm), Δz (mm), F1_z_centered (mm), F2_z_centered (mm)]
-    Icoils, 
+    -1000*Icoils, 
     f1_data_mean, 
     f2_data_mean, 
     f1_data_mean .- f2_data_mean, 
-    f1_data_mean .- f1_data_mean[1], 
-    f2_data_mean .- f2_data_mean[1]
+    f1_data_mean .- f1_data_mean[end], 
+    f2_data_mean .- f2_data_mean[end]
 )  
+reverse!(data_mean, dims=1)
 
 pretty_table(
     data_mean;
@@ -566,7 +602,7 @@ pretty_table(
     alignment=:c,
     header        = (
         ["Current", "F1 z", "F2 z", "Δz", "Centered F1 z","Centered F2 z"], 
-        ["[A]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
+        ["[mA]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
         ),
     border_crayon = crayon"blue bold",
     tf            = tf_unicode_rounded,
@@ -574,11 +610,87 @@ pretty_table(
     equal_columns_width= true,
 )
 
+fig_00 = plot(abs.(data_mean[:,1]/1000), data_mean[:,2],
+    label=L"$F_{1}$",
+    line=(:solid,:red,2),
+)
+plot!(abs.(data_mean[:,1]/1000), data_mean[:,3],
+    label=L"$F_{2}$",
+    line=(:solid,:blue,2),
+)
+plot!(
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
+    xlims = (1e-5,1.0),
+    title = "Peak position",
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    size=(800,600),
+    legend=:topleft,
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+)
+vspan!([1e-8, abs(data_mean[findlast(<(0), data_mean[:,1])+1,1]/1000)], color=:gray, alpha=0.30,label="zero" )
+plot!(abs.(data_mean[:,1]/1000), data_mean[:,2], fillrange=data_mean[:,3],
+    fillalpha=0.2,
+    color=:purple,
+    label = false,
+)
+
+fig_01 = plot(abs.(data_mean[:,1]/1000), data_mean[:,2],
+    label=L"$F_{1}$",
+    line=(:solid,:red,2),
+)
+plot!(abs.(data_mean[:,1]/1000), 2*data_mean[1,3] .- data_mean[:,3],
+    label=L"Mirrored $F_{2}$",
+    line=(:solid,:blue,2),
+)
+plot!(
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
+    xlims = (1e-5,1.0),
+    title = "Peak position",
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    size=(800,600),
+    legend=:topleft,
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+)
+vspan!([1e-8, abs(data_mean[findlast(<(0), data_mean[:,1])+1,1]/1000)], color=:gray, alpha=0.30,label="zero" )
+# Fill between y1 and y2
+plot!(abs.(data_mean[:,1]/1000), data_mean[:,2], fillrange=2*data_mean[1,3] .- data_mean[:,3],
+    fillalpha=0.2,
+    color=:purple,
+    label = false,
+)
+
+fig=plot(fig_00, fig_01,
+layout=@layout([a ; b]),
+share=:x,
+)
+plot!(fig[1], xlabel = "", xformatter=_->"")
+plot!(fig[2], title = "", top_margin = -9mm)
+display(fig)
+
 fig=plot(
-    data_mean[2:end, 1], abs.(data_mean[2:end, 5]),
+    data_mean[2:end, 1]/1000, abs.(data_mean[2:end, 5]),
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
     yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
     xlims = (0.001,1.0),
+    ylims = (1e-4,1.5),
     title = "F=1 Peak Position vs Current",
     label = "07122025",
     seriestype = :scatter,
@@ -591,14 +703,16 @@ fig=plot(
     gridalpha = 0.5,
     gridstyle = :dot,
     minorgridalpha = 0.05,
-    xticks = :log10,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = :log10,
     framestyle = :box,
     size=(800,600),
     tickfontsize=11,
     guidefontsize=14,
     legendfontsize=10,
-)
+) 
+hspan!([1e-6,1000*n_bins* cam_pixelsize], color=:gray, alpha=0.30, label="Pixel size" )
 plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
 marker=(:cross, :purple, 6),
 line=(:purple, :dash, 2, 0.5),
@@ -615,55 +729,9 @@ line=(:dot, :red, 3),
 markerstrokewidth=2,
 label="10142024: CQD"
 )
-a0,b0,fit_JSF = linear_fit(data_JSF[:exp][end-3:end,:])
-a1,b1,fit_datamean = linear_fit(data_mean[end-9:end,[1,5]])
-label1_str = @sprintf("z = %.3f \\, I + %.3f", a0, b0)
-label2_str = @sprintf("z = %.3f \\, I + %.3f", a1, b1)
-plot!(Icoils,fit_JSF.(Icoils), label=L"10142024: %$(label1_str)" )
-plot!(Icoils,fit_datamean.(Icoils), label=L"07122025: %$(label2_str)" )
-vspan!([0.0001,0.020], color=:gray, alpha=0.30,label="unresolved")
 savefig(fig, joinpath(dir_path, "mean.png"))
 
-# p = plot(
-#     xlims = (0.01,1.0),
-#     title = "F=1 Peak Position vs Current",
-#     legend = :topleft,
-#     grid = true,
-#     minorgrid = true,
-#     gridalpha = 0.5,
-#     gridstyle = :dot,
-#     minorgridalpha = 0.05,
-#     xticks = :log10,
-#     yticks = :log10,
-#     framestyle = :box,
-#     size=(800,600),
-#     tickfontsize=11,
-#     guidefontsize=14,
-#     legendfontsize=12,
-# )
-# colors = palette(:viridis, 9) # Generate a color palette for the 9 currents
-# for i = 1:8
-#     data_mean = hcat( # [I_coil (mA), F1_z_peak (mm), F2_z_peak (mm), Δz (mm), F1_z_centered (mm), F2_z_centered (mm)]
-#     Icoils, 
-#     f1_data_mean, 
-#     f2_data_mean, 
-#     f1_data_mean .- f2_data_mean, 
-#     f1_data_mean .- f1_data_mean[i], 
-#     f2_data_mean .- f2_data_mean[i]
-#     )
-#     p = plot!(
-#     data_mean[10:end, 1], data_mean[10:end, 5],
-#     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-#     yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
-#     label = "07122025 : $( @sprintf("%.3f",Icoils[i]) ) A",
-#     seriestype = :scatter,
-#     marker = (:circle, :white, 4),
-#     markerstrokecolor = colors[i],
-#     markerstrokewidth = 2,
 
-# )
-# display(p)
-# end  
 
 ##########################################################################################
 ##########################################################################################
@@ -671,23 +739,28 @@ savefig(fig, joinpath(dir_path, "mean.png"))
 ##########################################################################################
 ##########################################################################################
 
-F1_data_framewise = process_framewise_maxima("F1", Icoils, matched_files, z_position, bg_signal)
-F2_data_framewise = process_framewise_maxima("F2", Icoils, matched_files, z_position, bg_signal)
+F1_data_framewise = process_framewise_maxima("F1", data, n_bins)
+F2_data_framewise = process_framewise_maxima("F2", data, n_bins)
 
 data_framewise = hcat( 
-    # [I_coil (mA), F1_z_peak (mm), Erro, F2_z_peak (mm), Error, Δz (mm), Error, F1_z_centered (mm), F2_z_centered (mm)]
-    Icoils, 
+    # [I_coil (mA), F1_z_peak (mm), Error, F2_z_peak (mm), Error, Δz (mm), Error, F1_z_centered (mm), Error, F2_z_centered (mm), Error]
+    -1000*Icoils, 
     vec(mean(F1_data_framewise,dims=1)), 
-    vec(std(F1_data_framewise,dims=1)), 
+    vec(std(F1_data_framewise,dims=1)) / sqrt(size(F1_data_framewise,1)), 
+
     vec(mean(F2_data_framewise,dims=1)), 
-    vec(std(F2_data_framewise,dims=1)),
+    vec(std(F2_data_framewise,dims=1)) / sqrt(size(F2_data_framewise,1)) ,
+    
     vec(mean(F1_data_framewise,dims=1)) .- vec(mean(F2_data_framewise,dims=1)),
-    sqrt.(vec(std(F1_data_framewise,dims=1)).^2 .+ vec(std(F2_data_framewise,dims=1)).^2),
-    vec(mean(F1_data_framewise,dims=1)) .- vec(mean(F1_data_framewise,dims=1))[1],    
-    sqrt.(vec(std(F1_data_framewise,dims=1)).^2 .+ vec(std(F1_data_framewise,dims=1))[1]^2),
+    sqrt.( vec(std(F1_data_framewise,dims=1)/sqrt(size(F1_data_framewise,1))).^2 .+ vec(std(F2_data_framewise,dims=1)/sqrt(size(F2_data_framewise,1))).^2),
+    
+    vec(mean(F1_data_framewise,dims=1)) .- vec(mean(F1_data_framewise,dims=1))[end],    
+    sqrt.( vec(std(F1_data_framewise,dims=1)/sqrt(size(F1_data_framewise,1))).^2 .+ vec(std(F1_data_framewise,dims=1)/sqrt(size(F1_data_framewise,1)))[end].^2),
+        
     vec(mean(F2_data_framewise,dims=1)) .- vec(mean(F2_data_framewise,dims=1))[1],
-    sqrt.(vec(std(F2_data_framewise,dims=1)).^2 .+ vec(std(F2_data_framewise,dims=1))[1]^2),
+    sqrt.( vec(std(F2_data_framewise,dims=1)/sqrt(size(F2_data_framewise,1))).^2 .+ vec(std(F2_data_framewise,dims=1)/sqrt(size(F2_data_framewise,1)))[end].^2),
 ) 
+reverse!(data_framewise, dims=1)
 
 pretty_table(
     data_framewise;
@@ -695,7 +768,7 @@ pretty_table(
     alignment=:c,
     header        = (
         ["Current", "F1 z", "Std.Dev.",  "F2 z", "Std.Dev.", "Δz", "Std.Dev.", "Centered F1 z", "Std.Dev.", "Centered F2 z", "Std.Dev."], 
-        ["[A]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
+        ["[mA]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
         ),
     border_crayon = crayon"green bold",
     tf            = tf_unicode_rounded,
@@ -704,15 +777,100 @@ pretty_table(
 )
 
 
+fig_00 = plot(abs.(data_framewise[:,1]/1000), data_framewise[:,2],
+    ribbon= data_framewise[:, 3],
+    label=L"$F_{1}$",
+    line=(:solid,:red,1),
+    fillalpha=0.23, 
+    fillcolor=:red,  
+)
+plot!(abs.(data_framewise[:,1]/1000), data_framewise[:,2], fillrange=data_framewise[:,4],
+    fillalpha=0.2,
+    color=:orange,
+    label = false,
+)
+plot!(abs.(data_framewise[:,1]/1000), data_framewise[:,4],
+    ribbon= data_framewise[:,5],
+    label=L"$F_{2}$",
+    line=(:solid,:blue,1),
+    fillalpha=0.23, 
+    fillcolor=:blue,  
+)
+plot!(
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
+    xlims = (1e-5,1.0),
+    title = "Peak position",
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    size=(800,600),
+    legend=:topleft,
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+)
+vspan!([1e-8, abs(data_framewise[findlast(<(0), data_framewise[:,1])+1,1]/1000)], color=:gray, alpha=0.30,label="zero" )
+
+fig_01 = plot(abs.(data_framewise[:,1]/1000), data_framewise[:,2],
+    ribbon= data_framewise[:, 3],
+    label=L"$F_{1}$",
+    line=(:solid,:red,2),
+)
+plot!(abs.(data_framewise[:,1]/1000), 2*data_framewise[1,4] .- data_framewise[:,4],
+    ribbon= data_framewise[:, 5],
+    label=L"Mirrored $F_{2}$",
+    line=(:solid,:blue,2),
+)
+plot!(
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
+    xlims = (1e-5,1.0),
+    title = "Peak position",
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    size=(800,600),
+    legend=:topleft,
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+)
+vspan!([1e-8, abs(data_framewise[findlast(<(0), data_mean[:,1])+1,1]/1000)], color=:gray, alpha=0.30,label="zero" )
+# Fill between y1 and y2
+plot!(abs.(data_framewise[:,1]/1000), data_framewise[:,2], fillrange=2*data_framewise[1,4] .- data_framewise[:,4],
+    fillalpha=0.2,
+    color=:purple,
+    label = false,
+)
+
+fig=plot(fig_00, fig_01,
+layout=@layout([a ; b]),
+share=:x,
+)
+plot!(fig[1], xlabel = "", xformatter=_->"")
+plot!(fig[2], title = "", top_margin = -9mm)
+display(fig)
+
 fig=plot(
-    data_framewise[10:end, 1], data_framewise[10:end, 8],
+    data_framewise[2:end, 1]/1000, abs.(data_framewise[2:end, 8]),
+    yerror = abs.(data_framewise[2:end, 9]),
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
     yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
-    xlims = (0.01,1.0),
+    xlims = (0.001,1.0),
+    ylims = (1e-4,1.5),
     title = "F=1 Peak Position vs Current",
-    label = "07122025",
+    label = "20250725",
     seriestype = :scatter,
-    marker = (:circle, :white, 4),
+    marker = (:circle, :white, 2),
     markerstrokecolor = :black,
     markerstrokewidth = 2,
     legend = :bottomright,
@@ -721,19 +879,16 @@ fig=plot(
     gridalpha = 0.5,
     gridstyle = :dot,
     minorgridalpha = 0.05,
-    xticks = :log10,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = :log10,
     framestyle = :box,
     size=(800,600),
     tickfontsize=11,
     guidefontsize=14,
-    legendfontsize=12,
-)
-plot!(data_framewise[10:end, 1], data_framewise[10:end, 8],
-    ribbon= data_framewise[10:end, 9],
-    label= "Std", 
-    fillalpha=0.5, fillcolor=:grey36, line=(:solid, :grey36, 0.2)
-)
+    legendfontsize=10,
+) 
+hspan!([1e-6,1000*n_bins* cam_pixelsize], color=:gray, alpha=0.30, label="Pixel size" )
 plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
 marker=(:cross, :purple, 6),
 line=(:purple, :dash, 2, 0.5),
@@ -750,14 +905,59 @@ line=(:dot, :red, 3),
 markerstrokewidth=2,
 label="10142024: CQD"
 )
-a0,b0,fit_JSF = linear_fit(data_JSF[:exp][end-3:end,:])
-a1,b1,fit_dataframewise = linear_fit(data_framewise[end-9:end,[1,8]])
-label1_str = @sprintf("z = %.3f \\, I + %.3f", a0, b0)
-label2_str = @sprintf("z = %.3f \\, I + %.3f", a1, b1)
-plot!(Icoils,fit_JSF.(Icoils), label=L"10142024: %$(label1_str)" )
-plot!(Icoils,fit_dataframewise.(Icoils), label=L"07122025: %$(label2_str)")
-vspan!([0.0001,0.020], color=:gray, alpha=0.30,label="unresolved")
 savefig(fig, joinpath(dir_path, "framewise.png"))
+
+fig=plot(
+    abs.(data_framewise[1:end, 1]/1000), abs.(data_framewise[1:end, 6]),
+    yerror = data_framewise[2:end, 7],
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = (:log10, L"$\Delta z \ (\mathrm{mm})$", :log),
+    xlims = (0.001,1.0),
+    ylims = (1e-4,3.0),
+    title = "Peak Separation vs Current",
+    label = "KT",
+    # seriestype = :scatter,
+    line=(:solid,:red,2),
+    marker = (:circle, :white, 1),
+    markerstrokecolor = :red,
+    markerstrokewidth = 2,
+    legend = :bottomright,
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = :log10,
+    framestyle = :box,
+    size=(800,600),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+) 
+plot!(abs.(vec(data["data"]["Current_mA"])/1000), vec(data["data"]["PeakSeparationMean_um"]/1000),
+yerr=vec(data["data"]["PeakSeparationStd_um"])/1000,
+label="XL",
+# seriestype=:scatter,
+line=(:solid,:purple,1),
+marker=(:square,:white,1),
+markerstrokewidth=1,
+markerstrokecolor=:purple
+)
+
+
+
+t_run = Dates.canonicalize(Dates.now()-t_start)
+println("Running time : ", t_run)
+
+
+############################################################################################################################################################################
+############################################################################################################################################################################
+############################################################################################################################################################################
+############################################################################################################################################################################
+############################################################################################################################################################################
+
 
 ##########################################################################################
 ##########################################################################################
@@ -879,16 +1079,39 @@ vspan!([0.0001,0.025], color=:gray, alpha=0.30,label="unresolved", legend_column
 savefig(fig, joinpath(dir_path, "crosscorrelation.png"))
 
 
-t_run = Dates.canonicalize(Dates.now()-t_start)
-println("Running time : ", t_run)
-
-############################################################################################################################################################################
-############################################################################################################################################################################
-############################################################################################################################################################################
-############################################################################################################################################################################
-############################################################################################################################################################################
 
 
+ssk_sim = CSV.read("./simulation_data/results_CQD_2ki.csv",DataFrame; header=["dI","k1_cqd1","k2_cqd1","k1_cqd2","k2_cqd2","k1_cqd3","k2_cqd3"]);
+
+ssk_sim
+
+fig=plot(
+    data_framewise[10:end, 1], data_framewise[10:end, 8],
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+    xlims = (0.01,1.0),
+    title = "F=1 Peak Position vs Current",
+    label = "07122025",
+    seriestype = :scatter,
+    marker = (:circle, :white, 4),
+    markerstrokecolor = :black,
+    markerstrokewidth = 2,
+    legend = :bottomright,
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    xticks = :log10,
+    yticks = :log10,
+    framestyle = :box,
+    size=(800,600),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=12,
+)
+plot(ssk_sim.dI, ssk_sim.k1_cqd3)
+plot(ssk_sim.dI, ssk_sim.k2_cqd3)
 
 
 fig=plot(
