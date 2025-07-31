@@ -760,6 +760,10 @@ plot!(Icoils,fit_dataframewise.(Icoils), label=L"07122025: %$(label2_str)")
 vspan!([0.0001,0.020], color=:gray, alpha=0.30,label="unresolved")
 savefig(fig, joinpath(dir_path, "framewise.png"))
 
+
+data_framewise[:,[1,2,3,4,5]]
+
+
 ##########################################################################################
 ##########################################################################################
 # CROSS-CORRELATION

@@ -20,6 +20,7 @@ using BSplineKit, Optim
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using Printf, LaTeXStrings, PrettyTables
+using CSV, DataFrames
 # Time-stamping/logging
 using Dates
 # Set the working directory to the current location
@@ -288,9 +289,9 @@ function process_mean_maxima(signal_key::String, data, n_bins; save=false)
 
         # Compute overall mean signal
         signal_mean = vec(mean(dropdims(mean(signal,dims=3); dims=3), dims=1))
-        @assert length(signal_mean) % n_bins == 0 "Signal length not divisible by n_bins"
 
         # Bin signal by reshaping and averaging
+        @assert length(signal_mean) % n_bins == 0 "Signal length not divisible by n_bins"
         binned = reshape(signal_mean, n_bins, :)  # now shape is (2, 1280)
         signal_mean = vec(mean(binned, dims=1))
 
@@ -309,7 +310,7 @@ function process_mean_maxima(signal_key::String, data, n_bins; save=false)
             plot!( 1e3 .* pixel_positions(2560,1,cam_pixelsize) , signal_profiles[i, :], label=false, line=(:solid, colors[i], 1))
         end
         plot!(z_coord, processed_signal, label="mean (bins=$(n_bins))", line=(:solid, :black, 2));
-        display(fig_00);
+        # display(fig_00);
         # savefig(fig_00, joinpath(dir_path, "$(signal_key)_I$( @sprintf("%02d", j))_raw.png" ))
 
         # --- Fit smoothing spline to processed signal ---
@@ -370,7 +371,7 @@ function process_mean_maxima(signal_key::String, data, n_bins; save=false)
         xxs = collect(range(minimum(z_coord), maximum(z_coord), length=2000));
         plot!(xxs, S_fit.(xxs), line=(:solid, :red, 2), label="Spline fitting");
         vline!([minima[1]], line=(:dash, :black, 1), label=L"$z_{\mathrm{max}}= %$(round(minima[1], digits=3))\mathrm{mm}$");
-        display(fig_01);
+        # display(fig_01);
         # savefig(fig_01, joinpath(dir_path, "$(signal_key)_I$(@sprintf("%02d", j))_processed.png" ))
 
         # --- Display side-by-side plot ---
@@ -539,7 +540,8 @@ z_pixels = Int(2560 / exp_bin)  # Number of z-pixels after binning
 # Spatial axes shifted to center the pixels
 x_position = pixel_positions(2160, exp_bin, cam_pixelsize)
 z_position = pixel_positions(2560, exp_bin, cam_pixelsize)
-
+# Binning for the analysis
+n_bins = 1
 # Read data
 data = matread(joinpath(data_directory, "data.mat")) 
 
@@ -746,19 +748,19 @@ data_framewise = hcat(
     # [I_coil (mA), F1_z_peak (mm), Error, F2_z_peak (mm), Error, Δz (mm), Error, F1_z_centered (mm), Error, F2_z_centered (mm), Error]
     -1000*Icoils, 
     vec(mean(F1_data_framewise,dims=1)), 
-    vec(std(F1_data_framewise,dims=1)) / sqrt(size(F1_data_framewise,1)), 
+    vec(std(F1_data_framewise,dims=1)) ./ sqrt(size(F1_data_framewise,1)) , 
 
     vec(mean(F2_data_framewise,dims=1)), 
-    vec(std(F2_data_framewise,dims=1)) / sqrt(size(F2_data_framewise,1)) ,
+    vec(std(F2_data_framewise,dims=1)) ./ sqrt(size(F2_data_framewise,1)) ,
     
     vec(mean(F1_data_framewise,dims=1)) .- vec(mean(F2_data_framewise,dims=1)),
-    sqrt.( vec(std(F1_data_framewise,dims=1)/sqrt(size(F1_data_framewise,1))).^2 .+ vec(std(F2_data_framewise,dims=1)/sqrt(size(F2_data_framewise,1))).^2),
+    sqrt.( vec(std(F1_data_framewise,dims=1)).^2 .+ vec(std(F2_data_framewise,dims=1)).^2 ) ./ sqrt(size(F1_data_framewise,1)) ,
     
     vec(mean(F1_data_framewise,dims=1)) .- vec(mean(F1_data_framewise,dims=1))[end],    
-    sqrt.( vec(std(F1_data_framewise,dims=1)/sqrt(size(F1_data_framewise,1))).^2 .+ vec(std(F1_data_framewise,dims=1)/sqrt(size(F1_data_framewise,1)))[end].^2),
+    sqrt.( vec(std(F1_data_framewise,dims=1)).^2 .+ vec(std(F1_data_framewise,dims=1))[end].^2 ) ./ sqrt(size(F1_data_framewise,1)),
         
     vec(mean(F2_data_framewise,dims=1)) .- vec(mean(F2_data_framewise,dims=1))[1],
-    sqrt.( vec(std(F2_data_framewise,dims=1)/sqrt(size(F2_data_framewise,1))).^2 .+ vec(std(F2_data_framewise,dims=1)/sqrt(size(F2_data_framewise,1)))[end].^2),
+    sqrt.( vec(std(F2_data_framewise,dims=1)).^2 .+ vec(std(F2_data_framewise,dims=1))[end].^2 ) ./sqrt(size(F2_data_framewise,1)),
 ) 
 reverse!(data_framewise, dims=1)
 
@@ -862,17 +864,19 @@ display(fig)
 
 fig=plot(
     data_framewise[2:end, 1]/1000, abs.(data_framewise[2:end, 8]),
-    yerror = abs.(data_framewise[2:end, 9]),
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
-    xlims = (0.001,1.0),
-    ylims = (1e-4,1.5),
-    title = "F=1 Peak Position vs Current",
+    yerror = data_framewise[2:end, 9],
     label = "20250725",
     seriestype = :scatter,
     marker = (:circle, :white, 2),
     markerstrokecolor = :black,
     markerstrokewidth = 2,
+)
+plot!(
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+    xlims = (0.001,1.0),
+    ylims = (1e-5,1.5),
+    title = "F=1 Peak Position vs Current",
     legend = :bottomright,
     grid = true,
     minorgrid = true,
@@ -881,7 +885,8 @@ fig=plot(
     minorgridalpha = 0.05,
     xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
               [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = :log10,
+    yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     framestyle = :box,
     size=(800,600),
     tickfontsize=11,
@@ -906,6 +911,7 @@ markerstrokewidth=2,
 label="10142024: CQD"
 )
 savefig(fig, joinpath(dir_path, "framewise.png"))
+
 
 fig=plot(
     abs.(data_framewise[1:end, 1]/1000), abs.(data_framewise[1:end, 6]),
@@ -946,17 +952,175 @@ markerstrokewidth=1,
 markerstrokecolor=:purple
 )
 
-
-
 t_run = Dates.canonicalize(Dates.now()-t_start)
 println("Running time : ", t_run)
 
 
 ############################################################################################################################################################################
 ############################################################################################################################################################################
+
+data_20250712 = [
+    0.0    8.44791  0.000518525  8.42793  0.00118161;
+    0.002  8.44287  0.000938761  8.42958  0.00233814;
+    0.004  8.43723  0.000910976  8.42722  0.0027258;
+    0.006  8.43482  0.000990039  8.42604  0.0018639;
+    0.008  8.43537  0.00114152   8.42256  0.000477835;
+    0.01   8.44025  0.000706939  8.42801  0.0014779;
+    0.012  8.43449  0.00169919   8.42741  0.00162732;
+    0.016  8.43596  0.00175432   8.43447  0.000601924;
+    0.022  8.44658  0.000916083  8.43388  0.000597619;
+    0.032  8.46016  0.000435286  8.42367  0.000669231;
+    0.044  8.48834  0.00132164   8.39899  0.00107894;
+    0.058  8.53888  0.00401241   8.36016  0.00421937;
+    0.074  8.58065  0.00165977   8.30529  0.0031774;
+    0.094  8.64399  0.00258139   8.24529  0.00294799;
+    0.114  8.70363  0.00274223   8.20613  0.000977637;
+    0.134  8.74965  0.00140882   8.13372  0.00068276;
+    0.154  8.79234  0.00346408   8.0876   0.00190484;
+    0.174  8.85616  0.00228569   8.01507  0.00452789;
+    0.195  8.89328  0.00255722   7.96818  0.00401482;
+    0.215  8.94618  0.00363949   7.90005  0.00386873;
+    0.236  9.00505  0.00196132   7.84441  0.00613796;
+    0.26   9.05515  0.00203986   7.83049  0.00222426;
+    0.285  9.1162   0.00694458   7.72989  0.00238672;
+    0.308  9.15401  0.0087926    7.71359  0.00904536;
+    0.341  9.27811  0.0156376    7.65668  0.00283654;
+    0.381  9.29719  0.00758248   7.52245  0.00229699;
+    0.42   9.37437  0.00336082   7.43683  0.00277513;
+    0.46   9.45703  0.00700836   7.37241  0.00276939;
+    0.5    9.55574  0.015104     7.28498  0.0137936;
+    0.55   9.6742   0.0112162    7.19503  0.012108;
+    0.609  9.76674  0.0125186    7.04633  0.00839444;
+]
+
+plot(data_JSF[:exp][:,1], abs.(data_JSF[:exp][:,2]),
+marker=(:cross, :purple, 6),
+line=(:purple, :dash, 2, 0.5),
+markerstrokewidth=2,
+label="10142024"
+)
+plot!(data_JSF[:model][:,1], abs.(data_JSF[:model][:,2]),
+line=(:dash, :blue, 3),
+markerstrokewidth=2,
+label="10142024: QM"
+)
+plot!(data_JSF[:model][:,1], abs.(data_JSF[:model][:,3]),
+line=(:dot, :red, 3),
+markerstrokewidth=2,
+label="10142024: CQD"
+)
+plot!(data_20250712[:,1], abs.(data_20250712[:,2] .- data_20250712[1,2]),
+ribbon = data_20250712[:,3] ,
+label="07122025",
+marker=(:xcross,:green,2),
+line=(:solid,:green,2),
+fillalpha=0.23, 
+fillcolor=:green,  
+)
+plot!(abs.(data_framewise[:, 1]/1000), abs.(data_framewise[:, 8]),
+    yerror = data_framewise[:, 9],
+    marker=(:circle, :white, 3),
+    markerstrokewidth=2,
+    markerstrokecolor=:black,
+    line=(:solid,:black,2),
+    label = "20250725",
+    fillalpha=0.25, 
+    fillcolor=:gray,  
+)
+plot!(
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = (:log10, L"$\Delta z \ (\mathrm{mm})$", :log),
+    xlims = (0.001,1.0),
+    ylims = (1e-4,2.0),
+    title = "F1 Peak positions vs Current",
+    legend = :bottomright,
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = :log10,
+    framestyle = :box,
+    size=(800,600),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+) 
+
+sim_data = CSV.read("./simulation_data/results_CQD_20250728T105702.csv",DataFrame; header=false)
+
+fig=plot(
+    data_framewise[2:end, 1]/1000, abs.(data_framewise[2:end, 8]),
+    yerror = data_framewise[2:end, 9],
+    label = "20250725",
+    marker = (:circle, :white, 2),
+    markerstrokecolor = :black,
+    markerstrokewidth = 2,
+    line=(:solid,:black,2),
+    fillalpha=0.23, 
+    fillcolor=:black, 
+)
+plot!(
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+    xlims = (0.001,1.0),
+    ylims = (1e-5,1.5),
+    title = "F=1 Peak Position vs Current",
+    legend = :bottomright,
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    framestyle = :box,
+    size=(800,600),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+) 
+plot!(data_20250712[:,1], abs.(data_20250712[:,2] .- data_20250712[1,2]),
+ribbon = data_20250712[:,3] ,
+label="07122025",
+marker=(:xcross,:green,2),
+line=(:solid,:green,2),
+fillalpha=0.23, 
+fillcolor=:green,  
+)
+colors = palette(:phase, 5 );
+plot!(sim_data[:,1],abs.(sim_data[:,12]), 
+label=L"CQD $k_{i}=1\times10^{-6}$",
+line=(:dash,colors[1],2))
+plot!(sim_data[:,1],abs.(sim_data[:,13]), 
+label=L"CQD $k_{i}=2\times10^{-6}$",
+line=(:dash,colors[2],2))
+plot!(sim_data[:,1],abs.(sim_data[:,14]), 
+label=L"CQD $k_{i}=3\times10^{-6}$",
+line=(:dash,colors[3],2))
+plot!(sim_data[:,1],abs.(sim_data[:,15]), 
+label=L"CQD $k_{i}=4\times10^{-6}$",
+line=(:dash,colors[4],2))
+plot!(sim_data[:,1],abs.(sim_data[:,16]), 
+label=L"CQD $k_{i}=5\times10^{-6}$",
+line=(:dash,colors[5],2))
+hspan!([1e-6,1000*n_bins* cam_pixelsize], color=:gray, alpha=0.30, label="Pixel size" )
+
+
+
+simqm = CSV.read("./simulation_data/results_QM_20250728T105702.csv",DataFrame; header=false)
 ############################################################################################################################################################################
 ############################################################################################################################################################################
 ############################################################################################################################################################################
+############################################################################################################################################################################
+############################################################################################################################################################################
+
+
+
 
 
 ##########################################################################################
@@ -965,6 +1129,7 @@ println("Running time : ", t_run)
 ##########################################################################################
 ##########################################################################################
 
++
 xcorr_data = zeros(nI,2)
 for k=1:nI
     ccbg = dropdims(mean(bg, dims=3),dims=3)
