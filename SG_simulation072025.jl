@@ -153,6 +153,9 @@ function CQDEqOfMotion(t,Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Floa
     return [x,y,z]
 end
 
+
+
+
 # CQD Screen position
 function CQD_Screen_position(Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, ki::Float64)
     L1 = y_FurnaceToSlit 
@@ -196,6 +199,53 @@ function generate_samples(Nss, rng)
     return alive_slit
 end
 
+# Magnet shape
+function z_magnet_edge(x)
+    a =2.5e-3;
+    z_center = 1.3*a 
+    r_edge = a
+    φ = π/6
+
+    if x <= -r_edge
+        z = z_center - tan(φ)*(x+r_edge)
+    elseif x > -r_edge && x <= r_edge
+        z = z_center - sqrt(r_edge^2 - x^2)
+    elseif x > r_edge
+        z = z_center + tan(φ)*(x-r_edge)
+    else
+        0
+    end
+
+    return z
+end
+
+function z_magnet_trench(x)
+    a = 2.5e-3;
+    z_center = 1.3*a 
+    r_edge = 1.0*a
+    r_trench = 1.362*a
+    r_trench_center = z_center - 1.018*a
+    lw = 1.58*a
+    φ = π/6
+
+    if x <= -r_trench - lw*cos(φ)
+        z = r_trench_center + lw*sin(φ)
+    elseif x > -r_trench-lw*cos(φ) && x <= -r_trench
+        z = r_trench_center - tan(φ)*(x+r_trench)
+    elseif x > -r_trench && x <= r_trench
+        z = r_trench_center - sqrt( r_trench^2 - x^2 )
+    elseif x > r_trench && x<= r_trench + lw*cos(φ)
+        z = r_trench_center + tan(φ)*(x-r_trench)
+    elseif x > r_trench + lw*cos(φ)
+        z = r_trench_center + lw*sin(φ)
+    else
+        0
+    end
+
+    return z
+end
+
+
 atom        = "39K"  ;
 ## PHYSICAL CONSTANTS from NIST
 # RSU : Relative Standard Uncertainty
@@ -236,6 +286,52 @@ y_SG            = 7.0e-2 ;
 y_SGToScreen    = 32.0e-2 ;
 # Sample size: number of atoms arriving to the screen
 Nss=2000000
+
+
+# Assume x_line is already defined and z_magnet_edge / z_magnet_trench are functions
+x_line = 1e-3*collect(range(-10,10,10001))
+fig_slit = plot(
+xlabel=L"$x \ (\mathrm{mm})$",
+xlim=(-8,8),
+xticks=-8:2:8,
+ylabel=L"$y \ (\mathrm{mm})$",
+ylim=(-3,7),
+yticks=-3:1:7,
+aspect_ratio=:equal
+);
+# Upper fill above edge
+x_fill = 1e3 .* x_line
+y_edge = 1e3 .* z_magnet_edge.(x_line)
+y_top = fill(10.0, length(x_fill))  
+plot!(
+    [x_fill; reverse(x_fill)],
+    [y_edge; reverse(y_top)],
+    seriestype = :shape,
+    label="Rounded edge",
+    color = :grey36,
+    line=(:solid, :grey36),
+    fillalpha = 0.75
+);
+# Lower fill below trench
+y_trench = 1e3 .* z_magnet_trench.(x_line)
+y_bottom = fill(-10.0, length(x_fill))  
+plot!(
+    [x_fill; reverse(x_fill)],
+    [y_bottom; reverse(y_trench)],
+    seriestype = :shape,
+    color = :grey60,
+    line=(:solid,:grey60),
+    label = "trench",
+    fillalpha = 0.75,
+);
+# slit
+plot!(1e3/2*[-x_slit,-x_slit,x_slit,x_slit,-x_slit], 1e3/2*[-z_slit,z_slit,z_slit,-z_slit,-z_slit], 
+label="Slit",
+seriestype=:shape,
+line=(:solid,:red,1),
+color=:red,
+fillalpha=0.2,);
+display(fig_slit)
 
 # Magnetic field gradient interpolation
 GradCurrents = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01];
