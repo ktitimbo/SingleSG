@@ -153,9 +153,6 @@ function CQDEqOfMotion(t,Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Floa
     return [x,y,z]
 end
 
-
-
-
 # CQD Screen position
 function CQD_Screen_position(Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, ki::Float64)
     L1 = y_FurnaceToSlit 
@@ -520,9 +517,6 @@ end
 
 alive_slit = generate_samples(Nss, rng);
 
-# println("Valid samples:\n", alive_slit)
-println("Total iterations: ", iteration_count)
-
 # Precompute velocity magnitudes and angles
 velocities = [sqrt(v[4]^2 + v[5]^2 + v[6]^2) for v in alive_slit];
 theta_vals = [acos(v[6] / sqrt(v[4]^2 + v[5]^2 + v[6]^2)) for v in alive_slit];
@@ -619,7 +613,7 @@ fig3 = plot(
     left_margin=3mm,
 )
 display(fig3)
-savefig(fig3,filename*"_03.svg")
+savefig(fig3, joinpath(dir_path, "vel_stats.png"))
 
 # # CQD Sampling: electron and nuclear magnetic moments
 # θes = 2 * asin.(sqrt.(rand(rng,Nss)))
