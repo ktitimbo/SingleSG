@@ -24,6 +24,7 @@ using StatsBase
 using Random, Statistics, NaNStatistics, MLBase, Distributions, StaticArrays
 using Alert
 # Data manipulation
+using OrderedCollections
 using DelimitedFiles, CSV, DataFrames
 # Custom modules
 include("./Modules/atoms.jl");
@@ -42,10 +43,10 @@ hostname = gethostname();
 # Timestamp start for execution timing
 t_start = Dates.now()
 # Random seeds
-rng = MersenneTwister(145) #TaskLocalRNG()
+base_seed_set = 145;
+rng_set = MersenneTwister(base_seed_set) #TaskLocalRNG()
 
 println("\n\t\tRunning process on:\t $(Dates.format(t_start, "yyyymmddTHHMMSS")) \n")
-
 # Generate a timestamped directory name for output (e.g., "20250718T153245")
 directoryname = Dates.format(t_start, "yyyymmddTHHMMSS") ;
 # Construct the full directory path (relative to current working directory)
@@ -141,7 +142,7 @@ function CQDEqOfMotion(t,Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Floa
         x = r0[1] + v0[1]*t 
         y = r0[2] + v0[2]*t
         z = r0[3] + v0[3]*t + acc_0/2*(t-tf2)^2 + acc_0/kω*log(cos(θe/2)^2)*(t-tf2) + 1/2/(kω)^2 * acc_0 * ( polylog(2,-exp(-2*kω*(t-tf2))*tan(θe/2)^2) - polylog(2,-tan(θe/2)^2) )
-    elseif t > tf3
+    elseif t > tf3 # Travel to the Screen
         x = r0[1] + v0[1]*t
         y = r0[2] + v0[2]*t
         z = r0[3] + v0[3]*t + acc_0/2*( (t-tf2)^2 - (t-tf3)^2) + acc_0/kω*y_SG/v0[2] * ( log(cos(θe/2)^2) + v0[2]/y_SG*log(cos(θe/2)^2+exp(-2*kω*y_SG/v0[2])*sin(θe/2)^2)*(t-tf3) ) + acc_0/2/kω^2*( polylog(2,-exp(-2*kω*y_SG/v0[2])*tan(θe/2)^2) - polylog(2,-tan(θe/2)^2) )
@@ -151,6 +152,52 @@ function CQDEqOfMotion(t,Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Floa
     end
 
     return [x,y,z]
+end
+
+# CQD equations of motion only along the z-coordinate
+@inline function CQDEqOfMotion_z(t,Ix::Float64,μ::Float64,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, ki::Float64)
+    vy = v0[2]
+    vz = v0[3]
+    z0 = r0[3]
+    
+    tf2 = (y_FurnaceToSlit + y_SlitToSG ) / vy
+    tf3 = (y_FurnaceToSlit + y_SlitToSG + y_SG ) / vy
+    tF = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen ) / vy
+
+    cqd_sign = sign(θn-θe) 
+    ωL       = abs( γₑ * BvsI(Ix) )
+    acc_0    = μ*GvsI(Ix)/M
+    kω       = cqd_sign*ki*ωL
+
+    # Precompute angles
+    θe_half = θe / 2
+    tanθ = tan(θe_half)
+    tanθ2 = tanθ^2
+    cosθ2 = cos(θe_half)^2
+    sinθ2 = sin(θe_half)^2
+    log_cos2 = log(cosθ2)
+    polylog_0 = polylog(2, -tanθ2)
+
+    if tf2 <= t && t <= tf3   # Crossing the SG apparatus
+        Δt = t - tf2
+        exp_term = exp(-2 * kω * Δt)
+        polylog_t = polylog(2, -exp_term * tanθ2)
+
+        return z0 + vz*t + 0.5*acc_0*Δt^2 + acc_0 / kω * log_cos2 * Δt + 0.5 * acc_0 / kω^2 * ( polylog_t - polylog_0 )
+    
+    elseif tf3 < t && t <= tF # Travel to the Screen
+        Δt2 = t - tf2
+        Δt3 = t - tf3
+        τ_SG = y_SG / vy
+        exp_SG = exp(-2 * kω * τ_SG)
+        polylog_SG = polylog(2, -exp_SG * tanθ2)
+        log_term = log(cosθ2 + exp_SG * sinθ2)
+
+        return z0 + vz*t + 0.5*acc_0*( Δt2^2 - Δt3^2 ) + acc_0 / kω * τ_SG * (log_cos2 + log_term * Δt3 / τ_SG) + 0.5 * acc_0 / kω^2 * (polylog_SG - polylog_0)
+
+    else 
+        @inbounds return NaN
+    end
 end
 
 # CQD Screen position
@@ -171,29 +218,71 @@ function CQD_Screen_position(Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::
     return [x,y,z]
 end
 
-# generate samples post-filtering by the slit
-function generate_samples(Nss, rng)
-    alive_slit = SVector[]  # or appropriate container
+# Generate samples post-filtering by the slit
+function _generate_samples_serial(No::Int, rng0)
+    alive = Matrix{Float64}(undef, No, 6)
     iteration_count = 0
+    count = 0
 
-    @time while length(alive_slit) < Nss
+    @time while count < No
         iteration_count += 1
 
-        x_initial = x_furnace * (rand(rng) - 0.5)
-        z_initial = z_furnace * (rand(rng) - 0.5)
-
+        x_initial = x_furnace * (rand(rng0) - 0.5)
+        z_initial = z_furnace * (rand(rng0) - 0.5)
         v0_x, v0_y, v0_z = AtomicBeamVelocity()
 
         x_at_slit = x_initial + y_FurnaceToSlit * v0_x / v0_y
         z_at_slit = z_initial + y_FurnaceToSlit * v0_z / v0_y
 
         if -x_slit/2 <= x_at_slit <= x_slit/2 && -z_slit/2 <= z_at_slit <= z_slit/2
-            push!(alive_slit, SVector(x_initial, 0.0, z_initial, v0_x, v0_y, v0_z))
+            count += 1
+            alive[count,:] =  [x_initial, 0.0, z_initial, v0_x, v0_y, v0_z]
         end
     end
 
     println("Total iterations: ", iteration_count)
-    return alive_slit
+    return alive
+end
+
+function _generate_samples_multithreaded(No::Int, base_seed::Int)
+    alive = Matrix{Float64}(undef, No, 6)
+    sample_count = Threads.Atomic{Int}(0)
+    iteration_count = Threads.Atomic{Int}(0)
+
+    @time Threads.@threads for thread_id in 1:Threads.nthreads()
+        rng0 = MersenneTwister(hash((base_seed, thread_id)))
+
+        while true
+            Threads.atomic_add!(iteration_count, 1)
+
+            x_initial = x_furnace * (rand(rng0) - 0.5)
+            z_initial = z_furnace * (rand(rng0) - 0.5)
+            v0_x, v0_y, v0_z = AtomicBeamVelocity()
+
+            x_at_slit = x_initial + y_FurnaceToSlit * v0_x / v0_y
+            z_at_slit = z_initial + y_FurnaceToSlit * v0_z / v0_y
+
+            if -x_slit/2 <= x_at_slit <= x_slit/2 && -z_slit/2 <= z_at_slit <= z_slit/2
+                idx = Threads.atomic_add!(sample_count, 1)
+                if idx <= No
+                    @inbounds alive[idx, :] = [x_initial, 0.0, z_initial, v0_x, v0_y, v0_z]
+                else
+                    break
+                end
+            end
+        end
+    end
+
+    println("Total iterations: ", iteration_count[])
+    return alive
+end
+
+function generate_samples(No::Int; rng = Random.default_rng(), multithreaded::Bool = false, base_seed::Int = 1234)
+    if multithreaded
+        return _generate_samples_multithreaded(No, base_seed)
+    else
+        return _generate_samples_serial(No, rng)
+    end
 end
 
 # Magnet shape
@@ -242,6 +331,350 @@ function z_magnet_trench(x)
     return z
 end
 
+@inline function z_magnet_profile_time(t,r0::Vector{Float64}, v0::Vector{Float64}, kind::Symbol)
+    a = 2.5e-3;
+    z_center = 1.3*a 
+    r_edge = 1.0*a
+    r_trench = 1.362*a
+    r_trench_center = z_center - 1.018*a
+    lw = 1.58*a
+    φ = π/6
+
+    @inbounds x = r0[1] + v0[1]*t
+
+    if kind===:edge
+        if x <= -r_edge
+           return z_center - tan(φ)*(x+r_edge)
+        elseif x <= r_edge
+            return z_center - sqrt(r_edge^2 - x^2)
+        else
+            return z_center + tan(φ)*(x-r_edge)
+        end
+    elseif kind===:trench
+        if x <= -r_trench - lw*cos(φ)
+            return r_trench_center + lw*sin(φ)
+        elseif x <= -r_trench
+            return r_trench_center - tan(φ)*(x+r_trench)
+        elseif x <= r_trench
+            return r_trench_center - sqrt( r_trench^2 - x^2 )
+        elseif x<= r_trench + lw*cos(φ)
+            return r_trench_center + tan(φ)*(x-r_trench)
+        else # x > r_trench + lw*cos(φ)
+            return r_trench_center + lw*sin(φ)
+        end
+    else
+        error("Unknown kind: $kind (expected :edge or :trench)")
+    end
+end
+
+function generate_matched_pairs(No)
+    θes_up_list = Float64[]
+    θns_up_list = Float64[]
+    θes_down_list = Float64[]
+    θns_down_list = Float64[]
+    
+    count_less = 0
+    count_greater = 0
+    total_trials = 0
+    
+    @time while count_less < No || count_greater < No
+        total_trials += 1
+        θe = 2 * asin(sqrt(rand(rng_set)))
+        θn = 2 * asin(sqrt(rand(rng_set)))
+
+        if θe < θn && count_less < No
+            push!(θes_up_list, θe)
+            push!(θns_up_list, θn)
+            count_less += 1
+        elseif θe > θn && count_greater < No
+            push!(θes_down_list, θe)
+            push!(θns_down_list, θn)
+            count_greater += 1
+        end
+    end
+    
+    println("Total angle pairs generated: $total_trials")
+
+    return θes_up_list, θns_up_list, θes_down_list, θns_down_list
+end
+
+function build_init_cond(alive::Matrix{Float64}, θes::Vector{Float64}, θns::Vector{Float64})
+    No = size(alive, 1)
+    pairs = Matrix{Float64}(undef, No, 8)
+    @inbounds for i in 1:No
+        pairs[i, 1:6] = alive[i,:]
+        pairs[i, 7] = θes[i]
+        pairs[i, 8] = θns[i]
+    end
+    return pairs
+end
+
+function find_good_particles(Ix, pairs)
+    Nss = size(pairs, 1)
+       
+    good_particles = OrderedDict{Int8, Vector{Int}}()
+
+    for (i0_idx,i0) in enumerate(Ix)
+        println("Analyzing current I₀ = $(@sprintf("%.3f", i0))A")
+        
+        
+        # Thread-local buffers and counters
+        thread_buffers = [Vector{Int}() for _ in 1:Threads.nthreads()]
+        hits_SG_threads = zeros(Int, Threads.nthreads())
+        hits_post_threads = zeros(Int, Threads.nthreads())
+
+        Threads.@threads for j = 1:Nss
+            tid = Threads.threadid()
+
+            v_y = @inbounds pairs[j, 5]
+
+            t_in = (y_FurnaceToSlit + y_SlitToSG) / v_y
+            t_out = (y_FurnaceToSlit + y_SlitToSG + y_SG) / v_y
+
+            r0 = @inbounds [pairs[j, 1], pairs[j, 2], pairs[j, 3]]
+            v0 = @inbounds [pairs[j, 4], pairs[j, 5], pairs[j, 6]]
+            θe0 = @inbounds pairs[j, 7]
+            θn0 = @inbounds pairs[j, 8]
+
+            hit = false
+
+            # Stern--Gerlach cavity check
+            dt_step = (t_out - t_in) / 1000
+            @inbounds for i in 0:1000
+                dt = t_in + i * dt_step
+
+                pos = CQDEqOfMotion(dt, i0, μₑ, r0, v0, θe0, θn0, ki)
+                x, _, z = pos
+                top = z_magnet_edge(x)
+                bottom = z_magnet_trench(x)
+                if z >= top || z <= bottom
+                    hits_SG_threads[tid] += 1
+                    hit = true
+                    break
+                end
+            end
+
+            # Post-SG circular aperture check
+            if !hit
+                t_screen = (y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) / v_y
+                R_tube = 35e-3/2 # radius of the pipe 
+                dt_step_screen = (t_screen - t_out) / 1000
+
+                @inbounds for i in 1:1000
+                    dt = t_out + i * dt_step_screen
+                    pos = CQDEqOfMotion(dt, i0, μₑ, r0, v0, θe0, θn0, ki)
+                    x, _, z = pos
+                    if x^2 + z^2 >= R_tube^2
+                        hits_post_threads[tid] += 1
+                        hit = true
+                        break
+                    end
+                end
+            end
+
+            if !hit
+                tid = Threads.threadid()
+                push!(thread_buffers[tid], j)
+            end
+        end
+
+        # After threading: merge buffers
+        all_good = reduce(vcat, thread_buffers)
+        good_particles[i0_idx] = all_good
+
+                # Print counters
+        total_SG_hits   = sum(hits_SG_threads)
+        total_post_hits = sum(hits_post_threads)
+
+        println("\t→ SG hits   = $total_SG_hits")
+        println("\t→ Pipe hits = $total_post_hits")
+        println()
+    end
+
+    return good_particles
+end
+
+function compute_screen_xyz(Icoils, valid_up::OrderedDict{Int8, Matrix{Float64}}, 
+                               valid_dw::OrderedDict{Int8, Matrix{Float64}})
+
+    screen_up = OrderedDict{Int8, Matrix{Float64}}()
+    screen_dw = OrderedDict{Int8, Matrix{Float64}}()
+
+    for i in eachindex(Icoils)
+        good_up = valid_up[i]
+        good_dw = valid_dw[i]
+
+        N_up = size(good_up, 1)
+        N_dw = size(good_dw, 1)
+
+        coords_up = Matrix{Float64}(undef, N_up, 3)
+        coords_dw = Matrix{Float64}(undef, N_dw, 3)
+
+        Threads.@threads for j = 1:N_up
+            r0 = @inbounds good_up[j, 1:3]
+            v0 = @inbounds good_up[j, 4:6]
+            θe0 = good_up[j, 7]
+            θn0 = good_up[j, 8]
+            @inbounds coords_up[j, :] = CQD_Screen_position(Icoils[i], μₑ, r0, v0, θe0, θn0, ki)
+        end
+
+        Threads.@threads for j = 1:N_dw
+            r0 = @inbounds good_dw[j, 1:3]
+            v0 = @inbounds good_dw[j, 4:6]
+            θe0 = good_dw[j, 7]
+            θn0 = good_dw[j, 8]
+            @inbounds coords_dw[j, :] = CQD_Screen_position(Icoils[i], μₑ, r0, v0, θe0, θn0, ki)
+        end
+
+        screen_up[i] = coords_up
+        screen_dw[i] = coords_dw
+    end
+
+    return screen_up, screen_dw
+end
+
+# Function to plot histogram using Freedman-Diaconis binning rule
+function FD_histograms(data_list::Vector{Float64},Label::LaTeXString,color)
+    # Calculate the interquartile range (IQR)
+    Q1 = quantile(data_list, 0.25)
+    Q3 = quantile(data_list, 0.75)
+    IQR = Q3 - Q1
+
+    # Calculate Freedman-Diaconis bin width
+    n = length(data_list)
+    bin_width = 2 * IQR / (n^(1/3))
+
+    # Calculate the number of bins using the range of the data
+    data_range = maximum(data_list) - minimum(data_list)
+    bins = ceil(Int, data_range / bin_width)
+
+    # Plot the histogram
+    histogram(data_list, bins=bins, normalize=:pdf,
+            label=Label,
+            # xlabel="Polar angle", 
+            color=color,
+            alpha=0.8,
+            xlim=(0,π),
+            xticks=PlottingTools.pitick(0, π, 8; mode=:latex),)
+end
+
+function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
+    # Extract velocity components from columns 4:6
+    velocities = sqrt.(sum(alive[:, 4:6].^2, dims=2))[:, 1]  # Vector of norms
+    theta_vals = acos.(alive[:, 6] ./ velocities)
+    phi_vals   = atan.(alive[:, 5], alive[:, 4])
+
+    # Compute means
+    mean_v = mean(velocities)
+    rms_v  = sqrt(mean(velocities .^ 2))
+    mean_theta = mean(theta_vals)
+    mean_phi   = mean(phi_vals)
+
+    # Histogram for velocities
+    figa = histogram(
+        velocities,
+        bins = FreedmanDiaconisBins(velocities),
+        label = L"$v_0$",
+        normalize = :pdf,
+        xlabel = L"v_{0} \ (\mathrm{m/s})",
+        alpha = 0.70
+    )
+    vline!([mean_v], 
+        label = L"$\langle v_{0} \rangle = %$(round(mean_v, digits=1)) \mathrm{m/s}$",
+        line = (:black, :solid, 2),
+    )
+    vline!([rms_v], 
+        label = L"$\sqrt{\langle v_{0}^2 \rangle} = %$(round(rms_v, digits=1)) \mathrm{m/s}$",
+        line = (:red, :dash, 3)
+    )
+
+    # Histogram for theta (polar angle)
+    figb = histogram(
+        theta_vals,
+        bins = FreedmanDiaconisBins(theta_vals),
+        label = L"$\theta_v$",
+        normalize = :pdf,
+        alpha = 0.70,
+        xlabel = L"$\theta_{v}$",
+    )
+    vline!([mean_theta], 
+        label = L"$\langle \theta_{v} \rangle = %$(round(mean_theta/π, digits=3))\pi$",
+        line = (:black, :solid, 2)
+    )
+
+    # Histogram for phi (azimuthal angle)
+    figc = histogram(
+        phi_vals,
+        bins = FreedmanDiaconisBins(phi_vals),
+        label = L"$\phi_v$",
+        normalize = :pdf,
+        alpha = 0.70,
+        xlabel = L"$\phi_{v}$",
+    )
+    vline!([mean_phi], 
+        label = L"$\langle \phi_{v} \rangle = %$(round(mean_phi/π, digits=3))\pi$",
+        line = (:black, :solid, 2)
+    )
+
+    # 2D Histogram of position (x, z)
+    xs = 1e3 .* alive[:, 1]
+    zs = 1e6 .* alive[:, 3]
+    figd = histogram2d(xs, zs,
+        bins = (FreedmanDiaconisBins(xs), FreedmanDiaconisBins(zs)),
+        show_empty_bins = true,
+        color = :plasma,
+        xlabel = L"$x \ (\mathrm{mm})$",
+        ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -1.0:0.25:1.0,
+        yticks = -50:10:50,
+        colorbar_position = :bottom,
+    )
+
+    # Histograms for velocity components
+    vxs = alive[:, 4]
+    vys = alive[:, 5]
+    vzs = alive[:, 6]
+
+    fige = histogram(vxs,
+        bins = FreedmanDiaconisBins(vxs),
+        normalize = :pdf,
+        label = L"$v_{0,x}$",
+        alpha = 0.65,
+        color = :orange,
+        xlabel = L"$v_{0,x} \ (\mathrm{m/s})$",
+    )
+
+    figf = histogram(vys,
+        bins = FreedmanDiaconisBins(vys),
+        normalize = :pdf,
+        label = L"$v_{0,y}$",
+        alpha = 0.65,
+        color = :blue,
+        xlabel = L"$v_{0,y} \ (\mathrm{m/s})$",
+    )
+
+    figg = histogram(vzs,
+        bins = FreedmanDiaconisBins(vzs),
+        normalize = :pdf,
+        label = L"$v_{0,z}$",
+        alpha = 0.65,
+        color = :red,
+        xlabel = L"$v_{0,z} \ (\mathrm{m/s})$",
+    )
+
+    # Combine plots
+    fig = plot(
+        figa, fige, figb, figf, figc, figg, figd,
+        layout = @layout([a1 a2; a3 a4; a5 a6; a7]),
+        size = (650, 800),
+        legendfontsize = 8,
+        left_margin = 3mm,
+    )
+
+    display(fig)
+    savefig(fig, path_filename)
+end
+
 
 atom        = "39K"  ;
 ## PHYSICAL CONSTANTS from NIST
@@ -262,31 +695,38 @@ const γₙ        = atom_info[3];
 const Ispin    = atom_info[4];
 const Ahfs     = atom_info[6];
 const M        = atom_info[7];
-ki = 2.0e-6
+ki = 2.1e-6
 
 # STERN--GERLACH EXPERIMENT
 # Image size
-exp_pixelsize = 0.0260 ;   # [mm] for 20243014
-cam_pixelsize = 0.0065 ;  # [mm]
+const cam_pixelsize = 0.0065 ;  # [mm]
+n_bins = 4
+exp_pixelsize = n_bins * cam_pixelsize ;   # [mm] for 20243014
 # Furnace
 T = 273.15 + 200 ; # Furnace temperature (K)
 # Furnace aperture
-x_furnace = 2.0e-3 ;
-z_furnace = 100e-6 ;
+const x_furnace = 2.0e-3 ;
+const z_furnace = 100e-6 ;
 # Slit
-x_slit  = 4.0e-3 ;
-z_slit  = 300e-6 ;
+const x_slit  = 4.0e-3 ;
+const z_slit  = 300e-6 ;
 # Propagation distances
-y_FurnaceToSlit = 224.0e-3 ;
-y_SlitToSG      = 44.0e-3 ;
-y_SG            = 7.0e-2 ;
-y_SGToScreen    = 32.0e-2 ;
+const y_FurnaceToSlit = 224.0e-3 ;
+const y_SlitToSG      = 44.0e-3 ;
+const y_SG            = 7.0e-2 ;
+const y_SGToScreen    = 32.0e-2 ;
 # Sample size: number of atoms arriving to the screen
-Nss=2000000
+Nss=1000000
+# Coil currents
+Icoils = [0.001,0.002,0.003,0.005,0.007,
+            0.010,0.020,0.030,0.040,0.050,0.060,0.070,0.080,
+            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50,0.60,0.70,0.75,0.80
+];
+nI = length(Icoils);
 
 
 # Assume x_line is already defined and z_magnet_edge / z_magnet_trench are functions
-x_line = 1e-3*collect(range(-10,10,10001))
+x_line = 1e-3*collect(range(-10,10,10001));
 fig_slit = plot(
 xlabel=L"$x \ (\mathrm{mm})$",
 xlim=(-8,8),
@@ -297,9 +737,9 @@ yticks=-3:1:7,
 aspect_ratio=:equal
 );
 # Upper fill above edge
-x_fill = 1e3 .* x_line
-y_edge = 1e3 .* z_magnet_edge.(x_line)
-y_top = fill(10.0, length(x_fill))  
+x_fill = 1e3 .* x_line;
+y_edge = 1e3 .* z_magnet_edge.(x_line);
+y_top = fill(10.0, length(x_fill)); 
 plot!(
     [x_fill; reverse(x_fill)],
     [y_edge; reverse(y_top)],
@@ -329,6 +769,7 @@ line=(:solid,:red,1),
 color=:red,
 fillalpha=0.2,);
 display(fig_slit)
+savefig(fig_slit, joinpath(dir_path, "slit.png"))
 
 # Magnetic field gradient interpolation
 GradCurrents = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01];
@@ -425,271 +866,70 @@ $B_{z} = %$(round(1e3*BvsI(bcrossing),digits=3))\,\mathrm{mT}$");
 display(fig2)
 savefig(fig2, joinpath(dir_path, "mu_effective.png"))
 
-
-
-# function QMEqOfMotion(t,Ix,μ,r0::Vector{Float64},v0::Vector{Float64})
-#     tf1 = y_FurnaceToSlit / v0[2]
-#     tf2 = (y_FurnaceToSlit + y_SlitToSG ) / v0[2]
-#     tf3 = (y_FurnaceToSlit + y_SlitToSG + y_SG ) / v0[2]
-#     tF = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen ) / v0[2]
-
-#     acc_0   = μ*GvsI(Ix)/M
-
-#     if 0.00 <= t && t <= tf1     # Furnace to Slit
-#         x = r0[1] + v0[1]*t 
-#         y = r0[2] + v0[2]*t 
-#         z = r0[3] + v0[3]*t
-#         vx , vy , vz = v0[1] , v0[2] , v0[3]
-#     elseif tf1 < t && t <= tf2    # Slit to SG apparatus
-#         x = r0[1] + v0[1]*t 
-#         y = r0[2] + v0[2]*t
-#         z = r0[3] + v0[3]*t
-#         vx , vy , vz = v0[1] , v0[2] , v0[3]
-#     elseif tf2 < t && t <= tf3   # Crossing the SG apparatus
-#         vx = v0[1]
-#         vy = v0[2]
-#         vz = v0[3] + acc_0*(t-tf2)
-#         x = r0[1] + v0[1]*t 
-#         y = r0[2] + v0[2]*t
-#         z = r0[3] + v0[3]*t + acc_0/2*(t-tf2)^2
-#     elseif t > tf3
-#         x = r0[1] + v0[1]*t
-#         y = r0[2] + v0[2]*t
-#         z = r0[3] + v0[3]*t + acc_0/2/v0[2]^2*( (v0[2]*t-y_FurnaceToSlit-y_SlitToSG)^2 - (v0[2]*t-y_FurnaceToSlit-y_SlitToSG-y_SG)^2 ) 
-#         vx = v0[1]
-#         vy = v0[2]
-#         vz = v0[3] + acc_0*y_SG/v0[2]
-#     end
-
-#     return [x,y,z]
-# end
-
-# function QM_Screen_position(Ix,μ,r0::Vector{Float64},v0::Vector{Float64})
-#     L1 = y_FurnaceToSlit 
-#     L2 = y_SlitToSG
-#     Lsg = y_SG
-#     Ld = y_SGToScreen
-
-#     acc_0 = μ * GvsI(Ix) / M
-
-#     x = r0[1] + (L1 + L2 + Lsg + Ld) * v0[1] / v0[2]
-#     y = r0[2] +  L1 + L2 + Lsg + Ld
-#     z = r0[3] + (L1 + L2 + Lsg + Ld) * v0[3] / v0[2] + acc_0 /2 / v0[2]^2 * ((Lsg + Ld)^2 - Ld^2) 
- 
-#     return 1e3*[x,y,z]
-# end
-
-# trj_sk = CSV.read("./trajectory_ode.csv",DataFrame; header=["dy","dz"])
-# ic_sk = CSV.read("./z0_vz0_vy0_theta_e0_spin__ki_current.csv",DataFrame;header=["z0","vz0","vy0","θe","spin","ki","I0"])
-
-# plot(trj_sk[!,"dy"],trj_sk[!,"dz"])
-# vline!([y_FurnaceToSlit], label="Slit", line=(:dash,:black))
-# vline!([y_FurnaceToSlit+y_SlitToSG], label="SG", line=(:dash,:black))
-# vline!([y_FurnaceToSlit+y_SlitToSG+y_SG], label="SG", line=(:dash,:black))
-# vline!([y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen], label="Screen", line=(:dash,:black))
-# time_dt = collect(range(0,(y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen)/ic_sk.vy0[1], length=1000))
-# rt = zeros(Float64,length(time_dt),3)
-# rtqm = zeros(Float64,length(time_dt),3)
-# for (i,dt) in enumerate(time_dt)
-#     println(i)
-#     rt[i,:] = CQDEqOfMotion(dt,ic_sk.I0[1],μB,[0.0,0.0,ic_sk.z0[1]],[0.0,ic_sk.vy0[1],ic_sk.vz0[1]],ic_sk.θe[1],π/3,ic_sk.ki[1] )
-#     rtqm[i,:] = QMEqOfMotion(dt,ic_sk.I0[1],μB,[0.0,0.0,ic_sk.z0[1]],[0.0,ic_sk.vy0[1],ic_sk.vz0[1]] )
-# end
-# plot!(rt[:,2],rt[:,3],line=(:red,4))
-# plot!(rtqm[:,2],rtqm[:,3])
-
-# QM_Screen_position(ic_sk.I0[1],μB,[0.0,0.0,ic_sk.z0[1]],[0.0,ic_sk.vy0[1],ic_sk.vz0[1]])
-# 1e3*rtqm[end,:]
-
-# CQD_Screen_position(ic_sk.I0[1],μB,[0.0,0.0,ic_sk.z0[1]],[0.0,ic_sk.vy0[1],ic_sk.vz0[1]],ic_sk.θe[1],π/3,ic_sk.ki[1])
-# 1e3*rt[end,:]
-
 # Atomic beam velocity probability Distribution
 p_furnace   = [-x_furnace/2,-z_furnace/2];
 p_slit      = [x_slit/2, z_slit/2];
 θv_max      = 1.25*atan(norm(p_furnace-p_slit) , y_FurnaceToSlit);
 function AtomicBeamVelocity()
-    ϕ = 2π*rand(rng)
-    θ = asin(sin(θv_max)*sqrt(rand(rng)))
-    v = sqrt(-2*kb*T/M*(1 + lambertw((rand(rng)-1)/exp(1),-1)))
+    ϕ = 2π*rand(rng_set)
+    θ = asin(sin(θv_max)*sqrt(rand(rng_set)))
+    v = sqrt(-2*kb*T/M*(1 + lambertw((rand(rng_set)-1)/exp(1),-1)))
     return [ v*sin(θ)*sin(ϕ) , v*cos(θ) , v*sin(θ)*cos(ϕ) ]
 end
 
-alive_slit = generate_samples(Nss, rng);
+alive_slit = generate_samples(Nss; rng = rng_set, multithreaded = true, base_seed = base_seed_set);
 
-# Precompute velocity magnitudes and angles
-velocities = [sqrt(v[4]^2 + v[5]^2 + v[6]^2) for v in alive_slit];
-theta_vals = [acos(v[6] / sqrt(v[4]^2 + v[5]^2 + v[6]^2)) for v in alive_slit];
-phi_vals   = [atan(v[5], v[4]) for v in alive_slit];
-# Compute means once
-mean_v , rms_v = mean(velocities) , sqrt(mean([v^2 for v in velocities]));
-mean_theta , mean_phi = mean(theta_vals) , mean(phi_vals);
+plot_velocity_stats(alive_slit, joinpath(dir_path, "vel_stats.png"))
 
-# Histogram for velocities
-fig3a = histogram(
-    velocities,
-    bins = FreedmanDiaconisBins(velocities),
-    label = L"$v_0$",
-    normalize = :pdf,
-    xlabel=L"v_{0} \ (\mathrm{m/s})",
-    alpha = 0.70
-);
-vline!([mean_v], 
-    label = L"$\langle v_{0} \rangle = %$(round(mean_v, digits=1)) \mathrm{m/s}$",
-    line = (:black, :solid, 2),
-);
-vline!([rms_v], 
-    label = L"$\sqrt{\langle v_{0}^2 \rangle} = %$(round(rms_v, digits=1)) \mathrm{m/s}$",
-    line = (:red, :dash, 3)
-);
-# Histogram for theta (polar angle)
-fig3b = histogram(
-    theta_vals,
-    bins = FreedmanDiaconisBins(theta_vals),
-    label = L"$\theta_v$",
-    normalize = :pdf,
-    alpha = 0.70,
-    xlabel=L"$\theta_{v}$",
-);
-vline!([mean_theta], 
-    label = L"$\langle \theta_{v} \rangle = %$(round(mean_theta/π, digits=3))\pi$",
-    line = (:black, :solid, 2)
-);
-# Histogram for phi (azimuthal angle)
-fig3c = histogram(
-    phi_vals,
-    bins = FreedmanDiaconisBins(phi_vals),
-    label = L"$\phi_v$",
-    normalize = :pdf,
-    alpha = 0.70,
-    xlabel=L"$\phi_{v}$",
-);
-vline!([mean_phi], 
-    label = L"$\langle \phi_{v} \rangle = %$(round(mean_phi/π, digits=3))\pi$",
-    line = (:black, :solid, 2)
-);
-fig3d=histogram2d([1e3*x[1] for x in alive_slit], [1e6*z[3] for z in alive_slit], 
-    bins=(FreedmanDiaconisBins([1e3*x[1] for x in alive_slit]), FreedmanDiaconisBins([1e6*z[3] for z in alive_slit])), 
-    show_empty_bins=true,
-    # normalize=:pdf,  
-    color=:plasma,
-    # title="Histogram: Initial position",
-    xlabel=L"$x \ (\mathrm{mm})$",
-    ylabel=L"$z \ (\mathrm{\mu m})$",
-    xticks=-1.0:0.25:1.0,
-    yticks=-50:10:50,
-    colorbar_position=:bottom,  # Set colorbar at the bottom
-) ;
-fig3e=histogram( [v[4] for v in alive_slit],
-    bins=FreedmanDiaconisBins([v[4] for v in alive_slit]),
-    normalize=:pdf,
-    label=L"$v_{0,x}$",
-    alpha=0.65,
-    color=(:orange),
-    xlabel=L"$v_{0,x} \ (\mathrm{m/s})$",
-);
-fig3f=histogram( [v[5] for v in alive_slit],
-    bins=FreedmanDiaconisBins([v[5] for v in alive_slit]),
-    normalize=:pdf,
-    label=L"$v_{0,y}$",
-    alpha=0.65,
-    color=(:blue),
-    xlabel=L"$v_{0,y} \ (\mathrm{m/s})$",
-);
-fig3g=histogram( [v[6] for v in alive_slit],
-    bins=FreedmanDiaconisBins([v[6] for v in alive_slit]),
-    normalize=:pdf,
-    label=L"$v_{0,z}$",
-    alpha=0.65,
-    color=(:red),
-    xlabel=L"$v_{0,z} \ (\mathrm{m/s})$",
-);
-# Combine plots
-fig3 = plot(
-    fig3a, fig3e, fig3b, fig3f, fig3c, fig3g,  fig3d ,
-    layout = @layout([a1 a2; a3 a4; a5 a6 ; a7]),
-    size=(650,800),
-    legendfontsize=8,
-    left_margin=3mm,
-)
-display(fig3)
-savefig(fig3, joinpath(dir_path, "vel_stats.png"))
+θesUP, θnsUP, θesDOWN, θnsDOWN = generate_matched_pairs(Nss);
+pairs_UP = build_init_cond(alive_slit, θesUP, θnsUP)
+pairs_DOWN = build_init_cond(alive_slit, θesDOWN, θnsDOWN)
+# Optionally clear memory
+θesUP = θnsUP = θesDOWN = θnsDOWN = alive_slit = nothing
 
-# # CQD Sampling: electron and nuclear magnetic moments
-# θes = 2 * asin.(sqrt.(rand(rng,Nss)))
-# θns = 2 * asin.(sqrt.(rand(rng,Nss)))
-# mask = θes .< θns
-# # Split the data in those going UP and DOWN according to CQD
-# MMeUP = hcat(θes[mask], θns[mask])
-# MMeDOWN = hcat(θes[.!mask], θns[.!mask])
-# Appended [x0,y0,z0,vx0,vy0,vz0,θₑ,θₙ] for UP and DOWN independently
-# pairs_UP = [vcat( alive_slit[i], MMeUP[i,:]) for i in 1:size(MMeUP,1)]
-# pairs_DOWN = [vcat(alive_slit[size(MMeUP,1)+i], MMeDOWN[i,:]) for i in 1:size(MMeDOWN,1)]
+@time good_particles_up = find_good_particles(Icoils, pairs_UP[1:100,:])
+@time good_particles_dw = find_good_particles(Icoils, pairs_DOWN)
 
-function generate_matched_pairs(No)
-    θes_up_list = Float64[]
-    θns_up_list = Float64[]
-    θes_down_list = Float64[]
-    θns_down_list = Float64[]
-    
-    count_less = 0
-    count_greater = 0
-    
-    while count_less < No || count_greater < No
-        θe = 2 * asin(sqrt(rand(rng)))
-        θn = 2 * asin(sqrt(rand(rng)))
 
-        if θe < θn && count_less < No
-            push!(θes_up_list, θe)
-            push!(θns_up_list, θn)
-            count_less += 1
-        elseif θe > θn && count_greater < No
-            push!(θes_down_list, θe)
-            push!(θns_down_list, θn)
-            count_greater += 1
-        end
-    end
-    
-    return θes_up_list, θns_up_list, θes_down_list, θns_down_list
+
+
+
+a = @time good_particles_up = find_good_particles(Icoils, pairs_UP[1:1000,:]);
+b = @time good_particles_up = find_good_particles_00(Icoils, pairs_UP[1:1000,:]);
+
+println("Particles with final θₑ=0")
+for (i0, indices) in good_particles_up
+    println("Current $(@sprintf("%.3f", Icoils[i0]))A \t→   Good particles: ", length(indices))
 end
-θesUP , θnsUP , θesDOWN , θnsDOWN= generate_matched_pairs(Nss);
-pairs_UP    = [vcat( alive_slit[i], θesUP[i], θnsUP[i]) for i in 1:Nss];
-pairs_DOWN  = [vcat(alive_slit[i], θesDOWN[i], θnsDOWN[i]) for i in 1:Nss];
-θesUP , θnsUP = nothing , nothing
-θesDOWN , θnsDOWN = nothing , nothing
 
-pairs_UP    = reshape(reinterpret(Float64, pairs_UP), 8, :)'
-pairs_DOWN  = reshape(reinterpret(Float64, pairs_DOWN), 8, :)'
-
-
-# Function to plot histogram using Freedman-Diaconis binning rule
-function FD_histograms(data_list::Vector{Float64},Label::LaTeXString,color)
-    # Calculate the interquartile range (IQR)
-    Q1 = quantile(data_list, 0.25)
-    Q3 = quantile(data_list, 0.75)
-    IQR = Q3 - Q1
-
-    # Calculate Freedman-Diaconis bin width
-    n = length(data_list)
-    bin_width = 2 * IQR / (n^(1/3))
-
-    # Calculate the number of bins using the range of the data
-    data_range = maximum(data_list) - minimum(data_list)
-    bins = ceil(Int, data_range / bin_width)
-
-    # Plot the histogram
-    histogram(data_list, bins=bins, normalize=:pdf,
-            label=Label,
-            # xlabel="Polar angle", 
-            color=color,
-            alpha=0.8,
-            xlim=(0,π),
-            xticks=PlottingTools.pitick(0, π, 8; mode=:latex),)
+println("Particles with final θₑ=π")
+for (i0, indices) in good_particles_dw
+    println("Current $(@sprintf("%.3f", Icoils[i0]))A \t→   Good particles: ", length(indices))
 end
-fig4a = FD_histograms(pairs_UP[:,7],L"\theta_{e}",:dodgerblue);
-fig4b = FD_histograms(pairs_UP[:,8],L"\theta_{n}",:red);
-fig4c = FD_histograms(pairs_DOWN[:,7],L"\theta_{e}",:dodgerblue);
-fig4d = FD_histograms(pairs_DOWN[:,8],L"\theta_{n}",:red);
+
+# Get positions of good particles for a specific current
+pairs_up = OrderedDict{Int8, Matrix{Float64}}()
+pairs_dw = OrderedDict{Int8, Matrix{Float64}}()
+for i=1:nI
+    pairs_up[i] = pairs_UP[good_particles_up[i], :]
+    pairs_dw[i] = pairs_DOWN[good_particles_dw[i], :]
+end
+
+min_ups = minimum(size(pairs_up[v],1) for v in eachindex(Icoils))
+min_dws = minimum(size(pairs_dw[v],1) for v in eachindex(Icoils))
+
+
+
+
+
+
+
+
+idxi0 = rand(1:nI)
+fig4a = FD_histograms(pairs_up[idxi0][:,7],L"\theta_{e}",:dodgerblue);
+fig4b = FD_histograms(pairs_up[idxi0][:,8],L"\theta_{n}",:red);
+fig4c = FD_histograms(pairs_dw[idxi0][:,7],L"\theta_{e}",:dodgerblue);
+fig4d = FD_histograms(pairs_dw[idxi0][:,8],L"\theta_{n}",:red);
 fig4= plot(fig4a,fig4b,fig4c,fig4d,
     layout = @layout([a1 a2 ; a3 a4]),
     size=(600,600),
@@ -706,13 +946,54 @@ plot!(fig4[1],xticks=(xticks(fig4[1])[1], []),xlabel="",bottom_margin=-5mm);
 plot!(fig4[2],xticks=(xticks(fig4[2])[1], []), yticks=(yticks(fig4[2])[1], []), xlabel="",bottom_margin=-5mm, left_margin=-5mm);
 plot!(fig4[4],yticks=(yticks(fig4[4])[1], fill("", length(yticks(fig4[4])[1]))), ylabel="",left_margin=-5mm);
 display(fig4)
-savefig(fig4,filename*"_04.svg")
+savefig(fig4, joinpath(dir_path, "polar_stats.png"))
 
 
 
-Icoils = [0.001,0.002,0.003,0.005,0.007,
-            0.010,0.020,0.030,0.040,0.050,0.060,0.070,0.080,
-            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.50,0.60,0.70,0.75,0.80]
+
+@time screen_up, screen_dw = compute_screen_xyz(Icoils, pairs_up, pairs_dw);
+
+screen_up
+
+screen_up = OrderedDict{Int8, Matrix{Float64}}()
+screen_dw = OrderedDict{Int8, Matrix{Float64}}()
+
+for i = 1:nI
+    # Extract initial conditions for the good particles
+    good_up = pairs_up[i]
+    good_dw = pairs_dw[i]
+
+    N_up = size(good_up, 1)
+    N_dw = size(good_dw, 1)
+
+    coords_up = zeros(N_up, 3)
+    coords_dw = zeros(N_dw, 3)
+
+    # Compute final coordinates for θₑ = 0 particles
+    Threads.@threads for j = 1:N_up
+        r0 = @inbounds good_up[j, 1:3]
+        v0 = @inbounds good_up[j, 4:6]
+        θe0 = good_up[j, 7]
+        θn0 = good_up[j, 8]
+        coords_up[j, :] = CQD_Screen_position(Icoils[i], μₑ, r0, v0, θe0, θn0, ki)
+    end
+
+    # Compute final coordinates for θₑ = π particles
+    Threads.@threads for j = 1:N_dw
+        r0 = @inbounds good_dw[j, 1:3]
+        v0 = @inbounds good_dw[j, 4:6]
+        θe0 = good_dw[j, 7]
+        θn0 = good_dw[j, 8]
+        coords_dw[j, :] = CQD_Screen_position(Icoils[i], μₑ, r0, v0, θe0, θn0, ki)
+    end
+
+    # Save results
+    screen_up[i] = coords_up
+    screen_dw[i] = coords_dw
+end
+
+screen_up[1]
+
 screen_coord = zeros(Nss,3, length(Icoils));
 
 for j=1:length(Icoils)
