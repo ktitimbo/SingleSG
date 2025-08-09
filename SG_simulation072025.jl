@@ -19,6 +19,7 @@ using Dates
 using LinearAlgebra, DataStructures
 using Interpolations, Roots, Dierckx, Loess, Optim
 using BSplineKit
+using DSP
 using WignerD, LambertW, PolyLog
 using StatsBase
 using Random, Statistics, NaNStatistics, MLBase, Distributions, StaticArrays
@@ -79,9 +80,9 @@ const ki = 2.1e-6
 
 # STERN--GERLACH EXPERIMENT
 # Image size
-const cam_pixelsize = 0.0065 ;  # [mm]
+const cam_pixelsize = 0.0065e-3 ;  # [m]
 n_bins = 4
-exp_pixelsize = n_bins * cam_pixelsize ;   # [mm] for 20243014
+exp_pixelsize = n_bins * cam_pixelsize ;   # [m] 
 # Furnace
 const T = 273.15 + 200 ; # Furnace temperature (K)
 # Furnace aperture
@@ -96,7 +97,7 @@ const y_SlitToSG      = 44.0e-3 ;
 const y_SG            = 7.0e-2 ;
 const y_SGToScreen    = 32.0e-2 ;
 # Sample size: number of atoms arriving to the screen
-const Nss = 10000
+const Nss = 20000
 
 # Coil currents
 Icoils = [0.001,0.002,0.003,0.005,0.007,
@@ -269,6 +270,15 @@ end
         return z0 + vz*t + 0.5*acc_0*( Δt2^2 - Δt3^2 ) + acc_0 / kω * τ_SG * (log_cos2 + log_term * Δt3 / τ_SG) + 0.5 * acc_0 / kω^2 * (polylog_SG - polylog_0)
     end
 end
+
+@inline function CQDEqOfMotion_OFF_z(t,r0::AbstractVector{Float64},v0::AbstractVector{Float64})
+    vy = v0[2]
+    vz = v0[3]
+    z0 = r0[3]
+    
+    return z0 + vz*t
+end
+
 
 # CQD Screen position
 function CQD_Screen_position(Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, kx::Float64)
@@ -721,7 +731,7 @@ function find_bad_particles_ix(Ix, pairs)
 
         local_bad_particles = Int[]  # local to this thread and current
         hits_SG = 0
-        hits_post = 0
+        # hits_post = 0
 
         for j = 1:No
             try
@@ -729,7 +739,7 @@ function find_bad_particles_ix(Ix, pairs)
                     v_y = pairs[j, 5]
                     t_in = (y_FurnaceToSlit + y_SlitToSG) / v_y
                     t_out = (y_FurnaceToSlit + y_SlitToSG + y_SG) / v_y
-                    t_screen = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen) / v_y
+                    # t_screen = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen) / v_y
                     t_length = 1000
 
                     r0 = @view pairs[j, 1:3]
@@ -750,15 +760,15 @@ function find_bad_particles_ix(Ix, pairs)
                     continue
                 end
 
-                t_sweep_screen = range(t_out, t_screen, length=t_length)
-                xs = r0[1] .+ v0[1] .* t_sweep_screen
-                zs = CQDEqOfMotion_z.(t_sweep_screen, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
-                R_tube = 35e-3 / 2
-                if any(xs.^2 .+ zs.^2 .> R_tube^2)
-                    push!(local_bad_particles, j)
-                    hits_post += 1
-                    continue
-                end
+                # t_sweep_screen = range(t_out, t_screen, length=t_length)
+                # xs = r0[1] .+ v0[1] .* t_sweep_screen
+                # zs = CQDEqOfMotion_z.(t_sweep_screen, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
+                # R_tube = 35e-3 / 2
+                # if any(xs.^2 .+ zs.^2 .> R_tube^2)
+                #     push!(local_bad_particles, j)
+                #     hits_post += 1
+                #     continue
+                # end
 
             catch err
                 @error "Thread $(Threads.threadid()), particle $j crashed" exception=err
@@ -766,7 +776,83 @@ function find_bad_particles_ix(Ix, pairs)
         end
 
         println("\t→ SG hits   = $hits_SG")
-        println("\t→ Pipe hits = $hits_post\n")
+        # println("\t→ Pipe hits = $hits_post\n")
+
+        sort!(local_bad_particles)
+        bad_particles_per_current[idx] = local_bad_particles
+    end
+
+    # Final result as Dict for compatibility
+    bad_particles = Dict{Int8, Vector{Int}}()
+    for idx in 1:ncurrents
+        bad_particles[Int8(idx)] = bad_particles_per_current[idx]
+    end
+
+    return bad_particles
+end
+
+function find_bad_particles_ix_v2(Ix, pairs)
+    No = size(pairs, 1)  # Number of particles
+    ncurrents = length(Ix)
+
+    # Indexed by idx, NOT threadid
+    bad_particles_per_current = Vector{Vector{Int}}(undef, ncurrents)
+    for i in 1:ncurrents
+        bad_particles_per_current[i] = Int[]
+    end
+
+    Threads.@threads for idx in 1:ncurrents
+        i0 = Ix[idx]
+        println("Analyzing current I₀ = $(@sprintf("%.3f", i0))A")
+
+        local_bad_particles = Int[]  # local to this thread and current
+        hits_SG = 0
+        # hits_post = 0
+
+        for j = 1:No
+            try
+                @inbounds begin
+                    v_y = pairs[j, 5]
+                    t_in = (y_FurnaceToSlit + y_SlitToSG) / v_y
+                    t_out = (y_FurnaceToSlit + y_SlitToSG + y_SG) / v_y
+                    # t_screen = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen) / v_y
+                    t_length = 1000
+
+                    r0 = @view pairs[j, 1:3]
+                    v0 = @view pairs[j, 4:6]
+                    θe0 = @view pairs[j, 7]
+                    θn0 = @view pairs[j, 8]
+                end
+
+                t_sweep_sg = range(t_in, t_out, length=t_length)
+                z_val = CQDEqOfMotion_z.(t_sweep_sg, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
+                z_top = z_magnet_edge_time.(t_sweep_sg, Ref(r0), Ref(v0))
+                z_bottom = z_magnet_trench_time.(t_sweep_sg, Ref(r0), Ref(v0))
+
+                inside_cavity = (z_bottom .< z_val) .& (z_val .< z_top)
+                if !all(inside_cavity)
+                    push!(local_bad_particles, j)
+                    hits_SG += 1
+                    continue
+                end
+
+                # t_sweep_screen = range(t_out, t_screen, length=t_length)
+                # xs = r0[1] .+ v0[1] .* t_sweep_screen
+                # zs = CQDEqOfMotion_z.(t_sweep_screen, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
+                # R_tube = 35e-3 / 2
+                # if any(xs.^2 .+ zs.^2 .> R_tube^2)
+                #     push!(local_bad_particles, j)
+                #     hits_post += 1
+                #     continue
+                # end
+
+            catch err
+                @error "Thread $(Threads.threadid()), particle $j crashed" exception=err
+            end
+        end
+
+        println("\t→ SG hits   = $hits_SG")
+        # println("\t→ Pipe hits = $hits_post\n")
 
         sort!(local_bad_particles)
         bad_particles_per_current[idx] = local_bad_particles
@@ -817,9 +903,6 @@ function compute_screen_xyz( Ix::Vector, valid_up::OrderedDict, valid_dw::Ordere
 
     return screen_up, screen_dw
 end
-
-
-
 
 # Function to plot histogram using Freedman-Diaconis binning rule
 function FD_histograms(data_list::Vector{Float64},Label::LaTeXString,color)
@@ -1210,18 +1293,72 @@ min_dws = minimum(size(valid_dw[v],1) for v in eachindex(Icoils))
 
 
 # data recovery
-data_path = "./simulation_data/20250807T163648/"
-data_u = JLD2.jldopen(joinpath(data_path, "data_up.jld2"), "r") do file
-    return Dict(k => read(file, k) for k in keys(file))
-end
-data_d = JLD2.jldopen(joinpath(data_path, "data_dw.jld2"), "r") do file
-    return Dict(k => read(file, k) for k in keys(file))
+data_path = ["./simulation_data/"] .* [
+    "20250807T163648/",
+    "20250807T180252/", 
+    "20250807T181304/"
+]
+
+# data_u = JLD2.jldopen(joinpath(data_path[3], "data_up.jld2"), "r") do file
+#     return Dict(k => read(file, k) for k in keys(file))
+# end
+# data_d = JLD2.jldopen(joinpath(data_path[3], "data_dw.jld2"), "r") do file
+#     return Dict(k => read(file, k) for k in keys(file))
+# end
+# valid_up = data_u["valid_up"]
+# valid_dw = data_d["valid_dw"]
+
+# Load all valid_up dictionaries into a vector
+# valid_up_list = [
+#     JLD2.jldopen(joinpath(path, "data_up.jld2"), "r") do file
+#         read(file, "valid_up")
+#     end
+#     for path in data_path
+# ]
+
+# # Combine: same keys, so we vcat the matrices for each key
+# combined_valid_up = OrderedDict{Int64, Matrix{Float64}}()
+# for k in keys(valid_up_list[1])
+#     combined_valid_up[k] = vcat([vu[k] for vu in valid_up_list]...)
+# end
+
+# combined_valid_up
+
+function combine_valid_data(data_paths::Vector{String}; spin::Symbol = :up)
+    # Decide which key to load
+    key = spin === :up ? "valid_up" : "valid_dw"
+    file_name = spin === :up ? "data_up.jld2" : "data_dw.jld2"
+
+    # Load each dictionary from file
+    dict_list = Vector{OrderedDict{Int64, Matrix{Float64}}}(undef, length(data_paths))
+    for (i, path) in enumerate(data_paths)
+        filepath = joinpath(path, file_name)
+        dict_list[i] = JLD2.jldopen(filepath, "r") do file
+            read(file, key)
+        end
+    end
+
+    # Get the common keys
+    first_keys = collect(keys(dict_list[1]))
+    combined = OrderedDict{Int64, Matrix{Float64}}()
+
+    # Preallocate dictionary
+    for k in first_keys
+        combined[k] = Matrix{Float64}(undef, 0, size(dict_list[1][k], 2))
+    end
+
+    # Threaded concatenation
+    @threads for i in eachindex(first_keys)
+        k = first_keys[i]
+        combined[k] = vcat((d[k] for d in dict_list)...)
+    end
+
+    return combined
 end
 
-valid_up = data_u["valid_up"]
-valid_dw = data_d["valid_dw"]
+valid_up = combine_valid_data(data_path; spin = :up)
+valid_dw = combine_valid_data(data_path; spin = :dw)
 
-valid_up[1]
 
 idxi0 = rand(1:nI)
 fig4a = FD_histograms(valid_up[idxi0][:,7],L"\theta_{e}",:dodgerblue);
@@ -1246,22 +1383,304 @@ plot!(fig4[4],yticks=(yticks(fig4[4])[1], fill("", length(yticks(fig4[4])[1]))),
 display(fig4)
 savefig(fig4, joinpath(dir_path, "polar_stats.png"))
 
-valid_up
-valid_dw
-
-
 @time screen_up, screen_dw = compute_screen_xyz(Icoils, valid_up, valid_dw);
 
+idxi0 = rand(1:nI)
+data_up = 1e3*screen_up[idxi0][:,[1,3]] # [mm]
+data_dw = 1e3*screen_dw[idxi0][:,[1,3]] # [mm]
 
-screen_up[1]
 
-screen_coord = zeros(Nss,3, length(Icoils));
+data = data_dw
 
-for j=1:length(Icoils)
-    @time @threads for i=1:Nss
-        screen_coord[i,:,j] = CQD_Screen_position(Icoils[j],μₑ,pairs_UP[i,1:3],pairs_UP[i,4:6],pairs_UP[i,7], pairs_UP[i,8],ki)
-    end
+
+function bin_centers(edges::AbstractVector)
+    return (edges[1:end-1] .+ edges[2:end]) ./ 2
 end
+
+function gaussian_kernel(x,wd)
+    # Create Gaussian kernel around zero
+    kernel = (1 / (sqrt(2π) * wd)) .* exp.(-x .^ 2 ./ (2 * wd^2))
+    kernel ./= sum(kernel)  # normalize to sum to 1
+    return kernel
+end
+
+function smooth_profile(z_vals, pdf_vals, wd)
+    kernel = gaussian_kernel(z_vals,wd)
+    # Convolve pdf values with kernel, pad=true means full convolution
+    smoothed = DSP.conv(pdf_vals, kernel)
+    # Trim convolution result to same length as input, like MATLAB 'same'
+    n = length(pdf_vals)
+    start_idx = div(length(kernel), 2) + 1
+    return smoothed[start_idx:start_idx + n - 1]
+end
+
+
+n_bins = 1
+xmin = -16.0
+xmax =  16.0
+zmin = -8.0
+zmax =  8.0
+bin_size = 1e3 * n_bins * cam_pixelsize
+
+x_pixels = ceil(Int, (xmax - xmin) / bin_size)
+z_pixels = ceil(Int, (zmax - zmin) / bin_size)
+
+edges_x = xmin:bin_size:(xmin + x_pixels*bin_size)
+edges_z = zmin:bin_size:(zmin + z_pixels*bin_size)
+
+# Example usage:
+centers_x = bin_centers(edges_x)
+centers_z = bin_centers(edges_z)
+
+# data is Nx2 matrix: columns are x and z positions
+h = fit(Histogram, (data[:, 1], data[:, 2]), (edges_x, edges_z))
+counts = h.weights
+
+# heatmap expects x and y vectors, and a matrix of values (counts)
+heatmap(
+    centers_x,
+    centers_z,
+    counts',
+    xlabel = "x (mm)",
+    ylabel = "z (mm)",
+    title = "2D Histogram",
+    color = :inferno,
+    # aspect_ratio = :equal,
+)
+
+z_profile = vec(mean(counts,dims=1))
+plot(centers_z, z_profile)
+# Example usage:
+wd = 0.05                   # kernel width (mm), adjust as needed
+smoothed_pdf = smooth_profile(centers_z, z_profile, wd)
+plot!(centers_z, smoothed_pdf)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+function analyze_2dhist(Ix::Float64, data::AbstractMatrix, n_bins::Int)
+
+    @assert size(data, 2) ≥ 2 "Data must have at least two columns (x and z)."
+
+    # Determine bounds
+    sim_xmin, sim_xmax = extrema(data[:, 1])
+    sim_zmin, sim_zmax = extrema(data[:, 2])
+
+    # Number of bins without materializing all edges
+    steps = 1e3 * n_bins * cam_pixelsize
+    nbins_x = Int(cld(sim_xmax - sim_xmin, steps)) + 1
+    nbins_z = Int(cld(sim_zmax - sim_zmin, steps)) + 1
+
+    # Fit 2D histogram
+    h0 = fit(
+        Histogram,
+        (data[:, 1], data[:, 2]),
+        (range(sim_xmin, sim_xmax, length=nbins_x),
+         range(sim_zmin, sim_zmax, length=nbins_z))
+    )
+    h0 = normalize(h0, mode=:pdf)
+
+    # Bin centers
+    # bin_centers_x = (h0.edges[1][1:end-1] .+ h0.edges[1][2:end]) ./ 2
+    bin_centers_z = (h0.edges[2][1:end-1] .+ h0.edges[2][2:end]) ./ 2
+
+    # Z-profile (mean along x-axis)
+    z_profile = hcat(bin_centers_z, vec(mean(h0.weights, dims=1)))
+
+    # Raw max
+    zmax_idx = argmax(z_profile[:, 2])
+    z_max_0 = z_profile[zmax_idx, 1]
+
+    # Figure: 2D histogram
+    fig_2dhist = histogram2d(
+        data[:, 1], data[:, 2],
+        nbins=(nbins_x, nbins_z),
+        color=:inferno,
+        title=L"Co Quantum Dynamics: $I_{c}=%$(Ix)\mathrm{A}$ $\vec{\mu}_{e} \upuparrows \hat{z}$",
+        xlabel=L"$x \ (\mathrm{mm})$",
+        ylabel=L"$z \ (\mathrm{mm})$",
+        xlim=(sim_xmin, sim_xmax),
+        show_empty_bins=true,
+    )
+    hline!([z_max_0], label=false, line=(:red, :dash, 1))
+
+    # Figure: Z-profile with LOESS
+    fig_prof = plot(
+        z_profile[:, 1], z_profile[:, 2],
+        label="Simulation",
+        seriestype=:line,
+        line=(:gray, 1),
+        title="CoQuantum Dynamics",
+        xlabel=L"$z \, (\mathrm{mm})$",
+        legend=:best,
+        # zlims=(0, :auto),
+        legendtitle=(
+            isempty(Icoils) ?
+            "" :
+            L"$I_{0}=%$(Ix)\,\mathrm{A}$"
+        ),
+        legendtitlefontsize=10,
+    )
+    vline!([z_max_0], label=L"$z_{\mathrm{max}} = %$(round(z_max_0,digits=6)) \, \mathrm{mm}$", line=(:red, :dash, 2))
+
+    # LOESS fit
+    zscan = range(minimum(z_profile[:, 1]), maximum(z_profile[:, 1]), step=0.001)
+    model = loess(z_profile[:, 1], z_profile[:, 2], span=0.10)
+    plot!(zscan, predict(model, zscan), label="Loess", line=(:purple4, 2, 0.5))
+
+    # Optimization to refine z_max
+    smooth_fn = x_val -> -Loess.predict(model, [x_val[1]])[1]
+    opt_result = optimize(smooth_fn, [minimum(bin_centers_z)], [maximum(bin_centers_z)], [z_max_0], Fminbox(LBFGS()))
+    z_max_fit = Optim.minimizer(opt_result)[1]
+    vline!([z_max_fit], label=L"$z_{\mathrm{max}} = %$(round(z_max_fit,digits=6)) \, \mathrm{mm}$", line=(:red, :dot, 2))
+
+    return (
+        # h0=h0,
+        z_profile=z_profile,
+        z_max_0=z_max_0,
+        z_max_fit=z_max_fit,
+        fig_2dhist=fig_2dhist,
+        fig_prof=fig_prof
+    )
+end
+
+result = analyze_2dhist(Icoils[22], data, 2)
+
+
+result.fig_prof
+
+
+function gaussian_kernel(x,wd)
+    # Create Gaussian kernel around zero
+    kernel = (1 / (sqrt(2π) * wd)) .* exp.(-x .^ 2 ./ (2 * wd^2))
+    kernel ./= sum(kernel)  # normalize to sum to 1
+    return kernel
+end
+
+function smooth_profile(z_vals, pdf_vals, wd)
+    kernel = gaussian_kernel(z_vals,wd)
+    # Convolve pdf values with kernel, pad=true means full convolution
+    smoothed = DSP.conv(pdf_vals, kernel)
+    # Trim convolution result to same length as input, like MATLAB 'same'
+    n = length(pdf_vals)
+    start_idx = div(length(kernel), 2) + 1
+    return smoothed[start_idx:start_idx + n - 1]
+end
+
+
+
+
+# Create 2D histogram
+n_bins=2
+sim_xmin , sim_xmax = minimum(data[:,1])  , maximum(data[:,1])
+sim_zmin , sim_zmax = minimum(data[:,2]) , maximum(data[:,2])
+nbins_x = length(collect(sim_xmin:1e3*n_bins * cam_pixelsize:sim_xmax))+1
+nbins_z = length(collect(sim_zmin:1e3*n_bins * cam_pixelsize:sim_zmax))+1
+h0 = fit(Histogram,(data[:,1],data[:,2]),
+    (range(sim_xmin,sim_xmax,length=nbins_x),range(sim_zmin,sim_zmax,length=nbins_z))
+)
+h0=normalize(h0,mode=:pdf)
+bin_edges_x = collect(h0.edges[1])
+bin_edges_z = collect(h0.edges[2])
+bin_centers_x = (bin_edges_x[1:end-1] .+ bin_edges_x[2:end]) ./ 2  # Compute bin centers
+bin_centers_z = (bin_edges_z[1:end-1] .+ bin_edges_z[2:end]) ./ 2  # Compute bin centers
+
+z_profile = hcat(bin_centers_z, vec(mean(h0.weights,dims=1)))
+# Find the index of the maximum value in the second column & Extract the corresponding value from the first column
+zmax_idx = argmax(z_profile[:, 2])
+z_max_0 = z_profile[zmax_idx, 1]
+
+fig_2dhist = histogram2d(data[:,1],data[:,2],
+    nbins=(nbins_x,nbins_z),
+    # normalize=:pdf,
+    color=:inferno,
+    title=L"Co Quantum Dynamics: $\vec{\mu}_{e} \upuparrows \hat{z}$",
+    xlabel=L"$x \ (\mathrm{mm})$",
+    ylabel=L"$z \ (\mathrm{mm})$",
+    xlim=(sim_xmin, sim_xmax),
+    # ylim=(sim_zmin,3),
+    show_empty_bins=true,
+)
+hline!([z_max_0],label=false,line=(:red,:dash,1))
+
+
+# Example usage:
+wd = 0.1                   # kernel width (mm), adjust as needed
+smoothed_pdf = smooth_profile(z_profile[:,1], z_profile[:,2], wd)
+
+fig_prof = plot(z_profile[:,1],z_profile[:,2],
+    label="Simulation",
+    seriestype=:line,
+    line=(:gray,1),
+    # marker=(:black,:circle,2),
+    title="CoQuantum Dynamics",
+    # zlims=(0,:auto),
+    xlabel=L"$z \, (\mathrm{mm})$",
+    legend=:best,
+    legendtitle=L"$I_{0}=%$(Icoils[idxi0])\,\mathrm{A}$",
+    legendtitlefontsize=10,
+)
+vline!([z_max_0], label=L"$z_{\mathrm{max}} = %$(round(z_max_0,digits=6)) \, \mathrm{mm}$",line=(:red,:dash,2))
+zscan = collect(minimum(z_profile[:,1]):0.001:maximum(z_profile[:,1]))
+
+model = loess(z_profile[:,1],z_profile[:,2], span=0.10)
+plot!(zscan,predict(model,zscan),
+    label="Loess",
+    line=(:purple4,2,0.5),
+)
+
+# Define the smoothed function
+smooth_fn = x_val -> -Loess.predict(model, [x_val[1]])[1]
+# Find minimum using optimization
+opt_result = optimize(smooth_fn, [minimum(bin_centers_z)], [maximum(bin_centers_z)], [z_max_0], Fminbox(LBFGS()))
+z_max_fit = Optim.minimizer(opt_result)[1]
+vline!([z_max_fit], label=L"$z_{\mathrm{max}} = %$(round(z_max_fit,digits=6)) \, \mathrm{mm}$", line=(:red,:dot,2))
+plot!(z_profile[:,1], smoothed_pdf)
+2+2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 s_bin = 2

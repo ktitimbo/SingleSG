@@ -1237,8 +1237,8 @@ plot!(
     legendfontsize=10,
 ) 
 
-sim_data = CSV.read("./simulation_data/results_CQD_20250730T120418.csv",DataFrame; header=false)
-kis = [0.25, 0.50, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 4.0, 5.0] # ×10^-6
+sim_data = CSV.read("./simulation_data/results_CQD_20250807T135817.csv",DataFrame; header=false)
+kis = [1.50,1.80,2.00,2.10,2.20,2.25,2.30,2.40,2.50,2.60] # ×10^-6
 # Compute absolute values for plotting
 y = data_framewise[:,12]
 y_abs = abs.(y)
@@ -1264,7 +1264,7 @@ plot!(abs.(data_framewise[neg_mask,1]/1000), y_abs[neg_mask],
 )
 plot!(
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+    # yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
     xlims = (0.015,1.0),
     ylims = (1e-3,1.5),
     title = "F=1 Peak Position vs Current",
@@ -1285,8 +1285,8 @@ plot!(
     legendfontsize=10,
 ) 
 colors = palette(:phase, length(kis) );
-for i=7:10
-    plot!(sim_data[:,1],abs.(sim_data[:,29+i]), 
+for i=1:length(kis)
+    plot!(sim_data[:,1],abs.(sim_data[:,21+i]), 
     label=L"CQD $k_{i}=%$(kis[i])\times10^{-6}$",
     line=(:dash,colors[i],2))
 end
