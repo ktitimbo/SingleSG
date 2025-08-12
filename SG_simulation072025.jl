@@ -76,11 +76,14 @@ const γₙ        = atom_info[3];
 const Ispin    = atom_info[4];
 const Ahfs     = atom_info[6];
 const M        = atom_info[7];
+# Math constants
+const TWOπ = 2π;
+const INV_E = exp(-1);
 
 # STERN--GERLACH EXPERIMENT
 # Image size
 const cam_pixelsize = 0.0065e-3 ;  # [m]
-n_bins = 4
+n_bins = 2
 exp_pixelsize = n_bins * cam_pixelsize ;   # [m] 
 # Furnace
 const T = 273.15 + 200 ; # Furnace temperature (K)
@@ -96,9 +99,9 @@ const y_SlitToSG      = 44.0e-3 ;
 const y_SG            = 7.0e-2 ;
 const y_SGToScreen    = 32.0e-2 ;
 # Connecting pipes
-R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
+const R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
 # Sample size: number of atoms arriving to the screen
-const Nss = 500
+const Nss = 80000
 
 # Coil currents
 Icoils = [0.001,0.002,0.003,0.005,0.007,
@@ -121,6 +124,37 @@ BvsI = linear_interpolation(Bdata.dI, Bdata.Bz, extrapolation_bc=Line());
 #################################################################################
 # FUNCTIONS
 #################################################################################
+"""
+    clear_all() -> Nothing
+
+    Set to `nothing` every **non-const** binding in `Main`, except a small skip-list
+    (`:Base`, `:Core`, `:Main`, and `Symbol("@__dot__")`). This effectively clears
+    user-defined variables and functions from the current session without restarting Julia.
+
+    What it does
+    - Iterates `names(Main; all=true)` and, for each name:
+    - Skips if it is one of `:Base`, `:Core`, `:Main`, or `Symbol("@__dot__")`.
+    - Skips if the binding is **not defined** or is **const**.
+    - Otherwise sets the binding to `nothing` in `Main`.
+    - Triggers a `GC.gc()` afterward.
+    - Prints a summary message.
+
+    Notes & caveats
+    - This will clear **user functions** too (they’re non-const bindings).
+    - Type names and imported modules are usually `const` in `Main`, so they are **not** cleared.
+    - This does not unload packages or reset the environment; it only nukes non-const globals.
+    - There is no undo; you’ll need to re-run definitions after clearing.
+
+    Example
+    ```julia
+    julia> x = 1; y = "hi"; f(x) = x+1;
+
+    julia> clear_all()
+    All user-defined variables (except constants) cleared.
+
+    julia> x, y, f
+    (nothing, nothing, nothing)
+"""
 function clear_all()
     for name in names(Main, all=true)
         if name ∉ (:Base, :Core, :Main, Symbol("@__dot__"))
@@ -136,56 +170,219 @@ function clear_all()
     println("All user-defined variables (except constants) cleared.")
 end
 
+
+"""Return the real dilogarithm `Li₂(z)` via `reli2(z)`; `s` is ignored."""
 function polylog(s,z)
     # return MyPolylogarithms.polylog(s,z)
     return reli2(z)
 end
 
-function FreedmanDiaconisBins(data_list::Vector{Float64})
-    # Calculate the interquartile range (IQR)
-    Q1 = quantile(data_list, 0.25)
-    Q3 = quantile(data_list, 0.75)
+"""
+    FreedmanDiaconisBins(data::AbstractVector{<:Real}) -> Int
+
+    Return the optimal number of histogram bins for `data` using the
+    **Freedman–Diaconis rule**:
+
+        bin_width = 2 * IQR / n^(1/3)
+        bins      = ceil( range / bin_width )
+
+    where:
+    - `IQR` is the interquartile range (Q3 − Q1).
+    - `n` is the number of samples.
+    - `range` is `maximum(data) - minimum(data)`.
+
+    This rule balances resolution with statistical noise and is robust to outliers.
+
+    # Arguments
+    - `data::AbstractVector{<:Real}`: 1D array of real numeric values.
+
+    # Returns
+    - `Int`: Number of bins.
+
+    # Notes
+    - If `IQR` is zero (e.g., all values identical), returns `1`.
+    - Assumes `data` has at least one element.
+    - Automatically promotes input to `Float64` for calculations.
+"""
+function FreedmanDiaconisBins(data::AbstractVector{<:Real})
+    @assert !isempty(data) "data must not be empty"
+    # Promote to Float64 for calculations
+    data_f = Float64.(data)
+
+    # Interquartile range
+    Q1 = quantile(data_f, 0.25)
+    Q3 = quantile(data_f, 0.75)
     IQR = Q3 - Q1
 
-    # Calculate Freedman-Diaconis bin width
-    n = length(data_list)
+    # Edge case: no spread in data
+    if IQR == 0
+        return 1
+    end
+
+    # Freedman–Diaconis bin width
+    n = length(data_f)
     bin_width = 2 * IQR / (n^(1/3))
 
-    # Calculate the number of bins using the range of the data
-    data_range = maximum(data_list) - minimum(data_list)
-    bins = ceil(Int, data_range / bin_width)
+    # Number of bins
+    data_range = maximum(data_f) - minimum(data_f)
+    bins = max(1, ceil(Int, data_range / bin_width))
 
     return bins
 end
 
 # Quantum Magnetic Moment μF : electron(1/2)-nucleus(3/2)
+"""
+    μF_effective(Ix, II, F, mF) -> Float64
+
+    Effective magnetic moment μ_F for a given hyperfine manifold and Zeeman sublevel,
+    based on the (Breit–Rabi–style) expression you coded.
+
+    Inputs
+    - `Ix`  : Coil current (units consistent with `BvsI(Ix)` → magnetic field).
+    - `II`  : Nuclear spin quantum number (I). Can be integer or half-integer.
+    - `F`   : Total angular momentum (must be `I ± 1/2`).
+    - `mF`  : Magnetic quantum number (must satisfy `-F ≤ mF ≤ F`).
+
+    Assumptions / Globals
+    - Uses global constants: `ħ, Ahfs, γₑ, γₙ, μB, gₑ`.
+    - Uses global field map/function: `BvsI(Ix)` returning B (same units used in Δ).
+    - Defines the adimensional field parameter
+    `normalized_B = (γₑ - γₙ) * ħ / ΔE * BvsI(Ix)`,
+    where `ΔE = 2π * ħ * Ahfs * (I + 1/2)`.
+
+    Details
+    - For the upper manifold `F = I + 1/2`, the `mF = ±F` edges use the simplified
+    analytic form `μF = ± gₑ/2 * (1 + 2*γₙ/γₑ * I) * μB`.
+    - For other `mF` and for the lower manifold `F = I - 1/2`, uses the full expressions
+    with the square‑root denominator
+    `sqrt(1 - 4*mF/(2I+1)*normalized_B + normalized_B^2)`; the argument is clamped
+    to ≥ 0 to avoid numerical noise causing `NaN`.
+
+    Returns
+    - `Float64` effective magnetic moment (units of μB if you keep the constants consistent).
+"""
 function μF_effective(Ix,II,F,mF)
+    # Promote to Float64 to avoid mixed-type arithmetic issues
+    Ix, II, F, mF = promote(float(Ix), float(II), float(F), float(mF))
+
+    # Energy scale and adimensional field
     ΔE = 2π*ħ*Ahfs*(II+1/2)
     normalized_B = (γₑ-γₙ)*ħ / ΔE * BvsI(Ix) 
-    if F==II+1/2 
-        if mF==F
-            μF = gₑ/2 * ( 1 + 2*γₙ/γₑ*II)*μB
-        elseif mF==-F
-            μF = -gₑ/2 * ( 1 + 2*γₙ/γₑ*II)*μB
-        else
-            μF = gₑ*μB* ( mF*γₙ/γₑ + (1-γₙ/γₑ)/sqrt(1-4*mF/(2*II+1)*normalized_B+(normalized_B)^2) * ( mF/(2*II+1)-1/2*normalized_B ) )
-        end
-    elseif F==II-1/2
-        μF = gₑ*μB* ( mF*γₙ/γₑ - (1-γₙ/γₑ)/sqrt(1-4*mF/(2*II+1)*normalized_B+(normalized_B)^2) * ( mF/(2*II+1)-1/2*normalized_B ) )
+    
+    # Validate quantum numbers
+    is_F_upper = isapprox(F, II + 0.5; atol = 1e-12)
+    is_F_lower = isapprox(F, II - 0.5; atol = 1e-12)
+    if !(is_F_upper || is_F_lower)
+        throw(ArgumentError("F must be I±1/2; got F=$F for I=$II"))
     end
+    if mF < -F - 1e-12 || mF > F + 1e-12
+        throw(ArgumentError("mF must be in [-F, F]; got mF=$mF for F=$F"))
+    end
+
+    # Common pieces
+    ratio = γₙ / γₑ
+    denom_arg = 1 - 4*mF/(2*II + 1) * normalized_B + normalized_B^2
+    # Clamp tiny negative due to rounding
+    denom = sqrt(max(denom_arg, 0.0))
+
+    μF::Float64 = NaN  # <-- initialize
+    if is_F_upper 
+        if isapprox(mF,  F; atol = 1e-12) || isapprox(mF, -F; atol = 1e-12)
+            s = sign(mF)
+            μF = s * (gₑ/2) * (1 + 2*ratio*II) * μB
+        else
+            μF = gₑ * μB * ( mF*ratio + (1 - ratio)/denom * ( mF/(2*II + 1) - 0.5*normalized_B ) )
+        end
+    else # is_F_lower
+        μF = gₑ * μB * ( mF*ratio - (1 - ratio)/denom * ( mF/(2*II + 1) - 0.5*normalized_B ) )
+    end
+
     return μF
 end
 
 # Atomic beam velocity probability Distribution
-p_furnace   = [-x_furnace/2,-z_furnace/2];
-p_slit      = [x_slit/2, z_slit/2];
-θv_max      = 1.25*atan(norm(p_furnace-p_slit) , y_FurnaceToSlit);
-function AtomicBeamVelocity()
-    ϕ = 2π*rand(rng_set)
-    θ = asin(sin(θv_max)*sqrt(rand(rng_set)))
-    v = sqrt(-2*kb*T/M*(1 + lambertw((rand(rng_set)-1)/exp(1),-1)))
-    return [ v*sin(θ)*sin(ϕ) , v*cos(θ) , v*sin(θ)*cos(ϕ) ]
+"""
+    struct FurnaceBeamParams
+        sinθmax::Float64
+        c1::Float64
+    end
+
+    Holds precomputed parameters for sampling atomic beam velocities from a heated
+    furnace with a rectangular aperture and downstream slit.
+
+    # Fields
+    - `sinθmax` — Maximum sine of the polar emission angle, determined by the geometry
+    from the furnace to the slit.
+    - `c1` — Velocity scale factor `-2*kB*T/M` (m²/s²), used in the speed distribution.
+"""
+struct FurnaceBeamParams
+    sinθmax::Float64
+    c1::Float64
 end
+
+"""
+    fb_params(; x_furnace, z_furnace, x_slit, z_slit, y_FurnaceToSlit, T, M, kb) -> FurnaceBeamParams
+
+    Convenience constructor for `FurnaceBeamParams`.  
+    Computes the maximum emission angle from the geometry and the speed scale factor
+    from the temperature and particle mass.
+
+    # Keyword Arguments
+    - `x_furnace`, `z_furnace` — Furnace aperture dimensions (m).
+    - `x_slit`, `z_slit` — Slit aperture dimensions (m).
+    - `y_FurnaceToSlit` — Distance from furnace to slit (m).
+    - `T` — Furnace temperature (K).
+    - `M` — Particle mass (kg).
+    - `kb` — Boltzmann constant (J/K).
+"""
+fb_params(; x_furnace=x_furnace, z_furnace=z_furnace, x_slit=x_slit, z_slit=z_slit, y_FurnaceToSlit=y_FurnaceToSlit, T=T, M=M, kb=kb) = begin
+    Δxz   = SVector(-x_furnace/2, -z_furnace/2) - SVector(x_slit/2, z_slit/2)
+    θvmax = 1.25 * atan(norm(Δxz), y_FurnaceToSlit)
+    FurnaceBeamParams(sin(θvmax), -2*kb*T/M)
+end
+fbp = fb_params()
+
+"""
+    AtomicBeamVelocity(rng, p::FurnaceBeamParams) -> SVector{3,Float64}
+
+    Draws a random velocity vector `(vx, vy, vz)` from the Maxwell–Boltzmann velocity
+    distribution for an effusive atomic beam, with angular spread limited by the
+    furnace–slit geometry.
+
+    # Arguments
+    - `rng` — Random number generator.
+    - `p` — Precomputed `FurnaceBeamParams`.
+
+    # Returns
+    An `SVector{3,Float64}` giving the velocity components (m/s) in the
+    beam frame:
+    - `vx` — Horizontal component (x-axis)
+    - `vy` — Longitudinal component (y-axis, along beam axis)
+    - `vz` — Vertical component (z-axis)
+
+    # Notes
+    - The speed distribution uses the analytical inversion formula involving the
+    Lambert W function on branch `-1`.
+    - Using a precomputed `p` avoids recomputing geometry/temperature constants in
+    every call.
+"""
+@inline function AtomicBeamVelocity(rng,p::FurnaceBeamParams)::SVector{3,Float64}
+    ϕ = TWOπ * rand(rng)
+    θ = asin(p.sinθmax * sqrt(rand(rng)))
+    v = sqrt(p.c1 * (1 + lambertw((rand(rng)-1)*INV_E, -1)))
+    sθ = sin(θ); cθ = cos(θ); sϕ = sin(ϕ); cϕ = cos(ϕ)
+    return SVector(v*sθ*sϕ, v*cθ, v*sθ*cϕ)
+end
+
+# p_furnace   = [-x_furnace/2,-z_furnace/2];
+# p_slit      = [x_slit/2, z_slit/2];
+# θv_max      = 1.25*atan(norm(p_furnace-p_slit) , y_FurnaceToSlit);
+# function AtomicBeamVelocity()
+#     ϕ = 2π*rand(rng_set)
+#     θ = asin(sin(θv_max)*sqrt(rand(rng_set)))
+#     v = sqrt(-2*kb*T/M*(1 + lambertw((rand(rng_set)-1)/exp(1),-1)))
+#     return [ v*sin(θ)*sin(ϕ) , v*cos(θ) , v*sin(θ)*cos(ϕ) ]
+# end
 
 # CQD Equations of motion
 function CQDEqOfMotion(t,Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, kx::Float64)
@@ -273,7 +470,6 @@ end
 end
 
 @inline function CQDEqOfMotion_OFF_z(t,r0::AbstractVector{Float64},v0::AbstractVector{Float64})
-    vy = v0[2]
     vz = v0[3]
     z0 = r0[3]
     
@@ -308,24 +504,38 @@ function CQD_Screen_position(Ix,μ::Float64,r0::AbstractVector{Float64},v0::Abst
 end
 
 # Generate samples post-filtering by the slit
-function _generate_samples_serial(No::Int, rng0)
+function _generate_samples_serial(No::Int, rng, p::FurnaceBeamParams)
+    @assert No > 0
     alive = Matrix{Float64}(undef, No, 6)
     iteration_count = 0
     count = 0
 
+    # precompute a few constants
+    hx = x_slit/2
+    hz = z_slit/2
+    epsvy = 1e-18
+
     @time while count < No
         iteration_count += 1
 
-        x_initial = x_furnace * (rand(rng0) - 0.5)
-        z_initial = z_furnace * (rand(rng0) - 0.5)
-        v0_x, v0_y, v0_z = AtomicBeamVelocity()
+        # initial transverse position (uniform over furnace rectangle)
+        x0 = x_furnace * (rand(rng) - 0.5)
+        z0 = z_furnace * (rand(rng) - 0.5)
 
-        x_at_slit = x_initial + y_FurnaceToSlit * v0_x / v0_y
-        z_at_slit = z_initial + y_FurnaceToSlit * v0_z / v0_y
+        v = AtomicBeamVelocity(rng,p)
+        v0_x, v0_y, v0_z = v[1], v[2], v[3]
 
-        if -x_slit/2 <= x_at_slit <= x_slit/2 && -z_slit/2 <= z_at_slit <= z_slit/2
+        # avoid near-zero v_y
+        if abs(v0_y) ≤ epsvy
+            continue
+        end
+
+        x_at_slit = x0 + y_FurnaceToSlit * v0_x / v0_y
+        z_at_slit = z0 + y_FurnaceToSlit * v0_z / v0_y
+
+        if -hx <= x_at_slit <= hx && -hz <= z_at_slit <= hz
             count += 1
-            alive[count,:] =  [x_initial, 0.0, z_initial, v0_x, v0_y, v0_z]
+            @inbounds alive[count,:] =  [x0, 0.0, z0, v0_x, v0_y, v0_z]
         end
     end
 
@@ -333,10 +543,16 @@ function _generate_samples_serial(No::Int, rng0)
     return alive
 end
 
-function _generate_samples_multithreaded(No::Int, base_seed::Int)
+function _generate_samples_multithreaded(No::Int, base_seed::Int, p::FurnaceBeamParams)
     alive = Matrix{Float64}(undef, No, 6)
+
     sample_count = Threads.Atomic{Int}(0)
     iteration_count = Threads.Atomic{Int}(0)
+
+    # Precomputed constants
+    hx = x_slit/2
+    hz = z_slit/2
+    epsvy = 1e-18
 
     @time Threads.@threads for thread_id in 1:Threads.nthreads()
         rng0 = TaskLocalRNG()
@@ -346,21 +562,30 @@ function _generate_samples_multithreaded(No::Int, base_seed::Int)
         while true
             Threads.atomic_add!(iteration_count, 1)
 
-            x_initial = x_furnace * (rand(rng0) - 0.5)
-            z_initial = z_furnace * (rand(rng0) - 0.5)
-            v0_x, v0_y, v0_z = AtomicBeamVelocity()
+            x0 = x_furnace * (rand(rng0) - 0.5)
+            z0 = z_furnace * (rand(rng0) - 0.5)
 
-            x_at_slit = x_initial + y_FurnaceToSlit * v0_x / v0_y
-            z_at_slit = z_initial + y_FurnaceToSlit * v0_z / v0_y
+            # Velocity sample (zero-alloc SVector)
+            v = AtomicBeamVelocity(rng0,p)
+            v0_x, v0_y, v0_z = v[1], v[2], v[3]
 
-            if -x_slit/2 <= x_at_slit <= x_slit/2 && -z_slit/2 <= z_at_slit <= z_slit/2
+            # Avoid divide-by-zero / huge times
+            if abs(v0_y) ≤ epsvy
+                continue
+            end
+
+            x_at_slit = x0 + y_FurnaceToSlit * v0_x / v0_y
+            z_at_slit = z0 + y_FurnaceToSlit * v0_z / v0_y
+
+            if -hx ≤ x_at_slit ≤ hx && -hz ≤ z_at_slit ≤ hz
                 idx = Threads.atomic_add!(sample_count, 1)
                 if idx <= No
-                    @inbounds alive[idx, :] = [x_initial, 0.0, z_initial, v0_x, v0_y, v0_z]
+                    @inbounds alive[idx, :] = [x0, 0.0, z0, v0_x, v0_y, v0_z]
                 else
                     break
                 end
             end
+
         end
     end
 
@@ -368,11 +593,11 @@ function _generate_samples_multithreaded(No::Int, base_seed::Int)
     return alive
 end
 
-function generate_samples(No::Int; rng = Random.default_rng(), multithreaded::Bool = false, base_seed::Int = 1234)
+function generate_samples(No::Int, p::FurnaceBeamParams; rng = Random.default_rng(), multithreaded::Bool = false, base_seed::Int = 1234)
     if multithreaded
-        return _generate_samples_multithreaded(No, base_seed)
+        return _generate_samples_multithreaded(No, base_seed, p)
     else
-        return _generate_samples_serial(No, rng)
+        return _generate_samples_serial(No, rng, p)
     end
 end
 
@@ -734,8 +959,8 @@ function find_bad_particles_ix(Ix, pairs)
         bad_particles_per_current[i] = Int[]
     end
 
-    # Threads.@threads for idx in 1:ncurrents
-    for idx in 1:ncurrents
+    Threads.@threads for idx in 1:ncurrents
+    # for idx in 1:ncurrents
         i0 = Ix[idx]
         println("Analyzing current I₀ = $(@sprintf("%.3f", i0))A")
 
@@ -825,8 +1050,8 @@ function compute_screen_xyz( Ix::Vector, valid_up::OrderedDict, valid_dw::Ordere
         coords_up = Matrix{Float64}(undef, N_up, 3)
         coords_dw = Matrix{Float64}(undef, N_dw, 3)
 
-        # Threads.@threads for j = 1:N_up
-        for j = 1:N_up
+        Threads.@threads for j = 1:N_up
+        # for j = 1:N_up
             # r0 = @view good_up[j, 1:3]
             # v0 = @view good_up[j, 4:6]
             r0  = SVector{3,Float64}(good_up[j, 1], good_up[j, 2], good_up[j, 3])
@@ -1217,16 +1442,48 @@ function plot_polar_stats(Ix::Vector{Float64}, data_up, data_dw, path_filename::
     return savefig(fig4,  path_filename)
 end
 
-save_fig = false
+function get_valid_particles_per_current(pairs, bad_particles_dict)
+    valid_dict = OrderedDict{Int, Matrix}()
+    all_indices = 1:size(pairs, 1)
+    for (idx, bad_indices) in bad_particles_dict
+        good_indices = setdiff(all_indices, bad_indices)
+        valid_dict[idx] = pairs[good_indices, :]
+    end
+    return valid_dict
+end
+
+function bin_centers(edges::AbstractVector)
+    return (edges[1:end-1] .+ edges[2:end]) ./ 2
+end
+
+function gaussian_kernel(x,wd)
+    # Create Gaussian kernel around zero
+    kernel = (1 / (sqrt(2π) * wd)) .* exp.(-x .^ 2 ./ (2 * wd^2))
+    kernel ./= sum(kernel)  # normalize to sum to 1
+    return kernel
+end
+
+function smooth_profile(z_vals, pdf_vals, wd)
+    kernel = gaussian_kernel(z_vals,wd)
+    # Convolve pdf values with kernel, pad=true means full convolution
+    smoothed = DSP.conv(pdf_vals, kernel)
+    # Trim convolution result to same length as input, like MATLAB 'same'
+    n = length(pdf_vals)
+    start_idx = div(length(kernel), 2) + 1
+    return smoothed[start_idx:start_idx + n - 1]
+end
+
+
+save_fig = true
 if save_fig == true
-    plot_SG_geometry(joinpath(dir_path, "slit.png"))
-    plot_SG_magneticfield(joinpath(dir_path, "SG_magneticfield.png"))
-    plot_ueff(Ispin,joinpath(dir_path, "mu_effective.png"))
+    plot_SG_geometry(joinpath(dir_path, "slit.png"));
+    plot_SG_magneticfield(joinpath(dir_path, "SG_magneticfield.png"));
+    plot_ueff(Ispin,joinpath(dir_path, "mu_effective.png"));
 end
 
 # Monte Carlo generation
-alive_slit = generate_samples(Nss; rng = rng_set, multithreaded = true, base_seed = base_seed_set);
-save_fig && plot_velocity_stats(alive_slit, joinpath(dir_path, "init_vel_stats.png"))
+alive_slit = generate_samples(Nss, fbp; rng = rng_set, multithreaded = true, base_seed = base_seed_set);
+save_fig && plot_velocity_stats(alive_slit, joinpath(dir_path, "init_vel_stats.png"));
 
 θesUP, θnsUP, θesDOWN, θnsDOWN = generate_matched_pairs(Nss);
 pairs_UP = build_init_cond(alive_slit, θesUP, θnsUP);
@@ -1252,15 +1509,7 @@ for (i0, indices) in bad_particles_dw
 end
 
 
-function get_valid_particles_per_current(pairs, bad_particles_dict)
-    valid_dict = OrderedDict{Int, Matrix}()
-    all_indices = 1:size(pairs, 1)
-    for (idx, bad_indices) in bad_particles_dict
-        good_indices = setdiff(all_indices, bad_indices)
-        valid_dict[idx] = pairs[good_indices, :]
-    end
-    return valid_dict
-end
+
 
 valid_up   = get_valid_particles_per_current(pairs_UP,   bad_particles_up)
 valid_dw = get_valid_particles_per_current(pairs_DOWN, bad_particles_dw)
@@ -1348,46 +1597,155 @@ save_fig && plot_polar_stats(Icoils, valid_up, valid_dw, joinpath(dir_path, "pol
 
 screen_up, screen_dw = compute_screen_xyz(Icoils, valid_up, valid_dw);
 
+"""
+    analyze_screen_profile(
+        data_mm::AbstractMatrix;
+        n_bins::Integer = 2,
+        width_mm::Float64 = 0.1,
+        plot::Bool = false,
+    ) -> NamedTuple
 
-idxi0 = 25#rand(1:nI)
-data_up = 1e3*screen_up[idxi0][:,[1,3]] # [mm]
-data_dw = 1e3*screen_dw[idxi0][:,[1,3]] # [mm]
+Build a 2D histogram from (x, z) hit positions in **millimeters**, extract the mean
+**z-profile** (averaged over x), smooth it with a Gaussian kernel, and report the
+z-location of the maximum both before and after smoothing.
 
+This version **forces both the x- and z-bin centers to be symmetric around 0**  
+and includes a center exactly at 0 in each axis.
 
-data = data_up
+# Arguments
+- `data_mm::AbstractMatrix`:
+N×2 array where column 1 = x [mm], column 2 = z [mm].
 
+- `n_bins::Integer`:
+Binning multiplier; the bin size in mm is  
+`bin_size = 1e3 * n_bins * cam_pixelsize`,  
+assuming `cam_pixelsize` is a **global variable in meters**.
 
-function bin_centers(edges::AbstractVector)
-    return (edges[1:end-1] .+ edges[2:end]) ./ 2
+- `width_mm::Float64`:
+Gaussian kernel width σ (in mm) passed to your `smooth_profile(z, y, width_mm)`.
+
+- `plot::Bool`:
+If `true`, plots the raw and smoothed z-profiles (and you can uncomment the heatmap).
+
+# Implementation details
+- x-limits: `xlim = (-9.0, 9.0)` mm, z-limits: `zlim = (-12.5, 12.5)` mm.
+- Bin edges in both axes are extended as needed so that:
+    - bin centers are symmetric about zero,
+    - zero is exactly at a bin center.
+- The returned z-profile is `[z_center, raw_profile, smoothed_profile]`.
+
+# Returns
+A `NamedTuple` with:
+- `z_profile`         :: Matrix (Nz × 3) `[z_center, raw_counts, smoothed_counts]`
+- `z_max_raw_mm`      :: z at the raw profile maximum [mm]
+- `z_max_smooth_mm`   :: z at the smoothed profile maximum [mm]
+"""
+function analyze_screen_profile(
+    data_mm::AbstractMatrix;
+    n_bins::Integer = 2,
+    width_mm::Float64 = 0.1,
+    add_plot::Bool = false,
+)
+
+    @assert size(data_mm,2) == 2 "data_mm must be N×2 (columns: x,z in mm)"
+    @assert n_bins > 0 "n_bins must be > 0"
+    @assert width_mm > 0 "width_mm must be positive"
+
+    # Fixed analysis limits
+    xlim = (-9.0, 9.0)
+    zlim = (-12.5, 12.5)
+    xmin, xmax = xlim
+    zmin, zmax = zlim
+
+    # Bin size in mm (cam_pixelsize is assumed global in meters)
+    bin_size = 1e3 * n_bins * cam_pixelsize
+
+    # --------------------------------------------------------
+    # X edges: force symmetric centers around 0
+    # --------------------------------------------------------
+    x_half_range = max(abs(xmin), abs(xmax))
+    kx = max(1, ceil(Int, x_half_range / bin_size))
+    centers_x = collect((-kx:kx) .* bin_size)
+    edges_x = collect((-(kx + 0.5)) * bin_size : bin_size : ((kx + 0.5) * bin_size))
+
+    # --------------------------------------------------------
+    # Z edges: force symmetric centers around 0
+    # --------------------------------------------------------
+    z_half_range = max(abs(zmin), abs(zmax))
+    kz = max(1, ceil(Int, z_half_range / bin_size))
+    centers_z = collect((-kz:kz) .* bin_size)
+    edges_z = collect((-(kz + 0.5)) * bin_size : bin_size : ((kz + 0.5) * bin_size))
+
+    # 2D histogram
+    x = @view data_mm[:, 1]
+    z = @view data_mm[:, 2]
+    h = fit(Histogram, (x, z), (edges_x, edges_z))
+    counts = h.weights  # size: (length(centers_x), length(centers_z))
+
+    # z-profile = mean over x bins
+    z_profile_raw = vec(mean(counts, dims = 1))
+
+    # Raw maximum
+    z_max_raw_mm = centers_z[argmax(z_profile_raw)]
+
+    # Smoothing
+    z_profile_smooth = smooth_profile(centers_z, z_profile_raw, width_mm)
+    z_max_smooth_mm = centers_z[argmax(z_profile_smooth)]
+
+    # Combine into one matrix for convenience: [z raw smooth]
+    z_profile = hcat(
+        centers_z,
+        z_profile_raw,
+        z_profile_smooth,
+    )
+
+    if add_plot
+        # Uncomment to visualize full 2D histogram:
+        # heatmap(centers_x, centers_z, counts', xlabel="x (mm)", ylabel="z (mm)", title="2D Histogram")
+
+        # Profiles
+        fig=plot(z_profile[:, 1], z_profile[:, 2], label = "raw", xlabel = "z (mm)", ylabel = "mean counts")
+        plot!(z_profile[:, 1], z_profile[:, 3], label = "smoothed")
+        display(fig)
+    end
+
+    return (
+        z_profile = z_profile,
+        z_max_raw_mm = z_max_raw_mm,
+        z_max_smooth_mm = z_max_smooth_mm,
+    )
 end
 
-function gaussian_kernel(x,wd)
-    # Create Gaussian kernel around zero
-    kernel = (1 / (sqrt(2π) * wd)) .* exp.(-x .^ 2 ./ (2 * wd^2))
-    kernel ./= sum(kernel)  # normalize to sum to 1
-    return kernel
+
+for idxi0=1:nI
+    data_up = 1e3*screen_up[idxi0][:,[1,3]] # [mm]
+    res = analyze_screen_profile(data_up; n_bins=n_bins, width_mm=0.10, add_plot=true)
+    println(res.z_max_smooth_mm)
 end
 
-function smooth_profile(z_vals, pdf_vals, wd)
-    kernel = gaussian_kernel(z_vals,wd)
-    # Convolve pdf values with kernel, pad=true means full convolution
-    smoothed = DSP.conv(pdf_vals, kernel)
-    # Trim convolution result to same length as input, like MATLAB 'same'
-    n = length(pdf_vals)
-    start_idx = div(length(kernel), 2) + 1
-    return smoothed[start_idx:start_idx + n - 1]
-end
+
+
+2+2
+
+
+
+
+
+
+
+
+
 
 extrema(data[:,1])
 extrema(data[:,2])
 
-data[:,1].^2 + data[:,2].^2 .< (1e3*R_tube)^2
+sum(data[:,1].^2 + data[:,2].^2 .< (1e3*R_tube)^2)
 
 n_bins = 2
 xmin = -9.0
 xmax =  9.0
-zmin = -17.5
-zmax =  17.5
+zmin = -12.5
+zmax =  12.5
 bin_size = 1e3 * n_bins * cam_pixelsize
 
 x_pixels = ceil(Int, (xmax - xmin) / bin_size)
