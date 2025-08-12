@@ -4,6 +4,7 @@
 # July 2025
 
 #  Plotting Setup
+ENV["GKS_WSTYPE"] = "100"
 using Plots; gr()
 Plots.default(
     show=true, dpi=800, fontfamily="Computer Modern", 
@@ -17,12 +18,12 @@ using LaTeXStrings, Printf, PrettyTables
 using Dates
 # Numerical tools
 using LinearAlgebra, DataStructures
-using Interpolations, Roots, Dierckx, Loess, Optim
+using Interpolations, Roots, Loess, Optim
 using BSplineKit
 using DSP
-using WignerD, LambertW, PolyLog
+using LambertW, PolyLog
 using StatsBase
-using Random, Statistics, NaNStatistics, MLBase, Distributions, StaticArrays
+using Random, Statistics, NaNStatistics, Distributions, StaticArrays
 using Alert
 # Data manipulation
 using OrderedCollections
@@ -83,7 +84,7 @@ const INV_E = exp(-1);
 # STERN--GERLACH EXPERIMENT
 # Image size
 const cam_pixelsize = 0.0065e-3 / 2;  # [m] half the camera resolution
-n_bins = 2
+n_bins = 1
 exp_pixelsize = n_bins * cam_pixelsize ;   # [m] 
 # Furnace
 const T = 273.15 + 200 ; # Furnace temperature (K)
@@ -101,7 +102,7 @@ const y_SGToScreen    = 32.0e-2 ;
 # Connecting pipes
 const R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
 # Sample size: number of atoms arriving to the screen
-const Nss = 80000
+const Nss = 800
 
 # Coil currents
 Icoils = [0.001,0.002,0.003,0.005,0.007,
@@ -1131,15 +1132,15 @@ function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
         normalize = :pdf,
         xlabel = L"v_{0} \ (\mathrm{m/s})",
         alpha = 0.70
-    )
+    );
     vline!([mean_v], 
         label = L"$\langle v_{0} \rangle = %$(round(mean_v, digits=1)) \mathrm{m/s}$",
         line = (:black, :solid, 2),
-    )
+    );
     vline!([rms_v], 
         label = L"$\sqrt{\langle v_{0}^2 \rangle} = %$(round(rms_v, digits=1)) \mathrm{m/s}$",
         line = (:red, :dash, 3)
-    )
+    );
 
     # Histogram for theta (polar angle)
     figb = histogram(
@@ -1149,11 +1150,11 @@ function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
         normalize = :pdf,
         alpha = 0.70,
         xlabel = L"$\theta_{v}$",
-    )
+    );
     vline!([mean_theta], 
         label = L"$\langle \theta_{v} \rangle = %$(round(mean_theta/π, digits=3))\pi$",
         line = (:black, :solid, 2)
-    )
+    );
 
     # Histogram for phi (azimuthal angle)
     figc = histogram(
@@ -1163,11 +1164,11 @@ function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
         normalize = :pdf,
         alpha = 0.70,
         xlabel = L"$\phi_{v}$",
-    )
+    );
     vline!([mean_phi], 
         label = L"$\langle \phi_{v} \rangle = %$(round(mean_phi/π, digits=3))\pi$",
         line = (:black, :solid, 2)
-    )
+    );
 
     # 2D Histogram of position (x, z)
     xs = 1e3 .* alive[:, 1]
@@ -1181,7 +1182,7 @@ function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
         xticks = -1.0:0.25:1.0,
         yticks = -50:10:50,
         colorbar_position = :bottom,
-    )
+    );
 
     # Histograms for velocity components
     vxs = alive[:, 4]
@@ -1195,7 +1196,7 @@ function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
         alpha = 0.65,
         color = :orange,
         xlabel = L"$v_{0,x} \ (\mathrm{m/s})$",
-    )
+    );
 
     figf = histogram(vys,
         bins = FreedmanDiaconisBins(vys),
@@ -1204,7 +1205,7 @@ function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
         alpha = 0.65,
         color = :blue,
         xlabel = L"$v_{0,y} \ (\mathrm{m/s})$",
-    )
+    );
 
     figg = histogram(vzs,
         bins = FreedmanDiaconisBins(vzs),
@@ -1213,7 +1214,7 @@ function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
         alpha = 0.65,
         color = :red,
         xlabel = L"$v_{0,z} \ (\mathrm{m/s})$",
-    )
+    );
 
     # Combine plots
     fig = plot(
@@ -1222,8 +1223,7 @@ function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
         size = (650, 800),
         legendfontsize = 8,
         left_margin = 3mm,
-    )
-
+    );
     display(fig)
     
 
@@ -1247,7 +1247,7 @@ function plot_SG_geometry(path_filename::AbstractString)
         aspect_ratio = :equal,
         legend = :bottomright,
         title = "Stern–Gerlach Slit Geometry"
-    )
+    );
 
     # Convert to mm
     x_fill = 1e3 .* x_line
@@ -1263,7 +1263,7 @@ function plot_SG_geometry(path_filename::AbstractString)
         color = :grey36,
         line = (:solid, :grey36),
         fillalpha = 0.75
-    )
+    );
 
     y_trench = 1e3 .* z_magnet_trench.(x_line)
     y_bottom = fill(-10.0, length(x_fill))
@@ -1277,7 +1277,7 @@ function plot_SG_geometry(path_filename::AbstractString)
         line = (:solid, :grey60),
         label = "Trench",
         fillalpha = 0.75
-    )
+    );
 
     # Slit rectangle (assumes x_slit and z_slit are global)
     plot!(
@@ -1289,7 +1289,7 @@ function plot_SG_geometry(path_filename::AbstractString)
         line = (:solid, :red, 1),
         color = :red,
         fillalpha = 0.2
-    )
+    );
 
     # Save and show
     display(fig)
@@ -1315,13 +1315,13 @@ function plot_SG_magneticfield(path_filename::AbstractString)
         xlabel = "Coil Current (A)",
         ylabel = "Magnetic field gradient (T/m)",
         yticks = 0:50:350
-    )
+    );
     plot!(
         fig1a,
         icoils, GvsI(icoils),
         line = (:red, 2),
         label = L"$\partial_{z}B_{z}$"
-    )
+    );
 
     # Panel 2: B field vs current
     fig1b = plot(
@@ -1332,13 +1332,13 @@ function plot_SG_magneticfield(path_filename::AbstractString)
         xlabel = "Coil Current (A)",
         ylabel = "Magnetic field (T)",
         yticks = 0:0.1:1.0
-    )
+    );
     plot!(
         fig1b,
         icoils, BvsI(icoils),
         line = (:orange, 2),
         label = L"$B_{z}$"
-    )
+    );
 
     # Panel 3: B vs gradient
     fig1c = plot(
@@ -1350,7 +1350,7 @@ function plot_SG_magneticfield(path_filename::AbstractString)
         ylims = (0, 0.8),
         xticks = 0:50:350,
         yticks = 0:0.1:1.0
-    )
+    );
 
     # Compose layout
     fig1 = plot(
@@ -1364,7 +1364,7 @@ function plot_SG_magneticfield(path_filename::AbstractString)
         left_margin = 5mm,
         bottom_margin = 0mm,
         right_margin = 0mm
-    )
+    );
 
     # Save and show
     display(fig1)
@@ -1390,14 +1390,14 @@ function plot_ueff(II,path_filename::AbstractString)
         legend = :right,
         background_color_legend = RGBA(0.85, 0.85, 0.85, 0.1),
         size = (800, 600),
-    )
+    );
 
     # Define lines to plot: (F, mF, color index, style)
     lines_to_plot = vcat(
         [(F_up, mf, :solid) for mf in mf_up[1:end-1]],
         [(F_up, mf_up[end],:dash)],
         [(F_down, mf, :dash) for mf in mf_down],
-    )
+    );
 
     # Plot all curves
     for ((f,mf,lstyle),color) in zip(lines_to_plot,colorsF)
@@ -1414,21 +1414,20 @@ function plot_ueff(II,path_filename::AbstractString)
     label_text = L"$I_{0} = %$(round(bcrossing, digits=5))\,\mathrm{A}$
      $\partial_{z}B_{z} = %$(round(GvsI(bcrossing), digits=2))\,\mathrm{T/m}$
      $B_{z} = %$(round(1e3 * BvsI(bcrossing), digits=3))\,\mathrm{mT}$"
-    vline!([bcrossing], line=(:black, :dot, 2), label=label_text,xaxis = :log10,)
+    vline!([bcrossing], line=(:black, :dot, 2), label=label_text,xaxis = :log10,);
     
     display(fig)
     
-
     return savefig(fig, path_filename)
 end
 
 function plot_polar_stats(Ix::Vector{Float64}, data_up, data_dw, path_filename::AbstractString)
     nx = length(Ix)
     idxi0 = rand(1:nx)
-    fig4a = FD_histograms(data_up[idxi0][:,7], L"\theta_{e}", :dodgerblue)
-    fig4b = FD_histograms(data_up[idxi0][:,8], L"\theta_{n}", :red)
-    fig4c = FD_histograms(data_dw[idxi0][:,7], L"\theta_{e}", :dodgerblue)
-    fig4d = FD_histograms(data_dw[idxi0][:,8], L"\theta_{n}", :red)
+    fig4a = FD_histograms(data_up[idxi0][:,7], L"\theta_{e}", :dodgerblue);
+    fig4b = FD_histograms(data_up[idxi0][:,8], L"\theta_{n}", :red);
+    fig4c = FD_histograms(data_dw[idxi0][:,7], L"\theta_{e}", :dodgerblue);
+    fig4d = FD_histograms(data_dw[idxi0][:,8], L"\theta_{n}", :red);
     
     fig4 = plot(fig4a, fig4b, fig4c, fig4d,
         layout = @layout([a1 a2 ; a3 a4]),
@@ -1438,11 +1437,11 @@ function plot_polar_stats(Ix::Vector{Float64}, data_up, data_dw, path_filename::
         guidefont = font(8, "Computer Modern"),
         link = :xy,
         left_margin = 5mm, bottom_margin = 0mm, right_margin = 0mm,
-    )
+    );
     
-    plot!(fig4[1], xticks = (xticks(fig4[1])[1], []), xlabel = "", bottom_margin = -5mm)
-    plot!(fig4[2], xticks = (xticks(fig4[2])[1], []), yticks = (yticks(fig4[2])[1], []), xlabel = "", bottom_margin = -5mm, left_margin = -5mm)
-    plot!(fig4[4], yticks = (yticks(fig4[4])[1], fill("", length(yticks(fig4[4])[1]))), ylabel = "", left_margin = -5mm)
+    plot!(fig4[1], xticks = (xticks(fig4[1])[1], []), xlabel = "", bottom_margin = -5mm);
+    plot!(fig4[2], xticks = (xticks(fig4[2])[1], []), yticks = (yticks(fig4[2])[1], []), xlabel = "", bottom_margin = -5mm, left_margin = -5mm);
+    plot!(fig4[4], yticks = (yticks(fig4[4])[1], fill("", length(yticks(fig4[4])[1]))), ylabel = "", left_margin = -5mm);
     
     display(fig4)
         
@@ -1717,18 +1716,19 @@ function analyze_screen_profile(Ix, data_mm::AbstractMatrix;
         plot!(z_profile[:, 1], z_profile[:, 3], 
             label = L"Smoothed $z=%$(round(z_max_smooth_mm,digits=4))\mathrm{mm}$",
             line=(:coral3,:dash,2),
-        )
+        );
         vline!([z_max_smooth_mm], 
             label=false,
             line=(:red,:solid,1)
-        )
+        );
         plot!(z,Sfit_smooth.(z), 
             label=L"Spline Smoothed $z=%$(round(z_max_smooth_spline_mm[1],digits=4))\mathrm{mm}$",
             line=(:royalblue3,:dot,2),
-        )
+        );
         vline!(z_max_smooth_spline_mm, 
             label=false,
-            line=(:blue,:solid,1))
+            line=(:blue,:solid,1)
+        );
         display(fig)
     end
 
@@ -1791,16 +1791,10 @@ end
     - If you prefer keys by current value instead of index, use a
     `Dict{Float64, ...}` and set `out[Icoils[i]] = inner`.
 """
-function analyze_profiles_to_dict(
-    Icoils::AbstractVector,
-    screen_up::AbstractDict{<:Integer,<:AbstractMatrix};
-    n_bins::Integer = 2,
-    width_mm::Float64 = 0.1,
-    add_plot::Bool = false,
-    λ_raw::Float64 = 0.01,
-    λ_smooth::Float64 = 1e-3,
-    store_profiles::Bool = true,
-)
+function analyze_profiles_to_dict(Icoils::AbstractVector, screen_up::AbstractDict{<:Integer,<:AbstractMatrix};
+    n_bins::Integer = 2, width_mm::Float64 = 0.1, add_plot::Bool = false,
+    λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, store_profiles::Bool = true,)
+
     @assert length(Icoils) == length(screen_up)
     @assert all(haskey(screen_up, i) for i in 1:length(Icoils))
     @assert all(size(screen_up[i], 2) ≥ 3 for i in 1:length(Icoils)) "screen_up[i] must have at least 3 columns (x in col 1, z in col 3)"
@@ -1870,14 +1864,11 @@ for (i0, indices) in bad_particles_dw
     println("Current $(@sprintf("%.3f", Icoils[i0]))A \t→   Good particles: ", Nss-length(indices))
 end
 
-
-
-
 valid_up = get_valid_particles_per_current(pairs_UP,   bad_particles_up)
 valid_dw = get_valid_particles_per_current(pairs_DOWN, bad_particles_dw)
 pairs_UP = bad_particles_up =nothing
 pairs_DOWN = bad_particles_dw = nothing
-# Gc.gc()
+# GC.gc()
 
 println("Minimum number of valid particles for up-spin: $(minimum(size(valid_up[v],1) for v in eachindex(Icoils)))")
 println("Minimum number of valid particles for down-spin: $(minimum(size(valid_dw[v],1) for v in eachindex(Icoils)))")
@@ -1885,81 +1876,79 @@ println("Minimum number of valid particles for down-spin: $(minimum(size(valid_d
 @save joinpath(dir_path, "data_up.jld2") valid_up Icoils
 @save joinpath(dir_path, "data_dw.jld2") valid_dw Icoils
 
-########################################################################################################################
-# data recovery
-data_path = ["./simulation_data/"] .* [
-    "20250807T163648/",
-    "20250807T180252/", 
-    "20250807T181304/",
-]
-
-# data_u = JLD2.jldopen(joinpath(data_path[3], "data_up.jld2"), "r") do file
-#     return Dict(k => read(file, k) for k in keys(file))
-# end
-# data_d = JLD2.jldopen(joinpath(data_path[3], "data_dw.jld2"), "r") do file
-#     return Dict(k => read(file, k) for k in keys(file))
-# end
-# valid_up = data_u["valid_up"]
-# valid_dw = data_d["valid_dw"]
-
-# Load all valid_up dictionaries into a vector
-# valid_up_list = [
-#     JLD2.jldopen(joinpath(path, "data_up.jld2"), "r") do file
-#         read(file, "valid_up")
-#     end
-#     for path in data_path
+# ########################################################################################################################
+# # data recovery
+# data_path = ["./simulation_data/"] .* [
+#     "20250807T163648/",
+#     "20250807T180252/", 
+#     "20250807T181304/",
 # ]
 
-# # Combine: same keys, so we vcat the matrices for each key
-# combined_valid_up = OrderedDict{Int64, Matrix{Float64}}()
-# for k in keys(valid_up_list[1])
-#     combined_valid_up[k] = vcat([vu[k] for vu in valid_up_list]...)
+# # data_u = JLD2.jldopen(joinpath(data_path[3], "data_up.jld2"), "r") do file
+# #     return Dict(k => read(file, k) for k in keys(file))
+# # end
+# # data_d = JLD2.jldopen(joinpath(data_path[3], "data_dw.jld2"), "r") do file
+# #     return Dict(k => read(file, k) for k in keys(file))
+# # end
+# # valid_up = data_u["valid_up"]
+# # valid_dw = data_d["valid_dw"]
+
+# # Load all valid_up dictionaries into a vector
+# # valid_up_list = [
+# #     JLD2.jldopen(joinpath(path, "data_up.jld2"), "r") do file
+# #         read(file, "valid_up")
+# #     end
+# #     for path in data_path
+# # ]
+
+# # # Combine: same keys, so we vcat the matrices for each key
+# # combined_valid_up = OrderedDict{Int64, Matrix{Float64}}()
+# # for k in keys(valid_up_list[1])
+# #     combined_valid_up[k] = vcat([vu[k] for vu in valid_up_list]...)
+# # end
+
+# # combined_valid_up
+
+# function combine_valid_data(data_paths::Vector{String}; spin::Symbol = :up)
+#     # Decide which key to load
+#     key = spin === :up ? "valid_up" : "valid_dw"
+#     file_name = spin === :up ? "data_up.jld2" : "data_dw.jld2"
+
+#     # Load each dictionary from file
+#     dict_list = Vector{OrderedDict{Int64, Matrix{Float64}}}(undef, length(data_paths))
+#     for (i, path) in enumerate(data_paths)
+#         filepath = joinpath(path, file_name)
+#         dict_list[i] = JLD2.jldopen(filepath, "r") do file
+#             read(file, key)
+#         end
+#     end
+
+#     # Get the common keys
+#     first_keys = collect(keys(dict_list[1]))
+#     combined = OrderedDict{Int64, Matrix{Float64}}()
+
+#     # Preallocate dictionary
+#     for k in first_keys
+#         combined[k] = Matrix{Float64}(undef, 0, size(dict_list[1][k], 2))
+#     end
+
+#     # Threaded concatenation
+#     @threads for i in eachindex(first_keys)
+#         k = first_keys[i]
+#         combined[k] = vcat((d[k] for d in dict_list)...)
+#     end
+
+#     return combined
 # end
 
-# combined_valid_up
-
-function combine_valid_data(data_paths::Vector{String}; spin::Symbol = :up)
-    # Decide which key to load
-    key = spin === :up ? "valid_up" : "valid_dw"
-    file_name = spin === :up ? "data_up.jld2" : "data_dw.jld2"
-
-    # Load each dictionary from file
-    dict_list = Vector{OrderedDict{Int64, Matrix{Float64}}}(undef, length(data_paths))
-    for (i, path) in enumerate(data_paths)
-        filepath = joinpath(path, file_name)
-        dict_list[i] = JLD2.jldopen(filepath, "r") do file
-            read(file, key)
-        end
-    end
-
-    # Get the common keys
-    first_keys = collect(keys(dict_list[1]))
-    combined = OrderedDict{Int64, Matrix{Float64}}()
-
-    # Preallocate dictionary
-    for k in first_keys
-        combined[k] = Matrix{Float64}(undef, 0, size(dict_list[1][k], 2))
-    end
-
-    # Threaded concatenation
-    @threads for i in eachindex(first_keys)
-        k = first_keys[i]
-        combined[k] = vcat((d[k] for d in dict_list)...)
-    end
-
-    return combined
-end
-
-valid_up = combine_valid_data(data_path; spin = :up)
-valid_dw = combine_valid_data(data_path; spin = :dw)
-########################################################################################################################
+# valid_up = combine_valid_data(data_path; spin = :up)
+# valid_dw = combine_valid_data(data_path; spin = :dw)
+# ########################################################################################################################
 
 
 save_fig && plot_polar_stats(Icoils, valid_up, valid_dw, joinpath(dir_path, "polar_stats.png"))
 
 screen_up, screen_dw = compute_screen_xyz(Icoils, valid_up, valid_dw);
-
-
 
 results = analyze_profiles_to_dict(
     Icoils, screen_up;
@@ -2958,7 +2947,7 @@ vline!([z_max_fit], label=L"$z_{\mathrm{max}} = %$(round(z_max_fit,digits=6)) \,
 
 
 
-using 
+
 plot(bin_centers_z,vec(mean(h0.weights,dims=1)),
     seriestype=:line,
     line=(:gray,1),
