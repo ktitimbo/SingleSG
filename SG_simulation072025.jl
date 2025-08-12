@@ -76,7 +76,6 @@ const γₙ        = atom_info[3];
 const Ispin    = atom_info[4];
 const Ahfs     = atom_info[6];
 const M        = atom_info[7];
-const ki = 2.1e-6
 
 # STERN--GERLACH EXPERIMENT
 # Image size
@@ -96,8 +95,10 @@ const y_FurnaceToSlit = 224.0e-3 ;
 const y_SlitToSG      = 44.0e-3 ;
 const y_SG            = 7.0e-2 ;
 const y_SGToScreen    = 32.0e-2 ;
+# Connecting pipes
+R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
 # Sample size: number of atoms arriving to the screen
-const Nss = 20000
+const Nss = 500
 
 # Coil currents
 Icoils = [0.001,0.002,0.003,0.005,0.007,
@@ -279,23 +280,31 @@ end
     return z0 + vz*t
 end
 
-
 # CQD Screen position
-function CQD_Screen_position(Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, kx::Float64)
+function CQD_Screen_position(Ix,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θe::Float64, θn::Float64, kx::Float64)
     L1 = y_FurnaceToSlit 
     L2 = y_SlitToSG
     Lsg = y_SG
     Ld = y_SGToScreen
+    Ltot = L1 + L2 + Lsg + Ld
 
+    # Physics parameters
     cqd_sign = sign(θn-θe) 
     acc_0 = μ * GvsI(Ix) / M
     ωL = abs(γₑ * BvsI(Ix))
     kω = cqd_sign * kx * ωL
 
-    x = r0[1] + (L1 + L2 + Lsg + Ld) * v0[1] / v0[2]
-    y = r0[2] +  L1 + L2 + Lsg + Ld
-    z = r0[3] + (L1 + L2 + Lsg + Ld) * v0[3] / v0[2] + acc_0/2/v0[2]^2*((Lsg+Ld)^2-Ld^2) + acc_0/kω*Lsg/v0[2]*( log(cos(θe/2)^2) + Ld/Lsg * log( cos(θe/2)^2 + exp(-2*kω*Lsg/v0[2])*sin(θe/2)^2 ) ) + acc_0/2/kω^2 * ( polylog(2, -exp(-2*kω*Lsg/v0[2])*tan(θe/2)^2) - polylog(2, -tan(θe/2)^2)  )
-    return [x,y,z]
+    # Common trig values
+    θe_half = θe / 2
+    cos2 = cos(θe_half)^2
+    sin2 = sin(θe_half)^2
+    tan2 = tan(θe_half)^2
+    exp_term = exp(-2 * kω * Lsg / v0[2])
+
+    x = r0[1] + Ltot * v0[1] / v0[2]
+    y = r0[2] + Ltot
+    z = r0[3] + Ltot * v0[3] / v0[2] + 0.5*acc_0/v0[2]^2*((Lsg+Ld)^2-Ld^2) + acc_0/kω*Lsg/v0[2]*( log(cos2) + Ld/Lsg * log( cos2 + exp_term*sin2 ) ) + 0.5*acc_0/kω^2 * ( polylog(2, -exp_term*tan2) - polylog(2, -tan2) )
+    return SVector(x,y,z)
 end
 
 # Generate samples post-filtering by the slit
@@ -725,13 +734,14 @@ function find_bad_particles_ix(Ix, pairs)
         bad_particles_per_current[i] = Int[]
     end
 
-    Threads.@threads for idx in 1:ncurrents
+    # Threads.@threads for idx in 1:ncurrents
+    for idx in 1:ncurrents
         i0 = Ix[idx]
         println("Analyzing current I₀ = $(@sprintf("%.3f", i0))A")
 
         local_bad_particles = Int[]  # local to this thread and current
         hits_SG = 0
-        # hits_post = 0
+        hits_post = 0
 
         for j = 1:No
             try
@@ -760,82 +770,15 @@ function find_bad_particles_ix(Ix, pairs)
                     continue
                 end
 
-                # t_sweep_screen = range(t_out, t_screen, length=t_length)
-                # xs = r0[1] .+ v0[1] .* t_sweep_screen
-                # zs = CQDEqOfMotion_z.(t_sweep_screen, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
-                # R_tube = 35e-3 / 2
-                # if any(xs.^2 .+ zs.^2 .> R_tube^2)
-                #     push!(local_bad_particles, j)
-                #     hits_post += 1
-                #     continue
-                # end
-
-            catch err
-                @error "Thread $(Threads.threadid()), particle $j crashed" exception=err
-            end
-        end
-
-        println("\t→ SG hits   = $hits_SG")
-        # println("\t→ Pipe hits = $hits_post\n")
-
-        sort!(local_bad_particles)
-        bad_particles_per_current[idx] = local_bad_particles
-    end
-
-    # Final result as Dict for compatibility
-    bad_particles = Dict{Int8, Vector{Int}}()
-    for idx in 1:ncurrents
-        bad_particles[Int8(idx)] = bad_particles_per_current[idx]
-    end
-
-    return bad_particles
-end
-
-function find_bad_particles_ix_v2(Ix, pairs)
-    No = size(pairs, 1)  # Number of particles
-    ncurrents = length(Ix)
-
-    # Indexed by idx, NOT threadid
-    bad_particles_per_current = Vector{Vector{Int}}(undef, ncurrents)
-    for i in 1:ncurrents
-        bad_particles_per_current[i] = Int[]
-    end
-
-    Threads.@threads for idx in 1:ncurrents
-        i0 = Ix[idx]
-        println("Analyzing current I₀ = $(@sprintf("%.3f", i0))A")
-
-        local_bad_particles = Int[]  # local to this thread and current
-        hits_SG = 0
-        # hits_post = 0
-
-        for j = 1:No
-            try
-                @inbounds begin
-                    v_y = pairs[j, 5]
-                    t_in = (y_FurnaceToSlit + y_SlitToSG) / v_y
-                    t_out = (y_FurnaceToSlit + y_SlitToSG + y_SG) / v_y
-                    # t_screen = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen) / v_y
-                    t_length = 1000
-
-                    r0 = @view pairs[j, 1:3]
-                    v0 = @view pairs[j, 4:6]
-                    θe0 = @view pairs[j, 7]
-                    θn0 = @view pairs[j, 8]
-                end
-
-                t_sweep_sg = range(t_in, t_out, length=t_length)
-                z_val = CQDEqOfMotion_z.(t_sweep_sg, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
-                z_top = z_magnet_edge_time.(t_sweep_sg, Ref(r0), Ref(v0))
-                z_bottom = z_magnet_trench_time.(t_sweep_sg, Ref(r0), Ref(v0))
-
-                inside_cavity = (z_bottom .< z_val) .& (z_val .< z_top)
-                if !all(inside_cavity)
+                # Post-SG pipe check
+                x_screen, _ ,  z_screen = CQD_Screen_position(i0, μₑ, r0, v0, θe0, θn0, ki)
+                if x_screen^2 + z_screen^2 .>= R_tube^2
                     push!(local_bad_particles, j)
-                    hits_SG += 1
+                    hits_post += 1 
                     continue
                 end
 
+
                 # t_sweep_screen = range(t_out, t_screen, length=t_length)
                 # xs = r0[1] .+ v0[1] .* t_sweep_screen
                 # zs = CQDEqOfMotion_z.(t_sweep_screen, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
@@ -852,7 +795,7 @@ function find_bad_particles_ix_v2(Ix, pairs)
         end
 
         println("\t→ SG hits   = $hits_SG")
-        # println("\t→ Pipe hits = $hits_post\n")
+        println("\t→ Pipe hits = $hits_post\n")
 
         sort!(local_bad_particles)
         bad_particles_per_current[idx] = local_bad_particles
@@ -871,7 +814,8 @@ function compute_screen_xyz( Ix::Vector, valid_up::OrderedDict, valid_dw::Ordere
     screen_up = OrderedDict{Int64, Matrix{Float64}}()
     screen_dw = OrderedDict{Int64, Matrix{Float64}}()
 
-    for i in eachindex(Ix)
+    
+    @inbounds for i in eachindex(Ix)
         good_up = valid_up[i]
         good_dw = valid_dw[i]
 
@@ -881,20 +825,26 @@ function compute_screen_xyz( Ix::Vector, valid_up::OrderedDict, valid_dw::Ordere
         coords_up = Matrix{Float64}(undef, N_up, 3)
         coords_dw = Matrix{Float64}(undef, N_dw, 3)
 
-        Threads.@threads for j = 1:N_up
-            r0 = @inbounds good_up[j, 1:3]
-            v0 = @inbounds good_up[j, 4:6]
+        # Threads.@threads for j = 1:N_up
+        for j = 1:N_up
+            # r0 = @view good_up[j, 1:3]
+            # v0 = @view good_up[j, 4:6]
+            r0  = SVector{3,Float64}(good_up[j, 1], good_up[j, 2], good_up[j, 3])
+            v0  = SVector{3,Float64}(good_up[j, 4], good_up[j, 5], good_up[j, 6])
             θe0 = good_up[j, 7]
             θn0 = good_up[j, 8]
-            @inbounds coords_up[j, :] = CQD_Screen_position(Ix[i], μₑ, r0, v0, θe0, θn0, ki)
+            coords_up[j, :] = CQD_Screen_position(Ix[i], μₑ, r0, v0, θe0, θn0, ki)
         end
 
-        Threads.@threads for j = 1:N_dw
-            r0 = @inbounds good_dw[j, 1:3]
-            v0 = @inbounds good_dw[j, 4:6]
+        # Threads.@threads for j = 1:N_dw
+        for j = 1:N_dw
+            # r0 = @view good_dw[j, 1:3]
+            # v0 = @view good_dw[j, 4:6]
+            r0  = SVector{3,Float64}(good_dw[j, 1], good_dw[j, 2], good_dw[j, 3])
+            v0  = SVector{3,Float64}(good_dw[j, 4], good_dw[j, 5], good_dw[j, 6])
             θe0 = good_dw[j, 7]
             θn0 = good_dw[j, 8]
-            @inbounds coords_dw[j, :] = CQD_Screen_position(Ix[i], μₑ, r0, v0, θe0, θn0, ki)
+            coords_dw[j, :] = CQD_Screen_position(Ix[i], μₑ, r0, v0, θe0, θn0, ki)
         end
 
         screen_up[i] = coords_up
@@ -1043,9 +993,9 @@ function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
     )
 
     display(fig)
-    savefig(fig, path_filename)
+    
 
-    return fig
+    return savefig(fig, path_filename)
 end
 
 function plot_SG_geometry(path_filename::AbstractString)
@@ -1111,9 +1061,8 @@ function plot_SG_geometry(path_filename::AbstractString)
 
     # Save and show
     display(fig)
-    savefig(fig, path_filename)
-
-    return fig
+    
+    return savefig(fig, path_filename)
 end
 
 function plot_SG_magneticfield(path_filename::AbstractString)
@@ -1187,9 +1136,8 @@ function plot_SG_magneticfield(path_filename::AbstractString)
 
     # Save and show
     display(fig1)
-    savefig(fig1, path_filename)
-
-    return fig1
+    
+    return savefig(fig1, path_filename)
 end
 
 function plot_ueff(II,path_filename::AbstractString)
@@ -1237,28 +1185,59 @@ function plot_ueff(II,path_filename::AbstractString)
     vline!([bcrossing], line=(:black, :dot, 2), label=label_text,xaxis = :log10,)
     
     display(fig)
-    savefig(fig, path_filename)
+    
 
-    return fig
+    return savefig(fig, path_filename)
 end
 
-plot_SG_geometry(joinpath(dir_path, "slit.png"))
-plot_SG_magneticfield(joinpath(dir_path, "SG_magneticfield.png"))
-plot_ueff(Ispin,joinpath(dir_path, "mu_effective.png"))
+function plot_polar_stats(Ix::Vector{Float64}, data_up, data_dw, path_filename::AbstractString)
+    nx = length(Ix)
+    idxi0 = rand(1:nx)
+    fig4a = FD_histograms(data_up[idxi0][:,7], L"\theta_{e}", :dodgerblue)
+    fig4b = FD_histograms(data_up[idxi0][:,8], L"\theta_{n}", :red)
+    fig4c = FD_histograms(data_dw[idxi0][:,7], L"\theta_{e}", :dodgerblue)
+    fig4d = FD_histograms(data_dw[idxi0][:,8], L"\theta_{n}", :red)
+    
+    fig4 = plot(fig4a, fig4b, fig4c, fig4d,
+        layout = @layout([a1 a2 ; a3 a4]),
+        size = (600, 600),
+        plot_title = L"Initial polar angles for $I_{c}= %$(Ix[idxi0]) \mathrm{A}$",
+        plot_titlefontsize = 10,
+        guidefont = font(8, "Computer Modern"),
+        link = :xy,
+        left_margin = 5mm, bottom_margin = 0mm, right_margin = 0mm,
+    )
+    
+    plot!(fig4[1], xticks = (xticks(fig4[1])[1], []), xlabel = "", bottom_margin = -5mm)
+    plot!(fig4[2], xticks = (xticks(fig4[2])[1], []), yticks = (yticks(fig4[2])[1], []), xlabel = "", bottom_margin = -5mm, left_margin = -5mm)
+    plot!(fig4[4], yticks = (yticks(fig4[4])[1], fill("", length(yticks(fig4[4])[1]))), ylabel = "", left_margin = -5mm)
+    
+    display(fig4)
+        
+    return savefig(fig4,  path_filename)
+end
+
+save_fig = false
+if save_fig == true
+    plot_SG_geometry(joinpath(dir_path, "slit.png"))
+    plot_SG_magneticfield(joinpath(dir_path, "SG_magneticfield.png"))
+    plot_ueff(Ispin,joinpath(dir_path, "mu_effective.png"))
+end
 
 # Monte Carlo generation
 alive_slit = generate_samples(Nss; rng = rng_set, multithreaded = true, base_seed = base_seed_set);
-plot_velocity_stats(alive_slit, joinpath(dir_path, "vel_stats.png"))
+save_fig && plot_velocity_stats(alive_slit, joinpath(dir_path, "init_vel_stats.png"))
 
 θesUP, θnsUP, θesDOWN, θnsDOWN = generate_matched_pairs(Nss);
-pairs_UP = build_init_cond(alive_slit, θesUP, θnsUP)
-pairs_DOWN = build_init_cond(alive_slit, θesDOWN, θnsDOWN)
+pairs_UP = build_init_cond(alive_slit, θesUP, θnsUP);
+pairs_DOWN = build_init_cond(alive_slit, θesDOWN, θnsDOWN);
 # Optionally clear memory
 θesUP = θnsUP = θesDOWN = θnsDOWN = alive_slit = nothing
 GC.gc()
 
-@time bad_particles_up = find_bad_particles_ix(Icoils, pairs_UP)
-@time bad_particles_dw = find_bad_particles_ix(Icoils, pairs_DOWN)
+ki = 2.1e-6
+bad_particles_up = find_bad_particles_ix(Icoils, pairs_UP)
+bad_particles_dw = find_bad_particles_ix(Icoils, pairs_DOWN)
 
 bad_particles_up = OrderedDict(sort(collect(bad_particles_up); by=first))
 bad_particles_dw = OrderedDict(sort(collect(bad_particles_dw); by=first))
@@ -1272,6 +1251,7 @@ for (i0, indices) in bad_particles_dw
     println("Current $(@sprintf("%.3f", Icoils[i0]))A \t→   Good particles: ", Nss-length(indices))
 end
 
+
 function get_valid_particles_per_current(pairs, bad_particles_dict)
     valid_dict = OrderedDict{Int, Matrix}()
     all_indices = 1:size(pairs, 1)
@@ -1284,19 +1264,22 @@ end
 
 valid_up   = get_valid_particles_per_current(pairs_UP,   bad_particles_up)
 valid_dw = get_valid_particles_per_current(pairs_DOWN, bad_particles_dw)
+pairs_UP = bad_particles_up =nothing
+pairs_DOWN = bad_particles_dw = nothing
+# Gc.gc()
 
-min_ups = minimum(size(valid_up[v],1) for v in eachindex(Icoils))
-min_dws = minimum(size(valid_dw[v],1) for v in eachindex(Icoils))
+println("Minimum number of valid particles for up-spin: $(minimum(size(valid_up[v],1) for v in eachindex(Icoils)))")
+println("Minimum number of valid particles for down-spin: $(minimum(size(valid_dw[v],1) for v in eachindex(Icoils)))")
 
 @save joinpath(dir_path, "data_up.jld2") valid_up Icoils
 @save joinpath(dir_path, "data_dw.jld2") valid_dw Icoils
 
-
+########################################################################################################################
 # data recovery
 data_path = ["./simulation_data/"] .* [
     "20250807T163648/",
     "20250807T180252/", 
-    "20250807T181304/"
+    "20250807T181304/",
 ]
 
 # data_u = JLD2.jldopen(joinpath(data_path[3], "data_up.jld2"), "r") do file
@@ -1358,39 +1341,20 @@ end
 
 valid_up = combine_valid_data(data_path; spin = :up)
 valid_dw = combine_valid_data(data_path; spin = :dw)
+########################################################################################################################
 
 
-idxi0 = rand(1:nI)
-fig4a = FD_histograms(valid_up[idxi0][:,7],L"\theta_{e}",:dodgerblue);
-fig4b = FD_histograms(valid_up[idxi0][:,8],L"\theta_{n}",:red);
-fig4c = FD_histograms(valid_dw[idxi0][:,7],L"\theta_{e}",:dodgerblue);
-fig4d = FD_histograms(valid_dw[idxi0][:,8],L"\theta_{n}",:red);
-fig4= plot(fig4a,fig4b,fig4c,fig4d,
-    layout = @layout([a1 a2 ; a3 a4]),
-    size=(600,600),
-    plot_title="Initial polar angles",
-    # plot_titlefontcolor=:black,
-    plot_titlefontsize=10,
-    guidefont=font(8,"Computer Modern"),
-    # tickfont=font(8, "Computer Modern"),
-    link=:xy,
-    # bottom_margin=-8mm, left_margin=-4mm, right_margin=-1mm
-    left_margin=5mm,bottom_margin=0mm,right_margin=0mm,
-);
-plot!(fig4[1],xticks=(xticks(fig4[1])[1], []),xlabel="",bottom_margin=-5mm);
-plot!(fig4[2],xticks=(xticks(fig4[2])[1], []), yticks=(yticks(fig4[2])[1], []), xlabel="",bottom_margin=-5mm, left_margin=-5mm);
-plot!(fig4[4],yticks=(yticks(fig4[4])[1], fill("", length(yticks(fig4[4])[1]))), ylabel="",left_margin=-5mm);
-display(fig4)
-savefig(fig4, joinpath(dir_path, "polar_stats.png"))
+save_fig && plot_polar_stats(Icoils, valid_up, valid_dw, joinpath(dir_path, "polar_stats.png"))
 
-@time screen_up, screen_dw = compute_screen_xyz(Icoils, valid_up, valid_dw);
+screen_up, screen_dw = compute_screen_xyz(Icoils, valid_up, valid_dw);
 
-idxi0 = rand(1:nI)
+
+idxi0 = 25#rand(1:nI)
 data_up = 1e3*screen_up[idxi0][:,[1,3]] # [mm]
 data_dw = 1e3*screen_dw[idxi0][:,[1,3]] # [mm]
 
 
-data = data_dw
+data = data_up
 
 
 function bin_centers(edges::AbstractVector)
@@ -1414,12 +1378,16 @@ function smooth_profile(z_vals, pdf_vals, wd)
     return smoothed[start_idx:start_idx + n - 1]
 end
 
+extrema(data[:,1])
+extrema(data[:,2])
 
-n_bins = 1
-xmin = -16.0
-xmax =  16.0
-zmin = -8.0
-zmax =  8.0
+data[:,1].^2 + data[:,2].^2 .< (1e3*R_tube)^2
+
+n_bins = 2
+xmin = -9.0
+xmax =  9.0
+zmin = -17.5
+zmax =  17.5
 bin_size = 1e3 * n_bins * cam_pixelsize
 
 x_pixels = ceil(Int, (xmax - xmin) / bin_size)
@@ -1437,26 +1405,29 @@ h = fit(Histogram, (data[:, 1], data[:, 2]), (edges_x, edges_z))
 counts = h.weights
 
 # heatmap expects x and y vectors, and a matrix of values (counts)
-heatmap(
-    centers_x,
-    centers_z,
-    counts',
-    xlabel = "x (mm)",
-    ylabel = "z (mm)",
-    title = "2D Histogram",
-    color = :inferno,
-    # aspect_ratio = :equal,
-)
+# heatmap(
+#     centers_x,
+#     centers_z,
+#     counts',
+#     xlabel = "x (mm)",
+#     ylabel = "z (mm)",
+#     title = "2D Histogram",
+#     color = :inferno,
+#     # aspect_ratio = :equal,
+# );
 
 z_profile = vec(mean(counts,dims=1))
+# Raw max
+zmax_idx = argmax(z_profile)
+z_max_0 = centers_z[zmax_idx]
 plot(centers_z, z_profile)
 # Example usage:
-wd = 0.05                   # kernel width (mm), adjust as needed
+wd = 0.1                   # kernel width (mm), adjust as needed
 smoothed_pdf = smooth_profile(centers_z, z_profile, wd)
 plot!(centers_z, smoothed_pdf)
 
 
-
+error("does it work?")
 
 
 

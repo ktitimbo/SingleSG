@@ -93,59 +93,106 @@ const y_SGToScreen    = 32.0e-2 ;
 # Sample size: number of atoms arriving to the screen
 const Nss = 5000
 
-II = Ispin
-    F_up = II + 0.5
-    mf_up = collect(F_up:-1:-F_up)
-    F_down = II - 0.5
-    mf_down = collect(-F_down:1:F_down)
-    dimF = Int8(4*II + 2)
-    
-    # Set color palette
-    color8 = palette(:rainbow, dimF)
-    current_range = collect(0.00009:0.00002:1);
+# Magnetic field gradient interpolation
+GradCurrents = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01];
+GradGradient = [0, 25.6, 58.4, 92.9, 132.2, 164.2, 196.3, 226, 240, 253.7, 277.2, 298.6];
+GvsI = Interpolations.LinearInterpolation(GradCurrents, GradGradient, extrapolation_bc=Line());
+IvsG = Interpolations.LinearInterpolation(GradGradient, GradCurrents, extrapolation_bc=Line());
 
-    # Initialize plot
-    fig = plot(
-        xlabel = L"Current ($\mathrm{A}$)",
-        ylabel = L"$\mu_{F}/\mu_{B}$",
-        xaxis = :log10,
-        legend = :right,
-        background_color_legend = RGBA(0.85, 0.85, 0.85, 0.1),
-        size = (800, 600),
-    )
+# Magnetic Field
+Bdata = CSV.read("./SG_BvsI.csv",DataFrame; header=["dI","Bz"]);
+BvsI = linear_interpolation(Bdata.dI, Bdata.Bz, extrapolation_bc=Line());
 
-    # Define lines to plot: (F, mF, color index, style)
-    lines_to_plot = vcat(
-        [(F_up, mf, :solid) for mf in mf_up[1:end-1]],
-        [(F_up, mf_up[end],:dash)]
-        [(F_down, mf, :dash) for mf in mf_down],
-    )
-
-    # Plot all curves
-    for i=1:dimF
-        μ_vals = μF_effective.(current_range, II, lines_to_plot[], mF) ./ μB
-
+function find_bad_particles_ix(Ix, pairs)
+    No = size(pairs, 1)  # Number of particles
+    ncurrents = length(Ix)
+    bad_particles_per_thread = Vector{Dict{Int8, Vector{Int}}}(undef, Threads.nthreads())
+    for i in 1:Threads.nthreads()
+        bad_particles_per_thread[i] = Dict{Int8, Vector{Int}}()
     end
 
-    for (F, mF, cidx, lstyle) in lines_to_plot
-        μ_vals = μF_effective.(Irange, Ispin, F, mF) ./ μB
-        label = L"\$F=$(F)\$, \$m_{F}=$(mF >= 0 ? "+$mF" : "$mF")\$"
-        plot!(Irange, μ_vals, label=label, line=(color8[cidx], lstyle, 2))
+    Threads.@threads for idx in 1:ncurrents
+    # for idx in 1:ncurrents
+        tid = Threads.threadid()
+        i0 = Ix[idx]
+        println("Analyzing current I₀ = $(@sprintf("%.3f", i0))A")
+
+        # Thread-local buffer for particles that collided
+        bad_particles = Vector{Int}()
+        hits_SG = 0
+        hits_post = 0
+
+        for j = 1:No
+            try
+                @inbounds begin
+                    # travel times
+                    v_y = pairs[j, 5]
+                    t_in = (y_FurnaceToSlit + y_SlitToSG) / v_y
+                    t_out = (y_FurnaceToSlit + y_SlitToSG + y_SG) / v_y
+                    t_screen = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen) / v_y
+                    t_length = 1000
+
+                    # initial conditions
+                    r0 = @view pairs[j, 1:3]
+                    v0 = @view pairs[j, 4:6]
+                    θe0 = pairs[j, 7]
+                    θn0 = pairs[j, 8]
+                end
+
+                # SG cavity check
+                t_sweep_sg = range(t_in, t_out, length=t_length)
+                z_val = CQDEqOfMotion_z.(t_sweep_sg, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
+                z_top = z_magnet_edge_time.(t_sweep_sg, Ref(r0), Ref(v0))
+                z_bottom = z_magnet_trench_time.(t_sweep_sg, Ref(r0), Ref(v0))
+
+                inside_cavity = (z_bottom .< z_val) .& (z_val .< z_top)
+                if !all(inside_cavity)
+                    push!(bad_particles, j)
+                    hits_SG += 1
+                    continue
+                end
+
+                # Post-SG pipe check
+                t_sweep_screen = range(t_out, t_screen, length=t_length)
+                xs = r0[1] .+ v0[1] .* t_sweep_screen
+                zs = CQDEqOfMotion_z.(t_sweep_screen, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
+
+                R_tube = 35e-3 / 2
+                if any(xs.^2 .+ zs.^2 .> R_tube^2)
+                    push!(bad_particles, j)
+                    hits_post += 1
+                    continue
+                end
+
+            catch err
+               @error "Thread $tid, particle $j crashed" exception=err
+            end
+        end
+
+        # Save results from this thread
+        sort!(bad_particles)
+        bad_particles_per_thread[tid][Int8(idx)] = bad_particles
+
+        println("\t→ SG hits   = $hits_SG")
+        println("\t→ Pipe hits = $hits_post\n")
     end
 
-    # Magnetic crossing point
-    f(x) = BvsI(x) - 2π*ħ*Ahfs*(Ispin+1/2)/(2ħ)/(γₙ - γₑ)
-    bcrossing = find_zero(f, (0.001, 0.02))
-
-    # Annotated vertical line
-    label_text = L"\$I_{0} = %$(round(bcrossing, digits=5))\,\mathrm{A}$\n" *
-                 L"\partial_{z}B_{z} = %$(round(GvsI(bcrossing), digits=2))\,\mathrm{T/m}$\n" *
-                 L"\$B_{z} = %$(round(1e3 * BvsI(bcrossing), digits=3))\,\mathrm{mT}$"
-    vline!([bcrossing], line=(:black, :dot, 2), label=label_text)
-
-    display(fig)
-    if savepath !== nothing
-        savefig(fig, savepath)
+    # Merge thread-local results into one dictionary
+    bad_particles = Dict{Int8, Vector{Int}}()
+    for d in bad_particles_per_thread
+        for (k, v) in d
+            if haskey(bad_particles, k)
+                append!(bad_particles[k], v)
+            else
+                bad_particles[k] = copy(v)  # make sure to copy to avoid mutation issues
+            end
+        end
     end
-    return fig
+    # Optional: sort & deduplicate entries (recommended!)
+    for (k, v) in bad_particles
+        sort!(v)
+        unique!(v)
+    end
+
+    return bad_particles
 end
