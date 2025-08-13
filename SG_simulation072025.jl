@@ -4,7 +4,7 @@
 # July 2025
 
 #  Plotting Setup
-ENV["GKS_WSTYPE"] = "100"
+# ENV["GKS_WSTYPE"] = "100"
 using Plots; gr()
 Plots.default(
     show=true, dpi=800, fontfamily="Computer Modern", 
@@ -102,7 +102,7 @@ const y_SGToScreen    = 32.0e-2 ;
 # Connecting pipes
 const R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
 # Sample size: number of atoms arriving to the screen
-const Nss = 800
+const Nss = 50000
 
 # Coil currents
 Icoils = [0.001,0.002,0.003,0.005,0.007,
@@ -1292,7 +1292,7 @@ function plot_SG_geometry(path_filename::AbstractString)
     );
 
     # Save and show
-    display(fig)
+    # display(fig)
     
     return savefig(fig, path_filename)
 end
@@ -1367,7 +1367,7 @@ function plot_SG_magneticfield(path_filename::AbstractString)
     );
 
     # Save and show
-    display(fig1)
+    # display(fig1)
     
     return savefig(fig1, path_filename)
 end
@@ -1416,7 +1416,7 @@ function plot_ueff(II,path_filename::AbstractString)
      $B_{z} = %$(round(1e3 * BvsI(bcrossing), digits=3))\,\mathrm{mT}$"
     vline!([bcrossing], line=(:black, :dot, 2), label=label_text,xaxis = :log10,);
     
-    display(fig)
+    # display(fig)
     
     return savefig(fig, path_filename)
 end
@@ -1443,7 +1443,7 @@ function plot_polar_stats(Ix::Vector{Float64}, data_up, data_dw, path_filename::
     plot!(fig4[2], xticks = (xticks(fig4[2])[1], []), yticks = (yticks(fig4[2])[1], []), xlabel = "", bottom_margin = -5mm, left_margin = -5mm);
     plot!(fig4[4], yticks = (yticks(fig4[4])[1], fill("", length(yticks(fig4[4])[1]))), ylabel = "", left_margin = -5mm);
     
-    display(fig4)
+    # display(fig4)
         
     return savefig(fig4,  path_filename)
 end
@@ -1729,7 +1729,7 @@ function analyze_screen_profile(Ix, data_mm::AbstractMatrix;
             label=false,
             line=(:blue,:solid,1)
         );
-        display(fig)
+        # display(fig)
     end
 
     return (
@@ -1830,7 +1830,7 @@ function analyze_profiles_to_dict(Icoils::AbstractVector, screen_up::AbstractDic
 end
 
 
-save_fig = true
+save_fig = false
 if save_fig == true
     plot_SG_geometry(joinpath(dir_path, "slit.png"));
     plot_SG_magneticfield(joinpath(dir_path, "SG_magneticfield.png"));
@@ -1952,12 +1952,16 @@ screen_up, screen_dw = compute_screen_xyz(Icoils, valid_up, valid_dw);
 
 results = analyze_profiles_to_dict(
     Icoils, screen_up;
-    n_bins=1, width_mm=0.10, add_plot=true, λ_raw=0.01, λ_smooth=1e-3,
+    n_bins=1, width_mm=0.10, add_plot=false, λ_raw=0.01, λ_smooth=1e-3,
     store_profiles=true
 )
 
+@save joinpath(dir_path, "zpeak_up.jld2") results
+
 Float64(results[1][:z_max_smooth_mm])
 
+
+throw(error("valimos"))
 # Example access:
 results[5][:Icoil]
 results[5][:z_profile][1900:2000,1]
