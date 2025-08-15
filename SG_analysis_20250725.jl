@@ -76,7 +76,7 @@ exp_pixelsize_x, exp_pixelsize_z = (exp_bin_x, exp_bin_z).*cam_pixelsize  # Effe
 x_pixels = Int(nx_pixels / exp_bin_x);  # Number of x-pixels after binning
 z_pixels = Int(nz_pixels / exp_bin_z);  # Number of z-pixels after binning
 # Setting the variables for the module
-MyExperimentalAnalysis.cam_pixelsize = exp_pixelsize_z;
+MyExperimentalAnalysis.effective_cam_pixelsize_z = exp_pixelsize_z;
 MyExperimentalAnalysis.x_pixels = x_pixels;
 MyExperimentalAnalysis.z_pixels = z_pixels;
 println("************************************************")

@@ -15,7 +15,7 @@ module MyExperimentalAnalysis
     default_x_pixels = 2160;
     default_z_pixels = 2560;
 
-    cam_pixelsize = default_camera_pixel_size
+    effective_cam_pixelsize_z = default_camera_pixel_size # along the z axis
     x_pixels = default_x_pixels
     z_pixels = default_z_pixels
 
@@ -405,7 +405,7 @@ module MyExperimentalAnalysis
     your global `SAVE_FIG` is true), save the figure via `saveplot`.
 
     Notes:
-    - Requires global `cam_pixelsize` (meters) and `pixel_positions` for building the z‑axis; positions are converted to mm via `1e3`.
+    - Requires global `effective_cam_pixelsize_z` (meters) and `pixel_positions` for building the z‑axis; positions are converted to mm via `1e3`.
     - Ensure the z length matches `pixel_positions(z_pixels, …)`. If your detector width differs, pass the correct pixel count.
     """
     function process_mean_maxima(signal_key::String, data, n_bins::Integer; half_max=false, λ0::Float64=0.01)
@@ -419,8 +419,8 @@ module MyExperimentalAnalysis
         @info "Processing mean maxima" signal_label=signal_label
 
         # Precompute z-axes (mm)
-        z_full_mm   = 1e3 .* pixel_positions(z_pixels, 1,  cam_pixelsize)
-        z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, cam_pixelsize)
+        z_full_mm   = 1e3 .* pixel_positions(z_pixels, 1,  effective_cam_pixelsize_z)
+        z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
 
         peak_positions = zeros(Float64,nI)
 
@@ -547,7 +547,7 @@ module MyExperimentalAnalysis
     6. Plot the processed profile, spline, and detected maximum; save if requested.
 
     Notes:
-    - Requires global `cam_pixelsize` and `pixel_positions`; positions are converted to mm via `1e3`.
+    - Requires global `effective_cam_pixelsize_z` and `pixel_positions`; positions are converted to mm via `1e3`.
     - `n_bins` must evenly divide the z length (asserted).
     """
     function process_framewise_maxima(signal_key::String, data, n_bins::Integer; half_max::Bool=false, λ0::Float64=0.01)
@@ -560,7 +560,7 @@ module MyExperimentalAnalysis
                     error("Invalid signal_key: choose 'F1' or 'F2'")
 
         # z-axes (mm)
-        z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, cam_pixelsize)
+        z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
 
         # Determine max number of frames across currents
         n_runs_max = maximum(size(Float64.(data["data"][signal_label][1, i]), 3) for i in 1:nI)
