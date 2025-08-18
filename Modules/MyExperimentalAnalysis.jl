@@ -2,13 +2,14 @@ module MyExperimentalAnalysis
     # Plotting backend and general appearance settings
     using Plots; gr()
     using Plots.PlotMeasures
-    using MAT
+    using MAT, JLD2
     using LinearAlgebra
     using ImageFiltering, FFTW
     using Statistics, StatsBase
     using BSplineKit, Optim
     using Colors, ColorSchemes
     using Printf, LaTeXStrings
+    using OrderedCollections
     using Dates
     # Corresponding to data acquired with no previous binning
     default_camera_pixel_size = 6.5e-6 ; # (mm)
@@ -569,7 +570,7 @@ module MyExperimentalAnalysis
         @info "Processing per-frame maxima" signal_label=signal_label
 
         for j in 1:nI
-            # Load stack (Ny × Nz × Nframes)
+            # Load stack (Nx × Nz × Nframes)
             stack    = Float64.(data["data"][signal_label][1, j])
             n_frames = size(stack, 3)
             cols     = palette(:phase, n_frames)
@@ -742,6 +743,241 @@ module MyExperimentalAnalysis
         end
     end
 
+    """
+        stack_data(data_directory;
+                pattern = r"Cur(.*?)A",
+                order::Symbol = :desc,
+                keynames = ("BG","F1","F2"),
+                verbose::Bool = true)
+
+    Scan `data_directory` for .mat files whose paths contain `Cur...A`.
+    Parse the current tokens (`...` may end with `u` or `m`), convert to amperes,
+    sort by current (default `:desc`), and stack variables into 4-D arrays:
+
+    Returns an OrderedDict with:
+    :Directory :: String
+    :Files     :: Vector{String}              # ordered to match currents
+    :Currents  :: Vector{Float64}             # in amperes, ordered
+    :F1_data   :: Array{T,4}  (X,Y,T,N)
+    :F2_data   :: Array{T,4}
+    :BG_data   :: Array{T,4}
+
+    Keyword args:
+    - `pattern`: regex used to capture the token between `Cur` and `A` (first capture group).
+    - `order`: `:asc` or `:desc` sort by current magnitude.
+    - `keynames`: tuple with the variable names in the .mat files (default ("BG","F1","F2")).
+    """
+    function stack_data(data_directory::AbstractString;
+                        pattern = r"Cur(.*?)A",
+                        order::Symbol = :desc,
+                        keynames = ("BG","F1","F2"),
+                        verbose::Bool = true)
+
+        # 1) Collect only .mat files that match the pattern
+        all_files = readdir(data_directory; join=true)
+        files = [f for f in all_files if endswith(lowercase(f), ".mat") && occursin(pattern, f)]
+        @assert !isempty(files) "No matching .mat files found in $data_directory"
+
+        # 2) Extract current tokens and convert to amperes
+        tokens = Vector{SubString{String}}(undef, length(files))
+        for (i, f) in enumerate(files)
+            m = match(pattern, f)
+            @assert m !== nothing "Couldn't parse current from: $f"
+            tokens[i] = m.captures[1]  # e.g. "-7u", "117m", "12930u"
+        end
+
+        currents = [endswith(tok, "u") ? parse(Float64, chop(tok, tail=1)) * 1e-6 :
+                    endswith(tok, "m") ? parse(Float64, chop(tok, tail=1)) * 1e-3 :
+                    parse(Float64, tok) for tok in tokens]
+
+        # 3) Sort by current (asc/desc)
+        p = order === :desc ? sortperm(currents; rev=true) :
+            order === :asc  ? sortperm(currents) :
+            throw(ArgumentError("order must be :asc or :desc"))
+        files    = files[p]
+        currents = Float64.(currents[p])
+
+        # 4) Probe sizes & eltype from first file
+        keyBG, keyF1, keyF2 = keynames
+        sz, T = matopen(files[1]) do fh
+            f1 = read(fh, keyF1)
+            ((size(f1)), eltype(f1))
+        end
+
+        # Sanity check the first file has all keys
+        matopen(files[1]) do fh
+            @assert haskey(fh, keyBG) && haskey(fh, keyF1) && haskey(fh, keyF2) "Missing keys in $(files[1])"
+        end
+
+        N = length(files)
+        F1 = Array{T}(undef, sz[1], sz[2], sz[3], N)
+        F2 = similar(F1)
+        BG = similar(F1)
+        
+        println("\nEach component is organized as (Nx,Nz,Nframes,Ncurrents)\n")
+        
+        # 5) Load & stack
+        for (i, f) in enumerate(files)
+            matopen(f) do fh
+                f1 = read(fh, keyF1); f2 = read(fh, keyF2); bg = read(fh, keyBG)
+                @assert size(f1) == sz && size(f2) == sz && size(bg) == sz "Inconsistent sizes in $f"
+                F1[:,:,:,i] = f1
+                F2[:,:,:,i] = f2
+                BG[:,:,:,i] = bg
+            end
+            verbose && i % 5 == 0 && @info "Loaded $i / $N" file=f
+        end
+
+        return OrderedDict(
+            :Directory => String(data_directory),
+            :Files     => files,
+            :Currents  => currents,   # amperes
+            :F1_data   => F1,         # 540×2560×30×N
+            :F2_data   => F2,
+            :BG_data   => BG
+        )
+    end
+
+    """
+        bin_x_mean(A::AbstractMatrix, binsize::Integer) -> AbstractMatrix
+
+    Downsample (bin) the **rows** of `A` by averaging contiguous blocks of length `binsize`.
+    Each column is processed independently. The result has size
+    `(size(A,1) ÷ binsize, size(A,2))`.
+
+    # Arguments
+    - `A`: Input 2D array. If `A` has an integer element type (e.g. `UInt16`), consider
+    converting first (e.g. `Float32.(A)`) to avoid overflow and to control the output type.
+    - `binsize`: Positive integer that must divide `size(A,1)` exactly.
+
+    # Returns
+    A matrix where every `binsize` consecutive rows in `A` have been replaced by their mean.
+
+    # Throws
+    - `AssertionError` if `size(A,1) % binsize != 0`.
+
+    # Notes
+    - Internally reshapes to `(binsize, nblocks, ncols)`, takes `mean(...; dims=1)`, and
+    removes the singleton dimension with `dropdims`.
+    - Make sure `Statistics.mean` is available: `using Statistics`.
+    (Qualify as `Statistics.mean` if other packages also define `mean`.)
+    """
+    function bin_x_mean(A::AbstractMatrix, binsize::Integer)
+        nrows, ncols = size(A)
+        @assert nrows % binsize == 0 "nrows ($nrows) must be divisible by binsize ($binsize)"
+
+        B = reshape(A, binsize, div(nrows, binsize), ncols)  # (binsize, nblocks, ncols)
+        M = dropdims(mean(B, dims=1), dims=1)                # (1, nblocks, ncols) -> (nblocks, ncols)
+        return M 
+    end
+
+    function my_process_framewise_maxima(signal_key::String, data, n_bins::Integer; half_max::Bool=false, λ0::Float64=0.01)
+        I_current = vec(data[:Currents])
+        nI = length(I_current) # Number of current settings
+
+        # Validate signal_key → dataset key
+        signal_label = signal_key == "F1" ? :F1ProcessedImages :
+                    signal_key == "F2" ? :F2ProcessedImages :
+                    error("Invalid signal_key: choose 'F1' or 'F2'")
+
+        # z-axes (mm)
+        z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
+
+        # Determine max number of frames across currents
+	    n_runs_max = maximum(size(Float64.(data[:F1ProcessedImages][:,:,:,i]), 3) for i in 1:nI)
+        max_position_data = fill(NaN, n_runs_max, nI)  # (n_runs_max × nI)
+
+        @info "Processing per-frame maxima" signal_label=signal_label
+
+        for j in 1:nI
+            # Load stack (Nx × Nz × Nframes)
+            stack    = Float64.(data[signal_label][:,:,:,j])
+            n_frames = size(stack, 3)
+            cols     = palette(:phase, n_frames)
+
+            for i in 1:n_frames
+                # --- Per-frame z-profile (average over x → 1×Nz → vec)
+                frame_profile = vec(mean(stack[:, :, i], dims=1))
+
+                # --- Bin along z
+                @assert length(frame_profile) % n_bins == 0 "Signal length not divisible by n_bins"
+                binned            = reshape(frame_profile, n_bins, :)
+                processed_profile = vec(mean(binned, dims=1))  # length = Nz / n_bins
+
+                # --- Optional half-maximum window
+                z_fit = z_binned_mm
+                y_fit = processed_profile
+                if half_max
+                    y_max  = maximum(y_fit)
+                    keep   = findall(yi -> yi > y_max/2, y_fit)
+                    z_fit  = z_fit[keep]
+                    y_fit  = y_fit[keep]
+                end
+
+                # --- Spline fit (cubic) on (z_fit, y_fit)
+                S_fit = BSplineKit.fit(BSplineOrder(4), z_fit, y_fit, λ0; weights=compute_weights(z_fit, λ0))
+
+                # --- Maxima via minimizing negative spline from multiple guesses
+                negative_spline(x) = -S_fit(x[1])
+                initial_guesses = sort([
+                    ceil(minimum(z_fit)),
+                    quantile(z_fit, 0.40),
+                    z_fit[argmax(y_fit)],
+                    quantile(z_fit, 0.65),
+                    quantile(z_fit, 0.75),
+                    quantile(z_fit, 0.90),
+                    floor(maximum(z_fit)),
+                ])
+
+                candidates = Float64[]
+                for g in initial_guesses
+                    res = optimize(negative_spline, [minimum(z_fit)], [maximum(z_fit)], [g], Fminbox(LBFGS()))
+                    push!(candidates, Optim.minimizer(res)[1])
+                end
+                sort!(candidates)
+
+                # Deduplicate (within 1e-9)
+                dedup = [candidates[1]]
+                for v in candidates[2:end]
+                    if all(abs(v - x) > 1e-9 for x in dedup)
+                        push!(dedup, v)
+                    end
+                end
+
+                # Rank candidates by actual spline height (largest peak first)
+                @assert !isempty(dedup) "No peak candidates found"
+                vals     = S_fit.(dedup)        # evaluate spline (not negated)
+                best_ix  = argmax(vals)         # tallest peak index
+                max_z    = dedup[best_ix]       # z of tallest peak
+
+                # Store result for this frame/current
+                max_position_data[i, j] = max_z
+
+                # --- Plot per-frame processed profile + spline + peak
+                fig = plot(
+                    z_fit, y_fit,
+                    seriestype=:scatter, marker=(:circle, :white, 2),
+                    markerstrokecolor=:gray36, markerstrokewidth=0.8,
+                    xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
+                    xlims=extrema(z_binned_mm),
+                    title=L"%$(signal_key) Frame %$(i): $I_c=%$(round(1e3*I_current[j], digits=3))\ \mathrm{mA}$",
+                    label="$(signal_key) processed", legend=:topleft,
+                );
+                xs = collect(range(minimum(z_fit), maximum(z_fit), length=2001));
+                plot!(fig, xs, S_fit.(xs), line=(:solid, :red, 2), label="Spline fit");
+                vline!(fig, [max_z], line=(:dash, :black, 1), label=L"$z_{\max}=%$(round(max_z, digits=3))\ \mathrm{mm}$");
+                display(fig)
+                if _has(:SAVE_FIG)
+                    saveplot(fig, "fw$(i)_$(signal_key)_I$(@sprintf("%02d", j))")
+                end
+                
+            end
+        end
+
+        return max_position_data
+    end
+
+
     # Public API
     export saveplot, 
            compute_weights, 
@@ -752,6 +988,10 @@ module MyExperimentalAnalysis
            pixel_positions, 
            process_mean_maxima,
            process_framewise_maxima, 
-           process_maxima
+           process_maxima,
+           summarize_framewise,
+           stack_data,
+           bin_x_mean,
+           my_process_framewise_maxima
 
 end
