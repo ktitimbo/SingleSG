@@ -17,7 +17,7 @@ Plots.default(
     grid=true, minorgrid=true, framestyle=:box, widen=true,
 )
 FIG_EXT = "png"   # could be "pdf", "svg", etc.
-SAVE_FIG = false
+SAVE_FIG = true
 using Plots.PlotMeasures
 # Data I/O and numerical tools
 using MAT
@@ -51,7 +51,7 @@ MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 MyExperimentalAnalysis.OUTDIR   = OUTDIR;
 
 # Data Directory
-data_directory = "20250712/" ;
+data_directory = "20250725/" ;
 
 # Previous experiment data for comparison
 data_JSF = OrderedDict(
@@ -70,7 +70,7 @@ data_JSF = OrderedDict(
 cam_pixelsize = 6.5e-6 ;            # Physical pixel size of camera [m]
 nx_pixels , nz_pixels= (2160, 2560);
 # Experiment resolution
-exp_bin_x, exp_bin_z = (1,1) ;                       # Camera binning
+exp_bin_x, exp_bin_z = (1,1) ;  # Camera binning
 exp_pixelsize_x, exp_pixelsize_z = (exp_bin_x, exp_bin_z).*cam_pixelsize  # Effective pixel size after binning [m]
 # Image dimensions (adjusted for binning)
 x_pixels = Int(nx_pixels / exp_bin_x);  # Number of x-pixels after binning
@@ -91,7 +91,7 @@ z_position = pixel_positions(z_pixels, exp_bin_z, exp_pixelsize_z);
 n_bins = 1
 
 # Read data
-data = matread(joinpath(data_directory, "data.mat")) 
+data = matread(joinpath(data_directory, "data.mat")) ;
 
 # Extract coil currents (in mA)
 Icoils = vec(data["data"]["Current_mA"]/1000)
@@ -349,7 +349,7 @@ fig=plot(
     guidefontsize=14,
     legendfontsize=10,
 ) 
-hspan!([1e-6,1000*n_bins* cam_pixelsize], color=:gray, alpha=0.30, label="Pixel size" )
+hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
 plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
 marker=(:cross, :purple, 6),
 line=(:purple, :dash, 2, 0.5),
@@ -409,7 +409,7 @@ plot!(abs.(df_mean[neg_mask,:I_coil_mA]/1000), y_abs[neg_mask],
     markerstrokecolor = :orangered2,
     markerstrokewidth = 2,
 );
-hspan!([1e-6,1000*n_bins* cam_pixelsize], color=:gray, alpha=0.30, label="Pixel size" )
+hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
 plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
 marker=(:cross, :purple, 6),
 line=(:purple, :dash, 2, 0.5),
@@ -476,6 +476,7 @@ df_framewise = DataFrame(
     F2_z_centroid_mm    = res.F2_z_centroid_mm, 
     F2_z_centroid_se_mm = res.F2_z_centroid_se_mm
 )
+CSV.write(joinpath(OUTDIR, "fw_data.csv"), df_framewise);
 
 hl_Ic = Highlighter(
            (data, i, j) -> data[i, 1] == minimum(data[:, 1]),
@@ -553,13 +554,13 @@ vspan!(
 hline!([centroid_fw], line=(:dot,:black,2), label="Centroid")
 
 
-fig_02 = plot(abs.(data_framewise[:,1]/1000), data_framewise[:,2],
-    ribbon= data_framewise[:, 3],
+fig_02 = plot(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F1_z_peak_mm] ,
+    ribbon= df_framewise[!,:F1_z_peak_se_mm],
     label=L"$F_{1}$",
     line=(:solid,:red,2),
 )
-plot!(abs.(data_framewise[:,1]/1000), 2*centroid_mean .- data_framewise[:,4],
-    ribbon= data_framewise[:, 5],
+plot!(abs.(df_framewise[!,:I_coil_mA]/1000), 2*centroid_fw .- df_framewise[!,:F2_z_peak_mm] ,
+    ribbon= ribbon= df_framewise[!,:F2_z_peak_se_mm],
     label=L"Mirrored $F_{2}$",
     line=(:solid,:blue,2),
 )
@@ -581,38 +582,83 @@ plot!(
     guidefontsize=14,
     legendfontsize=10,
 )
-vspan!([1e-8, abs(data_framewise[findlast(<(0), data_mean[:,1])+1,1]/1000)], color=:gray, alpha=0.30,label="zero" )
+vspan!(
+    [1e-8, abs(df_framewise.I_coil_mA[findlast(<(0), df_framewise.I_coil_mA)+1] / 1000)],
+    color = :gray,
+    alpha = 0.30,
+    label = "zero"
+);
 # Fill between y1 and y2
-plot!(abs.(data_framewise[:,1]/1000), data_framewise[:,2], fillrange=2*centroid_mean .- data_framewise[:,4],
+plot!(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F1_z_peak_mm], fillrange=2*centroid_mean .- df_framewise[!,:F2_z_peak_mm],
     fillalpha=0.2,
     color=:purple,
     label = false,
-)
-hline!([centroid_mean], line=(:dot,:black,2), label="Centroid")
+);
+hline!([centroid_fw], line=(:dot,:black,2), label="Centroid")
 
-fig=plot(fig_01, fig_02,
-layout=@layout([a ; b]),
-share=:x,
+fig_03 = plot(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F1_z_centroid_mm] ,
+    ribbons=df_framewise[!,:F1_z_centroid_se_mm],
+    label=L"$F_{1}$",
+    line=(:solid,:red,2),
+);
+plot!(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F2_z_centroid_mm] ,
+    label=L"$F_{2}$",
+    line=(:solid,:blue,2),
+);
+plot!(
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
+    xlims = (1e-5,1.0),
+    title = "Peak position - Centered at Centroid",
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    size=(800,600),
+    legend=:topleft,
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
 )
-plot!(fig[1], xlabel = "", xformatter=_->"")
-plot!(fig[2], title = "", top_margin = -9mm)
+vspan!(
+    [1e-8, abs(df_framewise.I_coil_mA[findlast(<(0), df_framewise.I_coil_mA)+1] / 1000)],
+    color = :gray,
+    alpha = 0.30,
+    label = "zero"
+);
+# Fill between y1 and y2
+plot!(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F1_z_centroid_mm], fillrange=df_framewise[!,:F2_z_centroid_mm],
+    fillalpha=0.2,
+    color=:purple,
+    label = false,
+);
+
+fig=plot(fig_01, fig_02, fig_03, 
+layout=@layout([a ; b ; c]),
+share=:x,
+);
+plot!(fig[1], xlabel="", xformatter=_->"");
+plot!(fig[2], xlabel="", xformatter=_->"", title = "", top_margin = -9mm);
+plot!(fig[3], title="", top_margin = -9mm);
 display(fig)
+saveplot(fig, "fw_peak_centroid")
 
 fig=plot(
-    data_framewise[2:end, 1]/1000, abs.(data_framewise[2:end, 8]),
-    yerror = data_framewise[2:end, 9],
-    label = "20250725",
-    seriestype = :scatter,
-    marker = (:circle, :white, 2),
-    markerstrokecolor = :black,
-    markerstrokewidth = 2,
-)
-plot!(
+    abs.(df_framewise[!,:I_coil_mA]/1000), abs.(df_framewise[!,:F1_z_centroid_mm]),
+    yerror = df_framewise[!,:F1_z_centroid_se_mm],
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
     yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
     xlims = (0.001,1.0),
-    ylims = (1e-5,1.5),
+    ylims = (1e-4,1.5),
     title = "F=1 Peak Position vs Current",
+    label = "07122025",
+    seriestype = :scatter,
+    marker = (:circle, :white, 4),
+    markerstrokecolor = :black,
+    markerstrokewidth = 2,
     legend = :bottomright,
     grid = true,
     minorgrid = true,
@@ -621,15 +667,14 @@ plot!(
     minorgridalpha = 0.05,
     xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
               [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = :log10,
     framestyle = :box,
     size=(800,600),
     tickfontsize=11,
     guidefontsize=14,
     legendfontsize=10,
 ) 
-hspan!([1e-6,1000*n_bins* cam_pixelsize], color=:gray, alpha=0.30, label="Pixel size" )
+hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
 plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
 marker=(:cross, :purple, 6),
 line=(:purple, :dash, 2, 0.5),
@@ -646,38 +691,28 @@ line=(:dot, :red, 3),
 markerstrokewidth=2,
 label="10142024: CQD"
 )
-savefig(fig, joinpath(dir_path, "framewise.png"))
+saveplot(fig, "fw_00")
 
 
 # Compute absolute values for plotting
-y = data_framewise[:,12]
-y_abs = abs.(y)
+y = df_framewise[!,:F1_z_centroid_mm];
+y_abs = abs.(y);
 # Create masks for negative and non-negative values
-neg_mask = y .< 0
-pos_mask = .!neg_mask
+neg_mask = y .< 0;
+pos_mask = .!neg_mask;
 fig=plot(
-    abs.(data_framewise[pos_mask, 1]/1000), y_abs[pos_mask],
-    yerror = data_framewise[pos_mask, 13],
-    label = "20250725",
-    seriestype = :scatter,
-    marker = (:circle, :white, 2),
-    markerstrokecolor = :black,
-    markerstrokewidth = 2,
-)
-plot!(abs.(data_framewise[neg_mask,1]/1000), y_abs[neg_mask],
-    yerror = data_framewise[neg_mask, 13],
-    label=false, 
-    seriestype=:scatter,
-    marker = (:circle, :white, 2),
-    markerstrokecolor = :chocolate4,
-    markerstrokewidth = 2,
-)
-plot!(
+    abs.(df_framewise[pos_mask,:I_coil_mA]/1000), y_abs[pos_mask],
+    yerr = df_framewise[pos_mask,:F1_z_centroid_se_mm],
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
     yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
     xlims = (0.001,1.0),
-    ylims = (1e-5,1.5),
+    ylims = (1e-4,1.5),
     title = "F=1 Peak Position vs Current",
+    label = "07122025",
+    seriestype = :scatter,
+    marker = (:circle, :white, 4),
+    markerstrokecolor = :black,
+    markerstrokewidth = 2,
     legend = :bottomright,
     grid = true,
     minorgrid = true,
@@ -686,37 +721,48 @@ plot!(
     minorgridalpha = 0.05,
     xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
               [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = :log10,
     framestyle = :box,
     size=(800,600),
     tickfontsize=11,
     guidefontsize=14,
     legendfontsize=10,
-) 
-hspan!([1e-6,1000*n_bins* cam_pixelsize], color=:gray, alpha=0.30, label="Pixel size" )
+) ;
+plot!(abs.(df_framewise[neg_mask,:I_coil_mA]/1000), y_abs[neg_mask],
+    yerr = df_framewise[neg_mask,:F1_z_centroid_se_mm],
+    label=false, 
+    seriestype=:scatter,
+    marker = (:xcross, :orangered2, 4),
+    markerstrokecolor = :orangered2,
+    markerstrokewidth = 2,
+);
+hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
 plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
 marker=(:cross, :purple, 6),
 line=(:purple, :dash, 2, 0.5),
 markerstrokewidth=2,
 label="10142024"
-)
+);
 plot!(data_JSF[:model][:,1], data_JSF[:model][:,2],
 line=(:dash, :blue, 3),
 markerstrokewidth=2,
 label="10142024: QM"
-)
+);
 plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
 line=(:dot, :red, 3),
 markerstrokewidth=2,
 label="10142024: CQD"
-)
+);
+display(fig)
+saveplot(fig, "fw_01")
 
 
+###########################################################################################################
+###########################################################################################################
 # Comparison with Xukun's analysis
 fig=plot(
-    abs.(data_framewise[1:end, 1]/1000), abs.(data_framewise[1:end, 6]),
-    yerror = data_framewise[2:end, 7],
+    abs.(df_framewise[!,:I_coil_mA]/1000), abs.(df_framewise[!,:Δz_mm]),
+    yerror = df_framewise[!,:Δz_se_mm],
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
     yaxis = (:log10, L"$\Delta z \ (\mathrm{mm})$", :log),
     xlims = (0.001,1.0),
@@ -727,7 +773,7 @@ fig=plot(
     line=(:solid,:red,2),
     marker = (:circle, :white, 1),
     markerstrokecolor = :red,
-    markerstrokewidth = 2,
+    markerstrokewidth = 3,
     legend = :bottomright,
     grid = true,
     minorgrid = true,
@@ -752,11 +798,10 @@ marker=(:square,:white,1),
 markerstrokewidth=1,
 markerstrokecolor=:purple
 )
-
-t_run = Dates.canonicalize(Dates.now()-t_start)
+###########################################################################################################
+###########################################################################################################
+t_run = Dates.canonicalize(Dates.now()-T_START);
 println("Running time : ", t_run)
-
-
 ############################################################################################################################################################################
 ############################################################################################################################################################################
 
@@ -818,8 +863,8 @@ line=(:solid,:green,2),
 fillalpha=0.23, 
 fillcolor=:green,  
 )
-plot!(abs.(data_framewise[:, 1]/1000), abs.(data_framewise[:, 8]),
-    yerror = data_framewise[:, 9],
+plot!(abs.(df_framewise[!,:I_coil_mA]/1000), abs.(df_framewise[!,:F1_z_centroid_mm]),
+    yerror = df_framewise[!,:F1_z_centroid_se_mm],
     marker=(:circle, :white, 3),
     markerstrokewidth=2,
     markerstrokecolor=:black,
@@ -851,24 +896,27 @@ plot!(
 ) 
 
 sim_data = CSV.read("./simulation_data/results_CQD_20250807T135817.csv",DataFrame; header=false)
+simqm    = CSV.read("./simulation_data/results_QM_20250728T105702.csv",DataFrame; header=false)
+
 kis = [1.50,1.80,2.00,2.10,2.20,2.25,2.30,2.40,2.50,2.60] # ×10^-6
 # Compute absolute values for plotting
-y = data_framewise[:,12]
+y = df_framewise[!,:F1_z_centroid_mm];
 y_abs = abs.(y)
 # Create masks for negative and non-negative values
 neg_mask = y .< 0
 pos_mask = .!neg_mask
 fig=plot(
-    abs.(data_framewise[pos_mask, 1]/1000), y_abs[pos_mask],
-    yerror = data_framewise[pos_mask, 13],
+    abs.(df_framewise[pos_mask,:I_coil_mA]/1000), y_abs[pos_mask],
+    yerr = df_framewise[pos_mask,:F1_z_centroid_se_mm],
     label = "20250725",
     seriestype = :scatter,
     marker = (:circle, :white, 2),
     markerstrokecolor = :black,
     markerstrokewidth = 2,
 )
-plot!(abs.(data_framewise[neg_mask,1]/1000), y_abs[neg_mask],
-    yerror = data_framewise[neg_mask, 13],
+plot!(
+    abs.(df_framewise[neg_mask,:I_coil_mA]/1000), y_abs[neg_mask],
+    yerr = df_framewise[neg_mask,:F1_z_centroid_se_mm],
     label=false, 
     seriestype=:scatter,
     marker = (:circle, :white, 2),
@@ -877,7 +925,7 @@ plot!(abs.(data_framewise[neg_mask,1]/1000), y_abs[neg_mask],
 )
 plot!(
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    # yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
     xlims = (0.015,1.0),
     ylims = (1e-3,1.5),
     title = "F=1 Peak Position vs Current",
@@ -904,11 +952,3 @@ for i=1:length(kis)
     line=(:dash,colors[i],2))
 end
 hspan!([1e-6,1000*n_bins* cam_pixelsize], color=:gray, alpha=0.30, label="Pixel size" )
-
-
-simqm = CSV.read("./simulation_data/results_QM_20250728T105702.csv",DataFrame; header=false)
-############################################################################################################################################################################
-############################################################################################################################################################################
-############################################################################################################################################################################
-############################################################################################################################################################################
-############################################################################################################################################################################
