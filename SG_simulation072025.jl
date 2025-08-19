@@ -4,7 +4,7 @@
 # July 2025
 
 #  Plotting Setup
-# ENV["GKS_WSTYPE"] = "100"
+# ENV["GKS_WSTYPE"] = "101"
 using Plots; gr()
 Plots.default(
     show=true, dpi=800, fontfamily="Computer Modern", 
@@ -53,7 +53,7 @@ println("\n\t\tRunning process on:\t $(Dates.format(t_start, "yyyymmddTHHMMSS"))
 # Generate a timestamped directory name for output (e.g., "20250718T153245")
 directoryname = Dates.format(t_start, "yyyymmddTHHMMSS") ;
 # Construct the full directory path (relative to current working directory)
-dir_path = "./simulation_data/$(directoryname)" ;
+const dir_path = "./simulation_data/$(directoryname)" ;
 # Create the directory (and any necessary parent folders)
 mkpath(dir_path) ;
 @info "Created output directory" dir = dir_path
@@ -101,8 +101,6 @@ const y_SG            = 7.0e-2 ;
 const y_SGToScreen    = 32.0e-2 ;
 # Connecting pipes
 const R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
-# Sample size: number of atoms arriving to the screen
-const Nss = 50000
 
 # Coil currents
 Icoils = [0.001,0.002,0.003,0.005,0.007,
@@ -381,7 +379,16 @@ fbp = fb_params()
     sθ = sin(θ); cθ = cos(θ); sϕ = sin(ϕ); cϕ = cos(ϕ)
     return SVector(v*sθ*sϕ, v*cθ, v*sθ*cϕ)
 end
+    G = 
+    a .* sqrt.(2 .* rand(rng, Gamma(3/2,1.0)))
 
+@inline function AtomicBeamVelocity_v2(rng,p::FurnaceBeamParams)::SVector{3,Float64}
+    ϕ = TWOπ * rand(rng)
+    θ = asin(p.sinθmax * sqrt(rand(rng)))
+    v = sqrt(p.c1 * (1 + lambertw((rand(rng)-1)*INV_E, -1)))
+    sθ = sin(θ); cθ = cos(θ); sϕ = sin(ϕ); cϕ = cos(ϕ)
+    return SVector(v*sθ*sϕ, v*cθ, v*sθ*cϕ)
+end
 # p_furnace   = [-x_furnace/2,-z_furnace/2];
 # p_slit      = [x_slit/2, z_slit/2];
 # θv_max      = 1.25*atan(norm(p_furnace-p_slit) , y_FurnaceToSlit);
@@ -776,188 +783,7 @@ function build_init_cond(alive::Matrix{Float64}, θes::Vector{Float64}, θns::Ve
     return pairs
 end
 
-function find_good_particles(Ix, pairs)
-    No = size(pairs, 1) # Number of particles (rows in pairs)
-    good_particles = OrderedDict{Int8, Vector{Int}}()
-
-    for (i0_idx,i0) in enumerate(Ix)
-        println("Analyzing current I₀ = $(@sprintf("%.3f", i0))A")
-        
-        # Thread-local buffers to safely collect indices without locks
-        thread_buffers = [Vector{Int}() for _ in 1:Threads.nthreads()]
-
-        # Counters for particles hitting Stern-Gerlach cavity and post-SG pipe
-        hits_SG_threads = zeros(Int, Threads.nthreads())
-        hits_post_threads = zeros(Int, Threads.nthreads())
-
-        # Parallel loop over all particles
-        Threads.@threads for j = 1:No
-        # for j = 1:No
-            try
-                tid = Threads.threadid()
-
-                # travel times
-                v_y = pairs[j, 5] # Extract particle's propagation speed
-                t_in = (y_FurnaceToSlit + y_SlitToSG) / v_y
-                t_out = (y_FurnaceToSlit + y_SlitToSG + y_SG) / v_y
-                t_screen = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen) / v_y
-                t_length = 1000;
-
-                # initial conditions of the particle
-                # Extract initial position and velocity vectors (x,y,z components)
-                r0 = [pairs[j, 1], pairs[j, 2], pairs[j, 3]]
-                v0 = [pairs[j, 4], pairs[j, 5], pairs[j, 6]]
-                # Extract angles θe and θn
-                θe0 = pairs[j, 7]
-                θn0 = pairs[j, 8]
-
-                # --- SG cavity check ---
-                # Sample times within SG cavity (t_length)
-                t_sweep_sg = range(t_in, t_out, length=t_length)
-                # Compute z position at each time sample using CQDEqOfMotion_z vectorized with broadcasting `.`
-                z_val = CQDEqOfMotion_z.(t_sweep_sg, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
-                # Compute top and bottom cavity boundary at each sampled time
-                # z_top    = z_magnet_profile_time.(t_sweep_sg, Ref(r0), Ref(v0), Ref("top"))
-                # z_bottom = z_magnet_profile_time.(t_sweep_sg, Ref(r0), Ref(v0), Ref("bottom"))
-                z_top = z_magnet_edge_time.(t_sweep_sg, Ref(r0), Ref(v0))
-                z_bottom = z_magnet_trench_time.(t_sweep_sg, Ref(r0), Ref(v0))
-
-
-                # Logical vector where particle z position lies inside the cavity boundaries
-                inside_cavity = (z_bottom .< z_val) .& (z_val .< z_top)
-                # If particle ever crosses cavity boundaries, count it as hit and skip post-SG check
-                if !all(inside_cavity)
-                    hits_SG_threads[tid] += 1
-                    continue # Skip post-SG check if already invalid
-                end
-
-                # --- post-SG circular pipe check ---
-                # Sample times from end of SG to screen (t_length)
-                t_sweep_screen = range(t_out, t_screen, length=t_length)
-                # x positions move ballistically: x = x0 + vx * t
-                xs = r0[1] .+ v0[1].* t_sweep_screen
-                # z positions computed via CQDEqOfMotion_z
-                zs = CQDEqOfMotion_z.(t_sweep_screen, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
-
-                R_tube = 35e-3 / 2  # Radius of pipe aperture
-
-                # Check if particle leaves pipe aperture at any time
-                outside = any(xs.^2 .+ zs.^2 .> R_tube^2)
-                # Count pipe hits and skip if outside aperture
-                if outside
-                    hits_post_threads[tid] += 1
-                    continue  # Rejected by post-SG aperture
-                end
-
-                # If passed both checks, keep it
-                push!(thread_buffers[tid], j)
-            catch err
-                @error "Thread $j crashed" exception=err
-            end
-        end
-
-        # Combine results from all threads safely
-        good_idx = reduce(vcat, thread_buffers)
-        # Sort the indices for convenience and reproducibility
-        sort!(good_idx)
-        # Store sorted indices in output dictionary keyed by current index
-        good_particles[i0_idx] = good_idx
-
-        # Print diagnostics
-        println("\t→ SG hits   = $(sum(hits_SG_threads))")
-        println("\t→ Pipe hits = $(sum(hits_post_threads))\n")
-    end
-
-    return good_particles
-end
-
-function find_good_particles_ix(Ix, pairs)
-    No = size(pairs, 1)  # Number of particles
-    ncurrents = length(Ix)
-    good_particles_per_thread = Vector{Dict{Int8, Vector{Int}}}(undef, Threads.nthreads())
-    for i in 1:Threads.nthreads()
-        good_particles_per_thread[i] = Dict{Int8, Vector{Int}}()
-    end
-
-    Threads.@threads for idx in 1:ncurrents
-    # for idx in 1:ncurrents
-        tid = Threads.threadid()
-        i0 = Ix[idx]
-        println("Analyzing current I₀ = $(@sprintf("%.3f", i0))A")
-
-        # Thread-local buffers for this current
-        thread_buffer = Vector{Int}()
-        hits_SG = 0
-        hits_post = 0
-
-        for j = 1:No
-            try
-                @inbounds begin
-                    # travel times
-                    v_y = pairs[j, 5]
-                    t_in = (y_FurnaceToSlit + y_SlitToSG) / v_y
-                    t_out = (y_FurnaceToSlit + y_SlitToSG + y_SG) / v_y
-                    t_screen = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen) / v_y
-                    t_length = 1000
-
-                    # initial conditions
-                    r0 = @view pairs[j, 1:3]
-                    v0 = @view pairs[j, 4:6]
-                    θe0 = pairs[j, 7]
-                    θn0 = pairs[j, 8]
-                end
-
-                # SG cavity check
-                t_sweep_sg = range(t_in, t_out, length=t_length)
-                z_val = CQDEqOfMotion_z.(t_sweep_sg, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
-                z_top = z_magnet_edge_time.(t_sweep_sg, Ref(r0), Ref(v0))
-                z_bottom = z_magnet_trench_time.(t_sweep_sg, Ref(r0), Ref(v0))
-
-                inside_cavity = (z_bottom .< z_val) .& (z_val .< z_top)
-                if !all(inside_cavity)
-                    hits_SG += 1
-                    continue
-                end
-
-                # Post-SG pipe check
-                t_sweep_screen = range(t_out, t_screen, length=t_length)
-                xs = r0[1] .+ v0[1] .* t_sweep_screen
-                zs = CQDEqOfMotion_z.(t_sweep_screen, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
-
-                R_tube = 35e-3 / 2
-                if any(xs.^2 .+ zs.^2 .> R_tube^2)
-                    hits_post += 1
-                    continue
-                end
-
-                push!(thread_buffer, j)
-
-            catch err
-                @error "Thread $tid, particle $j crashed" exception=err
-            end
-        end
-
-        # Store per-thread result
-        sort!(thread_buffer)
-        good_particles_per_thread[tid][Int8(idx)] = thread_buffer
-
-        println("\t→ SG hits   = $hits_SG")
-        println("\t→ Pipe hits = $hits_post\n")
-    end
-
-
-    # Merge all thread-local dictionaries into a single Dict
-    good_particles = Dict{Int8, Vector{Int}}()
-    for d in good_particles_per_thread
-        for (k, v) in d
-            good_particles[k] = v
-        end
-    end
-    return good_particles
-
-end
-
-function find_bad_particles_ix(Ix, pairs)
+function find_bad_particles_ix(Ix, pairs, kx::Float64)
     No = size(pairs, 1)  # Number of particles
     ncurrents = length(Ix)
 
@@ -992,7 +818,7 @@ function find_bad_particles_ix(Ix, pairs)
                 end
 
                 t_sweep_sg = range(t_in, t_out, length=t_length)
-                z_val = CQDEqOfMotion_z.(t_sweep_sg, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
+                z_val = CQDEqOfMotion_z.(t_sweep_sg, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(kx))
                 z_top = z_magnet_edge_time.(t_sweep_sg, Ref(r0), Ref(v0))
                 z_bottom = z_magnet_trench_time.(t_sweep_sg, Ref(r0), Ref(v0))
 
@@ -1004,23 +830,12 @@ function find_bad_particles_ix(Ix, pairs)
                 end
 
                 # Post-SG pipe check
-                x_screen, _ ,  z_screen = CQD_Screen_position(i0, μₑ, r0, v0, θe0, θn0, ki)
+                x_screen, _ ,  z_screen = CQD_Screen_position(i0, μₑ, r0, v0, θe0, θn0, kx)
                 if x_screen^2 + z_screen^2 .>= R_tube^2
                     push!(local_bad_particles, j)
                     hits_post += 1 
                     continue
                 end
-
-
-                # t_sweep_screen = range(t_out, t_screen, length=t_length)
-                # xs = r0[1] .+ v0[1] .* t_sweep_screen
-                # zs = CQDEqOfMotion_z.(t_sweep_screen, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(ki))
-                # R_tube = 35e-3 / 2
-                # if any(xs.^2 .+ zs.^2 .> R_tube^2)
-                #     push!(local_bad_particles, j)
-                #     hits_post += 1
-                #     continue
-                # end
 
             catch err
                 @error "Thread $(Threads.threadid()), particle $j crashed" exception=err
@@ -1043,7 +858,7 @@ function find_bad_particles_ix(Ix, pairs)
     return bad_particles
 end
 
-function compute_screen_xyz( Ix::Vector, valid_up::OrderedDict, valid_dw::OrderedDict ) 
+function compute_screen_xyz( Ix::Vector, valid_up::OrderedDict, valid_dw::OrderedDict, kx::Float64) 
     screen_up = OrderedDict{Int64, Matrix{Float64}}()
     screen_dw = OrderedDict{Int64, Matrix{Float64}}()
 
@@ -1066,7 +881,7 @@ function compute_screen_xyz( Ix::Vector, valid_up::OrderedDict, valid_dw::Ordere
             v0  = SVector{3,Float64}(good_up[j, 4], good_up[j, 5], good_up[j, 6])
             θe0 = good_up[j, 7]
             θn0 = good_up[j, 8]
-            coords_up[j, :] = CQD_Screen_position(Ix[i], μₑ, r0, v0, θe0, θn0, ki)
+            coords_up[j, :] = CQD_Screen_position(Ix[i], μₑ, r0, v0, θe0, θn0, kx)
         end
 
         # Threads.@threads for j = 1:N_dw
@@ -1077,7 +892,7 @@ function compute_screen_xyz( Ix::Vector, valid_up::OrderedDict, valid_dw::Ordere
             v0  = SVector{3,Float64}(good_dw[j, 4], good_dw[j, 5], good_dw[j, 6])
             θe0 = good_dw[j, 7]
             θn0 = good_dw[j, 8]
-            coords_dw[j, :] = CQD_Screen_position(Ix[i], μₑ, r0, v0, θe0, θn0, ki)
+            coords_dw[j, :] = CQD_Screen_position(Ix[i], μₑ, r0, v0, θe0, θn0, kx)
         end
 
         screen_up[i] = coords_up
@@ -1112,109 +927,101 @@ function FD_histograms(data_list::Vector{Float64},Label::LaTeXString,color)
             xticks=PlottingTools.pitick(0, π, 8; mode=:latex),)
 end
 
-function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
-    # Extract velocity components from columns 4:6
-    velocities = sqrt.(sum(alive[:, 4:6].^2, dims=2))[:, 1]  # Vector of norms
-    theta_vals = acos.(alive[:, 6] ./ velocities)
-    phi_vals   = atan.(alive[:, 5], alive[:, 4])
+"""
+    plot_velocity_stats(alive::Matrix{Float64}, path_filename::AbstractString) -> Nothing
 
-    # Compute means
-    mean_v = mean(velocities)
-    rms_v  = sqrt(mean(velocities .^ 2))
-    mean_theta = mean(theta_vals)
-    mean_phi   = mean(phi_vals)
+    Generate and save a multi-panel figure showing velocity statistics, angular
+    distributions, and spatial distribution for a set of particles.
+
+    The figure includes:
+    1. Speed distribution with mean and RMS markers.
+    2. Distributions for velocity components (vx, vy, vz).
+    3. Polar (θ) and azimuthal (φ) velocity angle distributions with mean markers.
+    4. 2D histogram of initial positions (x, z) in mm and μm.
+
+    # Arguments
+    - `alive::Matrix{Float64}`: Particle data matrix with columns:
+        1. x-position (m)
+        2. y-position (m)
+        3. z-position (m)
+        4. vx-velocity (m/s)
+        5. vy-velocity (m/s)
+        6. vz-velocity (m/s)
+    - `path_filename::AbstractString`: Output file path for saving the figure.
+
+    # Notes
+    - Uses Freedman–Diaconis binning for all histograms.
+    - Plots are normalized to probability density.
+"""
+function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
+    @assert size(alive, 2) ≥ 6 "Expected at least 6 columns (x, y, z, vx, vy, vz)."
+
+    # --- Velocity magnitude and angles ---
+    vxs, vys, vzs = eachcol(alive[:, 4:6])
+    velocities = sqrt.(vxs.^2 .+ vys.^2 .+ vzs.^2)
+    theta_vals = acos.(vzs ./ velocities)       # polar angle
+    phi_vals   = atan.(vys, vxs)                 # azimuthal angle
+
+    # Means
+    mean_v, rms_v = mean(velocities), sqrt(mean(velocities.^2))
+    mean_theta, mean_phi = mean(theta_vals), mean(phi_vals)
+
 
     # Histogram for velocities
-    figa = histogram(
-        velocities,
+    figa = histogram(velocities;
         bins = FreedmanDiaconisBins(velocities),
-        label = L"$v_0$",
-        normalize = :pdf,
+        label = L"$v_0$", normalize = :pdf,
         xlabel = L"v_{0} \ (\mathrm{m/s})",
-        alpha = 0.70
-    );
-    vline!([mean_v], 
-        label = L"$\langle v_{0} \rangle = %$(round(mean_v, digits=1)) \mathrm{m/s}$",
-        line = (:black, :solid, 2),
-    );
-    vline!([rms_v], 
-        label = L"$\sqrt{\langle v_{0}^2 \rangle} = %$(round(rms_v, digits=1)) \mathrm{m/s}$",
-        line = (:red, :dash, 3)
-    );
+        alpha = 0.70,
+    )
+    vline!([mean_v], label = L"$\langle v_{0} \rangle = %$(round(mean_v, digits=1))\ \mathrm{m/s}$",
+           line = (:black, :solid, 2))
+    vline!([rms_v], label = L"$\sqrt{\langle v_{0}^2 \rangle} = %$(round(rms_v, digits=1))\ \mathrm{m/s}$",
+           line = (:red, :dash, 3))
 
-    # Histogram for theta (polar angle)
-    figb = histogram(
-        theta_vals,
+    figb = histogram(theta_vals;
         bins = FreedmanDiaconisBins(theta_vals),
-        label = L"$\theta_v$",
-        normalize = :pdf,
-        alpha = 0.70,
-        xlabel = L"$\theta_{v}$",
-    );
-    vline!([mean_theta], 
-        label = L"$\langle \theta_{v} \rangle = %$(round(mean_theta/π, digits=3))\pi$",
-        line = (:black, :solid, 2)
-    );
+        label = L"$\theta_v$", normalize = :pdf,
+        alpha = 0.70, xlabel = L"$\theta_{v}$"
+    )
+    vline!([mean_theta], label = L"$\langle \theta_{v} \rangle = %$(round(mean_theta/π, digits=3))\pi$",
+           line = (:black, :solid, 2))
 
-    # Histogram for phi (azimuthal angle)
-    figc = histogram(
-        phi_vals,
+    figc = histogram(phi_vals;
         bins = FreedmanDiaconisBins(phi_vals),
-        label = L"$\phi_v$",
-        normalize = :pdf,
-        alpha = 0.70,
-        xlabel = L"$\phi_{v}$",
-    );
-    vline!([mean_phi], 
-        label = L"$\langle \phi_{v} \rangle = %$(round(mean_phi/π, digits=3))\pi$",
-        line = (:black, :solid, 2)
-    );
+        label = L"$\phi_v$", normalize = :pdf,
+        alpha = 0.70, xlabel = L"$\phi_{v}$"
+    )
+    vline!([mean_phi], label = L"$\langle \phi_{v} \rangle = %$(round(mean_phi/π, digits=3))\pi$",
+           line = (:black, :solid, 2))
 
     # 2D Histogram of position (x, z)
-    xs = 1e3 .* alive[:, 1]
-    zs = 1e6 .* alive[:, 3]
-    figd = histogram2d(xs, zs,
+    # --- 2D position histogram ---
+    xs, zs = 1e3 .* alive[:, 1], 1e6 .* alive[:, 3]  # mm, μm
+    figd = histogram2d(xs, zs;
         bins = (FreedmanDiaconisBins(xs), FreedmanDiaconisBins(zs)),
-        show_empty_bins = true,
-        color = :plasma,
-        xlabel = L"$x \ (\mathrm{mm})$",
-        ylabel = L"$z \ (\mathrm{\mu m})$",
-        xticks = -1.0:0.25:1.0,
-        yticks = -50:10:50,
+        show_empty_bins = true, color = :plasma,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -1.0:0.25:1.0, yticks = -50:10:50,
         colorbar_position = :bottom,
-    );
+    )
 
-    # Histograms for velocity components
-    vxs = alive[:, 4]
-    vys = alive[:, 5]
-    vzs = alive[:, 6]
-
-    fige = histogram(vxs,
-        bins = FreedmanDiaconisBins(vxs),
-        normalize = :pdf,
-        label = L"$v_{0,x}$",
-        alpha = 0.65,
-        color = :orange,
-        xlabel = L"$v_{0,x} \ (\mathrm{m/s})$",
-    );
-
-    figf = histogram(vys,
-        bins = FreedmanDiaconisBins(vys),
-        normalize = :pdf,
-        label = L"$v_{0,y}$",
-        alpha = 0.65,
-        color = :blue,
-        xlabel = L"$v_{0,y} \ (\mathrm{m/s})$",
-    );
-
-    figg = histogram(vzs,
-        bins = FreedmanDiaconisBins(vzs),
-        normalize = :pdf,
-        label = L"$v_{0,z}$",
-        alpha = 0.65,
-        color = :red,
-        xlabel = L"$v_{0,z} \ (\mathrm{m/s})$",
-    );
+    # --- Velocity component histograms ---
+    fige = histogram(vxs;
+        bins = FreedmanDiaconisBins(vxs), normalize = :pdf,
+        label = L"$v_{0,x}$", alpha = 0.65, color = :orange,
+        xlabel = L"$v_{0,x} \ (\mathrm{m/s})$"
+    )
+    figf = histogram(vys;
+        bins = FreedmanDiaconisBins(vys), normalize = :pdf,
+        label = L"$v_{0,y}$", alpha = 0.65, color = :blue,
+        xlabel = L"$v_{0,y} \ (\mathrm{m/s})$"
+    )
+    figg = histogram(vzs;
+        bins = FreedmanDiaconisBins(vzs), normalize = :pdf,
+        label = L"$v_{0,z}$", alpha = 0.65, color = :red,
+        xlabel = L"$v_{0,z} \ (\mathrm{m/s})$"
+    )
 
     # Combine plots
     fig = plot(
@@ -1224,154 +1031,183 @@ function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
         legendfontsize = 8,
         left_margin = 3mm,
     );
-    display(fig)
+    savefig(fig, path_filename)
     
 
-    return savefig(fig, path_filename)
+    return fig
 end
 
-function plot_SG_geometry(path_filename::AbstractString)
-    # Assumes:
-    # - z_magnet_edge(x::Real)
-    # - z_magnet_trench(x::Real)
-    # - x_slit, z_slit (in meters)
+"""
+    plot_SG_geometry(path_filename::AbstractString) -> Nothing
 
-    local x_line = 1e-3*collect(range(-10,10,10001));
+    Plot the cross-sectional geometry of a Stern–Gerlach (SG) magnet slit and save it to file.
+
+    The plot shows:
+    - The rounded top edge of the magnet.
+    - The lower trench region.
+    - The rectangular slit opening.
+
+    # Arguments
+    - `path_filename::AbstractString`: Output file path for the saved plot (PDF, PNG, etc.).
+
+    # Assumptions
+    - The functions `z_magnet_edge(x::Real)` and `z_magnet_trench(x::Real)` are defined
+    and return vertical positions (in meters) of the magnet’s top and bottom surfaces
+    for a given horizontal position `x`.
+    - Global constants `x_slit` and `z_slit` (in meters) define the slit’s width and height.
+
+    # Units
+    - All distances in the plot are shown in millimeters.
+"""
+function plot_SG_geometry(path_filename::AbstractString)
+    @assert isdefined(Main, :z_magnet_edge) "Function `z_magnet_edge` must be defined."
+    @assert isdefined(Main, :z_magnet_trench) "Function `z_magnet_trench` must be defined."
+    @assert isdefined(Main, :x_slit) && isdefined(Main, :z_slit) "Global `x_slit` and `z_slit` must be defined."
+
+    # x positions for evaluation (in meters)
+    x_line = 1e-3 .* collect(range(-10, 10, length=10_001))
+
+    # Base figure
     fig = plot(
-        xlabel=L"$x \ (\mathrm{mm})$",
-        xlim = (-8, 8),
-        xticks = -8:2:8,
-        ylabel=L"$y \ (\mathrm{mm})$",
-        ylim = (-3, 7),
-        yticks = -3:1:7,
+        xlabel = L"$x \ (\mathrm{mm})$",
+        xlim = (-8, 8), xticks = -8:2:8,
+        ylabel = L"$y \ (\mathrm{mm})$",
+        ylim = (-3, 7), yticks = -3:1:7,
         aspect_ratio = :equal,
         legend = :bottomright,
         title = "Stern–Gerlach Slit Geometry"
-    );
+    )
 
-    # Convert to mm
+    # Top magnet edge shape
     x_fill = 1e3 .* x_line
     y_edge = 1e3 .* z_magnet_edge.(x_line)
-    y_top = fill(10.0, length(x_fill))
+    y_top  = fill(10.0, length(x_fill))
+    plot!(fig, [x_fill; reverse(x_fill)], [y_edge; reverse(y_top)];
+        seriestype = :shape, label = "Rounded edge",
+        color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
+    )
 
-    plot!(
-        fig,
-        [x_fill; reverse(x_fill)],
-        [y_edge; reverse(y_top)],
-        seriestype = :shape,
-        label = "Rounded edge",
-        color = :grey36,
-        line = (:solid, :grey36),
-        fillalpha = 0.75
-    );
-
+    # Bottom trench shape
     y_trench = 1e3 .* z_magnet_trench.(x_line)
     y_bottom = fill(-10.0, length(x_fill))
+    plot!(fig, [x_fill; reverse(x_fill)], [y_bottom; reverse(y_trench)];
+        seriestype = :shape, label = "Trench",
+        color = :grey60, line = (:solid, :grey60), fillalpha = 0.75
+    )
 
-    plot!(
-        fig,
-        [x_fill; reverse(x_fill)],
-        [y_bottom; reverse(y_trench)],
-        seriestype = :shape,
-        color = :grey60,
-        line = (:solid, :grey60),
-        label = "Trench",
-        fillalpha = 0.75
-    );
-
-    # Slit rectangle (assumes x_slit and z_slit are global)
-    plot!(
-        fig,
+    # Slit rectangle
+    plot!(fig,
         1e3 .* 0.5 .* [-x_slit, -x_slit, x_slit, x_slit, -x_slit],
-        1e3 .* 0.5 .* [-z_slit, z_slit, z_slit, -z_slit, -z_slit],
-        label = "Slit",
-        seriestype = :shape,
-        line = (:solid, :red, 1),
-        color = :red,
-        fillalpha = 0.2
-    );
+        1e3 .* 0.5 .* [-z_slit,  z_slit,  z_slit, -z_slit, -z_slit];
+        seriestype = :shape, label = "Slit",
+        line = (:solid, :red, 1), color = :red, fillalpha = 0.2
+    )
 
-    # Save and show
-    # display(fig)
+    savefig(fig, path_filename)
     
-    return savefig(fig, path_filename)
+    return nothing
 end
 
+"""
+    plot_SG_magneticfield(path_filename::AbstractString) -> Nothing
+
+    Plot magnetic field properties of the Stern–Gerlach apparatus and save the result.
+
+    The figure contains three vertically stacked panels:
+    1. Magnetic field gradient vs coil current, with experimental data and fitted model.
+    2. Magnetic field B_z vs coil current, with experimental data and fitted model.
+    3. B_z vs gradient, using the model curves.
+
+    # Arguments
+    - `path_filename::AbstractString`: Output path for saving the figure (PNG, PDF, etc.).
+
+    # Assumptions
+    The following must be defined in the current scope:
+    - `GradCurrents`, `GradGradient`: experimental gradient data vs current.
+    - `GvsI(current::AbstractVector)`: function returning model gradient vs current.
+    - `Bdata.dI`, `Bdata.Bz`: experimental B-field data vs current.
+    - `BvsI(current::AbstractVector)`: function returning model B-field vs current.
+"""
 function plot_SG_magneticfield(path_filename::AbstractString)
-    # Assumes the following are available in scope:
-    # - GradCurrents, GradGradient
-    # - GvsI(current::AbstractVector)
-    # - Bdata.dI, Bdata.Bz
-    # - BvsI(current::AbstractVector)
+    @assert isdefined(Main, :GradCurrents) && isdefined(Main, :GradGradient) "Missing gradient data."
+    @assert isdefined(Main, :GvsI) && isdefined(Main, :BvsI) "Missing model functions."
+    @assert isdefined(Main, :Bdata) "Missing B-field experimental data."
 
-    local icoils = collect(range(1e-6, 1.05, 10000))
+    icoils = collect(range(1e-6, 1.05, length=10_000))
 
-    # Panel 1: Gradient data vs current
-    fig1a = plot(
-        GradCurrents, GradGradient,
-        seriestype = :scatter,
-        marker = (:circle, :black, 2),
-        label = false,
-        xlabel = "Coil Current (A)",
+    # Panel 1: Gradient vs current
+    fig1a = plot(GradCurrents, GradGradient;
+        seriestype = :scatter, marker = (:circle, :black, 2),
+        label = false, xlabel = "Coil Current (A)",
         ylabel = "Magnetic field gradient (T/m)",
         yticks = 0:50:350
-    );
-    plot!(
-        fig1a,
-        icoils, GvsI(icoils),
-        line = (:red, 2),
-        label = L"$\partial_{z}B_{z}$"
-    );
+    )
+    plot!(fig1a, icoils, GvsI(icoils);
+        line = (:red, 2), label = L"$\partial_{z}B_{z}$"
+    )
 
-    # Panel 2: B field vs current
-    fig1b = plot(
-        Bdata.dI, Bdata.Bz,
-        seriestype = :scatter,
-        marker = (:circle, :black, 2),
-        label = false,
-        xlabel = "Coil Current (A)",
+    # Panel 2: B-field vs current
+    fig1b = plot(Bdata.dI, Bdata.Bz;
+        seriestype = :scatter, marker = (:circle, :black, 2),
+        label = false, xlabel = "Coil Current (A)",
         ylabel = "Magnetic field (T)",
         yticks = 0:0.1:1.0
-    );
-    plot!(
-        fig1b,
-        icoils, BvsI(icoils),
-        line = (:orange, 2),
-        label = L"$B_{z}$"
-    );
+    )
+    plot!(fig1b, icoils, BvsI(icoils);
+        line = (:orange, 2), label = L"$B_{z}$"
+    )
 
-    # Panel 3: B vs gradient
-    fig1c = plot(
-        GvsI(icoils), BvsI(icoils),
-        label = false,
-        line = (:blue, 2),
+    # Panel 3: B-field vs gradient
+    fig1c = plot(GvsI(icoils), BvsI(icoils);
+        label = false, line = (:blue, 2),
         xlabel = "Magnetic field gradient (T/m)",
         ylabel = "Magnetic field (T)",
-        ylims = (0, 0.8),
-        xticks = 0:50:350,
-        yticks = 0:0.1:1.0
-    );
+        ylims = (0, 0.8), xticks = 0:50:350, yticks = 0:0.1:1.0
+    )
 
-    # Compose layout
-    fig1 = plot(
-        fig1a, fig1b, fig1c,
+    # Layout
+    fig = plot(fig1a, fig1b, fig1c;
         layout = @layout([a1; a2; a3]),
         size = (400, 700),
-        plot_title = "Magnetic field in the Stern--Gerlach apparatus",
-        plot_titlefontsize = 10,
+        plot_title = "Magnetic field in the Stern–Gerlach apparatus",
+        plot_titlefont = font(10, "Computer Modern"),
         guidefont = font(8, "Computer Modern"),
-        link = :none,
-        left_margin = 5mm,
-        bottom_margin = 0mm,
-        right_margin = 0mm
-    );
+        left_margin = 5mm, bottom_margin = 0mm, right_margin = 0mm
+    )
 
-    # Save and show
-    # display(fig1)
-    
-    return savefig(fig1, path_filename)
+    savefig(fig, path_filename)
+    return nothing
 end
 
+"""
+    plot_ueff(II, path_filename::AbstractString) -> Plot
+
+    Plot the effective magnetic moment μ_F/μ_B versus coil current for all hyperfine
+    levels (F, m_F) of a spin-I system, and annotate the magnetic crossing point.
+
+    # Arguments
+    - `II`: Nuclear spin quantum number (e.g., 3/2, 4, etc.).
+    - `path_filename::AbstractString`: Output file path for saving the figure.
+
+    # Behavior
+    - Computes and plots μ_F/μ_B curves for all (F, m_F) states using `μF_effective`.
+    - Uses solid lines for most F = I + 1/2 states, a dashed line for the lowest m_F
+    in F = I + 1/2, and dashed lines for all F = I – 1/2 states.
+    - Colors each curve using the `:phase` palette.
+    - Finds the magnetic crossing current `I₀` by solving `BvsI(I) = …` and annotates
+    the plot with:
+        - I₀ in A
+        - ∂ₓBₓ at I₀ in T/m
+        - B_z at I₀ in mT
+    - Plots current on a logarithmic x-axis.
+
+    # Returns
+    - The `Plots.Plot` object for the generated figure.
+
+    # Notes
+    - Requires `μF_effective`, `μB`, `BvsI`, `GvsI`, `ħ`, `Ahfs`, `Ispin`,
+    `γₙ`, and `γₑ` to be defined in scope.
+"""
 function plot_ueff(II,path_filename::AbstractString)
     F_up = II + 0.5
     mf_up = collect(F_up:-1:-F_up)
@@ -1416,36 +1252,65 @@ function plot_ueff(II,path_filename::AbstractString)
      $B_{z} = %$(round(1e3 * BvsI(bcrossing), digits=3))\,\mathrm{mT}$"
     vline!([bcrossing], line=(:black, :dot, 2), label=label_text,xaxis = :log10,);
     
-    # display(fig)
+    savefig(fig, path_filename)
     
-    return savefig(fig, path_filename)
+    return nothing
 end
 
+"""
+    plot_polar_stats(Ix, data_up, data_dw, path_filename) -> Plot
+
+    Generate a 2×2 grid of histograms showing electron (θₑ) and nuclear (θₙ) polar angle
+    distributions for a randomly chosen coil current from `Ix`. The top row shows "up"
+    spin data, and the bottom row shows "down" spin data, with electron angles in the
+    left column and nuclear angles in the right column. Tick numbers are hidden on the
+    top row’s x-axes and the right column’s y-axes. The figure is saved to `path_filename`
+    and returned as a `Plots.Plot` object.
+
+    # Arguments
+    - `Ix::Vector{Float64}`: Coil current values in amperes.
+    - `data_up`: Collection of 2D arrays for "up" spin data (≥8 columns).
+    - `data_dw`: Collection of 2D arrays for "down" spin data (≥8 columns).
+    - `path_filename::AbstractString`: Output path for saving the figure.
+"""
 function plot_polar_stats(Ix::Vector{Float64}, data_up, data_dw, path_filename::AbstractString)
-    nx = length(Ix)
-    idxi0 = rand(1:nx)
-    fig4a = FD_histograms(data_up[idxi0][:,7], L"\theta_{e}", :dodgerblue);
-    fig4b = FD_histograms(data_up[idxi0][:,8], L"\theta_{n}", :red);
-    fig4c = FD_histograms(data_dw[idxi0][:,7], L"\theta_{e}", :dodgerblue);
-    fig4d = FD_histograms(data_dw[idxi0][:,8], L"\theta_{n}", :red);
+    @assert !isempty(Ix) "Ix is empty."
+    @assert length(data_up) == length(Ix) "data_up length must match Ix."
+    @assert length(data_dw) == length(Ix) "data_dw length must match Ix."
+
+    idxi0 = rand(1:length(Ix))
+    up = data_up[idxi0]
+    dw = data_dw[idxi0]
+    @assert ndims(up) == 2 && size(up,2) ≥ 8 "data_up[idxi0] must be a 2D array with ≥ 8 columns."
+    @assert ndims(dw) == 2 && size(dw,2) ≥ 8 "data_dw[idxi0] must be a 2D array with ≥ 8 columns."
+
+    # FD_histograms should return a Plots.Plot
+    figa = FD_histograms(up[:,7], L"\theta_{e}", :dodgerblue)
+    figb = FD_histograms(up[:,8], L"\theta_{n}", :red)
+    figc = FD_histograms(dw[:,7], L"\theta_{e}", :dodgerblue)
+    figd = FD_histograms(dw[:,8], L"\theta_{n}", :red)
     
-    fig4 = plot(fig4a, fig4b, fig4c, fig4d,
+    fig = plot(figa, figb, figc, figd,
         layout = @layout([a1 a2 ; a3 a4]),
         size = (600, 600),
         plot_title = L"Initial polar angles for $I_{c}= %$(Ix[idxi0]) \mathrm{A}$",
         plot_titlefontsize = 10,
         guidefont = font(8, "Computer Modern"),
-        link = :xy,
+        link = :both,
         left_margin = 5mm, bottom_margin = 0mm, right_margin = 0mm,
     );
-    
-    plot!(fig4[1], xticks = (xticks(fig4[1])[1], []), xlabel = "", bottom_margin = -5mm);
-    plot!(fig4[2], xticks = (xticks(fig4[2])[1], []), yticks = (yticks(fig4[2])[1], []), xlabel = "", bottom_margin = -5mm, left_margin = -5mm);
-    plot!(fig4[4], yticks = (yticks(fig4[4])[1], fill("", length(yticks(fig4[4])[1]))), ylabel = "", left_margin = -5mm);
-    
-    # display(fig4)
+
+    # Remove x-axis numbers from top row
+    plot!(fig[1]; xticks=(xticks(fig[1])[1], fill("", length(xticks(fig[1])[1]))), xlabel="",bottom_margin=-5mm)
+    plot!(fig[2]; xticks=(xticks(fig[2])[1], fill("", length(xticks(fig[2])[1]))), xlabel="",bottom_margin=-5mm)
+
+    # Remove y-axis numbers from right column
+    plot!(fig[2]; yticks=(yticks(fig[2])[1], fill("", length(yticks(fig[2])[1]))), ylabel="", left_margin=-5mm)
+    plot!(fig[4]; yticks=(yticks(fig[4])[1], fill("", length(yticks(fig[4])[1]))), ylabel="", left_margin=-5mm)
+
+    savefig(fig,  path_filename)
         
-    return savefig(fig4,  path_filename)
+    return fig
 end
 
 function get_valid_particles_per_current(pairs, bad_particles_dict)
@@ -1628,8 +1493,8 @@ end
     - Intended for integration into workflows that analyze many currents in
     sequence.
 """
-function analyze_screen_profile(Ix, data_mm::AbstractMatrix;
-    n_bins::Integer = 2, width_mm::Float64 = 0.1, add_plot::Bool = false, λ_raw::Float64=0.01, λ_smooth::Float64 = 1e-3)
+function analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
+    m_mom::Symbol = :up, n_bins::Integer = 2, width_mm::Float64 = 0.1, add_plot::Bool = false, λ_raw::Float64=0.01, λ_smooth::Float64 = 1e-3)
 
     @assert size(data_mm,2) == 2 "data_mm must be N×2 (columns: x,z in mm)"
     @assert n_bins > 0 "n_bins must be > 0"
@@ -1689,11 +1554,12 @@ function analyze_screen_profile(Ix, data_mm::AbstractMatrix;
 
         # Profiles
         z = range(zmin,zmax,length=max(2000,length(centers_z)))
+        xlims_plot = m_mom == :up ? (zmin/4, zmax) : m_mom == :dw ? (zmin, zmax/4) : (zmin, zmax)
         fig=plot(       
             title =L"$I_{c}=%$(Ix)\mathrm{A}$",
             xlabel = L"$z$ (mm)", 
             ylabel = "mean counts (au)",
-            xlims = (zmin/4, zmax),
+            xlims = xlims_plot,
         );
         plot!(z_profile[:, 1], z_profile[:, 2], 
             label = L"Raw $z=%$(round(z_max_raw_mm,digits=4))\mathrm{mm}$",
@@ -1729,7 +1595,7 @@ function analyze_screen_profile(Ix, data_mm::AbstractMatrix;
             label=false,
             line=(:blue,:solid,1)
         );
-        # display(fig)
+        savefig(fig, joinpath(dir_path, "profiles_"*replace(@sprintf("%d", 1e3*Ix), "." => "")*"uA.png"))
     end
 
     return (
@@ -1792,7 +1658,7 @@ end
     `Dict{Float64, ...}` and set `out[Icoils[i]] = inner`.
 """
 function analyze_profiles_to_dict(Icoils::AbstractVector, screen_up::AbstractDict{<:Integer,<:AbstractMatrix};
-    n_bins::Integer = 2, width_mm::Float64 = 0.1, add_plot::Bool = false,
+    m_mom::Symbol = :up, n_bins::Integer = 2, width_mm::Float64 = 0.1, add_plot::Bool = false,
     λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, store_profiles::Bool = true,)
 
     @assert length(Icoils) == length(screen_up)
@@ -1807,6 +1673,7 @@ function analyze_profiles_to_dict(Icoils::AbstractVector, screen_up::AbstractDic
         res = analyze_screen_profile(
             Icoils[i],
             data_mm;
+            m_mom=m_mom,
             n_bins=n_bins,
             width_mm=width_mm,
             add_plot=add_plot,
@@ -1829,17 +1696,23 @@ function analyze_profiles_to_dict(Icoils::AbstractVector, screen_up::AbstractDic
     return out
 end
 
-
-save_fig = false
+save_fig = true
 if save_fig == true
     plot_SG_geometry(joinpath(dir_path, "slit.png"));
     plot_SG_magneticfield(joinpath(dir_path, "SG_magneticfield.png"));
     plot_ueff(Ispin,joinpath(dir_path, "mu_effective.png"));
 end
 
+
+
+# Sample size: number of atoms arriving to the screen
+const Nss = 15000
+
 # Monte Carlo generation
 alive_slit = generate_samples(Nss, fbp; rng = rng_set, multithreaded = true, base_seed = base_seed_set);
-save_fig && plot_velocity_stats(alive_slit, joinpath(dir_path, "init_vel_stats.png"));
+if save_fig
+    display(plot_velocity_stats(alive_slit, joinpath(dir_path, "init_vel_stats.png")))
+end
 
 θesUP, θnsUP, θesDOWN, θnsDOWN = generate_matched_pairs(Nss);
 pairs_UP = build_init_cond(alive_slit, θesUP, θnsUP);
@@ -1848,27 +1721,29 @@ pairs_DOWN = build_init_cond(alive_slit, θesDOWN, θnsDOWN);
 θesUP = θnsUP = θesDOWN = θnsDOWN = alive_slit = nothing
 GC.gc()
 
-ki = 2.1e-6
-bad_particles_up = find_bad_particles_ix(Icoils, pairs_UP)
-bad_particles_dw = find_bad_particles_ix(Icoils, pairs_DOWN)
+ki = 3.96e-6
 
+bad_particles_up = find_bad_particles_ix(Icoils, pairs_UP, ki)
 bad_particles_up = OrderedDict(sort(collect(bad_particles_up); by=first))
-bad_particles_dw = OrderedDict(sort(collect(bad_particles_dw); by=first))
-
-println("Particles with final θₑ=0")
-for (i0, indices) in bad_particles_up
-    println("Current $(@sprintf("%.3f", Icoils[i0]))A \t→   Good particles: ", Nss-length(indices))
-end
-println("Particles with final θₑ=π")
-for (i0, indices) in bad_particles_dw
-    println("Current $(@sprintf("%.3f", Icoils[i0]))A \t→   Good particles: ", Nss-length(indices))
-end
 
 valid_up = get_valid_particles_per_current(pairs_UP,   bad_particles_up)
-valid_dw = get_valid_particles_per_current(pairs_DOWN, bad_particles_dw)
+# println("Particles with final θₑ=0")
+# for (i0, content) in valid_up
+#     println("Current $(@sprintf("%.3f", Icoils[i0]))A \t→   Good particles: ", size(content,1))
+# end
 pairs_UP = bad_particles_up =nothing
+
+bad_particles_dw = find_bad_particles_ix(Icoils, pairs_DOWN, ki)
+bad_particles_dw = OrderedDict(sort(collect(bad_particles_dw); by=first))
+
+valid_dw = get_valid_particles_per_current(pairs_DOWN, bad_particles_dw)
+# println("Particles with final θₑ=0")
+# for (i0, content) in valid_dw
+#     println("Current $(@sprintf("%.3f", Icoils[i0]))A \t→   Good particles: ", size(content,1))
+# end
 pairs_DOWN = bad_particles_dw = nothing
-# GC.gc()
+
+GC.gc()
 
 println("Minimum number of valid particles for up-spin: $(minimum(size(valid_up[v],1) for v in eachindex(Icoils)))")
 println("Minimum number of valid particles for down-spin: $(minimum(size(valid_dw[v],1) for v in eachindex(Icoils)))")
@@ -1945,21 +1820,105 @@ println("Minimum number of valid particles for down-spin: $(minimum(size(valid_d
 # valid_dw = combine_valid_data(data_path; spin = :dw)
 # ########################################################################################################################
 
+if save_fig
+    display(plot_polar_stats(Icoils, valid_up, valid_dw, joinpath(dir_path, "polar_stats.png")))
+end
 
-save_fig && plot_polar_stats(Icoils, valid_up, valid_dw, joinpath(dir_path, "polar_stats.png"))
+screen_up, screen_dw = compute_screen_xyz(Icoils, valid_up, valid_dw, ki);
 
-screen_up, screen_dw = compute_screen_xyz(Icoils, valid_up, valid_dw);
-
-results = analyze_profiles_to_dict(
+results_up = analyze_profiles_to_dict(
     Icoils, screen_up;
-    n_bins=1, width_mm=0.10, add_plot=false, λ_raw=0.01, λ_smooth=1e-3,
+    m_mom=:up,
+    n_bins=1, width_mm=0.10, add_plot=true, λ_raw=0.01, λ_smooth=1e-3,
+    store_profiles=true
+)
+
+results_dw = analyze_profiles_to_dict(
+    Icoils, screen_dw;
+    m_mom=:dw,
+    n_bins=1, width_mm=0.10, add_plot=true, λ_raw=0.01, λ_smooth=1e-3,
     store_profiles=true
 )
 
 @save joinpath(dir_path, "zpeak_up.jld2") results
 
-Float64(results[1][:z_max_smooth_mm])
+data_comparison = zeros(Float64,nI,8)
+for i=1:nI
+    data_comparison[i,:] = [results_up[i][:z_max_raw_mm] , 
+                            results_up[i][:z_max_raw_spline_mm], 
+                            results_up[i][:z_max_smooth_mm] , 
+                            results_up[i][:z_max_smooth_spline_mm],
+                            results_dw[i][:z_max_raw_mm] , 
+                            results_dw[i][:z_max_raw_spline_mm], 
+                            results_dw[i][:z_max_smooth_mm] , 
+                            results_dw[i][:z_max_smooth_spline_mm]
+                            ]
+end
 
+data_centroid = (data_comparison[:,1:4] .+ data_comparison[:,5:8])/2
+centroid_mean = mean(data_centroid, Weights(0:nI-1), dims=1)
+centroid_std = permutedims(std.(eachcol(data_centroid), Ref(Weights(0:nI-1)))) ./ sqrt(nI)
+
+
+plot(Icoils, abs.(data_comparison[:,1]), label="Raw (px)")
+plot!(Icoils, data_comparison[:,2], label="Raw Spline (sub px)")
+plot!(Icoils, data_comparison[:,3], label="Smoothed (px)")
+plot!(Icoils, data_comparison[:,4], label="Smoothed Spline (sub px)")
+# plot!(Icoils, data_comparison[:,5], label="Raw (px)")
+# plot!(Icoils, data_comparison[:,6], label="Raw Spline (sub px)")
+# plot!(Icoils, data_comparison[:,7], label="Smoothed (px)")
+# plot!(Icoils, data_comparison[:,8], label="Smoothed Spline (sub px)")
+plot!(
+    yaxis=(:log10, L"$z_{\mathrm{max}} \ (\mathrm{mm})$"),
+    xaxis = (:log10, L"$I_{0} \ (\mathrm{A})$"),
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+              [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+
+)
+
+
+
+
+
+
+
+rand_maxwell_chi(a, No; rng=rng_set) = a .* rand(rng, Chi(3), No)
+
+rand_maxwell_gamma(a, No; rng=rng_set) = begin
+    G = rand(rng, Gamma(3/2,1.0), No)
+    a .* sqrt.(2 .* G)
+end
+
+arth=rand_maxwell_gamma(sqrt(kb*T/M), 80000000)
+mean(arth)
+
+histogram(rand_maxwell_gamma(sqrt(kb*T/M), 100000))
+
+2*sqrt(2/π)*sqrt(kb*T/M)
+2+2
+
+
+# interpolation on the high current and low currents profiles for different velocity groups
+# seek the function for the convlution low and high currents
+# share with arthur peak position for f1 and f2: centroid folded and peak positions :::: DONE
+# contact arthur for keep track of his codes : github compatible 
+# experimental comparison symmetric f1 and f2 ::::
+# include peak heights and compare ratios for the simulations
+# process new data
+
+
+
+
+
+
+
+
+
+
+
+n_bins
 
 throw(error("valimos"))
 # Example access:
@@ -2045,6 +2004,25 @@ plot!(centers_z, smoothed_pdf)
 
 
 error("does it work?")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
