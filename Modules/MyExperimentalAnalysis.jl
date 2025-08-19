@@ -884,7 +884,7 @@ module MyExperimentalAnalysis
         z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
 
         # Determine max number of frames across currents
-	    n_runs_max = maximum(size(Float64.(data[:F1ProcessedImages][:,:,:,i]), 3) for i in 1:nI)
+	    n_runs_max = maximum(size(Float64.(data[signal_label][:,:,:,i]), 3) for i in 1:nI)
         max_position_data = fill(NaN, n_runs_max, nI)  # (n_runs_max × nI)
 
         @info "Processing per-frame maxima" signal_label=signal_label
@@ -977,6 +977,143 @@ module MyExperimentalAnalysis
         return max_position_data
     end
 
+    function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_max=false, λ0::Float64=0.01)
+        I_current = vec(data["Currents"])
+        nI = length(I_current)
+        
+        # Validate signal_key
+        signal_label = signal_key == "F1" ? "F1ProcessedImages" :
+                    signal_key == "F2" ? "F2ProcessedImages" :
+                    error("Invalid signal_key: choose 'F1' or 'F2'")
+        @info "Processing mean maxima" signal_label=signal_label
+
+        # Precompute z-axes (mm)
+        z_full_mm   = 1e3 .* pixel_positions(z_pixels, 1,  effective_cam_pixelsize_z)
+        z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
+
+        peak_positions = zeros(Float64,nI)
+
+        for j in 1:nI
+            # --- Load stack (Nx × Nz × Nframes at j-th current)
+            stack = Float64.(data[signal_label][:,:,:, j])
+            n_frames = size(stack, 3) # Number of frames in the signal
+
+            # --- Per-frame z-profiles (mean over x → 1×Nz, then vec)
+            frame_profiles = [vec(mean(stack[:, :, i, j], dims=1)) for i in 1:n_frames]
+            frame_profiles_mat = reduce(hcat, frame_profiles)'  # (Nframes × Nz)
+
+            # --- Mean profile over all frames and x
+            mean_over_frames = mean(stack, dims=3)                # (Nx × Nz × 1)
+            mean_over_frames = dropdims(mean_over_frames; dims=3) # (Nx × Nz)
+            # --- Mean profile over x : overall mean signal
+            mean_profile = mean(mean_over_frames, dims=1)         # (1 × Nz)
+            mean_profile = vec(mean_profile)                      # (Nz)
+
+            # --- Bin along z by reshaping and averaging
+            @assert length(mean_profile) % n_bins == 0 "Signal length not divisible by n_bins"
+            binned           = reshape(mean_profile, n_bins, :)
+            processed_signal = vec(mean(binned, dims=1))           # (Nz / n_bins)
+
+            # --- Optional half-maximum window
+            z_fit = z_binned_mm
+            y_fit = processed_signal
+            if half_max
+                ymax    = maximum(y_fit)
+                keep_ix = findall(yi -> yi > ymax/2, y_fit)
+                z_fit   = z_fit[keep_ix]
+                y_fit   = y_fit[keep_ix]
+            end
+
+            # --- Spline fit (cubic) on (z_fit, y_fit)
+            S_fit = BSplineKit.fit(BSplineOrder(4), z_fit, y_fit, λ0; weights=compute_weights(z_fit, λ0))
+
+            # --- Maxima via minimizing negative spline from multiple guesses
+            negative_spline(x) = -S_fit(x[1])
+            initial_guesses = sort([
+                ceil(minimum(z_fit)),
+                quantile(z_fit, 0.40),
+                z_fit[argmax(y_fit)],
+                quantile(z_fit, 0.65),
+                quantile(z_fit, 0.75),
+                quantile(z_fit, 0.90),
+                floor(maximum(z_fit)),
+            ])
+
+            minima_candidates = Float64[]
+            for g in initial_guesses
+                res = optimize(negative_spline, [minimum(z_fit)], [maximum(z_fit)], [g], Fminbox(LBFGS()))
+                push!(minima_candidates, Optim.minimizer(res)[1])
+            end
+            sort!(minima_candidates)
+            filtered = [minima_candidates[1]]
+            for m in minima_candidates[2:end]
+                if all(abs(m - x) > 1.0e-9 for x in filtered)
+                    push!(filtered, m)
+                end
+            end
+
+            vals   = -S_fit.(filtered)
+            order  = sortperm(vals)
+            maxima = filtered[order]
+
+            # Store primary peak (mm)
+            peak_positions[j] = maxima[1]
+
+            # --- Plots
+            fig_raw = plot(
+                xlabel=L"$z$ (mm)", ylabel="Intensity (a.u.)",
+                title=L"%$(signal_key) Raw: $I_c = %$(round(I_current[j], digits=3))\ \mathrm{mA}$",
+            )
+            cols = palette(:phase, n_frames)
+            for i in 1:n_frames
+                plot!(fig_raw, z_full_mm, frame_profiles_mat[i, :], label=false, line=(:dot, cols[i], 1))
+            end
+            plot!(fig_raw, z_binned_mm, processed_signal, label="mean (bins=$(n_bins))", line=(:solid, :black, 2))
+
+            fig_fit = plot(
+                z_fit, y_fit,
+                seriestype=:scatter, marker=(:circle,:white, 2), markerstrokecolor=:gray36, markerstrokewidth=0.8,
+                xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
+                title=L"%$(signal_key) Processed: $I_c = %$(round(I_current[j], digits=3))\ \mathrm{mA}$",
+                label="$(signal_key) processed", legend=:topleft,
+            )
+            xs = collect(range(minimum(z_fit), maximum(z_fit), length=2000))
+            plot!(fig_fit, xs, S_fit.(xs), line=(:solid, :red, 2), label="Spline fit")
+            vline!(fig_fit, [maxima[1]], line=(:dash, :black, 1), label=L"$z_{\max}=%$(round(maxima[1], digits=3))\ \mathrm{mm}$")
+
+            fig = plot(fig_raw, fig_fit; layout=@layout([a b]), size=(900, 400), left_margin=3mm, bottom_margin=3mm)
+            display(fig)
+            if _has(:SAVE_FIG)
+                saveplot(fig, "m_$(signal_key)_I$(@sprintf("%02d", j))")
+            end
+        end
+
+        return peak_positions
+    end
+
+    function build_processed_dict(raw_data::OrderedDict{Symbol,Any},
+                              DK::AbstractMatrix, FL::AbstractMatrix;
+                              T = Float32, epsval = T(1e-12))
+
+    # Per-pixel flat field, clamp to avoid zeros
+    flat = max.(T.(FL) .- T.(DK), epsval)
+    flat4 = reshape(flat, size(flat,1), size(flat,2), 1, 1)  # expand to 4D
+
+    # Promote to Float32 once
+    F1 = T.(raw_data[:F1_data])
+    F2 = T.(raw_data[:F2_data])
+    BG = T.(raw_data[:BG_data])
+
+    # Background subtract then flat-field correct
+    F1proc = (F1 .- BG) ./ flat4
+    F2proc = (F2 .- BG) ./ flat4
+
+    return OrderedDict(
+        :Currents            => raw_data[:Currents],
+        :F1ProcessedImages   => F1proc,   # size: 540×2560×30×25
+        :F2ProcessedImages   => F2proc,   # size: 540×2560×30×25
+    )
+end
 
     # Public API
     export saveplot, 
@@ -992,6 +1129,7 @@ module MyExperimentalAnalysis
            summarize_framewise,
            stack_data,
            bin_x_mean,
-           my_process_framewise_maxima
+           my_process_framewise_maxima,
+           build_processed_dict
 
 end

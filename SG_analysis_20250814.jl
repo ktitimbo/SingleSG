@@ -16,8 +16,6 @@ Plots.default(
     show=IN_NOTEBOOK, dpi=800, fontfamily="Computer Modern", 
     grid=true, minorgrid=true, framestyle=:box, widen=true,
 )
-FIG_EXT = "png"   # could be "pdf", "svg", etc.
-SAVE_FIG = false
 using Plots.PlotMeasures
 # Data I/O and numerical tools
 using MAT, JLD2
@@ -45,7 +43,9 @@ isdir(OUTDIR) || mkpath(OUTDIR);
 # General setup
 hostname = gethostname();
 @info "Running on host" hostname=hostname
-
+# For Plots
+FIG_EXT = "png"   # could be "pdf", "svg", etc.
+SAVE_FIG = false
 MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 MyExperimentalAnalysis.OUTDIR   = OUTDIR;
@@ -67,26 +67,38 @@ data_JSF = OrderedDict(
 
 # STERN–GERLACH EXPERIMENT SETUP
 # Camera and pixel geometry : intrinsic properties
-cam_pixelsize = 6.5e-6 ;            # Physical pixel size of camera [m]
-nx_pixels , nz_pixels= (2160, 2560);
+cam_pixelsize = 6.5e-6 ;  # Physical pixel size of camera [m]
+nx_pixels , nz_pixels= (2160, 2560); # (Nx,Nz) pixels
+magnification_factor = 1.3 ;
 # Experiment resolution
 exp_bin_x, exp_bin_z = (4,1) ;  # Camera binning
-exp_pixelsize_x, exp_pixelsize_z = (exp_bin_x, exp_bin_z).*cam_pixelsize  # Effective pixel size after binning [m]
+exp_pixelsize_x, exp_pixelsize_z = (exp_bin_x, exp_bin_z).*cam_pixelsize ; # Effective pixel size after binning [m]
 # Image dimensions (adjusted for binning)
 x_pixels = Int(nx_pixels / exp_bin_x);  # Number of x-pixels after binning
 z_pixels = Int(nz_pixels / exp_bin_z);  # Number of z-pixels after binning
+# Spatial axes shifted to center the pixels
+x_position = pixel_positions(x_pixels, 1, exp_pixelsize_x)
+z_position = pixel_positions(z_pixels, 1, exp_pixelsize_z)
+println("""
+***************************************************
+CAMERA FEATURES
+    Number of pixels        : $(nx_pixels) × $(nz_pixels)
+    Pixel size              : $(1e6*cam_pixelsize) μm
+
+IMAGES INFORMATION
+    Magnification factor    : $magnification_factor
+    Binning                 : $(exp_bin_x) × $(exp_bin_z)
+    Effective pixels        : $(x_pixels) × $(z_pixels)
+    Pixel size              : $(1e6*exp_pixelsize_x)μm × $(1e6*exp_pixelsize_z)μm
+    xlims                   : ($(round(minimum(1e6*x_position), digits=6)) μm, $(round(maximum(1e3*x_position), digits=4)) mm)
+    zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
+***************************************************
+""")
 # Setting the variables for the module
 MyExperimentalAnalysis.effective_cam_pixelsize_z = exp_pixelsize_z;
 MyExperimentalAnalysis.x_pixels = x_pixels;
 MyExperimentalAnalysis.z_pixels = z_pixels;
-println("************************************************")
-println("Camera features\n\tPixel size : $(1e6*cam_pixelsize)μm\n\tNumber of pixels : $(nx_pixels) × $(nz_pixels)")
-println("Images information\n\tBinning : $(exp_bin_x) × $(exp_bin_z)\n\tPixel size : ($(1e6*exp_pixelsize_x) , $(1e6*exp_pixelsize_z))μm\n\tNumber of effective pixels : $(x_pixels) × $(z_pixels)")
-println("************************************************")
-# Spatial axes shifted to center the pixels
-x_position = pixel_positions(x_pixels, 1, exp_pixelsize_x)
-z_position = pixel_positions(z_pixels, 1, exp_pixelsize_z)
-
+      
 # Binning for the analysis
 n_bins = 1
 
@@ -101,66 +113,108 @@ else
 end
 raw_data = load(outfile)["data"]
 Icoils = raw_data[:Currents]
+nI = length(Icoils)
 
-# Background and Flat
+# Background and Flat with no binning
 img_dk = matread(joinpath(data_directory, "img_dk.mat"))["DKMean"];
 img_fl = matread(joinpath(data_directory, "img_fl.mat"))["FLMean"];
-
-img_dk = bin_x_mean(img_dk,exp_bin_x)
-img_fl = bin_x_mean(img_fl,exp_bin_x)
+# Binning to match acquired data
+img_dk = bin_x_mean(img_dk,exp_bin_x);
+img_fl = bin_x_mean(img_fl,exp_bin_x);
 
 p1 = heatmap(1e3*z_position, 1e3*x_position, img_dk; 
-    title=L"$\langle \mathrm{Dark\;Frame} \rangle$",
+    title=L"$\langle$ Dark Frame $\rangle$",
     xlabel=L"$z\ \mathrm{(mm)}$",
-    ylabel=L"$x\ \mathrm{(mm)}$")
+    ylabel=L"$x\ \mathrm{(mm)}$");
 p2 = heatmap(1e3*z_position, 1e3*x_position, img_fl; 
-    title=L"$\langle \mathrm{Flat\;Frame} \rangle$",
+    title=L"$\langle$ Flat Frame $\rangle$",
     xlabel=L"$z\ \mathrm{(mm)}$",
-    ylabel=L"$x\ \mathrm{(mm)}$")
-plot(p1, p2; layout=(1,2), link=:both, size=(1000,400), 
+    ylabel=L"$x\ \mathrm{(mm)}$");
+fig = plot(p1, p2; layout=(1,2), link=:both, size=(1000,400), 
 left_margin=4mm,
 bottom_margin=3mm)
+saveplot(fig, "dark_flat")
 
-
-
-function build_processed_dict(raw_data::OrderedDict{Symbol,Any},
-                              DK::AbstractMatrix, FL::AbstractMatrix;
-                              T = Float32, epsval = T(1e-6))
-
-    # Per-pixel flat field, clamp to avoid zeros
-    flat = max.(T.(FL) .- T.(DK), epsval)
-    flat4 = reshape(flat, size(flat,1), size(flat,2), 1, 1)  # expand to 4D
-
-    # Promote to Float32 once
-    F1 = T.(raw_data[:F1_data])
-    F2 = T.(raw_data[:F2_data])
-    BG = T.(raw_data[:BG_data])
-
-    # Background subtract then flat-field correct
-    F1proc = (F1 .- BG) ./ flat4
-    F2proc = (F2 .- BG) ./ flat4
-
-    return OrderedDict(
-        :Currents            => raw_data[:Currents],
-        :F1ProcessedImages   => F1proc,   # size: 540×2560×30×25
-        :F2ProcessedImages   => F2proc,   # size: 540×2560×30×25
-    )
-end
 
 data_processed = build_processed_dict(raw_data, img_dk,img_fl)
 
-I_current = data_processed[:Currents]
-nI = length(I_current)
+########################################################################
+############# MEAN ANALYSIS #######################################
+########################################################################
+profiles_mean_analysis = zeros(Float64, nI, z_pixels)
+for j in 1:nI
+        # --- Load stack (Nx × Nz × Nframes at j-th current)
+        stack = Float64.(data_processed[:F1ProcessedImages][:,:,:, j])
+        n_frames = size(stack, 3) # Number of frames in the signal
 
-f1_max = my_process_framewise_maxima("F1", data_processed, n_bins; half_max=true,λ0=0.05)
-f2_max = my_process_framewise_maxima("F2", data_processed, n_bins; half_max=true,λ0=0.05)
+        # --- Per-frame z-profiles (mean over x → 1×Nz, then vec)
+        frame_profiles = [vec(mean(stack[:, :, i], dims=1)) for i in 1:n_frames]
+        frame_profiles_mat = reduce(hcat, frame_profiles)'  # (Nframes × Nz)
 
-f1_z_mm , f1_zstd_mm  = (vec(mean(f1_max, dims=1)) , vec(std(f1_max, dims=1)))
-f2_z_mm , f2_zstd_mm  = (vec(mean(f2_max, dims=1)) , vec(std(f2_max, dims=1)))
+        # --- Mean profile over all frames and x
+        mean_over_frames = mean(stack, dims=3)                # (Nx × Nz × 1)
+        mean_over_frames = dropdims(mean_over_frames; dims=3) # (Nx × Nz)
+        # --- Mean profile over x : overall mean signal
+        mean_profile = mean(mean_over_frames, dims=1)         # (1 × Nz)
+        mean_profile = vec(mean_profile)                      # (Nz)
+        profiles_mean_analysis[j,:] = 1e3 * mean_profile
+end
+
+cols = palette(:darkrainbow, nI)
+fig = plot(title="F1 processed data",
+    xlabel=L"$z$ (mm)",
+    ylabel="Intensity (au)")
+for i=1:nI
+    plot!(fig,1e3*z_position,profiles_mean_analysis[i,:], line=(:solid,cols[i],1), label=L"$I_{c}=%$(round(1e3*Icoils[i], digits=3))\mathrm{mA}$")
+end
+plot!(fig,legend=:outerright, legend_columns=1, foreground_color_legend=nothing)
+display(fig)
+saveplot(fig,"mean_f1_processed")
+
+profiles_mean_analysis = zeros(Float64, nI, z_pixels)
+for j in 1:nI
+        # --- Load stack (Nx × Nz × Nframes at j-th current)
+        stack = Float64.(data_processed[:F2ProcessedImages][:,:,:, j])
+        n_frames = size(stack, 3) # Number of frames in the signal
+
+        # --- Per-frame z-profiles (mean over x → 1×Nz, then vec)
+        frame_profiles = [vec(mean(stack[:, :, i], dims=1)) for i in 1:n_frames]
+        frame_profiles_mat = reduce(hcat, frame_profiles)'  # (Nframes × Nz)
+
+        # --- Mean profile over all frames and x
+        mean_over_frames = mean(stack, dims=3)                # (Nx × Nz × 1)
+        mean_over_frames = dropdims(mean_over_frames; dims=3) # (Nx × Nz)
+        # --- Mean profile over x : overall mean signal
+        mean_profile = mean(mean_over_frames, dims=1)         # (1 × Nz)
+        mean_profile = vec(mean_profile)                      # (Nz)
+        profiles_mean_analysis[j,:] = 1e3 * mean_profile
+end
+
+cols = palette(:darkrainbow, nI)
+fig = plot(title="F2 processed data",
+    xlabel=L"$z$ (mm)",
+    ylabel="Intensity (au)")
+for i=1:nI
+    plot!(fig,1e3*z_position,profiles_mean_analysis[i,:], line=(:solid,cols[i],1), label=L"$I_{c}=%$(round(1e3*Icoils[i], digits=3))\mathrm{mA}$")
+end
+plot!(fig,legend=:outerright, legend_columns=1, foreground_color_legend=nothing)
+display(fig)
+saveplot(fig,"mean_f2_processed")
+
+
+########################################################################
+############# FRAMEWISE ANALYSIS #######################################
+########################################################################
+
+f1_max = my_process_framewise_maxima("F1", data_processed, n_bins; half_max=true,λ0=0.03)
+f2_max = my_process_framewise_maxima("F2", data_processed, n_bins; half_max=true,λ0=0.03)
+
+f1_z_mm , f1_zstd_mm  = (vec(mean(f1_max, dims=1)) , vec(std(f1_max, dims=1)));
+f2_z_mm , f2_zstd_mm  = (vec(mean(f2_max, dims=1)) , vec(std(f2_max, dims=1)));
  
 data_centroid = (f1_z_mm .+ f2_z_mm)/2
-centroid_fw = mean(data_centroid, Weights(nI-1:-1:0))
-centroid_std = std(data_centroid, Weights(nI-1:-1:0); corrected=false) / sqrt(nI)
+centroid_fw = mean(data_centroid, Weights(nI:-1:1))
+centroid_std_err = std(data_centroid, Weights(nI:-1:1); corrected=false) / sqrt(nI)
 fig = plot(abs.(Icoils), data_centroid,
     label=false,
     color=:purple,
@@ -169,17 +223,17 @@ fig = plot(abs.(Icoils), data_centroid,
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
     xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
                 [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlim=(1e-3,1),
+    xlim=(5e-6,1),
     yaxis = L"$z_{0} \ (\mathrm{mm})$",
     title="Centroid",
     legend=:topleft,
 )
 hline!([centroid_fw], label=L"Centroid $z=%$(round(centroid_fw,digits=3))$mm")
-hspan!( [centroid_fw - centroid_std,centroid_fw + centroid_std], color=:orangered, alpha=0.30, label=L"St.Err. = $\pm%$(round(centroid_std,digits=3))$mm")
+hspan!([centroid_fw - centroid_std_err,centroid_fw + centroid_std_err], color=:orangered, alpha=0.30, label=L"St.Err. = $\pm%$(round(centroid_std_err,digits=3))$mm")
 saveplot(fig,"fw_centroid")
 
 
-res = summarize_framewise(f1_max, f2_max, I_current, centroid_fw, centroid_std; rev_order=true)
+res = summarize_framewise(f1_max, f2_max, Icoils, centroid_fw, centroid_std_err; rev_order=true);
 df_fw = DataFrame(
     I_coil_mA           = -res.I_coil_mA,
 
@@ -226,13 +280,13 @@ pretty_table(
     highlighters  = (hl_Ic,hl_F1,hl_F2),
 )
 
-fig=plot(
-    abs.(df_fw[!,:I_coil_mA]/1000), abs.(df_fw[!,:F1_z_centroid_mm]),
+fig_log=plot(
+    abs.(df_fw[!,:I_coil_mA]/1000), abs.(df_fw[!,:F1_z_centroid_mm])/magnification_factor,
     yerror = df_fw[!,:F1_z_centroid_se_mm],
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+    # xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    # yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
     xlims = (0.001,1.0),
-    ylims = (1e-4,2.5),
+    ylims = (1e-6,3.5),
     title = "F=1 Peak Position vs Current",
     label = "08142025",
     seriestype = :scatter,
@@ -272,9 +326,16 @@ markerstrokewidth=2,
 label="10142024: CQD"
 )
 plot!(left_margin=2mm,)
-
-
-
+sim_data = CSV.read("./simulation_data/results_CQD_20250807T135817.csv",DataFrame; header=false)
+# simqm    = CSV.read("./simulation_data/results_QM_20250728T105702.csv",DataFrame; header=false)
+kis = [1.50,1.80,2.00,2.10,2.20,2.25,2.30,2.40,2.50,2.60] # ×10^-6
+colors = palette(:phase, length(kis) );
+for i=1:length(kis)
+    plot!(sim_data[:,1],abs.(sim_data[:,21+i]), 
+    label=L"CQD $k_{i}=%$(kis[i])\times10^{-6}$",
+    line=(:dash,colors[i],2))
+end
+plot!(right_margin=1mm)
 
 
 
