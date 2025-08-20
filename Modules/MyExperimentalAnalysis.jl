@@ -871,6 +871,54 @@ module MyExperimentalAnalysis
         return M 
     end
 
+
+    """
+        my_process_framewise_maxima(signal_key::String, data, n_bins::Integer;
+                                    half_max::Bool=false, λ0::Float64=0.01) 
+                                    -> Matrix{Float64}
+
+    Extract per-frame peak positions (in mm) from processed Stern–Gerlach image stacks.
+    Each frame’s z-profile is binned, optionally windowed at half-maximum, spline-fitted,
+    and its primary maximum recorded. Returns a `(n_runs_max × nI)` matrix of peak positions
+
+    Process processed Stern–Gerlach image stacks to extract the **per-frame peak
+    positions** (along z, in mm) for each coil current setting.
+
+    # Arguments
+    - `signal_key::String` : Selects which signal to analyze. Must be `"F1"` or `"F2"`.
+    - `data` : Dictionary containing processed image stacks with keys 
+    `:F1ProcessedImages`, `:F2ProcessedImages`, and `:Currents`.
+    - `n_bins::Integer` : Number of pixels to average together along z (binning factor).
+
+    # Keywords
+    - `half_max::Bool = false` : If `true`, restricts the spline fit to the region
+    above half the maximum, focusing on the peak neighborhood.
+    - `λ0::Float64 = 0.01` : Regularization parameter for cubic spline smoothing.
+
+    # Returns
+    - `Matrix{Float64}` of size `(n_runs_max, nI)` where:
+    - `n_runs_max` = maximum number of frames across all currents,
+    - `nI` = number of coil currents.
+    Each entry `[i, j]` contains the z-position (in mm) of the primary peak for
+    frame `i` at current `j`, or `NaN` if no frame exists.
+
+    # Method
+    For each current index `j` and each frame `i`:
+    1. Load stack `(Nx × Nz × Nframes)` of processed images.
+    2. Compute z-profile by averaging over x.
+    3. Bin the profile along z by `n_bins`.
+    4. (Optional) Restrict to half-maximum window.
+    5. Fit a cubic smoothing spline `(z_fit, y_fit)` with regularization `λ0`.
+    6. Find candidate maxima by minimizing the negative spline from several initial guesses.
+    7. Deduplicate candidates and select the tallest peak.
+    8. Store the z-position of the peak in mm.
+    9. Generate diagnostic plots for each frame (profile + spline + peak), saving if `SAVE_FIG` is defined.
+
+    # Example
+    ```julia
+    framewise_peaks_F1 = my_process_framewise_maxima("F1", processed_data, 2)
+    framewise_peaks_F2 = my_process_framewise_maxima("F2", processed_data, 2; half_max=true)
+    """
     function my_process_framewise_maxima(signal_key::String, data, n_bins::Integer; half_max::Bool=false, λ0::Float64=0.01)
         I_current = vec(data[:Currents])
         nI = length(I_current) # Number of current settings
@@ -977,13 +1025,62 @@ module MyExperimentalAnalysis
         return max_position_data
     end
 
+
+    """
+        my_process_mean_maxima(signal_key::String, data, n_bins::Integer; 
+                            half_max=false, λ0::Float64=0.01) -> Vector{Float64}
+
+    Extract mean peak positions (in mm) from processed Stern–Gerlach stacks.
+    Profiles are averaged over frames, binned, optionally half-max windowed,
+    spline-fitted, and the primary maximum is returned for each current.
+
+    Process processed Stern–Gerlach image stacks to extract the primary peak 
+    position (along z, in mm) for each coil current setting.
+
+    # Arguments
+    - `signal_key::String` : Selects which signal to analyze. Must be `"F1"` or `"F2"`.
+    - `data` : Dictionary containing processed image stacks with keys 
+    `:F1ProcessedImages`, `:F2ProcessedImages`, and `:Currents`.
+    - `n_bins::Integer` : Number of pixels to average together along z (binning factor).
+
+    # Keywords
+    - `half_max::Bool = false` : If `true`, restricts the spline fit to the 
+    region where the profile is above half of its maximum (focus on peak).
+    - `λ0::Float64 = 0.01` : Regularization parameter for smoothing spline fit.
+
+    # Returns
+    - `Vector{Float64}` of length `nI`, where `nI` is the number of current values.  
+    Each entry is the location (in mm) of the primary maximum of the mean profile 
+    for the corresponding current.
+
+    # Method
+    For each current index `j`:
+    1. Load stack `(Nx × Nz × Nframes)` of processed images.
+    2. Compute per-frame z-profiles (average over x).
+    3. Average over frames to get an overall mean profile.
+    4. Bin the mean profile along z by `n_bins`.
+    5. (Optional) Apply a half-maximum window to isolate the central peak.
+    6. Fit a cubic smoothing spline `(z_fit, y_fit)` with parameter `λ0`.
+    7. Locate maxima by minimizing the negative spline, starting from several 
+    initial guesses. Filter duplicates and take the highest peak.
+    8. Store the z-position of the primary peak in mm.
+    9. Generate diagnostic plots:
+    - Raw frame profiles and mean binned profile.
+    - Spline fit, scatter of binned data, and annotated maximum.
+    - Save plots if global `SAVE_FIG` is defined.
+
+    # Example
+    ```julia
+    peaks_F1 = my_process_mean_maxima("F1", processed_data, 2; half_max=true, λ0=1e-3)
+    peaks_F2 = my_process_mean_maxima("F2", processed_data, 2)
+    """
     function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_max=false, λ0::Float64=0.01)
-        I_current = vec(data["Currents"])
+        I_current = vec(data[:Currents])
         nI = length(I_current)
         
         # Validate signal_key
-        signal_label = signal_key == "F1" ? "F1ProcessedImages" :
-                    signal_key == "F2" ? "F2ProcessedImages" :
+        signal_label = signal_key == "F1" ? :F1ProcessedImages :
+                    signal_key == "F2" ? :F2ProcessedImages :
                     error("Invalid signal_key: choose 'F1' or 'F2'")
         @info "Processing mean maxima" signal_label=signal_label
 
@@ -999,7 +1096,7 @@ module MyExperimentalAnalysis
             n_frames = size(stack, 3) # Number of frames in the signal
 
             # --- Per-frame z-profiles (mean over x → 1×Nz, then vec)
-            frame_profiles = [vec(mean(stack[:, :, i, j], dims=1)) for i in 1:n_frames]
+            frame_profiles = [vec(mean(stack[:, :, i], dims=1)) for i in 1:n_frames]
             frame_profiles_mat = reduce(hcat, frame_profiles)'  # (Nframes × Nz)
 
             # --- Mean profile over all frames and x
@@ -1074,7 +1171,7 @@ module MyExperimentalAnalysis
                 z_fit, y_fit,
                 seriestype=:scatter, marker=(:circle,:white, 2), markerstrokecolor=:gray36, markerstrokewidth=0.8,
                 xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
-                title=L"%$(signal_key) Processed: $I_c = %$(round(I_current[j], digits=3))\ \mathrm{mA}$",
+                title=L"%$(signal_key) Processed: $I_c = %$(round(1e3*I_current[j], digits=3))\ \mathrm{mA}$",
                 label="$(signal_key) processed", legend=:topleft,
             )
             xs = collect(range(minimum(z_fit), maximum(z_fit), length=2000))
@@ -1091,6 +1188,50 @@ module MyExperimentalAnalysis
         return peak_positions
     end
 
+    """
+        build_processed_dict(raw_data::OrderedDict{Symbol,Any},
+                         DK::AbstractMatrix, FL::AbstractMatrix;
+                         T = Float32, epsval = T(1e-12)) -> OrderedDict{Symbol,Any}
+
+    Construct a dictionary of background-subtracted and flat-field–corrected
+    images from raw Stern–Gerlach experimental data.
+
+    # Arguments
+    - `raw_data::OrderedDict{Symbol,Any}` : Dictionary containing raw image stacks.
+    Expected keys:
+    - `:F1_data` — 4D array of raw F1 signal images `(Nx × Nz × Nframes × Ncurrents)`.
+    - `:F2_data` — 4D array of raw F2 signal images `(Nx × Nz × Nframes × Ncurrents)`.
+    - `:BG_data` — 4D array of background images `(Nx × Nz × Nframes × Ncurrents)`.
+    - `:Currents` — Vector of coil current values.
+    - `DK::AbstractMatrix` : Dark-field (camera offset) image of size `(Nx × Nz)`.
+    - `FL::AbstractMatrix` : Flat-field (uniform illumination) image of size `(Nx × Nz)`.
+
+    # Keywords
+    - `T::Type{<:Real} = Float32` : Numeric type used for computation and storage.
+    - `epsval::Real = T(1e-12)` : Minimum allowed value in the flat-field to avoid
+    division by zero during correction.
+
+    # Processing steps
+    1. Compute per-pixel flat-field correction: `flat = FL - DK`, clamped below by `epsval`.
+    2. Convert all arrays to type `T`.
+    3. Background-subtract each frame: `F1 - BG` and `F2 - BG`.
+    4. Apply flat-field correction by dividing by `flat`.
+    5. Expand `flat` to match the dimensionality of the image stacks.
+
+    # Returns
+    - `OrderedDict` with keys:
+    - `:Currents` — coil currents (copied from `raw_data`).
+    - `:F1ProcessedImages` — processed F1 image stack `(Nx × Nz × Nframes × Ncurrents)`.
+    - `:F2ProcessedImages` — processed F2 image stack `(Nx × Nz × Nframes × Ncurrents)`.
+
+    # Example
+    ```julia
+    processed = build_processed_dict(raw_data, DK_image, FL_image)
+
+    F1proc = processed[:F1ProcessedImages]
+    F2proc = processed[:F2ProcessedImages]
+    currents = processed[:Currents]
+    """
     function build_processed_dict(raw_data::OrderedDict{Symbol,Any},
                               DK::AbstractMatrix, FL::AbstractMatrix;
                               T = Float32, epsval = T(1e-12))
@@ -1113,7 +1254,103 @@ module MyExperimentalAnalysis
         :F1ProcessedImages   => F1proc,   # size: 540×2560×30×25
         :F2ProcessedImages   => F2proc,   # size: 540×2560×30×25
     )
-end
+    end
+
+    """
+        mean_z_profile(stack::AbstractArray) -> Vector{<:Real}
+
+    Compute the mean profile along the z-axis of a 3D image stack.
+
+    Compute the mean z-profile from a stack `(Nx × Nz × Nframes)` by
+    averaging over x and frames. Returns a vector of length `Nz`.
+
+    # Arguments
+    - `stack` : A 3D array of size `(Nx, Nz, Nframes)`, where
+    - `Nx` = pixels along the x-axis,
+    - `Nz` = pixels along the z-axis,
+    - `Nframes` = number of frames.
+
+    # Returns
+    - `Vector{<:Real}` of length `Nz`, containing the mean intensity along `z`.
+    This is obtained by averaging over both the x-dimension and all frames.
+
+    # Notes
+    - The output is dimensionless (arbitrary units).
+    - Intended for use within `extract_profiles` to condense a stack into
+    a single per-current profile.
+
+    # Example
+    ```julia
+    jth_stack = data_processed[:F1ProcessedImages][:,:,:,j]  # (Nx × Nz × Nframes)
+    profile = mean_z_profile(jth_stack)                     # length = Nz
+    """
+    mean_z_profile(stack) = vec(dropdims(mean(stack; dims=(1,3)); dims=(1,3)))
+
+    """
+        extract_profiles(data_processed, key::Symbol, nI::Integer, z_pixels::Integer;
+                        T::Type{<:Real}=Float64) -> Matrix{T}
+
+    Compute mean `z`-profiles for each current index from a processed image dataset.
+
+    Compute mean z-profiles for all currents from a processed dataset.
+    Returns an `(nI × z_pixels)` matrix where each row is the profile
+    averaged over x and frames
+
+    # Arguments
+    - `data_processed` : A dictionary-like container (e.g. `Dict` or `OrderedDict`) 
+    with 4D arrays accessible by `key`. Each entry must have shape `(Nx, Nz, Nframes, nI)`.
+    - `key::Symbol` : Symbol identifying which dataset to use (e.g. `:F1ProcessedImages`).
+    - `nI::Integer` : Number of current values (i.e. how many stacks along the 4th dimension).
+    - `z_pixels::Integer` : Number of pixels along the z-axis (`Nz`).
+    - `T::Type{<:Real}` (keyword; default = `Float64`) : Numeric type of the output matrix.
+
+    # Returns
+    - `Matrix{T}` of size `(nI, z_pixels)`, where each row corresponds to the mean
+    `z`-profile for one current index. The profiles are averaged over both the 
+    x-dimension and frames.
+
+    # Notes
+    - Each profile is dimensionless (arbitrary units).
+    - The z-axis should be scaled externally if physical units (e.g. mm) are required.
+
+    # Example
+    ```julia
+    profiles_F1 = extract_profiles(data_processed, :F1ProcessedImages, nI, z_pixels)
+    profiles_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels)
+    """
+    function extract_profiles(data_processed, key::Symbol, nI::Integer, z_pixels::Integer;
+                            T::Type{<:Real}=Float64)
+        P = Matrix{T}(undef, nI, z_pixels)
+        @inbounds @views for j in 1:nI
+            # Convert only if needed
+            stack_raw = data_processed[key][:,:,:,j]
+            stack = T <: eltype(stack_raw) ? stack_raw : T.(stack_raw)
+            P[j, :] = mean_z_profile(stack)
+        end
+        return P
+    end
+
+    """
+        plot_profiles(z_mm, profiles, Icoils; title::AbstractString)
+
+    Plot one curve per row of `profiles` against `z_mm`. Labels show Ic in mA.
+    Returns the figure.
+    """
+    function plot_profiles(z_mm, profiles, Icoils; title::AbstractString)
+        nI = size(profiles, 1)
+        cols = palette(:darkrainbow, nI)
+        fig = plot(title=title, xlabel=L"$z$ (mm)", ylabel="Intensity (au)")
+        @inbounds for i in 1:nI
+            plot!(fig, z_mm, profiles[i, :],
+                line = (:solid, cols[i], 1),
+                label = L"$I_{c}=%$(round(1e3*Icoils[i]; digits=3))\,\mathrm{mA}$")
+        end
+        plot!(fig, legend=:outerright, legend_columns=2, foreground_color_legend=nothing)
+        return fig
+    end
+
+
+
 
     # Public API
     export saveplot, 
@@ -1130,6 +1367,10 @@ end
            stack_data,
            bin_x_mean,
            my_process_framewise_maxima,
-           build_processed_dict
+           my_process_mean_maxima,
+           build_processed_dict,
+           mean_z_profile,
+           extract_profiles,
+           plot_profiles
 
 end

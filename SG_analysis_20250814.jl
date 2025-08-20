@@ -30,6 +30,7 @@ using Printf, LaTeXStrings, PrettyTables
 using CSV, DataFrames, DelimitedFiles
 # Time-stamping/logging
 using Dates
+using Alert
 const T_START = Dates.now()
 # Custom modules
 include("./Modules/MyExperimentalAnalysis.jl");
@@ -73,6 +74,8 @@ magnification_factor = 1.3 ;
 # Experiment resolution
 exp_bin_x, exp_bin_z = (4,1) ;  # Camera binning
 exp_pixelsize_x, exp_pixelsize_z = (exp_bin_x, exp_bin_z).*cam_pixelsize ; # Effective pixel size after binning [m]
+# Furnace 
+Temperature = 273+205
 # Image dimensions (adjusted for binning)
 x_pixels = Int(nx_pixels / exp_bin_x);  # Number of x-pixels after binning
 z_pixels = Int(nz_pixels / exp_bin_z);  # Number of z-pixels after binning
@@ -101,6 +104,7 @@ MyExperimentalAnalysis.z_pixels = z_pixels;
       
 # Binning for the analysis
 n_bins = 1
+z_mm = 1e3 .* z_position
 
 if !isfile(outfile)
     @info "Not found → building $outfile"
@@ -114,6 +118,36 @@ end
 raw_data = load(outfile)["data"]
 Icoils = raw_data[:Currents]
 nI = length(Icoils)
+
+fig_I0 = plot(abs.(reverse(Icoils)), 
+    seriestype=:scatter,
+    label = "Currents sampled",
+    marker = (:circle, :white, 2),
+    markerstrokecolor = :orangered,
+    markerstrokewidth = 1,
+);
+plot!(    
+    yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$", :log),
+    ylim = (1e-6,1),
+    title = "Coil Currents",
+    label = "20250725",
+    legend = :bottomright,
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    yticks = :log10,
+    framestyle = :box,
+    size=(600,400),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+);
+vspan!([0, findlast(<(0), reverse(Icoils))+0.25], color=:gray, alpha=0.30,label="zero" );
+display(fig_I0) 
+saveplot(fig_I0, "current_range")
+
 
 # Background and Flat with no binning
 img_dk = matread(joinpath(data_directory, "img_dk.mat"))["DKMean"];
@@ -139,307 +173,36 @@ saveplot(fig, "dark_flat")
 data_processed = build_processed_dict(raw_data, img_dk,img_fl)
 
 ########################################################################
-############# MEAN ANALYSIS #######################################
+############# MEAN ANALYSIS ###########################################
 ########################################################################
-profiles_mean_analysis = zeros(Float64, nI, z_pixels)
-for j in 1:nI
-        # --- Load stack (Nx × Nz × Nframes at j-th current)
-        stack = Float64.(data_processed[:F1ProcessedImages][:,:,:, j])
-        n_frames = size(stack, 3) # Number of frames in the signal
+# Fitting factor
+λ0 = 0.03;
 
-        # --- Per-frame z-profiles (mean over x → 1×Nz, then vec)
-        frame_profiles = [vec(mean(stack[:, :, i], dims=1)) for i in 1:n_frames]
-        frame_profiles_mat = reduce(hcat, frame_profiles)'  # (Nframes × Nz)
+# --- Compute F1 / F2 mean profiles ----------------------------------------
+profiles_F1 = extract_profiles(data_processed, :F1ProcessedImages, nI, z_pixels)
+profiles_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels)
 
-        # --- Mean profile over all frames and x
-        mean_over_frames = mean(stack, dims=3)                # (Nx × Nz × 1)
-        mean_over_frames = dropdims(mean_over_frames; dims=3) # (Nx × Nz)
-        # --- Mean profile over x : overall mean signal
-        mean_profile = mean(mean_over_frames, dims=1)         # (1 × Nz)
-        mean_profile = vec(mean_profile)                      # (Nz)
-        profiles_mean_analysis[j,:] = 1e3 * mean_profile
-end
-
-cols = palette(:darkrainbow, nI)
-fig = plot(title="F1 processed data",
-    xlabel=L"$z$ (mm)",
-    ylabel="Intensity (au)")
-for i=1:nI
-    plot!(fig,1e3*z_position,profiles_mean_analysis[i,:], line=(:solid,cols[i],1), label=L"$I_{c}=%$(round(1e3*Icoils[i], digits=3))\mathrm{mA}$")
-end
-plot!(fig,legend=:outerright, legend_columns=1, foreground_color_legend=nothing)
+# --- Plot ------------------------------------------------------------------
+fig1 = plot_profiles(z_mm, profiles_F1, Icoils; title="F1 processed data")
+display(fig1)
+# saveplot(fig1, "mean_f1_processed")
+fig2 = plot_profiles(z_mm, profiles_F2, Icoils; title="F2 processed data")
+display(fig2)
+# saveplot(fig2, "mean_f2_processed")
+fig = plot(fig1, fig2;
+    layout=(2,1),
+    size=(1000,600),
+    share=:both,
+    legend_columns=2,
+    left_margin=5mm,
+)
 display(fig)
-saveplot(fig,"mean_f1_processed")
+saveplot(fig, "mean_profiles_processed")
 
-profiles_mean_analysis = zeros(Float64, nI, z_pixels)
-for j in 1:nI
-        # --- Load stack (Nx × Nz × Nframes at j-th current)
-        stack = Float64.(data_processed[:F2ProcessedImages][:,:,:, j])
-        n_frames = size(stack, 3) # Number of frames in the signal
+f1_mean_max = my_process_mean_maxima("F1", data_processed, n_bins; half_max=true, λ0=λ0)
+f2_mean_max = my_process_mean_maxima("F2", data_processed, n_bins; half_max=true, λ0=λ0)
 
-        # --- Per-frame z-profiles (mean over x → 1×Nz, then vec)
-        frame_profiles = [vec(mean(stack[:, :, i], dims=1)) for i in 1:n_frames]
-        frame_profiles_mat = reduce(hcat, frame_profiles)'  # (Nframes × Nz)
-
-        # --- Mean profile over all frames and x
-        mean_over_frames = mean(stack, dims=3)                # (Nx × Nz × 1)
-        mean_over_frames = dropdims(mean_over_frames; dims=3) # (Nx × Nz)
-        # --- Mean profile over x : overall mean signal
-        mean_profile = mean(mean_over_frames, dims=1)         # (1 × Nz)
-        mean_profile = vec(mean_profile)                      # (Nz)
-        profiles_mean_analysis[j,:] = 1e3 * mean_profile
-end
-
-cols = palette(:darkrainbow, nI)
-fig = plot(title="F2 processed data",
-    xlabel=L"$z$ (mm)",
-    ylabel="Intensity (au)")
-for i=1:nI
-    plot!(fig,1e3*z_position,profiles_mean_analysis[i,:], line=(:solid,cols[i],1), label=L"$I_{c}=%$(round(1e3*Icoils[i], digits=3))\mathrm{mA}$")
-end
-plot!(fig,legend=:outerright, legend_columns=1, foreground_color_legend=nothing)
-display(fig)
-saveplot(fig,"mean_f2_processed")
-
-
-########################################################################
-############# FRAMEWISE ANALYSIS #######################################
-########################################################################
-
-f1_max = my_process_framewise_maxima("F1", data_processed, n_bins; half_max=true,λ0=0.03)
-f2_max = my_process_framewise_maxima("F2", data_processed, n_bins; half_max=true,λ0=0.03)
-
-f1_z_mm , f1_zstd_mm  = (vec(mean(f1_max, dims=1)) , vec(std(f1_max, dims=1)));
-f2_z_mm , f2_zstd_mm  = (vec(mean(f2_max, dims=1)) , vec(std(f2_max, dims=1)));
- 
-data_centroid = (f1_z_mm .+ f2_z_mm)/2
-centroid_fw = mean(data_centroid, Weights(nI:-1:1))
-centroid_std_err = std(data_centroid, Weights(nI:-1:1); corrected=false) / sqrt(nI)
-fig = plot(abs.(Icoils), data_centroid,
-    label=false,
-    color=:purple,
-    marker=(:cross,5),
-    line=(:solid,1),
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-                [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlim=(5e-6,1),
-    yaxis = L"$z_{0} \ (\mathrm{mm})$",
-    title="Centroid",
-    legend=:topleft,
-)
-hline!([centroid_fw], label=L"Centroid $z=%$(round(centroid_fw,digits=3))$mm")
-hspan!([centroid_fw - centroid_std_err,centroid_fw + centroid_std_err], color=:orangered, alpha=0.30, label=L"St.Err. = $\pm%$(round(centroid_std_err,digits=3))$mm")
-saveplot(fig,"fw_centroid")
-
-
-res = summarize_framewise(f1_max, f2_max, Icoils, centroid_fw, centroid_std_err; rev_order=true);
-df_fw = DataFrame(
-    I_coil_mA           = -res.I_coil_mA,
-
-    F1_z_peak_mm        = res.F1_z_peak_mm,
-    F1_z_peak_se_mm     = res.F1_z_se_mm , 
-
-    F2_z_peak_mm        = res.F2_z_peak_mm,
-    F2_z_peak_se_mm     = res.F2_z_se_mm ,
-
-    Δz_mm               = res.Δz_mm,
-    Δz_se_mm            = res.Δz_se_mm,
-
-    F1_z_centroid_mm    = res.F1_z_centroid_mm, 
-    F1_z_centroid_se_mm = res.F1_z_centroid_se_mm,
-    F2_z_centroid_mm    = res.F2_z_centroid_mm, 
-    F2_z_centroid_se_mm = res.F2_z_centroid_se_mm
-)
-CSV.write(joinpath(OUTDIR, "fw_data.csv"), df_fw);
-
-hl_Ic = Highlighter(
-           (data, i, j) -> data[i, 1] == minimum(data[:, 1]),
-           crayon"fg:white bold bg:dark_gray"
-       );
-hl_F1 = Highlighter(
-           (data, i, j) -> data[i,8]<0,
-           crayon"fg:red bold bg:dark_gray"
-       );
-hl_F2 = Highlighter(
-           (data, i, j) -> data[i,10]>0,
-           crayon"fg:green bold bg:dark_gray"
-       );
-pretty_table(
-    df_fw;
-    formatters    = (ft_printf("%8.3f",1), ft_printf("%8.5f",2:6)),
-    alignment=:c,
-    header        = (
-        ["Current", "F1 z", "Std.Err.",  "F2 z", "Std.Err.", "Δz", "Std.Err.", "Centroid F1 z", "Std.Err.", "Centroid F2 z", "Std.Err."], 
-        ["[mA]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
-        ),
-    border_crayon = crayon"blue bold",
-    tf            = tf_unicode_rounded,
-    header_crayon = crayon"yellow bold",
-    equal_columns_width= true,
-    highlighters  = (hl_Ic,hl_F1,hl_F2),
-)
-
-fig_log=plot(
-    abs.(df_fw[!,:I_coil_mA]/1000), abs.(df_fw[!,:F1_z_centroid_mm])/magnification_factor,
-    yerror = df_fw[!,:F1_z_centroid_se_mm],
-    # xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    # yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
-    xlims = (0.001,1.0),
-    ylims = (1e-6,3.5),
-    title = "F=1 Peak Position vs Current",
-    label = "08142025",
-    seriestype = :scatter,
-    marker = (:circle, :white, 4),
-    markerstrokecolor = :black,
-    markerstrokewidth = 2,
-    legend = :bottomright,
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = :log10,
-    framestyle = :box,
-    size=(800,600),
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-) 
-hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
-plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
-marker=(:cross, :purple, 6),
-line=(:purple, :dash, 2, 0.5),
-markerstrokewidth=2,
-label="10142024"
-)
-plot!(data_JSF[:model][:,1], data_JSF[:model][:,2],
-line=(:dash, :blue, 3),
-markerstrokewidth=2,
-label="10142024: QM"
-)
-plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
-line=(:dot, :red, 3),
-markerstrokewidth=2,
-label="10142024: CQD"
-)
-plot!(left_margin=2mm,)
-sim_data = CSV.read("./simulation_data/results_CQD_20250807T135817.csv",DataFrame; header=false)
-# simqm    = CSV.read("./simulation_data/results_QM_20250728T105702.csv",DataFrame; header=false)
-kis = [1.50,1.80,2.00,2.10,2.20,2.25,2.30,2.40,2.50,2.60] # ×10^-6
-colors = palette(:phase, length(kis) );
-for i=1:length(kis)
-    plot!(sim_data[:,1],abs.(sim_data[:,21+i]), 
-    label=L"CQD $k_{i}=%$(kis[i])\times10^{-6}$",
-    line=(:dash,colors[i],2))
-end
-plot!(right_margin=1mm)
-
-
-
-
-
-
-
-n_frames    = size(raw_data[:F1_data],3)
-n_currents  = size(raw_data[:F1_data],4)
-
-raw_data[:F1_data]
-
-
-F1_profiles = dropdims(mean(raw_data[:BG_data]; dims=1), dims=1)
-cols=palette(:phase, n_frames*n_currents)
-fig = plot(
-    title = "Background profile",
-    legend=false
-)
-for j=1:n_currents, i=1:n_frames
-    k = (j-1)*n_frames + i
-    plot!(fig, z_position, F1_profiles[:,i,j], line=(:solid,cols[k],1))
-end
-display(fig)
-
-F1_profiles = dropdims(mean(F1_profiles; dims=2);dims=2)
-cols=palette(:darktest, n_currents)
-fig = plot(
-    title = "Background profile",
-    legend=:best
-)
-for j=1:4:n_currents
-    print(j)
-    plot!(fig, z_position, F1_profiles[:,j], line=(:solid,cols[j],1),label=L"$I_{c}=%$(round(1e3*Icoils[j], digits=3))\mathrm{mA}$")
-end
-display(fig)
-
-
-data = matread(joinpath(data_directory, "data.mat")) ;
-
-mean(raw_data[:F1_data][:,:,1,1],dims=1)
-
-for i=1:size(data[:F1_data],3)
-    img = heatmap(raw_data[:F1_data][:,:,i,1])
-    display(img)
-end
-
-old = matread(joinpath("20250725/", "data.mat"))
-old["data"]["F1ProcessedImages"][1,41]
-
-
-["data"]
-
-dd = matread(files[1])
-
-dd["BG"]
-
-# Read data
-data = matread(joinpath(data_directory, "data.mat")) ;
-
-# Extract coil currents (in mA)
-Icoils = vec(data["data"]["Current_mA"]/1000)
-nI = length(Icoils)     # Number of valid current files found
-
-fig_I0 = plot(abs.(reverse(-Icoils)), 
-    seriestype=:scatter,
-    label = "Currents sampled",
-    marker = (:circle, :white, 2),
-    markerstrokecolor = :orangered,
-    markerstrokewidth = 1,
-);
-plot!(    
-    yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$", :log),
-    ylim = (1e-6,1),
-    title = "Coil Currents",
-    label = "20250725",
-    legend = :bottomright,
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    yticks = :log10,
-    framestyle = :box,
-    size=(600,400),
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-);
-vspan!([0, findlast(<(0), reverse(-Icoils))+0.25], color=:gray, alpha=0.30,label="unresolved" );
-display(fig_I0) 
-saveplot(fig_I0, "current_range")
-
-
-##########################################################################################
-##########################################################################################
-# Run for F1 and F2 signals: MEAN OF FRAMES
-##########################################################################################
-##########################################################################################
-
-f1_data_mean = process_maxima(:mean,"F1", data, n_bins )
-f2_data_mean = process_maxima(:mean,"F2", data, n_bins )
-
-data_centroid = (f1_data_mean .+ f2_data_mean)/2
+data_centroid = (f1_mean_max .+ f2_mean_max)/2
 centroid_mean = mean(data_centroid, Weights(nI-1:-1:0))
 centroid_std = std(data_centroid, Weights(nI-1:-1:0); corrected=false) / sqrt(nI)
 fig = plot(abs.(Icoils), data_centroid,
@@ -453,18 +216,20 @@ fig = plot(abs.(Icoils), data_centroid,
     xlim=(1e-3,1),
     yaxis = L"$z_{0} \ (\mathrm{mm})$",
     title="Centroid",
+    legend=:topleft
 )
 hline!([centroid_mean], label=L"Centroid $z=%$(round(centroid_mean,digits=3))$mm")
 hspan!( [centroid_mean - centroid_std,centroid_mean + centroid_std], color=:orangered, alpha=0.30, label=L"St.Err. = $\pm%$(round(centroid_std,digits=3))$mm")
 saveplot(fig,"mean_centroid")
 
+
 df_mean = DataFrame(
-    I_coil_mA          = -1000 .* Icoils,
-    F1_z_peak_mm       = f1_data_mean,
-    F2_z_peak_mm       = f2_data_mean,
-    Δz_mm              = f1_data_mean .- f2_data_mean,
-    F1_z_centroid_mm   = f1_data_mean .- centroid_mean,
-    F2_z_centroid_mm   = f2_data_mean .- centroid_mean,
+    I_coil_mA          = 1000 .* Icoils,
+    F1_z_peak_mm       = f1_mean_max,
+    F2_z_peak_mm       = f2_mean_max,
+    Δz_mm              = f1_mean_max .- f2_mean_max,
+    F1_z_centroid_mm   = f1_mean_max .- centroid_mean,
+    F2_z_centroid_mm   = f2_mean_max .- centroid_mean,
 )
 sort!(df_mean, :I_coil_mA)
 CSV.write(joinpath(OUTDIR, "mean_data.csv"), df_mean);
@@ -495,7 +260,6 @@ pretty_table(
     equal_columns_width= true,
     highlighters  = (hl_Ic,hl_F1,hl_F2),
 )
-
 
 fig_01 = plot(abs.(df_mean[!,:I_coil_mA]/1000), df_mean[!,:F1_z_peak_mm],
     label=L"$F_{1}$",
@@ -625,14 +389,14 @@ plot!(fig[3], title="", top_margin = -9mm);
 display(fig)
 saveplot(fig, "mean_peak_centroid") 
 
-fig=plot(
-    abs.(df_mean[!,:I_coil_mA]/1000), abs.(df_mean[!,:F1_z_centroid_mm]),
+fig000=plot(
+    abs.(df_mean[!,:I_coil_mA]/1000), abs.(df_mean[!,:F1_z_centroid_mm])/magnification_factor,
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
     yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
     xlims = (0.001,1.0),
     ylims = (1e-4,1.5),
     title = "F=1 Peak Position vs Current",
-    label = "07122025",
+    label = "08142025",
     seriestype = :scatter,
     marker = (:circle, :white, 4),
     markerstrokecolor = :black,
@@ -669,7 +433,56 @@ line=(:dot, :red, 3),
 markerstrokewidth=2,
 label="10142024: CQD"
 )
-saveplot(fig, "mean_00")
+saveplot(fig000, "mean_000")
+
+fig001=plot(
+    abs.(df_mean[!,:I_coil_mA]/1000), abs.(df_mean[!,:F1_z_centroid_mm])/magnification_factor,
+    xaxis = (L"$I_{c} \ (\mathrm{A})$"),
+    yaxis = (L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$"),
+    title = "F=1 Peak Position vs Current",
+    label = "08142025",
+    seriestype = :scatter,
+    marker = (:circle, :white, 4),
+    markerstrokecolor = :black,
+    markerstrokewidth = 2,
+    legend = :bottomright,
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    framestyle = :box,
+    size=(800,600),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+) 
+hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
+plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
+marker=(:cross, :purple, 6),
+line=(:purple, :dash, 2, 0.5),
+markerstrokewidth=2,
+label="10142024"
+)
+plot!(data_JSF[:model][:,1], data_JSF[:model][:,2],
+line=(:dash, :blue, 3),
+markerstrokewidth=2,
+label="10142024: QM"
+)
+plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
+line=(:dot, :red, 3),
+markerstrokewidth=2,
+label="10142024: CQD"
+)
+# saveplot(fig001, "mean_001")
+
+fig0 = plot(fig000, fig001,
+    layout=(1,2),
+    size=(1000,400),
+    left_margin=8mm,
+    bottom_margin=5mm,
+)
+saveplot(fig0, "mean_00")
 
 
 # Compute absolute values for plotting
@@ -678,14 +491,14 @@ y_abs = abs.(y);
 # Create masks for negative and non-negative values
 neg_mask = y .< 0;
 pos_mask = .!neg_mask;
-fig=plot(
-    abs.(df_mean[pos_mask,:I_coil_mA]/1000), y_abs[pos_mask],
+fig100=plot(
+    abs.(df_mean[pos_mask,:I_coil_mA]/1000), y_abs[pos_mask]/magnification_factor,
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
     yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
     xlims = (0.001,1.0),
     ylims = (1e-4,1.5),
     title = "F=1 Peak Position vs Current",
-    label = "07122025",
+    label = "08142025",
     seriestype = :scatter,
     marker = (:circle, :white, 4),
     markerstrokecolor = :black,
@@ -705,7 +518,7 @@ fig=plot(
     guidefontsize=14,
     legendfontsize=10,
 ) ;
-plot!(abs.(df_mean[neg_mask,:I_coil_mA]/1000), y_abs[neg_mask], 
+plot!(abs.(df_mean[neg_mask,:I_coil_mA]/1000), y_abs[neg_mask]/magnification_factor, 
     label=false, 
     seriestype=:scatter,
     marker = (:xcross, :orangered2, 4),
@@ -729,21 +542,78 @@ line=(:dot, :red, 3),
 markerstrokewidth=2,
 label="10142024: CQD"
 );
-saveplot(fig, "mean_01")
+# saveplot(fig100, "mean_100")
+
+fig101=plot(
+    abs.(df_mean[pos_mask,:I_coil_mA]/1000), y_abs[pos_mask]/magnification_factor,
+    xaxis = (L"$I_{c} \ (\mathrm{A})$"),
+    yaxis = (L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$"),
+    title = "F=1 Peak Position vs Current",
+    label = "08142025",
+    seriestype = :scatter,
+    marker = (:circle, :white, 4),
+    markerstrokecolor = :black,
+    markerstrokewidth = 2,
+    legend = :bottomright,
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    framestyle = :box,
+    size=(800,600),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+) ;
+plot!(abs.(df_mean[neg_mask,:I_coil_mA]/1000), y_abs[neg_mask]/magnification_factor, 
+    label=false, 
+    seriestype=:scatter,
+    marker = (:xcross, :orangered2, 4),
+    markerstrokecolor = :orangered2,
+    markerstrokewidth = 2,
+);
+hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
+plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
+marker=(:cross, :purple, 6),
+line=(:purple, :dash, 2, 0.5),
+markerstrokewidth=2,
+label="10142024"
+);
+plot!(data_JSF[:model][:,1], data_JSF[:model][:,2],
+line=(:dash, :blue, 3),
+markerstrokewidth=2,
+label="10142024: QM"
+);
+plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
+line=(:dot, :red, 3),
+markerstrokewidth=2,
+label="10142024: CQD"
+);
+# saveplot(fig101, "mean_101")
+
+fig1 = plot(fig100, fig101,
+    layout=(1,2),
+    size=(1000,400),
+    left_margin=8mm,
+    bottom_margin=5mm,
+)
+saveplot(fig1, "mean_01")
 
 
-##########################################################################################
-##########################################################################################
-# Run for F1 and F2 signals: : FRAMEWISE
-##########################################################################################
-##########################################################################################
+########################################################################
+############# FRAMEWISE ANALYSIS #######################################
+########################################################################
 
-f1_data_framewise = process_maxima(:framewise,"F1", data, n_bins )
-f2_data_framewise = process_maxima(:framewise,"F2", data, n_bins )
+f1_max = my_process_framewise_maxima("F1", data_processed, n_bins; half_max=true,λ0=λ0)
+f2_max = my_process_framewise_maxima("F2", data_processed, n_bins; half_max=true,λ0=λ0)
 
-data_centroid = vec(mean((f1_data_framewise .+ f2_data_framewise)/2, dims=1))
+f1_z_mm , f1_zstd_mm  = (vec(mean(f1_max, dims=1)) , vec(std(f1_max, dims=1)));
+f2_z_mm , f2_zstd_mm  = (vec(mean(f2_max, dims=1)) , vec(std(f2_max, dims=1)));
+ 
+data_centroid = (f1_z_mm .+ f2_z_mm)/2
 centroid_fw = mean(data_centroid, Weights(nI-1:-1:0))
-centroid_std = std(data_centroid, Weights(nI-1:-1:0); corrected=false) / sqrt(nI)
+centroid_std_err = std(data_centroid, Weights(nI-1:-1:0); corrected=false) / sqrt(nI)
 fig = plot(abs.(Icoils), data_centroid,
     label=false,
     color=:purple,
@@ -752,18 +622,19 @@ fig = plot(abs.(Icoils), data_centroid,
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
     xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
                 [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlim=(1e-3,1),
+    xlim=(5e-6,1),
     yaxis = L"$z_{0} \ (\mathrm{mm})$",
     title="Centroid",
     legend=:topleft,
 )
 hline!([centroid_fw], label=L"Centroid $z=%$(round(centroid_fw,digits=3))$mm")
-hspan!( [centroid_fw - centroid_std,centroid_fw + centroid_std], color=:orangered, alpha=0.30, label=L"St.Err. = $\pm%$(round(centroid_std,digits=3))$mm")
+hspan!([centroid_fw - centroid_std_err,centroid_fw + centroid_std_err], color=:orangered, alpha=0.30, label=L"St.Err. = $\pm%$(round(centroid_std_err,digits=3))$mm")
 saveplot(fig,"fw_centroid")
 
-res = summarize_framewise(f1_data_framewise, f2_data_framewise, Icoils, centroid_fw, centroid_std; rev_order=true);
-df_framewise = DataFrame(
-    I_coil_mA           = res.I_coil_mA,
+
+res = summarize_framewise(f1_max, f2_max, Icoils, centroid_fw, centroid_std_err; rev_order=true);
+df_fw = DataFrame(
+    I_coil_mA           = -res.I_coil_mA,
 
     F1_z_peak_mm        = res.F1_z_peak_mm,
     F1_z_peak_se_mm     = res.F1_z_se_mm , 
@@ -779,7 +650,7 @@ df_framewise = DataFrame(
     F2_z_centroid_mm    = res.F2_z_centroid_mm, 
     F2_z_centroid_se_mm = res.F2_z_centroid_se_mm
 )
-CSV.write(joinpath(OUTDIR, "fw_data.csv"), df_framewise);
+CSV.write(joinpath(OUTDIR, "fw_data.csv"), df_fw);
 
 hl_Ic = Highlighter(
            (data, i, j) -> data[i, 1] == minimum(data[:, 1]),
@@ -794,7 +665,7 @@ hl_F2 = Highlighter(
            crayon"fg:green bold bg:dark_gray"
        );
 pretty_table(
-    df_framewise;
+    df_fw;
     formatters    = (ft_printf("%8.3f",1), ft_printf("%8.5f",2:6)),
     alignment=:c,
     header        = (
@@ -810,21 +681,20 @@ pretty_table(
 
 
 
-fig_01 = plot(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F1_z_peak_mm ],
-    ribbon= df_framewise[!, :F1_z_peak_se_mm ],
+fig_01 = plot(abs.(df_fw[!,:I_coil_mA]/1000), df_fw[!,:F1_z_peak_mm ],
+    ribbon= df_fw[!, :F1_z_peak_se_mm ],
     label=L"$F_{1}$",
     line=(:solid,:red,1),
     fillalpha=0.23, 
     fillcolor=:red,  
 )
-plot!(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F1_z_peak_mm ], fillrange=df_framewise[!,:F2_z_peak_mm ],
-    # abs.(data_framewise[:,1]/1000), data_framewise[:,2], fillrange=data_framewise[:,4],
+plot!(abs.(df_fw[!,:I_coil_mA]/1000), df_fw[!,:F1_z_peak_mm ], fillrange=df_fw[!,:F2_z_peak_mm ],
     fillalpha=0.05,
     color=:purple,
     label = false,
 )
-plot!(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F2_z_peak_mm ],
-    ribbon= df_framewise[!, :F2_z_peak_se_mm ],
+plot!(abs.(df_fw[!,:I_coil_mA]/1000), df_fw[!,:F2_z_peak_mm ],
+    ribbon= df_fw[!, :F2_z_peak_se_mm ],
     label=L"$F_{2}$",
     line=(:solid,:blue,1),
     fillalpha=0.23, 
@@ -849,31 +719,32 @@ plot!(
     legendfontsize=10,
 )
 vspan!(
-    [1e-8, abs(df_framewise.I_coil_mA[findlast(<(0), df_mean.I_coil_mA)+1] / 1000)],
+    [1e-8, abs(df_fw.I_coil_mA[findlast(<(0), df_fw.I_coil_mA)+1] / 1000)],
     color = :gray,
     alpha = 0.30,
     label = "zero"
 )
 hline!([centroid_fw], line=(:dot,:black,2), label="Centroid")
 
-
-fig_02 = plot(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F1_z_peak_mm] ,
-    ribbon= df_framewise[!,:F1_z_peak_se_mm],
+fig_02 = plot(abs.(df_fw[!,:I_coil_mA]/1000), df_fw[!,:F1_z_peak_mm] ,
+    ribbon= df_fw[!,:F1_z_peak_se_mm],
     label=L"$F_{1}$",
     line=(:solid,:red,2),
+    fillalpha=0.23, 
+    fillcolor=:red,  
 )
-plot!(abs.(df_framewise[!,:I_coil_mA]/1000), 2*centroid_fw .- df_framewise[!,:F2_z_peak_mm] ,
-    ribbon= ribbon= df_framewise[!,:F2_z_peak_se_mm],
+plot!(abs.(df_fw[!,:I_coil_mA]/1000), 2*centroid_fw .- df_fw[!,:F2_z_peak_mm] ,
+    ribbon= df_fw[!,:F2_z_peak_se_mm],
     label=L"Mirrored $F_{2}$",
     line=(:solid,:blue,2),
+    fillalpha=0.23, 
+    fillcolor=:blue,  
 )
 plot!(
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
     yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
     xlims = (1e-5,1.0),
     title = "Peak position",
-    grid = true,
-    minorgrid = true,
     gridalpha = 0.5,
     gridstyle = :dot,
     minorgridalpha = 0.05,
@@ -886,25 +757,25 @@ plot!(
     legendfontsize=10,
 )
 vspan!(
-    [1e-8, abs(df_framewise.I_coil_mA[findlast(<(0), df_framewise.I_coil_mA)+1] / 1000)],
+    [1e-8, abs(df_fw.I_coil_mA[findlast(<(0), df_fw.I_coil_mA)+1] / 1000)],
     color = :gray,
     alpha = 0.30,
     label = "zero"
 );
 # Fill between y1 and y2
-plot!(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F1_z_peak_mm], fillrange=2*centroid_mean .- df_framewise[!,:F2_z_peak_mm],
+plot!(abs.(df_fw[!,:I_coil_mA]/1000), df_fw[!,:F1_z_peak_mm], fillrange=2*centroid_fw .- df_fw[!,:F2_z_peak_mm],
     fillalpha=0.2,
     color=:purple,
     label = false,
 );
 hline!([centroid_fw], line=(:dot,:black,2), label="Centroid")
 
-fig_03 = plot(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F1_z_centroid_mm] ,
-    ribbons=df_framewise[!,:F1_z_centroid_se_mm],
+fig_03 = plot(abs.(df_fw[!,:I_coil_mA]/1000), df_fw[!,:F1_z_centroid_mm] ,
+    ribbons=df_fw[!,:F1_z_centroid_se_mm],
     label=L"$F_{1}$",
     line=(:solid,:red,2),
 );
-plot!(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F2_z_centroid_mm] ,
+plot!(abs.(df_fw[!,:I_coil_mA]/1000), df_fw[!,:F2_z_centroid_mm] ,
     label=L"$F_{2}$",
     line=(:solid,:blue,2),
 );
@@ -927,13 +798,13 @@ plot!(
     legendfontsize=10,
 )
 vspan!(
-    [1e-8, abs(df_framewise.I_coil_mA[findlast(<(0), df_framewise.I_coil_mA)+1] / 1000)],
+    [1e-8, abs(df_fw.I_coil_mA[findlast(<(0), df_fw.I_coil_mA)+1] / 1000)],
     color = :gray,
     alpha = 0.30,
     label = "zero"
 );
 # Fill between y1 and y2
-plot!(abs.(df_framewise[!,:I_coil_mA]/1000), df_framewise[!,:F1_z_centroid_mm], fillrange=df_framewise[!,:F2_z_centroid_mm],
+plot!(abs.(df_fw[!,:I_coil_mA]/1000), df_fw[!,:F1_z_centroid_mm], fillrange=df_fw[!,:F2_z_centroid_mm],
     fillalpha=0.2,
     color=:purple,
     label = false,
@@ -949,33 +820,32 @@ plot!(fig[3], title="", top_margin = -9mm);
 display(fig)
 saveplot(fig, "fw_peak_centroid")
 
-fig=plot(
-    abs.(df_framewise[!,:I_coil_mA]/1000), abs.(df_framewise[!,:F1_z_centroid_mm]),
-    yerror = df_framewise[!,:F1_z_centroid_se_mm],
+
+fig_log=plot(
+    abs.(df_fw[!,:I_coil_mA]/1000), abs.(df_fw[!,:F1_z_centroid_mm])/magnification_factor,
+    yerror = df_fw[!,:F1_z_centroid_se_mm],
     xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
     yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
     xlims = (0.001,1.0),
-    ylims = (1e-4,1.5),
+    ylims = (1e-6,3.5),
     title = "F=1 Peak Position vs Current",
-    label = "07122025",
+    label = "08142025",
     seriestype = :scatter,
     marker = (:circle, :white, 4),
     markerstrokecolor = :black,
     markerstrokewidth = 2,
     legend = :bottomright,
-    grid = true,
-    minorgrid = true,
     gridalpha = 0.5,
     gridstyle = :dot,
     minorgridalpha = 0.05,
     xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
               [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = :log10,
-    framestyle = :box,
     size=(800,600),
     tickfontsize=11,
     guidefontsize=14,
     legendfontsize=10,
+    left_margin=3mm,
 ) 
 hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
 plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
@@ -994,31 +864,80 @@ line=(:dot, :red, 3),
 markerstrokewidth=2,
 label="10142024: CQD"
 )
-saveplot(fig, "fw_00")
+display(fig_log)
+saveplot(fig_log, "fw_000")
 
-
-# Compute absolute values for plotting
-y = df_framewise[!,:F1_z_centroid_mm];
-y_abs = abs.(y);
-# Create masks for negative and non-negative values
-neg_mask = y .< 0;
-pos_mask = .!neg_mask;
-fig=plot(
-    abs.(df_framewise[pos_mask,:I_coil_mA]/1000), y_abs[pos_mask],
-    yerr = df_framewise[pos_mask,:F1_z_centroid_se_mm],
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
-    xlims = (0.001,1.0),
-    ylims = (1e-4,1.5),
+fig_lin=plot(
+    abs.(df_fw[!,:I_coil_mA]/1000), abs.(df_fw[!,:F1_z_centroid_mm])/magnification_factor,
+    yerror = df_fw[!,:F1_z_centroid_se_mm],
+    xaxis = (L"$I_{c} \ (\mathrm{A})$"),
+    yaxis = (L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$"),
     title = "F=1 Peak Position vs Current",
-    label = "07122025",
+    label = "08142025",
     seriestype = :scatter,
     marker = (:circle, :white, 4),
     markerstrokecolor = :black,
     markerstrokewidth = 2,
     legend = :bottomright,
-    grid = true,
-    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    size=(800,600),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+    left_margin=3mm,
+) 
+hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
+plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
+marker=(:cross, :purple, 6),
+line=(:purple, :dash, 2, 0.5),
+markerstrokewidth=2,
+label="10142024"
+)
+plot!(data_JSF[:model][:,1], data_JSF[:model][:,2],
+line=(:dash, :blue, 3),
+markerstrokewidth=2,
+label="10142024: QM"
+)
+plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
+line=(:dot, :red, 3),
+markerstrokewidth=2,
+label="10142024: CQD"
+)
+display(fig_lin)
+
+fig = plot(fig_log, fig_lin,
+    layout=(1,2),
+    size=(1000,400),
+    left_margin=5mm,
+    bottom_margin=5mm
+)
+display(fig)
+saveplot(fig,"fw_00")
+
+
+
+# Compute absolute values for plotting
+y = df_fw[!,:F1_z_centroid_mm];
+y_abs = abs.(y);
+# Create masks for negative and non-negative values
+neg_mask = y .< 0;
+pos_mask = .!neg_mask;
+fig10=plot(
+    abs.(df_fw[pos_mask,:I_coil_mA]/1000), y_abs[pos_mask],
+    yerr = df_fw[pos_mask,:F1_z_centroid_se_mm],
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+    xlims = (0.001,1.0),
+    ylims = (1e-4,1.5),
+    title = "F=1 Peak Position vs Current",
+    label = "08142025",
+    seriestype = :scatter,
+    marker = (:circle, :white, 4),
+    markerstrokecolor = :black,
+    markerstrokewidth = 2,
+    legend = :bottomright,
     gridalpha = 0.5,
     gridstyle = :dot,
     minorgridalpha = 0.05,
@@ -1031,8 +950,8 @@ fig=plot(
     guidefontsize=14,
     legendfontsize=10,
 ) ;
-plot!(abs.(df_framewise[neg_mask,:I_coil_mA]/1000), y_abs[neg_mask],
-    yerr = df_framewise[neg_mask,:F1_z_centroid_se_mm],
+plot!(abs.(df_fw[neg_mask,:I_coil_mA]/1000), y_abs[neg_mask],
+    yerr = df_fw[neg_mask,:F1_z_centroid_se_mm],
     label=false, 
     seriestype=:scatter,
     marker = (:xcross, :orangered2, 4),
@@ -1056,202 +975,180 @@ line=(:dot, :red, 3),
 markerstrokewidth=2,
 label="10142024: CQD"
 );
-display(fig)
-saveplot(fig, "fw_01")
+display(fig10)
 
-
-###########################################################################################################
-###########################################################################################################
-# Comparison with Xukun's analysis
-fig=plot(
-    abs.(df_framewise[!,:I_coil_mA]/1000), abs.(df_framewise[!,:Δz_mm]),
-    yerror = df_framewise[!,:Δz_se_mm],
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = (:log10, L"$\Delta z \ (\mathrm{mm})$", :log),
-    xlims = (0.001,1.0),
-    ylims = (1e-4,3.0),
-    title = "Peak Separation vs Current",
-    label = "KT",
-    # seriestype = :scatter,
-    line=(:solid,:red,2),
-    marker = (:circle, :white, 1),
-    markerstrokecolor = :red,
-    markerstrokewidth = 3,
+fig11=plot(
+    abs.(df_fw[pos_mask,:I_coil_mA]/1000), y_abs[pos_mask],
+    yerr = df_fw[pos_mask,:F1_z_centroid_se_mm],
+    xaxis = ( L"$I_{c} \ (\mathrm{A})$"),
+    yaxis = (L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$"),
+    title = "F=1 Peak Position vs Current",
+    label = "08142025",
+    seriestype = :scatter,
+    marker = (:circle, :white, 4),
+    markerstrokecolor = :black,
+    markerstrokewidth = 2,
     legend = :bottomright,
-    grid = true,
-    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    size=(800,600),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+) ;
+plot!(abs.(df_fw[neg_mask,:I_coil_mA]/1000), y_abs[neg_mask],
+    yerr = df_fw[neg_mask,:F1_z_centroid_se_mm],
+    label=false, 
+    seriestype=:scatter,
+    marker = (:xcross, :orangered2, 4),
+    markerstrokecolor = :orangered2,
+    markerstrokewidth = 2,
+);
+hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
+plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
+marker=(:cross, :purple, 6),
+line=(:purple, :dash, 2, 0.5),
+markerstrokewidth=2,
+label="10142024"
+);
+plot!(data_JSF[:model][:,1], data_JSF[:model][:,2],
+line=(:dash, :blue, 3),
+markerstrokewidth=2,
+label="10142024: QM"
+);
+plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
+line=(:dot, :red, 3),
+markerstrokewidth=2,
+label="10142024: CQD"
+);
+display(fig11)
+
+fig = plot(fig10, fig11,
+    layout=(1,2),
+    size=(1000,400),
+    left_margin=5mm,
+    bottom_margin=5mm
+)
+display(fig)
+saveplot(fig,"fw_01")
+
+
+
+#########################################################################################
+#########################################################################################
+############################## COMPARISON ###############################################
+#########################################################################################
+#########################################################################################
+fig_comp=plot(
+    abs.(df_fw[!,:I_coil_mA]/1000), abs.(df_fw[!,:F1_z_centroid_mm])/magnification_factor,
+    yerror = df_fw[!,:F1_z_centroid_se_mm],
+    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+    xlims = (0.001,1.0),
+    ylims = (1e-6,3.5),
+    title = "F=1 Peak Position vs Current",
+    label = "08142025",
+    seriestype = :scatter,
+    marker = (:circle, :white, 4),
+    markerstrokecolor = :black,
+    markerstrokewidth = 2,
+    legend = :bottomright,
     gridalpha = 0.5,
     gridstyle = :dot,
     minorgridalpha = 0.05,
     xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
               [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = :log10,
-    framestyle = :box,
     size=(800,600),
     tickfontsize=11,
     guidefontsize=14,
     legendfontsize=10,
+    left_margin=3mm,
 ) 
-plot!(abs.(vec(data["data"]["Current_mA"])/1000), vec(data["data"]["PeakSeparationMean_um"]/1000),
-yerr=vec(data["data"]["PeakSeparationStd_um"])/1000,
-label="XL",
-# seriestype=:scatter,
-line=(:solid,:purple,1),
-marker=(:square,:white,1),
-markerstrokewidth=1,
-markerstrokecolor=:purple
-)
-###########################################################################################################
-###########################################################################################################
-t_run = Dates.canonicalize(Dates.now()-T_START);
-println("Running time : ", t_run)
-############################################################################################################################################################################
-############################################################################################################################################################################
-
-data_20250712 = [
-    0.0    8.44791  0.000518525  8.42793  0.00118161;
-    0.002  8.44287  0.000938761  8.42958  0.00233814;
-    0.004  8.43723  0.000910976  8.42722  0.0027258;
-    0.006  8.43482  0.000990039  8.42604  0.0018639;
-    0.008  8.43537  0.00114152   8.42256  0.000477835;
-    0.01   8.44025  0.000706939  8.42801  0.0014779;
-    0.012  8.43449  0.00169919   8.42741  0.00162732;
-    0.016  8.43596  0.00175432   8.43447  0.000601924;
-    0.022  8.44658  0.000916083  8.43388  0.000597619;
-    0.032  8.46016  0.000435286  8.42367  0.000669231;
-    0.044  8.48834  0.00132164   8.39899  0.00107894;
-    0.058  8.53888  0.00401241   8.36016  0.00421937;
-    0.074  8.58065  0.00165977   8.30529  0.0031774;
-    0.094  8.64399  0.00258139   8.24529  0.00294799;
-    0.114  8.70363  0.00274223   8.20613  0.000977637;
-    0.134  8.74965  0.00140882   8.13372  0.00068276;
-    0.154  8.79234  0.00346408   8.0876   0.00190484;
-    0.174  8.85616  0.00228569   8.01507  0.00452789;
-    0.195  8.89328  0.00255722   7.96818  0.00401482;
-    0.215  8.94618  0.00363949   7.90005  0.00386873;
-    0.236  9.00505  0.00196132   7.84441  0.00613796;
-    0.26   9.05515  0.00203986   7.83049  0.00222426;
-    0.285  9.1162   0.00694458   7.72989  0.00238672;
-    0.308  9.15401  0.0087926    7.71359  0.00904536;
-    0.341  9.27811  0.0156376    7.65668  0.00283654;
-    0.381  9.29719  0.00758248   7.52245  0.00229699;
-    0.42   9.37437  0.00336082   7.43683  0.00277513;
-    0.46   9.45703  0.00700836   7.37241  0.00276939;
-    0.5    9.55574  0.015104     7.28498  0.0137936;
-    0.55   9.6742   0.0112162    7.19503  0.012108;
-    0.609  9.76674  0.0125186    7.04633  0.00839444;
-]
-
-plot(data_JSF[:exp][:,1], abs.(data_JSF[:exp][:,2]),
+hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Pixel size" )
+plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
 marker=(:cross, :purple, 6),
 line=(:purple, :dash, 2, 0.5),
 markerstrokewidth=2,
 label="10142024"
 )
-plot!(data_JSF[:model][:,1], abs.(data_JSF[:model][:,2]),
+plot!(data_JSF[:model][:,1], data_JSF[:model][:,2],
 line=(:dash, :blue, 3),
 markerstrokewidth=2,
 label="10142024: QM"
 )
-plot!(data_JSF[:model][:,1], abs.(data_JSF[:model][:,3]),
+plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
 line=(:dot, :red, 3),
 markerstrokewidth=2,
 label="10142024: CQD"
 )
-plot!(data_20250712[:,1], abs.(data_20250712[:,2] .- data_20250712[1,2]),
-ribbon = data_20250712[:,3] ,
-label="07122025",
-marker=(:xcross,:green,2),
-line=(:solid,:green,2),
-fillalpha=0.23, 
-fillcolor=:green,  
-)
-plot!(abs.(df_framewise[!,:I_coil_mA]/1000), abs.(df_framewise[!,:F1_z_centroid_mm]),
-    yerror = df_framewise[!,:F1_z_centroid_se_mm],
-    marker=(:circle, :white, 3),
-    markerstrokewidth=2,
-    markerstrokecolor=:black,
-    line=(:solid,:black,2),
-    label = "20250725",
-    fillalpha=0.25, 
-    fillcolor=:gray,  
-)
-plot!(
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = (:log10, L"$\Delta z \ (\mathrm{mm})$", :log),
-    xlims = (0.001,1.0),
-    ylims = (1e-4,2.0),
-    title = "F1 Peak positions vs Current",
-    legend = :bottomright,
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = :log10,
-    framestyle = :box,
-    size=(800,600),
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-) 
-
-sim_data = CSV.read("./simulation_data/results_CQD_20250807T135817.csv",DataFrame; header=false)
-simqm    = CSV.read("./simulation_data/results_QM_20250728T105702.csv",DataFrame; header=false)
-
+display(fig_log)
+sim_data = CSV.read("./simulation_data/results_CQD_20250818T160111.csv",DataFrame; header=false)
+# simqm    = CSV.read("./simulation_data/results_QM_20250728T105702.csv",DataFrame; header=false)
 kis = [1.50,1.80,2.00,2.10,2.20,2.25,2.30,2.40,2.50,2.60] # ×10^-6
-# Compute absolute values for plotting
-y = df_framewise[!,:F1_z_centroid_mm];
-y_abs = abs.(y)
-# Create masks for negative and non-negative values
-neg_mask = y .< 0
-pos_mask = .!neg_mask
-fig=plot(
-    abs.(df_framewise[pos_mask,:I_coil_mA]/1000), y_abs[pos_mask],
-    yerr = df_framewise[pos_mask,:F1_z_centroid_se_mm],
-    label = "20250725",
-    seriestype = :scatter,
-    marker = (:circle, :white, 2),
-    markerstrokecolor = :black,
-    markerstrokewidth = 2,
-)
-plot!(
-    abs.(df_framewise[neg_mask,:I_coil_mA]/1000), y_abs[neg_mask],
-    yerr = df_framewise[neg_mask,:F1_z_centroid_se_mm],
-    label=false, 
-    seriestype=:scatter,
-    marker = (:circle, :white, 2),
-    markerstrokecolor = :chocolate4,
-    markerstrokewidth = 2,
-)
-plot!(
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
-    xlims = (0.015,1.0),
-    ylims = (1e-3,1.5),
-    title = "F=1 Peak Position vs Current",
-    legend = :bottomright,
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-              [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    framestyle = :box,
-    size=(800,600),
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-) 
 colors = palette(:phase, length(kis) );
 for i=1:length(kis)
     plot!(sim_data[:,1],abs.(sim_data[:,21+i]), 
     label=L"CQD $k_{i}=%$(kis[i])\times10^{-6}$",
     line=(:dash,colors[i],2))
 end
-hspan!([1e-6,1000*n_bins* cam_pixelsize], color=:gray, alpha=0.30, label="Pixel size" )
+display(fig_comp)
+saveplot(fig_comp,"comparison")
+
+
+#########################################################################################
+#########################################################################################
+
+T_END = Dates.now()
+T_RUN = Dates.canonicalize(T_END-T_START)
+
+
+report = """
+***************************************************
+EXPERIMENT
+    Single Stern–Gerlach Experiment
+    Data directory          : $(data_directory)
+    Output directory        : $(OUTDIR)
+
+CAMERA FEATURES
+    Number of pixels        : $(nx_pixels) × $(nz_pixels)
+    Pixel size              : $(1e6*cam_pixelsize) μm
+
+IMAGES INFORMATION
+    Magnification factor    : $magnification_factor
+    Binning                 : $(exp_bin_x) × $(exp_bin_z)
+    Effective pixels        : $(x_pixels) × $(z_pixels)
+    Pixel size              : $(1e6*exp_pixelsize_x)μm × $(1e6*exp_pixelsize_z)μm
+    xlims                   : ($(round(minimum(1e6*x_position), digits=6)) μm, $(round(maximum(1e3*x_position), digits=4)) mm)
+    zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
+
+EXPERIMENT CONDITIONS
+    Currents (mA)           : $(round.(1e3*Icoils,digits=5))
+    No. of current          : $(nI)
+    Temperature (K)         : $(Temperature)
+
+ANALYSIS PROPERTIES
+    Binning                 : $(n_bins)
+    Smoothing parameter     : $(λ0)
+
+CODE
+    Code name               : $(PROGRAM_FILE),
+    Start date              : $(T_START)
+    End data                : $(T_END)
+    Run time                : $(T_RUN)
+    Hostname                : $(hostname)
+
+***************************************************
+"""
+
+# Print to terminal
+println(report)
+
+# Save to file
+open(joinpath(OUTDIR,"experiment_report.txt"), "w") do io
+    write(io, report)
+end
+
+println("Experiment analysis finished!")
+alert("Experiment analysis finished!")

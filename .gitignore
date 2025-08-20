@@ -3,8 +3,16 @@
 *.png
 *.svg
 *.mat
+*.csv
+*.jld2
 
 # Ignore folders
 20250712/
+20250725/
+20250814/
+20250525_DK/
+20250525_FL/
 results_data/
 simulation_data/
+analysis_data/
+artifacts/
