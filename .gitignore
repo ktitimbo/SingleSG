@@ -7,12 +7,13 @@
 *.jld2
 
 # Ignore folders
-20250712/
-20250725/
-20250814/
-20250525_DK/
-20250525_FL/
+2025*/ 
 results_data/
 simulation_data/
 analysis_data/
 artifacts/
+
+
+# Optional: editor/system files
+.vscode/
+*.DS_Store

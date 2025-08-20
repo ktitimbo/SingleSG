@@ -310,7 +310,7 @@ end
 """
     struct FurnaceBeamParams
         sinθmax::Float64
-        c1::Float64
+        α1::Float64
     end
 
     Holds precomputed parameters for sampling atomic beam velocities from a heated
@@ -319,11 +319,11 @@ end
     # Fields
     - `sinθmax` — Maximum sine of the polar emission angle, determined by the geometry
     from the furnace to the slit.
-    - `c1` — Velocity scale factor `-2*kB*T/M` (m²/s²), used in the speed distribution.
+    - `α2` — Velocity scale factor `kB*T/M` (m²/s²), used in the speed distribution.
 """
 struct FurnaceBeamParams
     sinθmax::Float64
-    c1::Float64
+    α2::Float64
 end
 
 """
@@ -344,7 +344,7 @@ end
 fb_params(; x_furnace=x_furnace, z_furnace=z_furnace, x_slit=x_slit, z_slit=z_slit, y_FurnaceToSlit=y_FurnaceToSlit, T=T, M=M, kb=kb) = begin
     Δxz   = SVector(-x_furnace/2, -z_furnace/2) - SVector(x_slit/2, z_slit/2)
     θvmax = 1.25 * atan(norm(Δxz), y_FurnaceToSlit)
-    FurnaceBeamParams(sin(θvmax), -2*kb*T/M)
+    FurnaceBeamParams(sin(θvmax), kb*T/M)
 end
 fbp = fb_params()
 
@@ -375,20 +375,32 @@ fbp = fb_params()
 @inline function AtomicBeamVelocity(rng,p::FurnaceBeamParams)::SVector{3,Float64}
     ϕ = TWOπ * rand(rng)
     θ = asin(p.sinθmax * sqrt(rand(rng)))
-    v = sqrt(p.c1 * (1 + lambertw((rand(rng)-1)*INV_E, -1)))
+    v = sqrt(-2*p.α2 * (1 + lambertw((rand(rng)-1)*INV_E, -1)))
     sθ = sin(θ); cθ = cos(θ); sϕ = sin(ϕ); cϕ = cos(ϕ)
     return SVector(v*sθ*sϕ, v*cθ, v*sθ*cϕ)
 end
-    G = 
-    a .* sqrt.(2 .* rand(rng, Gamma(3/2,1.0)))
 
-@inline function AtomicBeamVelocity_v2(rng,p::FurnaceBeamParams)::SVector{3,Float64}
+"""
+    AtomicBeamVelocity_v2(rng, p::FurnaceBeamParams) -> SVector{3,Float64}
+
+Draw one atomic velocity `(vx, vy, vz)` [m/s] for an effusive beam.
+
+- Speed: Maxwell with `a² = p.α2 = kB*T/M`, sampled via `G ~ Gamma(3/2,1)` and `v = √(2 a² G)`.
+- Direction (cosine-law, truncated): `θ = asin(p.sinθmax * √u)`, `ϕ ~ Uniform(0, 2π)`.
+
+Axis convention: `vy = v cosθ` (beam axis y), `vx = v sinθ sinϕ`, `vz = v sinθ cosϕ`.
+
+Requires `Distributions` and `StaticArrays`.
+"""
+@inline function AtomicBeamVelocity_v2(rng,p::FurnaceBeamParams)::SVector{3,Float64} 
     ϕ = TWOπ * rand(rng)
     θ = asin(p.sinθmax * sqrt(rand(rng)))
-    v = sqrt(p.c1 * (1 + lambertw((rand(rng)-1)*INV_E, -1)))
+    v = sqrt.(2 .* p.α2 .* rand(rng, Gamma(3/2,1.0)))
     sθ = sin(θ); cθ = cos(θ); sϕ = sin(ϕ); cϕ = cos(ϕ)
     return SVector(v*sθ*sϕ, v*cθ, v*sθ*cϕ)
 end
+
+
 # p_furnace   = [-x_furnace/2,-z_furnace/2];
 # p_slit      = [x_slit/2, z_slit/2];
 # θv_max      = 1.25*atan(norm(p_furnace-p_slit) , y_FurnaceToSlit);
