@@ -1288,45 +1288,54 @@ module MyExperimentalAnalysis
 
     """
         extract_profiles(data_processed, key::Symbol, nI::Integer, z_pixels::Integer;
-                        T::Type{<:Real}=Float64) -> Matrix{T}
+                        T::Type{<:Real}=Float64, n_bin::Integer=1) -> Matrix{T}
 
     Compute mean `z`-profiles for each current index from a processed image dataset.
-
-    Compute mean z-profiles for all currents from a processed dataset.
-    Returns an `(nI × z_pixels)` matrix where each row is the profile
-    averaged over x and frames
+    If `n_bin > 1`, bin along `z` by averaging every `n_bin` consecutive entries.
+    Returns an `(nI × z_out)` matrix, where `z_out = z_pixels ÷ n_bin`.
 
     # Arguments
-    - `data_processed` : A dictionary-like container (e.g. `Dict` or `OrderedDict`) 
-    with 4D arrays accessible by `key`. Each entry must have shape `(Nx, Nz, Nframes, nI)`.
-    - `key::Symbol` : Symbol identifying which dataset to use (e.g. `:F1ProcessedImages`).
-    - `nI::Integer` : Number of current values (i.e. how many stacks along the 4th dimension).
-    - `z_pixels::Integer` : Number of pixels along the z-axis (`Nz`).
-    - `T::Type{<:Real}` (keyword; default = `Float64`) : Numeric type of the output matrix.
+    - `data_processed` : Dict-like container with a 4D array at `key`, sized `(Nx, Nz, Nframes, nI)`.
+    - `key::Symbol`    : Dataset key (e.g. `:F1ProcessedImages`).
+    - `nI::Integer`    : Number of current settings (size along 4th dimension).
+    - `z_pixels::Integer` : Number of z pixels (`Nz`).
+    - `T::Type{<:Real}` : Output element type (default `Float64`).
+    - `n_bin::Integer` : Z-binning factor (default `1` = no binning).
 
     # Returns
-    - `Matrix{T}` of size `(nI, z_pixels)`, where each row corresponds to the mean
-    `z`-profile for one current index. The profiles are averaged over both the 
-    x-dimension and frames.
+    - `Matrix{T}` of size `(nI, z_pixels ÷ n_bin)`.
 
     # Notes
-    - Each profile is dimensionless (arbitrary units).
-    - The z-axis should be scaled externally if physical units (e.g. mm) are required.
-
-    # Example
-    ```julia
-    profiles_F1 = extract_profiles(data_processed, :F1ProcessedImages, nI, z_pixels)
-    profiles_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels)
+    - Requires `n_bin ≥ 1` and `z_pixels % n_bin == 0`.
+    - Binning is along z (the 2nd dimension).
     """
     function extract_profiles(data_processed, key::Symbol, nI::Integer, z_pixels::Integer;
-                            T::Type{<:Real}=Float64)
-        P = Matrix{T}(undef, nI, z_pixels)
+                            T::Type{<:Real}=Float64, n_bin::Integer=1)
+        @assert n_bin ≥ 1 "n_bin must be ≥ 1"
+        @assert z_pixels % n_bin == 0 "z_pixels ($z_pixels) must be divisible by n_bin ($n_bin)"
+        z_out = div(z_pixels, n_bin)
+        P = Matrix{T}(undef, nI, z_out)
+
         @inbounds @views for j in 1:nI
-            # Convert only if needed
+            # stack_raw :: (Nx, Nz, Nframes)
             stack_raw = data_processed[key][:,:,:,j]
             stack = T <: eltype(stack_raw) ? stack_raw : T.(stack_raw)
-            P[j, :] = mean_z_profile(stack)
+
+            if n_bin == 1
+                # Average over x (dim 1) and frames (dim 3) → length Nz
+                prof = dropdims(mean(stack; dims=(1,3)); dims=(1,3))
+                P[j, :] = prof
+            else
+                # Bin z first: reshape to (Nx, n_bin, z_out, Nframes)
+                Nx, Nz, Nf = size(stack)
+                @assert Nz == z_pixels  # sanity check
+                B = reshape(stack, Nx, n_bin, z_out, Nf)
+                # Mean over x (1), bin group (2), frames (4) → (1,1,z_out,1)
+                prof_binned = dropdims(mean(B; dims=(1,2,4)); dims=(1,2,4))
+                P[j, :] = prof_binned
+            end
         end
+
         return P
     end
 

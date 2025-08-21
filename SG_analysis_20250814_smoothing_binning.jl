@@ -36,9 +36,9 @@ const T_START = Dates.now()
 include("./Modules/MyExperimentalAnalysis.jl");
 using .MyExperimentalAnalysis;
 # Set the working directory to the current location
-cd(@__DIR__) ;
+cd(@__DIR__) 
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSS");
-const OUTDIR    = joinpath(@__DIR__, "analysis_data", RUN_STAMP);
+const OUTDIR    = joinpath(@__DIR__, "analysis_data", "smoothing_binning")
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 # General setup
@@ -53,8 +53,152 @@ MyExperimentalAnalysis.OUTDIR   = OUTDIR;
 
 # Data Directory
 data_directory = "20250814/" ;
-outfile = joinpath(data_directory, "data.jld2")
-outfile2 = joinpath(data_directory, "data_processed.jld2")
+
+parent_folder = joinpath(@__DIR__, "analysis_data")
+
+# --- 1) List only subfolders starting with "2025"
+"""
+    folders_2025(parent) -> Vector{String}
+
+Return the names of immediate subfolders of `parent` that start with "2025".
+"""
+function folders_2025(parent::AbstractString)
+    filter(f -> isdir(joinpath(parent, f)) && startswith(f, "2025"), readdir(parent))
+end
+
+# --- 2) Parse report.txt → (binning::Union{Int,Missing}, smoothing::Union{Float64,Missing})
+"""
+    extract_info(report_path) -> (binning::Union{Int,Missing}, smoothing::Union{Float64,Missing})
+
+Reads a `report.txt` and returns:
+- `binning`: the integer from the LAST "Binning : ..." occurrence on the line (handles "4 × 1", "4 x 1", "1", etc.)
+- `smoothing`: the Float64 after "Smoothing parameter : ..."
+"""
+function extract_info(report_path)::Tuple{Union{Int,Missing},Union{Float64,Missing}}
+    txt = read(report_path, String)
+
+    # Take the LAST "Binning : ..." occurrence (captures the whole right-hand side of the line)
+    bins = collect(eachmatch(r"Binning\s*:\s*([^\r\n]+)", txt))
+    binning_val::Union{Int,Missing} = missing
+    if !isempty(bins)
+        bin_str = strip(bins[end].captures[1])          # e.g. "4 × 1" or "1"
+        # Get the LAST integer on that line (handles "4 × 1", "4 x 1", "1", etc.)
+        m = match(r"(\d+)\s*$", bin_str)
+        if m === nothing
+            # fallback: any integer anywhere on the line; take the last one
+            ints = collect(eachmatch(r"\d+", bin_str))
+            if !isempty(ints)
+                m = ints[end]
+            end
+        end
+        if m !== nothing
+            binning_val = parse(Int, m.match)
+        end
+    end
+
+    # Smoothing parameter (allow decimals/scientific)
+    sm = match(r"Smoothing\s*parameter\s*:\s*([0-9.eE+-]+)", txt)
+    smoothing_val::Union{Float64,Missing} =
+        sm === nothing ? missing : (tryparse(Float64, sm.captures[1]) === nothing ? missing : tryparse(Float64, sm.captures[1]))
+
+    return (binning_val, smoothing_val)
+end
+
+# --- 3) Find fw_data CSV inside a folder
+"""
+    find_fw_data_csv(folder; filename="fw_data.csv") -> Union{String,Nothing}
+
+Prefers `filename` if present; otherwise searches for any CSV whose basename matches /\\bfw[_-]?data\\b/i.
+Returns the full path, or `nothing` if not found.
+"""
+function find_fw_data_csv(folder::AbstractString; filename::AbstractString="fw_data.csv")::Union{String,Nothing}
+    exact = joinpath(folder, filename)
+    if isfile(exact)
+        return exact
+    end
+    entries = readdir(folder; join=true)
+    cands = filter(p -> endswith(lowercase(p), ".csv") &&
+                        occursin(r"(?i)\bfw[_\-]?data\b", basename(p)),
+                   entries)
+    return isempty(cands) ? nothing : cands[1]
+end
+
+# --- 4) Load CSV with optional column selection/drop
+"""
+    load_fw_data_csv(path; select=nothing, drop=nothing, normalizenames=true) -> DataFrame
+
+Wrapper over CSV.read that lets you load *only* certain columns.
+- `select`: Vector of Symbols/Strings/Ints or a Regex to keep
+- `drop`:   Vector or Regex to drop
+- `normalizenames=true`: turn headers like "time (s)" into :time_s
+"""
+function load_fw_data_csv(path::AbstractString; select=nothing, drop=nothing, normalizenames::Bool=true)
+    kwargs = (; normalizenames)
+    select === nothing || (kwargs = merge(kwargs, (; select=select)))
+    drop   === nothing || (kwargs = merge(kwargs, (; drop=drop)))
+    return CSV.read(path, DataFrame; kwargs...)
+end
+
+
+# --- 5) Main collector: returns (meta=DataFrame, tables=Dict{String,DataFrame})
+"""
+    collect_fw(parent; select=nothing, drop=nothing, filename="fw_data.csv")
+      -> (meta::DataFrame, tables::Dict{String,DataFrame})
+
+Scans `parent/2025*` folders.
+- Parses each `report.txt` to get (Binning, Smoothing).
+- Finds and loads `fw_data.csv` (or a close match).
+- Returns:
+    * `meta`: one row per folder with Folder, Binning, Smoothing, fw_path
+    * `tables`: Dict mapping folder name => DataFrame (columns possibly filtered via `select`/`drop`)
+"""
+"""
+    collect_fw_map(parent; select=nothing, drop=nothing, filename="fw_data.csv", skip_missing=true)
+      -> Dict{String, NamedTuple{(:binning,:smoothing,:df),Tuple{Union{Int,Missing},Union{Float64,Missing},DataFrame}}}
+
+For each subfolder `parent/2025*`, returns:
+  map["20250814"] => (binning=1, smoothing=0.03, df=<DataFrame from fw_data.csv>)
+
+- `select`/`drop` are passed to CSV.read to load only needed columns.
+- If `skip_missing` is true, folders missing report or fw_data are skipped.
+"""
+function collect_fw_map(parent::AbstractString; select=nothing, drop=nothing,
+                        filename::AbstractString="fw_data.csv", skip_missing::Bool=true)
+    out = OrderedDict{String,NamedTuple{(:binning,:smoothing,:df),
+           Tuple{Union{Int,Missing},Union{Float64,Missing},DataFrame}}}()
+    for f in folders_2025(parent)
+        folder_path = joinpath(parent, f)
+        report_path = joinpath(folder_path, "experiment_report.txt")
+        fw_path = find_fw_data_csv(folder_path; filename=filename)
+
+        # handle missing pieces
+        if !(isfile(report_path) && fw_path !== nothing)
+            if skip_missing
+                @warn "Skipping (missing report or fw_data)" folder=f
+                continue
+            end
+        end
+
+        binning, smoothing = isfile(report_path) ? extract_info(report_path) : (missing, missing)
+        df = fw_path === nothing ? DataFrame() : load_fw_data_csv(fw_path; select=select, drop=drop)
+        out[f] = (binning=binning, smoothing=smoothing, df=df)
+    end
+    return out
+end
+
+
+# only load a few columns from each fw_data.csv
+sel = [:I_coil_mA, :F1_z_centroid_mm, :F1_z_centroid_se_mm]  # works with normalizenames=true
+m = collect_fw_map(parent_folder; select=sel)
+
+key_labels = sort(collect(keys(m)))
+
+plot(title="Binning 7 Smoothing")
+for k in key_labels
+    plot!(abs.(m[k][3][3:end,"I_coil_mA"]/1000), abs.(m[k][3][3:end,"F1_z_centroid_mm"]), label="$(m[k][1])| $(m[k][2])")
+end
+plot!(xlabel="Current (mA)",xaxis=:log10,yaxis=:log10)
+
 # Previous experiment data for comparison
 data_JSF = OrderedDict(
     :exp => hcat(
