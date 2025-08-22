@@ -1,5 +1,6 @@
 # This list has been updated according to the most recent values reported in NIST, CODATA2018, and IAEA 
 # (see Wolfram notebook for references and uncertainties)
+# Updated to July 2025
 module AtomicSpecies
     function atoms(spec::String)
         mp  = 1.67262192595e-27 ;   # proton mass (kg)

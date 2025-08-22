@@ -52,7 +52,7 @@ hostname = gethostname();
 # Random seeds
 base_seed_set = 145;
 # rng_set = MersenneTwister(base_seed_set)
-rng_set = TaskLocalRNG()
+rng_set = TaskLocalRNG();
 
 FIG_EXT = "png"   # could be "pdf", "svg", etc.
 
@@ -71,7 +71,7 @@ const μₑ    = 9.2847646917e-24 ;   # Electron magnetic moment (J/T). RSU = 3.
 const Sspin = 1/2 ;                # Electron spin
 const gₑ    = -2.00231930436092 ;  # Electron g-factor
 ## ATOM INFORMATION: 
-atom_info       = AtomicSpecies.atoms(atom);
+# atom_info       = AtomicSpecies.atoms(atom);
 K39_params = AtomParams(atom);
 # const R         = atom_info[1];
 # const μₙ        = atom_info[2];
@@ -96,8 +96,8 @@ sim_pixelsize_x, sim_pixelsize_z = (sim_bin_x, sim_bin_z).*cam_pixelsize ; # Eff
 x_pixels = Int(nx_pixels / sim_bin_x);  # Number of x-pixels after binning
 z_pixels = Int(nz_pixels / sim_bin_z);  # Number of z-pixels after binning
 # Spatial axes shifted to center the pixels
-x_position = pixel_coordinates(x_pixels, sim_bin_x, sim_pixelsize_x)
-z_position = pixel_coordinates(z_pixels, sim_bin_z, sim_pixelsize_z)
+x_position = pixel_coordinates(x_pixels, sim_bin_x, sim_pixelsize_x);
+z_position = pixel_coordinates(z_pixels, sim_bin_z, sim_pixelsize_z);
 println("""
 ***************************************************
 CAMERA FEATURES
@@ -113,7 +113,7 @@ SIMULATION INFORMATION
 ***************************************************
 """)
 # Furnace
-T_K = 273.15 + 200 ; # Furnace temperature (K)
+T_K = 273.15 + 205 ; # Furnace temperature (K)
 # Furnace aperture
 const x_furnace = 2.0e-3 ;
 const z_furnace = 100e-6 ;
@@ -159,8 +159,98 @@ Icoils = [0.001,0.002,0.003,0.005,0.007,
 ];
 nI = length(Icoils);
 
-plot_μeff(K39_params,joinpath(dir_path,"mm_effective.$(FIG_EXT)"))
+plot_μeff(K39_params,joinpath(OUTDIR,"mm_effective.$(FIG_EXT)"))
 
+
+# Sample size: number of atoms arriving to the screen
+const Nss = 2000000
+
+# Monte Carlo generation of particles traersing the filtering slit
+alive_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = true, base_seed = base_seed_set);
+θesUP, θnsUP, θesDOWN, θnsDOWN = generate_matched_pairs(Nss, rng_set; mode=:total)
+
+"""
+    build_init_cond(alive, UPθe, UPθn, DOWNθe, DOWNθn; mode=:total, add_label=false)
+
+Build paired arrays:
+- `mode = :total`:
+    returns `(pairsUP::Matrix, pairsDOWN::Matrix)` with sizes
+    `length(UPθe) × (8 or 9)` and `length(DOWNθe) × (8 or 9)`.
+- `mode = :bucket`:
+    returns `(pairsUP::Matrix, pairsDOWN::Matrix)`, both `No × (8 or 9)`.
+
+`alive[i,1:6]` is copied to the first 6 columns; columns 7–8 are θe, θn.
+If `add_label=true`, column 9 is 1.0 for UP and 0.0 for DOWN.
+"""
+function build_init_cond(
+    alive::AbstractMatrix{T},
+    UPθe::AbstractVector{T}, UPθn::AbstractVector{T},
+    DOWNθe::AbstractVector{T}, DOWNθn::AbstractVector{T};
+    mode::Symbol = :total
+) where {T<:Real}
+
+    No = size(alive, 1)
+    @assert length(UPθe)   == length(UPθn)   "UP θe/θn lengths must match"
+    @assert length(DOWNθe) == length(DOWNθn) "DOWN θe/θn lengths must match"
+
+    ncols = add_label ? 9 : 8
+
+    if mode === :total
+        n_up = length(UPθe)
+        n_dn = length(DOWNθe)
+        @assert n_up + n_dn == No "In :total, n_up + n_dn must equal size(alive,1)"
+
+        pairsUP   = Matrix{T}(undef, n_up, ncols)
+        pairsDOWN = Matrix{T}(undef, n_dn, ncols)
+
+        @inbounds @views begin
+            # UP block: rows 1:n_up from `alive`
+            for i in 1:n_up
+                pairsUP[i, 1:6] = alive[i, 1:6]
+                pairsUP[i, 7]   = UPθe[i]
+                pairsUP[i, 8]   = UPθn[i]
+            end
+            # DOWN block: rows (n_up+1):No from `alive`
+            for j in 1:n_dn
+                i_alive = n_up + j
+                pairsDOWN[j, 1:6] = alive[i_alive, 1:6]
+                pairsDOWN[j, 7]   = DOWNθe[j]
+                pairsDOWN[j, 8]   = DOWNθn[j]
+            end
+        end
+
+        return pairsUP, pairsDOWN
+
+    elseif mode === :bucket
+        @assert length(UPθe) == No == length(DOWNθe) "In :bucket, each θ list must have length No"
+
+        pairsUP   = Matrix{T}(undef, No, ncols)
+        pairsDOWN = Matrix{T}(undef, No, ncols)
+
+        @inbounds @views for i in 1:No
+            # UP
+            pairsUP[i, 1:6] = alive[i, 1:6]
+            pairsUP[i, 7]   = UPθe[i]
+            pairsUP[i, 8]   = UPθn[i]
+            if add_label; pairsUP[i, 9] = one(T); end
+            # DOWN
+            pairsDOWN[i, 1:6] = alive[i, 1:6]
+            pairsDOWN[i, 7]   = DOWNθe[i]
+            pairsDOWN[i, 8]   = DOWNθn[i]
+            if add_label; pairsDOWN[i, 9] = zero(T); end
+        end
+
+        return pairsUP, pairsDOWN
+
+    else
+        error("Unknown mode=$mode. Use :total or :bucket.")
+    end
+end
+
+
+if save_fig
+    display(plot_velocity_stats(alive_slit, joinpath(dir_path, "init_vel_stats.png")))
+end
 
 #################################################################################
 # FUNCTIONS
@@ -171,107 +261,11 @@ plot_μeff(K39_params,joinpath(dir_path,"mm_effective.$(FIG_EXT)"))
 
 
 
-# Generate samples post-filtering by the slit
-function _generate_samples_serial(No::Int, rng, p::FurnaceBeamParams)
-    @assert No > 0
-    alive = Matrix{Float64}(undef, No, 6)
-    iteration_count = 0
-    count = 0
 
-    # precompute a few constants
-    hx = x_slit/2
-    hz = z_slit/2
-    epsvy = 1e-18
-
-    @time while count < No
-        iteration_count += 1
-
-        # initial transverse position (uniform over furnace rectangle)
-        x0 = x_furnace * (rand(rng) - 0.5)
-        z0 = z_furnace * (rand(rng) - 0.5)
-
-        v = AtomicBeamVelocity(rng,p)
-        v0_x, v0_y, v0_z = v[1], v[2], v[3]
-
-        # avoid near-zero v_y
-        if abs(v0_y) ≤ epsvy
-            continue
-        end
-
-        x_at_slit = x0 + y_FurnaceToSlit * v0_x / v0_y
-        z_at_slit = z0 + y_FurnaceToSlit * v0_z / v0_y
-
-        if -hx <= x_at_slit <= hx && -hz <= z_at_slit <= hz
-            count += 1
-            @inbounds alive[count,:] =  [x0, 0.0, z0, v0_x, v0_y, v0_z]
-        end
-    end
-
-    println("Total iterations: ", iteration_count)
-    return alive
-end
-
-function _generate_samples_multithreaded(No::Int, base_seed::Int, p::FurnaceBeamParams)
-    alive = Matrix{Float64}(undef, No, 6)
-
-    sample_count = Threads.Atomic{Int}(0)
-    iteration_count = Threads.Atomic{Int}(0)
-
-    # Precomputed constants
-    hx = x_slit/2
-    hz = z_slit/2
-    epsvy = 1e-18
-
-    @time Threads.@threads for thread_id in 1:Threads.nthreads()
-        rng0 = TaskLocalRNG()
-        Random.seed!(rng0, hash((base_seed, thread_id)))
-        # rng0 = MersenneTwister(hash((base_seed, thread_id)))   
-
-        while true
-            Threads.atomic_add!(iteration_count, 1)
-
-            x0 = x_furnace * (rand(rng0) - 0.5)
-            z0 = z_furnace * (rand(rng0) - 0.5)
-
-            # Velocity sample (zero-alloc SVector)
-            v = AtomicBeamVelocity(rng0,p)
-            v0_x, v0_y, v0_z = v[1], v[2], v[3]
-
-            # Avoid divide-by-zero / huge times
-            if abs(v0_y) ≤ epsvy
-                continue
-            end
-
-            x_at_slit = x0 + y_FurnaceToSlit * v0_x / v0_y
-            z_at_slit = z0 + y_FurnaceToSlit * v0_z / v0_y
-
-            if -hx ≤ x_at_slit ≤ hx && -hz ≤ z_at_slit ≤ hz
-                idx = Threads.atomic_add!(sample_count, 1)
-                if idx <= No
-                    @inbounds alive[idx, :] = [x0, 0.0, z0, v0_x, v0_y, v0_z]
-                else
-                    break
-                end
-            end
-
-        end
-    end
-
-    println("Total iterations: ", iteration_count[])
-    return alive
-end
-
-function generate_samples(No::Int, p::FurnaceBeamParams; rng = Random.default_rng(), multithreaded::Bool = false, base_seed::Int = 1234)
-    if multithreaded
-        return _generate_samples_multithreaded(No, base_seed, p)
-    else
-        return _generate_samples_serial(No, rng, p)
-    end
-end
 
 # Magnet shape
 function z_magnet_edge(x)
-    a =2.5e-3;
+    a = 2.5e-3;
     z_center = 1.3*a 
     r_edge = a
     φ = π/6
@@ -394,36 +388,7 @@ function z_magnet_profile_time(t, r0::AbstractVector{Float64}, v0::AbstractVecto
     end
 end
 
-function generate_matched_pairs(No)
-    θes_up_list = Float64[]
-    θns_up_list = Float64[]
-    θes_down_list = Float64[]
-    θns_down_list = Float64[]
-    
-    count_less = 0
-    count_greater = 0
-    total_trials = 0
-    
-    @time while count_less < No || count_greater < No
-        total_trials += 1
-        θe = 2 * asin(sqrt(rand(rng_set)))
-        θn = 2 * asin(sqrt(rand(rng_set)))
 
-        if θe < θn && count_less < No
-            push!(θes_up_list, θe)
-            push!(θns_up_list, θn)
-            count_less += 1
-        elseif θe > θn && count_greater < No
-            push!(θes_down_list, θe)
-            push!(θns_down_list, θn)
-            count_greater += 1
-        end
-    end
-    
-    println("Total angle pairs generated: $total_trials")
-
-    return θes_up_list, θns_up_list, θes_down_list, θns_down_list
-end
 
 function build_init_cond(alive::Matrix{Float64}, θes::Vector{Float64}, θns::Vector{Float64})
     No = size(alive, 1)
@@ -1282,16 +1247,9 @@ end
 
 
 
-# Sample size: number of atoms arriving to the screen
-const Nss = 15000
 
-# Monte Carlo generation
-alive_slit = generate_samples(Nss, fbp; rng = rng_set, multithreaded = true, base_seed = base_seed_set);
-if save_fig
-    display(plot_velocity_stats(alive_slit, joinpath(dir_path, "init_vel_stats.png")))
-end
 
-θesUP, θnsUP, θesDOWN, θnsDOWN = generate_matched_pairs(Nss);
+
 pairs_UP = build_init_cond(alive_slit, θesUP, θnsUP);
 pairs_DOWN = build_init_cond(alive_slit, θesDOWN, θnsDOWN);
 # Optionally clear memory

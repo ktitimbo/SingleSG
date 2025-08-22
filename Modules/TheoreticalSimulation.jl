@@ -538,123 +538,341 @@ end
         return r, v
     end
 
-# CQD equations of motion only along the z-coordinate
-@inline function CQDEqOfMotion_z(t,Ix::Float64,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θe::Float64, θn::Float64, kx::Float64, p::AtomParams)
-    v0y = v0[2]
-    v0z = v0[3]
-    z0 = r0[3]
-    
-    tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG ) / v0y
-    tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG ) / v0y
+    # CQD equations of motion only along the z-coordinate
+    @inline function CQD_EqOfMotion_z(t,Ix::Float64,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θe::Float64, θn::Float64, kx::Float64, p::AtomParams)
+        v0y = v0[2]
+        v0z = v0[3]
+        z0 = r0[3]
+        
+        tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG ) / v0y
+        tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG ) / v0y
 
-    cqd_sign = sign(θn-θe) 
-    ωL       = abs( γₑ * BvsI(Ix) )
-    acc_0    = μ*GvsI(Ix)/p.M
-    kω       = cqd_sign*kx*ωL
+        cqd_sign = sign(θn-θe) 
+        ωL       = abs( γₑ * BvsI(Ix) )
+        acc_0    = μ*GvsI(Ix)/p.M
+        kω       = cqd_sign*kx*ωL
 
-    # Precompute angles
-    θe_half = θe / 2
-    tanθ = tan(θe_half)
-    tanθ2 = tanθ^2
-    cosθ2 = cos(θe_half)^2
-    sinθ2 = sin(θe_half)^2
-    log_cos2 = log(cosθ2)
-    polylog_0 = polylogarithm(2, -tanθ2)
+        # Precompute angles
+        θe_half = θe / 2
+        tanθ = tan(θe_half)
+        tanθ2 = tanθ^2
+        cosθ2 = cos(θe_half)^2
+        sinθ2 = sin(θe_half)^2
+        log_cos2 = log(cosθ2)
+        polylog_0 = polylogarithm(2, -tanθ2)
 
-    if t <= tf2
-        return z0 + v0z*t
-    elseif t <= tf3   # Crossing the SG apparatus
-        Δt = t - tf2
-        exp_term = exp(-2 * kω * Δt)
-        polylog_t = polylogarithm(2, -exp_term * tanθ2)
+        if t <= tf2
+            return z0 + v0z*t
+        elseif t <= tf3   # Crossing the SG apparatus
+            Δt = t - tf2
+            exp_term = exp(-2 * kω * Δt)
+            polylog_t = polylogarithm(2, -exp_term * tanθ2)
 
-        return z0 + v0z*t + 0.5 * acc_0 * Δt^2 + acc_0 / kω * log_cos2 * Δt + 0.5 * acc_0 / kω^2 * ( polylog_t - polylog_0 )
-    
-    else # t > tf3 # Travel to the Screen
-        Δt2 = t - tf2
-        Δt3 = t - tf3
-        τ_SG = default_y_SG / v0y
-        exp_SG = exp(-2 * kω * τ_SG)
-        polylog_SG = polylogarithm(2, -exp_SG * tanθ2)
-        log_term = log(cosθ2 + exp_SG * sinθ2)
+            return z0 + v0z*t + 0.5 * acc_0 * Δt^2 + acc_0 / kω * log_cos2 * Δt + 0.5 * acc_0 / kω^2 * ( polylog_t - polylog_0 )
+        
+        else # t > tf3 # Travel to the Screen
+            Δt2 = t - tf2
+            Δt3 = t - tf3
+            τ_SG = default_y_SG / v0y
+            exp_SG = exp(-2 * kω * τ_SG)
+            polylog_SG = polylogarithm(2, -exp_SG * tanθ2)
+            log_term = log(cosθ2 + exp_SG * sinθ2)
 
-        return z0 + v0z*t + 0.5*acc_0*( Δt2^2 - Δt3^2 ) + acc_0 / kω * τ_SG * (log_cos2 + log_term * Δt3 / τ_SG) + 0.5 * acc_0 / kω^2 * (polylog_SG - polylog_0)
+            return z0 + v0z*t + 0.5*acc_0*( Δt2^2 - Δt3^2 ) + acc_0 / kω * τ_SG * (log_cos2 + log_term * Δt3 / τ_SG) + 0.5 * acc_0 / kω^2 * (polylog_SG - polylog_0)
+        end
     end
-end
 
-@inline function QM_EqOfMotion_z(t,Ix::Float64,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θ::Float64, p::AtomParams)
-    v0y = v0[2]
-    v0z = v0[3]
-    z0 = r0[3]
-    
-    tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG ) / v0y
-    tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG ) / v0y
+    @inline function QM_EqOfMotion_z(t,Ix::Float64,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θ::Float64, p::AtomParams)
+        v0y = v0[2]
+        v0z = v0[3]
+        z0 = r0[3]
+        
+        tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG ) / v0y
+        tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG ) / v0y
 
-    acc_0    = μ*cos(θ)*GvsI(Ix)/p.M
+        acc_0    = μ*cos(θ)*GvsI(Ix)/p.M
 
-    if t <= tf2
-        return z0 + v0z*t
-    elseif t <= tf3   # Crossing the SG apparatus
-        Δt = t - tf2
-        return  z0 + v0z*t + 0.5*acc_0*Δt^2
-    else # t > tf3 # Travel to the Screen
-        τ_SG = default_y_SG / v0y
-        return z0 + v0z*t + acc_0 * τ_SG * (t - 0.5*(tf2+tf3))
+        if t <= tf2
+            return z0 + v0z*t
+        elseif t <= tf3   # Crossing the SG apparatus
+            Δt = t - tf2
+            return  z0 + v0z*t + 0.5*acc_0*Δt^2
+        else # t > tf3 # Travel to the Screen
+            τ_SG = default_y_SG / v0y
+            return z0 + v0z*t + acc_0 * τ_SG * (t - 0.5*(tf2+tf3))
+        end
     end
-end
 
 
 
-# CQD Screen position
-function CQD_Screen_position(Ix,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θe::Float64, θn::Float64, kx::Float64, p::AtomParams)
+    # CQD Screen position
+    function CQD_Screen_position(Ix,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θe::Float64, θn::Float64, kx::Float64, p::AtomParams)
 
-    x0, y0, z0 = r0
-    v0x, v0y, v0z = v0
+        x0, y0, z0 = r0
+        v0x, v0y, v0z = v0
 
-    L1 = default_y_FurnaceToSlit 
-    L2 = default_y_SlitToSG
-    Lsg = default_y_SG
-    Ld = default_y_SGToScreen
-    Ltot = L1 + L2 + Lsg + Ld
+        L1 = default_y_FurnaceToSlit 
+        L2 = default_y_SlitToSG
+        Lsg = default_y_SG
+        Ld = default_y_SGToScreen
+        Ltot = L1 + L2 + Lsg + Ld
 
-    # Physics parameters
-    cqd_sign = sign(θn-θe) 
-    acc_0 = μ * GvsI(Ix) / p.M
-    ωL = abs(γₑ * BvsI(Ix))
-    kω = cqd_sign * kx * ωL
+        # Physics parameters
+        cqd_sign = sign(θn-θe) 
+        acc_0 = μ * GvsI(Ix) / p.M
+        ωL = abs(γₑ * BvsI(Ix))
+        kω = cqd_sign * kx * ωL
 
-    # Common trig values
-    θe_half = θe / 2
-    cos2 = cos(θe_half)^2
-    sin2 = sin(θe_half)^2
-    tan2 = tan(θe_half)^2
-    exp_term = exp(-2 * kω * Lsg / v0y)
+        # Common trig values
+        θe_half = θe / 2
+        cos2 = cos(θe_half)^2
+        sin2 = sin(θe_half)^2
+        tan2 = tan(θe_half)^2
+        exp_term = exp(-2 * kω * Lsg / v0y)
 
-    x = x0 + Ltot * v0x / v0y
-    y = y0 + Ltot
-    z = z0 + Ltot * v0z / v0y + 0.5*acc_0/v0y^2*((Lsg+Ld)^2-Ld^2) + acc_0/kω*Lsg/v0y*( log(cos2) + Ld/Lsg * log( cos2 + exp_term*sin2 ) ) + 0.5*acc_0/kω^2 * ( polylogarithm(2, -exp_term*tan2) - polylogarithm(2, -tan2) )
-    return SVector(x,y,z)
-end
+        x = x0 + Ltot * v0x / v0y
+        y = y0 + Ltot
+        z = z0 + Ltot * v0z / v0y + 0.5*acc_0/v0y^2*((Lsg+Ld)^2-Ld^2) + acc_0/kω*Lsg/v0y*( log(cos2) + Ld/Lsg * log( cos2 + exp_term*sin2 ) ) + 0.5*acc_0/kω^2 * ( polylogarithm(2, -exp_term*tan2) - polylogarithm(2, -tan2) )
+        return SVector(x,y,z)
+    end
 
 
-function QM_Screen_position(Ix,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θ::Float64, p::AtomParams)
+    function QM_Screen_position(Ix,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θ::Float64, p::AtomParams)
 
-    x0, y0, z0 = r0
-    v0x, v0y, v0z = v0
+        x0, y0, z0 = r0
+        v0x, v0y, v0z = v0
 
-    # Geometry
-    Lsg = default_y_SG
-    Ld = default_y_SGToScreen
-    Ltot = default_y_FurnaceToSlit  + default_y_SlitToSG + Lsg + Ld
+        # Geometry
+        Lsg = default_y_SG
+        Ld = default_y_SGToScreen
+        Ltot = default_y_FurnaceToSlit  + default_y_SlitToSG + Lsg + Ld
 
-    # Physics parameters
-    acc_0 = μ * cos(θ) * GvsI(Ix) / p.M
+        # Physics parameters
+        acc_0 = μ * cos(θ) * GvsI(Ix) / p.M
 
-    x = x0 + Ltot * v0x / v0y
-    y = y0 + Ltot
-    z = z0 + Ltot * v0z / v0y + 0.5*acc_0/v0y^2*((Lsg+Ld)^2-Ld^2)
-    return SVector{3,Float64}(x, y, z)
-end
+        x = x0 + Ltot * v0x / v0y
+        y = y0 + Ltot
+        z = z0 + Ltot * v0z / v0y + 0.5*acc_0/v0y^2*((Lsg+Ld)^2-Ld^2)
+        return SVector{3,Float64}(x, y, z)
+    end
+
+    # Generate samples post-filtering by the slit
+    function _generate_samples_serial(No::Int, rng, p::EffusionParams; v_pdf::Symbol=:v3)
+        @assert No > 0
+        alive = Matrix{Float64}(undef, No, 6)
+        iteration_count = 0
+        count = 0
+
+        # precompute a few constants
+        hx = default_x_slit/2
+        hz = default_z_slit/2
+        epsvy = 1e-18
+
+        @time while count < No
+            iteration_count += 1
+
+            # initial transverse position (uniform over furnace rectangle)
+            x0 = default_x_furnace * (rand(rng) - 0.5)
+            z0 = default_z_furnace * (rand(rng) - 0.5)
+
+            if v_pdf === :v3
+                v = AtomicBeamVelocity_v3(rng,p)
+            elseif v_pdf === :v2
+                v = AtomicBeamVelocity_v2(rng,p)
+            else
+                @warn "No Velocity PDF chosen, got $v_pdf"
+                v = SVector{3,Float64}(0,800,0)
+            end
+
+            v0_x, v0_y, v0_z = v
+
+            # avoid near-zero v_y
+            if abs(v0_y) ≤ epsvy
+                continue
+            end
+
+            x_at_slit = x0 + default_y_FurnaceToSlit * v0_x / v0_y
+            z_at_slit = z0 + default_y_FurnaceToSlit * v0_z / v0_y
+
+            if (abs(x_at_slit) <= hx) & (abs(z_at_slit) <= hz)
+                count += 1
+                @inbounds alive[count,:] =  [x0, 0.0, z0, v0_x, v0_y, v0_z]
+            end
+        end
+
+        println("Total iterations: ", iteration_count)
+        return alive
+    end
+
+    function _generate_samples_multithreaded(No::Int, base_seed::Int, p::EffusionParams; v_pdf::Symbol = :v3)
+        alive = Matrix{Float64}(undef, No, 6)
+
+        sample_count = Threads.Atomic{Int}(0)
+        iteration_count = Threads.Atomic{Int}(0)
+
+        # Precomputed constants
+        hx = default_x_slit/2
+        hz = default_z_slit/2
+        epsvy = 1e-18
+
+        @time Threads.@threads for thread_id in 1:Threads.nthreads()
+            rng0 = TaskLocalRNG()
+            Random.seed!(rng0, hash((base_seed, thread_id)))
+            # rng0 = MersenneTwister(hash((base_seed, thread_id)))   
+
+            while true
+                Threads.atomic_add!(iteration_count, 1)
+
+                x0 = default_x_furnace * (rand(rng0) - 0.5)
+                z0 = default_z_furnace * (rand(rng0) - 0.5)
+
+                # Velocity sample (zero-alloc SVector)
+                if v_pdf === :v3
+                    v = AtomicBeamVelocity_v3(rng0,p)
+                elseif v_pdf === :v2
+                    v = AtomicBeamVelocity_v2(rng0,p)
+                else
+                    @warn "No Velocity PDF chosen, got $v_pdf"
+                    v = SVector{3,Float64}(0,800,0)
+                end
+                v0_x, v0_y, v0_z = v
+
+                # Avoid divide-by-zero / huge times
+                if abs(v0_y) ≤ epsvy
+                    continue
+                end
+
+                x_at_slit = x0 + default_y_FurnaceToSlit * v0_x / v0_y
+                z_at_slit = z0 + default_y_FurnaceToSlit * v0_z / v0_y
+
+                if -hx ≤ x_at_slit ≤ hx && -hz ≤ z_at_slit ≤ hz
+                    idx = Threads.atomic_add!(sample_count, 1)
+                    if idx <= No
+                        @inbounds alive[idx, :] = [x0, 0.0, z0, v0_x, v0_y, v0_z]
+                    else
+                        break
+                    end
+                end
+
+            end
+        end
+
+        println("Total iterations: ", iteration_count[])
+        return alive
+    end
+
+    function generate_samples(No::Int, p::EffusionParams; v_pdf::Symbol =:v3, rng = Random.default_rng(), multithreaded::Bool = false, base_seed::Int = 1234)
+        if multithreaded
+            return _generate_samples_multithreaded(No, base_seed, p; v_pdf=v_pdf)
+        else
+            return _generate_samples_serial(No, rng, p; v_pdf=v_pdf)
+        end
+    end
+
+    function generate_matched_pairs(No::Integer, rng; mode::Symbol = :total)
+        @assert No > 0
+        θes_up = Float64[]; θns_up = Float64[]
+        θes_dn = Float64[]; θns_dn = Float64[]
+
+        if mode === :total
+            sizehint!(θes_up, No ÷ 2); sizehint!(θns_up, No ÷ 2)
+            sizehint!(θes_dn, No ÷ 2); sizehint!(θns_dn, No ÷ 2)
+
+            kept = 0
+            while kept < No
+                θe = 2asin(sqrt(rand(rng))); θn = 2asin(sqrt(rand(rng)))
+                if θe < θn
+                    push!(θes_up, θe); push!(θns_up, θn); kept += 1
+                elseif θe > θn
+                    push!(θes_dn, θe); push!(θns_dn, θn); kept += 1
+                end
+            end
+
+        elseif mode === :bucket
+            sizehint!(θes_up, No); sizehint!(θns_up, No)
+            sizehint!(θes_dn, No); sizehint!(θns_dn, No)
+
+            nup = 0; ndn = 0
+            while (nup < No) || (ndn < No)
+                θe = 2asin(sqrt(rand(rng))); θn = 2asin(sqrt(rand(rng)))
+                if (θe < θn) && (nup < No)
+                    push!(θes_up, θe); push!(θns_up, θn); nup += 1
+                elseif (θe > θn) && (ndn < No)
+                    push!(θes_dn, θe); push!(θns_dn, θn); ndn += 1
+                end
+            end
+
+        else
+            error("Unknown mode=$mode. Use :total or :bucket.")
+        end
+
+        return θes_up, θns_up, θes_dn, θns_dn
+    end
+
+
+    function build_init_conditions(
+        alive::AbstractMatrix{T},
+        UPθe::AbstractVector{T}, UPθn::AbstractVector{T},
+        DOWNθe::AbstractVector{T}, DOWNθn::AbstractVector{T};
+        mode::Symbol = :total
+    ) where {T<:Real}
+
+        No = size(alive, 1)
+        @assert length(UPθe)   == length(UPθn)   "UP θe/θn lengths must match"
+        @assert length(DOWNθe) == length(DOWNθn) "DOWN θe/θn lengths must match"
+
+        if mode === :total
+            n_up = length(UPθe)
+            n_dn = length(DOWNθe)
+            @assert n_up + n_dn == No "In :total, n_up + n_dn must equal size(alive,1)"
+
+            pairsUP   = Matrix{T}(undef, n_up, 8)
+            pairsDOWN = Matrix{T}(undef, n_dn, 8)
+
+            @inbounds @views begin
+                # UP block: rows 1:n_up from `alive`
+                for i in 1:n_up
+                    pairsUP[i, 1:6] = alive[i, 1:6]
+                    pairsUP[i, 7]   = UPθe[i]
+                    pairsUP[i, 8]   = UPθn[i]
+                end
+                # DOWN block: rows (n_up+1):No from `alive`
+                for j in 1:n_dn
+                    i_alive = n_up + j
+                    pairsDOWN[j, 1:6] = alive[i_alive, 1:6]
+                    pairsDOWN[j, 7]   = DOWNθe[j]
+                    pairsDOWN[j, 8]   = DOWNθn[j]
+                end
+            end
+
+            return pairsUP, pairsDOWN
+
+        elseif mode === :bucket
+            @assert length(UPθe) == No == length(DOWNθe) "In :bucket, each θ list must have length No"
+
+            pairsUP   = Matrix{T}(undef, No, 8)
+            pairsDOWN = Matrix{T}(undef, No, 8)
+
+            @inbounds @views for i in 1:No
+                # UP
+                pairsUP[i, 1:6] = alive[i, 1:6]
+                pairsUP[i, 7]   = UPθe[i]
+                pairsUP[i, 8]   = UPθn[i]
+                if add_label; pairsUP[i, 9] = one(T); end
+                # DOWN
+                pairsDOWN[i, 1:6] = alive[i, 1:6]
+                pairsDOWN[i, 7]   = DOWNθe[i]
+                pairsDOWN[i, 8]   = DOWNθn[i]
+                if add_label; pairsDOWN[i, 9] = zero(T); end
+            end
+
+            return pairsUP, pairsDOWN
+
+        else
+            error("Unknown mode=$mode. Use :total or :bucket.")
+        end
+    end
+
 
     export AtomParams,
             clear_all,
@@ -665,6 +883,11 @@ end
             EffusionParams, BeamEffusionParams,
             AtomicBeamVelocity_v3, AtomicBeamVelocity_v2,
             μF_effective, plot_μeff,
-            CQD_EqOfMotion
+            generate_samples,
+            CQD_EqOfMotion, QM_EqOfMotion,
+            CQD_EqOfMotion_z, QM_EqOfMotion_z,
+            CQD_Screen_position, QM_Screen_position,
+            generate_matched_pairs,
+            build_init_conditions
 
 end
