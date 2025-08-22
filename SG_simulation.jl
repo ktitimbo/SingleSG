@@ -11,6 +11,7 @@ Plots.default(
     grid=true, minorgrid=true, framestyle=:box, widen=true,
 )
 using Plots.PlotMeasures
+FIG_EXT = "png"   # could be "pdf", "svg", etc.
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using LaTeXStrings, Printf, PrettyTables
@@ -31,6 +32,8 @@ using DelimitedFiles, CSV, DataFrames, JLD2
 # Custom modules
 include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
+include("./Modules/TheoreticalSimulation.jl");
+using .TheoreticalSimulation;
 # include("./Modules/MyPolylogarithms.jl");
 # Multithreading setup
 using Base.Threads
@@ -71,23 +74,48 @@ const Sspin = 1/2 ;                # Electron spin
 const gₑ    = -2.00231930436092 ;  # Electron g-factor
 ## ATOM INFORMATION: 
 atom_info       = AtomicSpecies.atoms(atom);
-const R         = atom_info[1];
-const μₙ        = atom_info[2];
-const γₙ        = atom_info[3];
-const Ispin    = atom_info[4];
-const Ahfs     = atom_info[6];
-const M        = atom_info[7];
+K39_params = AtomParams(atom);
+# const R         = atom_info[1];
+# const μₙ        = atom_info[2];
+# const γₙ        = atom_info[3];
+# const Ispin    = atom_info[4];
+# const Ahfs     = atom_info[6];
+# const M        = atom_info[7];
 # Math constants
 const TWOπ = 2π;
 const INV_E = exp(-1);
 
+
+
 # STERN--GERLACH EXPERIMENT
-# Image size
-const cam_pixelsize = 0.0065e-3 / 2;  # [m] half the camera resolution
-n_bins = 1
-exp_pixelsize = n_bins * cam_pixelsize ;   # [m] 
+# Camera and pixel geometry : intrinsic properties
+cam_pixelsize = 6.5e-6 ;  # Physical pixel size of camera [m]
+nx_pixels , nz_pixels= (2160, 2560); # (Nx,Nz) pixels
+# Simulation resolution
+sim_bin_x, sim_bin_z = (1,1) ;  # Camera binning
+sim_pixelsize_x, sim_pixelsize_z = (sim_bin_x, sim_bin_z).*cam_pixelsize ; # Effective pixel size after binning [m]
+# Image dimensions (adjusted for binning)
+x_pixels = Int(nx_pixels / sim_bin_x);  # Number of x-pixels after binning
+z_pixels = Int(nz_pixels / sim_bin_z);  # Number of z-pixels after binning
+# Spatial axes shifted to center the pixels
+x_position = pixel_coordinates(x_pixels, sim_bin_x, sim_pixelsize_x)
+z_position = pixel_coordinates(z_pixels, sim_bin_z, sim_pixelsize_z)
+println("""
+***************************************************
+CAMERA FEATURES
+    Number of pixels        : $(nx_pixels) × $(nz_pixels)
+    Pixel size              : $(1e6*cam_pixelsize) μm
+
+SIMULATION INFORMATION
+    Binning                 : $(sim_bin_x) × $(sim_bin_z)
+    Effective pixels        : $(x_pixels) × $(z_pixels)
+    Pixel size              : $(1e6*sim_pixelsize_x)μm × $(1e6*sim_pixelsize_z)μm
+    xlims                   : ($(round(minimum(1e6*x_position), digits=6)) μm, $(round(maximum(1e3*x_position), digits=4)) mm)
+    zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
+***************************************************
+""")
 # Furnace
-const T = 273.15 + 200 ; # Furnace temperature (K)
+T_K = 273.15 + 200 ; # Furnace temperature (K)
 # Furnace aperture
 const x_furnace = 2.0e-3 ;
 const z_furnace = 100e-6 ;
@@ -101,6 +129,30 @@ const y_SG            = 7.0e-2 ;
 const y_SGToScreen    = 32.0e-2 ;
 # Connecting pipes
 const R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
+effusion_params = BeamEffusionParams(x_furnace,z_furnace,x_slit,z_slit,y_FurnaceToSlit,T_K,K39_params);
+println("""
+***************************************************
+SETUP FEATURES
+    Temperature             : $(T_K)
+    Furnace aperture (x,z)  : ($(1e3*x_furnace)μm , $(1e6*z_furnace)μm)
+    Slit (x,z)              : ($(1e3*x_slit)μm , $(1e6*z_slit)μm)
+    Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
+    Slit → SG magnet        : $(1e3*y_SlitToSG)mm
+    SG magnet               : $(1e3*y_SG)mm
+    SG magnet → Screen      : $(1e3*y_SGToScreen)mm
+    Tube radius             : $(1e3*R_tube)mm
+***************************************************
+""")
+# Setting the variables for the module
+TheoreticalSimulation.default_x_furnace     = x_furnace;
+TheoreticalSimulation.default_z_furnace     = z_furnace;
+TheoreticalSimulation.default_x_slit        = x_slit;
+TheoreticalSimulation.default_z_slit        = z_slit;
+TheoreticalSimulation.default_y_FurnaceToSlit   = y_FurnaceToSlit;
+TheoreticalSimulation.default_y_SlitToSG        = y_SlitToSG;
+TheoreticalSimulation.default_y_SG              = y_SG;
+TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
+TheoreticalSimulation.default_R_tube            = R_tube;
 
 # Coil currents
 Icoils = [0.001,0.002,0.003,0.005,0.007,
@@ -109,426 +161,17 @@ Icoils = [0.001,0.002,0.003,0.005,0.007,
 ];
 nI = length(Icoils);
 
-# Magnetic field gradient interpolation
-GradCurrents = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01];
-GradGradient = [0, 25.6, 58.4, 92.9, 132.2, 164.2, 196.3, 226, 240, 253.7, 277.2, 298.6];
-GvsI = Interpolations.LinearInterpolation(GradCurrents, GradGradient, extrapolation_bc=Line());
-IvsG = Interpolations.LinearInterpolation(GradGradient, GradCurrents, extrapolation_bc=Line());
-
-# Magnetic Field
-Bdata = CSV.read("./SG_BvsI.csv",DataFrame; header=["dI","Bz"]);
-BvsI = linear_interpolation(Bdata.dI, Bdata.Bz, extrapolation_bc=Line());
+plot_μeff(K39_params,joinpath(dir_path,"mm_effective.$(FIG_EXT)"))
 
 
 #################################################################################
 # FUNCTIONS
 #################################################################################
-"""
-    clear_all() -> Nothing
 
-    Set to `nothing` every **non-const** binding in `Main`, except a small skip-list
-    (`:Base`, `:Core`, `:Main`, and `Symbol("@__dot__")`). This effectively clears
-    user-defined variables and functions from the current session without restarting Julia.
 
-    What it does
-    - Iterates `names(Main; all=true)` and, for each name:
-    - Skips if it is one of `:Base`, `:Core`, `:Main`, or `Symbol("@__dot__")`.
-    - Skips if the binding is **not defined** or is **const**.
-    - Otherwise sets the binding to `nothing` in `Main`.
-    - Triggers a `GC.gc()` afterward.
-    - Prints a summary message.
 
-    Notes & caveats
-    - This will clear **user functions** too (they’re non-const bindings).
-    - Type names and imported modules are usually `const` in `Main`, so they are **not** cleared.
-    - This does not unload packages or reset the environment; it only nukes non-const globals.
-    - There is no undo; you’ll need to re-run definitions after clearing.
 
-    Example
-    ```julia
-    julia> x = 1; y = "hi"; f(x) = x+1;
 
-    julia> clear_all()
-    All user-defined variables (except constants) cleared.
-
-    julia> x, y, f
-    (nothing, nothing, nothing)
-"""
-function clear_all()
-    for name in names(Main, all=true)
-        if name ∉ (:Base, :Core, :Main, Symbol("@__dot__"))
-            if !isdefined(Main, name) || isconst(Main, name)
-                continue  # Skip constants
-            end
-            @eval Main begin
-                global $name = nothing
-            end
-        end
-    end
-    GC.gc()
-    println("All user-defined variables (except constants) cleared.")
-end
-
-"""Return the real dilogarithm `Li₂(z)` via `reli2(z)`; `s` is ignored."""
-function polylog(s,z)
-    # return MyPolylogarithms.polylog(s,z)
-    return reli2(z)
-end
-
-"""
-    For BSplineKit fitting, compute weights for the B-spline fit.
-    Compute uniform weights scaled by (1 - λ0). Returns an array of the same size as `x_array`.
-"""
-function compute_weights(x_array, λ0)
-    return (1 - λ0) * fill!(similar(x_array), 1)
-end
-
-"""
-    FreedmanDiaconisBins(data::AbstractVector{<:Real}) -> Int
-
-    Return the optimal number of histogram bins for `data` using the
-    **Freedman–Diaconis rule**:
-
-        bin_width = 2 * IQR / n^(1/3)
-        bins      = ceil( range / bin_width )
-
-    where:
-    - `IQR` is the interquartile range (Q3 − Q1).
-    - `n` is the number of samples.
-    - `range` is `maximum(data) - minimum(data)`.
-
-    This rule balances resolution with statistical noise and is robust to outliers.
-
-    # Arguments
-    - `data::AbstractVector{<:Real}`: 1D array of real numeric values.
-
-    # Returns
-    - `Int`: Number of bins.
-
-    # Notes
-    - If `IQR` is zero (e.g., all values identical), returns `1`.
-    - Assumes `data` has at least one element.
-    - Automatically promotes input to `Float64` for calculations.
-"""
-function FreedmanDiaconisBins(data::AbstractVector{<:Real})
-    @assert !isempty(data) "data must not be empty"
-    # Promote to Float64 for calculations
-    data_f = Float64.(data)
-
-    # Interquartile range
-    Q1 = quantile(data_f, 0.25)
-    Q3 = quantile(data_f, 0.75)
-    IQR = Q3 - Q1
-
-    # Edge case: no spread in data
-    if IQR == 0
-        return 1
-    end
-
-    # Freedman–Diaconis bin width
-    n = length(data_f)
-    bin_width = 2 * IQR / (n^(1/3))
-
-    # Number of bins
-    data_range = maximum(data_f) - minimum(data_f)
-    bins = max(1, ceil(Int, data_range / bin_width))
-
-    return bins
-end
-
-# Quantum Magnetic Moment μF : electron(1/2)-nucleus(3/2)
-"""
-    μF_effective(Ix, II, F, mF) -> Float64
-
-    Effective magnetic moment μ_F for a given hyperfine manifold and Zeeman sublevel,
-    based on the (Breit–Rabi–style) expression you coded.
-
-    Inputs
-    - `Ix`  : Coil current (units consistent with `BvsI(Ix)` → magnetic field).
-    - `II`  : Nuclear spin quantum number (I). Can be integer or half-integer.
-    - `F`   : Total angular momentum (must be `I ± 1/2`).
-    - `mF`  : Magnetic quantum number (must satisfy `-F ≤ mF ≤ F`).
-
-    Assumptions / Globals
-    - Uses global constants: `ħ, Ahfs, γₑ, γₙ, μB, gₑ`.
-    - Uses global field map/function: `BvsI(Ix)` returning B (same units used in Δ).
-    - Defines the adimensional field parameter
-    `normalized_B = (γₑ - γₙ) * ħ / ΔE * BvsI(Ix)`,
-    where `ΔE = 2π * ħ * Ahfs * (I + 1/2)`.
-
-    Details
-    - For the upper manifold `F = I + 1/2`, the `mF = ±F` edges use the simplified
-    analytic form `μF = ± gₑ/2 * (1 + 2*γₙ/γₑ * I) * μB`.
-    - For other `mF` and for the lower manifold `F = I - 1/2`, uses the full expressions
-    with the square‑root denominator
-    `sqrt(1 - 4*mF/(2I+1)*normalized_B + normalized_B^2)`; the argument is clamped
-    to ≥ 0 to avoid numerical noise causing `NaN`.
-
-    Returns
-    - `Float64` effective magnetic moment (units of μB if you keep the constants consistent).
-"""
-function μF_effective(Ix,II,F,mF)
-    # Promote to Float64 to avoid mixed-type arithmetic issues
-    Ix, II, F, mF = promote(float(Ix), float(II), float(F), float(mF))
-
-    # Energy scale and adimensional field
-    ΔE = 2π*ħ*Ahfs*(II+1/2)
-    normalized_B = (γₑ-γₙ)*ħ / ΔE * BvsI(Ix) 
-    
-    # Validate quantum numbers
-    is_F_upper = isapprox(F, II + 0.5; atol = 1e-12)
-    is_F_lower = isapprox(F, II - 0.5; atol = 1e-12)
-    if !(is_F_upper || is_F_lower)
-        throw(ArgumentError("F must be I±1/2; got F=$F for I=$II"))
-    end
-    if mF < -F - 1e-12 || mF > F + 1e-12
-        throw(ArgumentError("mF must be in [-F, F]; got mF=$mF for F=$F"))
-    end
-
-    # Common pieces
-    ratio = γₙ / γₑ
-    denom_arg = 1 - 4*mF/(2*II + 1) * normalized_B + normalized_B^2
-    # Clamp tiny negative due to rounding
-    denom = sqrt(max(denom_arg, 0.0))
-
-    μF::Float64 = NaN  # <-- initialize
-    if is_F_upper 
-        if isapprox(mF,  F; atol = 1e-12) || isapprox(mF, -F; atol = 1e-12)
-            s = sign(mF)
-            μF = s * (gₑ/2) * (1 + 2*ratio*II) * μB
-        else
-            μF = gₑ * μB * ( mF*ratio + (1 - ratio)/denom * ( mF/(2*II + 1) - 0.5*normalized_B ) )
-        end
-    else # is_F_lower
-        μF = gₑ * μB * ( mF*ratio - (1 - ratio)/denom * ( mF/(2*II + 1) - 0.5*normalized_B ) )
-    end
-
-    return μF
-end
-
-# Atomic beam velocity probability Distribution
-"""
-    struct FurnaceBeamParams
-        sinθmax::Float64
-        α1::Float64
-    end
-
-    Holds precomputed parameters for sampling atomic beam velocities from a heated
-    furnace with a rectangular aperture and downstream slit.
-
-    # Fields
-    - `sinθmax` — Maximum sine of the polar emission angle, determined by the geometry
-    from the furnace to the slit.
-    - `α2` — Velocity scale factor `kB*T/M` (m²/s²), used in the speed distribution.
-"""
-struct FurnaceBeamParams
-    sinθmax::Float64
-    α2::Float64
-end
-
-"""
-    fb_params(; x_furnace, z_furnace, x_slit, z_slit, y_FurnaceToSlit, T, M, kb) -> FurnaceBeamParams
-
-    Convenience constructor for `FurnaceBeamParams`.  
-    Computes the maximum emission angle from the geometry and the speed scale factor
-    from the temperature and particle mass.
-
-    # Keyword Arguments
-    - `x_furnace`, `z_furnace` — Furnace aperture dimensions (m).
-    - `x_slit`, `z_slit` — Slit aperture dimensions (m).
-    - `y_FurnaceToSlit` — Distance from furnace to slit (m).
-    - `T` — Furnace temperature (K).
-    - `M` — Particle mass (kg).
-    - `kb` — Boltzmann constant (J/K).
-"""
-fb_params(; x_furnace=x_furnace, z_furnace=z_furnace, x_slit=x_slit, z_slit=z_slit, y_FurnaceToSlit=y_FurnaceToSlit, T=T, M=M, kb=kb) = begin
-    Δxz   = SVector(-x_furnace/2, -z_furnace/2) - SVector(x_slit/2, z_slit/2)
-    θvmax = 1.25 * atan(norm(Δxz), y_FurnaceToSlit)
-    FurnaceBeamParams(sin(θvmax), kb*T/M)
-end
-fbp = fb_params()
-
-"""
-    AtomicBeamVelocity(rng, p::FurnaceBeamParams) -> SVector{3,Float64}
-
-    Draws a random velocity vector `(vx, vy, vz)` from the Maxwell–Boltzmann velocity
-    distribution for an effusive atomic beam, with angular spread limited by the
-    furnace–slit geometry.
-
-    # Arguments
-    - `rng` — Random number generator.
-    - `p` — Precomputed `FurnaceBeamParams`.
-
-    # Returns
-    An `SVector{3,Float64}` giving the velocity components (m/s) in the
-    beam frame:
-    - `vx` — Horizontal component (x-axis)
-    - `vy` — Longitudinal component (y-axis, along beam axis)
-    - `vz` — Vertical component (z-axis)
-
-    # Notes
-    - The speed distribution uses the analytical inversion formula involving the
-    Lambert W function on branch `-1`.
-    - Using a precomputed `p` avoids recomputing geometry/temperature constants in
-    every call.
-"""
-@inline function AtomicBeamVelocity(rng,p::FurnaceBeamParams)::SVector{3,Float64}
-    ϕ = TWOπ * rand(rng)
-    θ = asin(p.sinθmax * sqrt(rand(rng)))
-    v = sqrt(-2*p.α2 * (1 + lambertw((rand(rng)-1)*INV_E, -1)))
-    sθ = sin(θ); cθ = cos(θ); sϕ = sin(ϕ); cϕ = cos(ϕ)
-    return SVector(v*sθ*sϕ, v*cθ, v*sθ*cϕ)
-end
-
-"""
-    AtomicBeamVelocity_v2(rng, p::FurnaceBeamParams) -> SVector{3,Float64}
-
-Draw one atomic velocity `(vx, vy, vz)` [m/s] for an effusive beam.
-
-- Speed: Maxwell with `a² = p.α2 = kB*T/M`, sampled via `G ~ Gamma(3/2,1)` and `v = √(2 a² G)`.
-- Direction (cosine-law, truncated): `θ = asin(p.sinθmax * √u)`, `ϕ ~ Uniform(0, 2π)`.
-
-Axis convention: `vy = v cosθ` (beam axis y), `vx = v sinθ sinϕ`, `vz = v sinθ cosϕ`.
-
-Requires `Distributions` and `StaticArrays`.
-"""
-@inline function AtomicBeamVelocity_v2(rng,p::FurnaceBeamParams)::SVector{3,Float64} 
-    ϕ = TWOπ * rand(rng)
-    θ = asin(p.sinθmax * sqrt(rand(rng)))
-    v = sqrt.(2 .* p.α2 .* rand(rng, Gamma(3/2,1.0)))
-    sθ = sin(θ); cθ = cos(θ); sϕ = sin(ϕ); cϕ = cos(ϕ)
-    return SVector(v*sθ*sϕ, v*cθ, v*sθ*cϕ)
-end
-
-
-# p_furnace   = [-x_furnace/2,-z_furnace/2];
-# p_slit      = [x_slit/2, z_slit/2];
-# θv_max      = 1.25*atan(norm(p_furnace-p_slit) , y_FurnaceToSlit);
-# function AtomicBeamVelocity()
-#     ϕ = 2π*rand(rng_set)
-#     θ = asin(sin(θv_max)*sqrt(rand(rng_set)))
-#     v = sqrt(-2*kb*T/M*(1 + lambertw((rand(rng_set)-1)/exp(1),-1)))
-#     return [ v*sin(θ)*sin(ϕ) , v*cos(θ) , v*sin(θ)*cos(ϕ) ]
-# end
-
-# CQD Equations of motion
-function CQDEqOfMotion(t,Ix,μ,r0::Vector{Float64},v0::Vector{Float64},θe::Float64, θn::Float64, kx::Float64)
-    tf1 = y_FurnaceToSlit / v0[2]
-    tf2 = (y_FurnaceToSlit + y_SlitToSG ) / v0[2]
-    tf3 = (y_FurnaceToSlit + y_SlitToSG + y_SG ) / v0[2]
-    tF = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen ) / v0[2]
-
-    cqd_sign = sign(θn-θe) 
-    ωL       = abs(γₑ * BvsI(Ix) )
-    acc_0    = μ*GvsI(Ix)/M
-    kω       = cqd_sign*kx*ωL
-
-    if 0.00 <= t && t <= tf1     # Furnace to Slit
-        x = r0[1] + v0[1]*t 
-        y = r0[2] + v0[2]*t 
-        z = r0[3] + v0[3]*t
-        vx , vy , vz = v0[1] , v0[2] , v0[3]
-    elseif tf1 < t && t <= tf2    # Slit to SG apparatus
-        x = r0[1] + v0[1]*t 
-        y = r0[2] + v0[2]*t
-        z = r0[3] + v0[3]*t
-        vx , vy , vz = v0[1] , v0[2] , v0[3]
-    elseif tf2 < t && t <= tf3   # Crossing the SG apparatus
-        vx = v0[1]
-        vy = v0[2]
-        vz = v0[3] + acc_0*(t-tf2) + acc_0/kω * log( cos(θe/2)^2 + exp(-2*kω*(t-tf2))*sin(θe/2)^2 )
-        x = r0[1] + v0[1]*t 
-        y = r0[2] + v0[2]*t
-        z = r0[3] + v0[3]*t + acc_0/2*(t-tf2)^2 + acc_0/kω*log(cos(θe/2)^2)*(t-tf2) + 1/2/(kω)^2 * acc_0 * ( polylog(2,-exp(-2*kω*(t-tf2))*tan(θe/2)^2) - polylog(2,-tan(θe/2)^2) )
-    elseif t > tf3 # Travel to the Screen
-        x = r0[1] + v0[1]*t
-        y = r0[2] + v0[2]*t
-        z = r0[3] + v0[3]*t + acc_0/2*( (t-tf2)^2 - (t-tf3)^2) + acc_0/kω*y_SG/v0[2] * ( log(cos(θe/2)^2) + v0[2]/y_SG*log(cos(θe/2)^2+exp(-2*kω*y_SG/v0[2])*sin(θe/2)^2)*(t-tf3) ) + acc_0/2/kω^2*( polylog(2,-exp(-2*kω*y_SG/v0[2])*tan(θe/2)^2) - polylog(2,-tan(θe/2)^2) )
-        vx = v0[1]
-        vy = v0[2]
-        vz = v0[3] + acc_0*y_SG/v0[2] + acc_0/kω*log(cos(θe/2)^2 + exp(-2*kω*y_SG/v0[2])*sin(θe/2)^2)
-    end
-
-    return [x,y,z]
-end
-
-# CQD equations of motion only along the z-coordinate
-@inline function CQDEqOfMotion_z(t,Ix::Float64,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θe::Float64, θn::Float64, kx::Float64)
-    vy = v0[2]
-    vz = v0[3]
-    z0 = r0[3]
-    
-    tf2 = (y_FurnaceToSlit + y_SlitToSG ) / vy
-    tf3 = (y_FurnaceToSlit + y_SlitToSG + y_SG ) / vy
-
-    cqd_sign = sign(θn-θe) 
-    ωL       = abs( γₑ * BvsI(Ix) )
-    acc_0    = μ*GvsI(Ix)/M
-    kω       = cqd_sign*kx*ωL
-
-    # Precompute angles
-    θe_half = θe / 2
-    tanθ = tan(θe_half)
-    tanθ2 = tanθ^2
-    cosθ2 = cos(θe_half)^2
-    sinθ2 = sin(θe_half)^2
-    log_cos2 = log(cosθ2)
-    polylog_0 = polylog(2, -tanθ2)
-
-    if t <= tf2
-        return z0 + vz*t
-    elseif t <= tf3   # Crossing the SG apparatus
-        Δt = t - tf2
-        exp_term = exp(-2 * kω * Δt)
-        polylog_t = polylog(2, -exp_term * tanθ2)
-
-        return z0 + vz*t + 0.5*acc_0*Δt^2 + acc_0 / kω * log_cos2 * Δt + 0.5 * acc_0 / kω^2 * ( polylog_t - polylog_0 )
-    
-    else # t > tf3 # Travel to the Screen
-        Δt2 = t - tf2
-        Δt3 = t - tf3
-        τ_SG = y_SG / vy
-        exp_SG = exp(-2 * kω * τ_SG)
-        polylog_SG = polylog(2, -exp_SG * tanθ2)
-        log_term = log(cosθ2 + exp_SG * sinθ2)
-
-        return z0 + vz*t + 0.5*acc_0*( Δt2^2 - Δt3^2 ) + acc_0 / kω * τ_SG * (log_cos2 + log_term * Δt3 / τ_SG) + 0.5 * acc_0 / kω^2 * (polylog_SG - polylog_0)
-    end
-end
-
-@inline function CQDEqOfMotion_OFF_z(t,r0::AbstractVector{Float64},v0::AbstractVector{Float64})
-    vz = v0[3]
-    z0 = r0[3]
-    
-    return z0 + vz*t
-end
-
-# CQD Screen position
-function CQD_Screen_position(Ix,μ::Float64,r0::AbstractVector{Float64},v0::AbstractVector{Float64},θe::Float64, θn::Float64, kx::Float64)
-    L1 = y_FurnaceToSlit 
-    L2 = y_SlitToSG
-    Lsg = y_SG
-    Ld = y_SGToScreen
-    Ltot = L1 + L2 + Lsg + Ld
-
-    # Physics parameters
-    cqd_sign = sign(θn-θe) 
-    acc_0 = μ * GvsI(Ix) / M
-    ωL = abs(γₑ * BvsI(Ix))
-    kω = cqd_sign * kx * ωL
-
-    # Common trig values
-    θe_half = θe / 2
-    cos2 = cos(θe_half)^2
-    sin2 = sin(θe_half)^2
-    tan2 = tan(θe_half)^2
-    exp_term = exp(-2 * kω * Lsg / v0[2])
-
-    x = r0[1] + Ltot * v0[1] / v0[2]
-    y = r0[2] + Ltot
-    z = r0[3] + Ltot * v0[3] / v0[2] + 0.5*acc_0/v0[2]^2*((Lsg+Ld)^2-Ld^2) + acc_0/kω*Lsg/v0[2]*( log(cos2) + Ld/Lsg * log( cos2 + exp_term*sin2 ) ) + 0.5*acc_0/kω^2 * ( polylog(2, -exp_term*tan2) - polylog(2, -tan2) )
-    return SVector(x,y,z)
-end
 
 # Generate samples post-filtering by the slit
 function _generate_samples_serial(No::Int, rng, p::FurnaceBeamParams)
@@ -1191,83 +834,7 @@ function plot_SG_magneticfield(path_filename::AbstractString)
     return nothing
 end
 
-"""
-    plot_ueff(II, path_filename::AbstractString) -> Plot
 
-    Plot the effective magnetic moment μ_F/μ_B versus coil current for all hyperfine
-    levels (F, m_F) of a spin-I system, and annotate the magnetic crossing point.
-
-    # Arguments
-    - `II`: Nuclear spin quantum number (e.g., 3/2, 4, etc.).
-    - `path_filename::AbstractString`: Output file path for saving the figure.
-
-    # Behavior
-    - Computes and plots μ_F/μ_B curves for all (F, m_F) states using `μF_effective`.
-    - Uses solid lines for most F = I + 1/2 states, a dashed line for the lowest m_F
-    in F = I + 1/2, and dashed lines for all F = I – 1/2 states.
-    - Colors each curve using the `:phase` palette.
-    - Finds the magnetic crossing current `I₀` by solving `BvsI(I) = …` and annotates
-    the plot with:
-        - I₀ in A
-        - ∂ₓBₓ at I₀ in T/m
-        - B_z at I₀ in mT
-    - Plots current on a logarithmic x-axis.
-
-    # Returns
-    - The `Plots.Plot` object for the generated figure.
-
-    # Notes
-    - Requires `μF_effective`, `μB`, `BvsI`, `GvsI`, `ħ`, `Ahfs`, `Ispin`,
-    `γₙ`, and `γₑ` to be defined in scope.
-"""
-function plot_ueff(II,path_filename::AbstractString)
-    F_up = II + 0.5
-    mf_up = collect(F_up:-1:-F_up)
-    F_down = II - 0.5
-    mf_down = collect(-F_down:1:F_down)
-    dimF = Int(4*II + 2)
-        
-    # Set color palette
-    colorsF = palette(:phase, dimF)
-    current_range = collect(0.00009:0.00002:1);
-
-    # Initialize plot
-    fig = plot(
-        xlabel = L"Current ($\mathrm{A}$)",
-        ylabel = L"$\mu_{F}/\mu_{B}$",
-        legend = :right,
-        background_color_legend = RGBA(0.85, 0.85, 0.85, 0.1),
-        size = (800, 600),
-    );
-
-    # Define lines to plot: (F, mF, color index, style)
-    lines_to_plot = vcat(
-        [(F_up, mf, :solid) for mf in mf_up[1:end-1]],
-        [(F_up, mf_up[end],:dash)],
-        [(F_down, mf, :dash) for mf in mf_down],
-    );
-
-    # Plot all curves
-    for ((f,mf,lstyle),color) in zip(lines_to_plot,colorsF)
-        μ_vals = μF_effective.(current_range, II, f, mf) ./ μB
-        label = L"$F=%$(f)$, $m_{F}=%$(mf)$"
-        plot!(current_range, μ_vals, label=label, line=(color,lstyle, 2))
-    end
-        
-    # Magnetic crossing point
-    f(x) = BvsI(x) - 2π*ħ*Ahfs*(Ispin+1/2)/(2ħ)/(γₙ - γₑ)
-    bcrossing = find_zero(f, (0.001, 0.02))
-
-    # Annotated vertical line
-    label_text = L"$I_{0} = %$(round(bcrossing, digits=5))\,\mathrm{A}$
-     $\partial_{z}B_{z} = %$(round(GvsI(bcrossing), digits=2))\,\mathrm{T/m}$
-     $B_{z} = %$(round(1e3 * BvsI(bcrossing), digits=3))\,\mathrm{mT}$"
-    vline!([bcrossing], line=(:black, :dot, 2), label=label_text,xaxis = :log10,);
-    
-    savefig(fig, path_filename)
-    
-    return nothing
-end
 
 """
     plot_polar_stats(Ix, data_up, data_dw, path_filename) -> Plot

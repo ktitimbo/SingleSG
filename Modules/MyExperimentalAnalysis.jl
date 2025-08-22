@@ -366,10 +366,10 @@ module MyExperimentalAnalysis
     - To center positions around zero instead of the first pixel, subtract the mean of the returned positions.
     """
     function pixel_positions(img_size::Int, bin_size::Int, pixel_size::Float64)
-    @assert img_size % bin_size == 0 "img_size must be divisible by bin_size"
-    n_pixels = div(img_size, bin_size)
-    effective_size = bin_size * pixel_size
-    return effective_size .* (1:n_pixels) .- effective_size / 2
+        @assert img_size % bin_size == 0 "img_size must be divisible by bin_size"
+        n_pixels = div(img_size, bin_size)
+        effective_size = bin_size * pixel_size
+        return effective_size .* (1:n_pixels) .- effective_size / 2
     end
 
     """
