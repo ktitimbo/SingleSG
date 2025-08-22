@@ -178,6 +178,8 @@ if SAVE_FIG
 end
 
 
+fmf_pairs(K39_params)
+
 crossing_slit
 
 Io_i = 0.060

@@ -14,7 +14,8 @@ module TheoreticalSimulation
     using LambertW, PolyLog
     using StatsBase
     using Random, Statistics, NaNStatistics, Distributions, StaticArrays
-    using Alert
+    # Multithreading setup
+    using Base.Threads
     # Data manipulation
     using OrderedCollections
     using DelimitedFiles, CSV, DataFrames, JLD2
@@ -73,6 +74,7 @@ module TheoreticalSimulation
     include("TheoreticalSimulation_EquationsOfMotion.jl")
     include("TheoreticalSimulation_VelocityPDF.jl")
     include("TheoreticalSimulation_Sampling.jl")
+    include("TheoreticalSimulation_DiscardedParticles.jl")
     include("TheoreticalSimulation_Plots.jl")
 
 
@@ -281,7 +283,7 @@ module TheoreticalSimulation
             compute_weights,
             FreedmanDiaconisBins,
             pixel_coordinates,
-            μF_effective, 
+            fmf_pairs, μF_effective, 
             generate_samples, build_initial_conditions,
             CQD_EqOfMotion, QM_EqOfMotion,
             CQD_EqOfMotion_z, QM_EqOfMotion_z,
