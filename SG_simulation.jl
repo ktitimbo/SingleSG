@@ -11,12 +11,12 @@ Plots.default(
     grid=true, minorgrid=true, framestyle=:box, widen=true,
 )
 using Plots.PlotMeasures
-FIG_EXT = "png"   # could be "pdf", "svg", etc.
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using LaTeXStrings, Printf, PrettyTables
 # Time-stamping/logging
 using Dates
+const T_START = Dates.now() ; # Timestamp start for execution timing
 # Numerical tools
 using LinearAlgebra, DataStructures
 using Interpolations, Roots, Loess, Optim
@@ -41,25 +41,23 @@ LinearAlgebra.BLAS.set_num_threads(4)
 @info "BLAS threads" count = BLAS.get_num_threads()
 @info "Julia threads" count = Threads.nthreads()
 # Set the working directory to the current location
-cd(dirname(@__FILE__)) 
+cd(@__DIR__) ;
+const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSS");
+const OUTDIR    = joinpath(@__DIR__, "simulation_data", RUN_STAMP);
+isdir(OUTDIR) || mkpath(OUTDIR);
+@info "Created output directory" OUTDIR
 # General setup
 hostname = gethostname();
 @info "Running on host" hostname=hostname
-# Timestamp start for execution timing
-t_start = Dates.now()
 # Random seeds
 base_seed_set = 145;
 # rng_set = MersenneTwister(base_seed_set)
 rng_set = TaskLocalRNG()
 
-println("\n\t\tRunning process on:\t $(Dates.format(t_start, "yyyymmddTHHMMSS")) \n")
-# Generate a timestamped directory name for output (e.g., "20250718T153245")
-directoryname = Dates.format(t_start, "yyyymmddTHHMMSS") ;
-# Construct the full directory path (relative to current working directory)
-const dir_path = "./simulation_data/$(directoryname)" ;
-# Create the directory (and any necessary parent folders)
-mkpath(dir_path) ;
-@info "Created output directory" dir = dir_path
+FIG_EXT = "png"   # could be "pdf", "svg", etc.
+
+println("\n\t\tRunning process on:\t $(Dates.format(T_START, "yyyymmddTHHMMSS")) \n")
+
 
 atom        = "39K"  ;
 ## PHYSICAL CONSTANTS from NIST
