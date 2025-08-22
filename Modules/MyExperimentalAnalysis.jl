@@ -37,6 +37,7 @@ module MyExperimentalAnalysis
     if !isdefined(@__MODULE__, :SAVE_FIG)
         SAVE_FIG = false
     end
+    
     # -------------------------------
     # FUNCTIONS
     # -------------------------------

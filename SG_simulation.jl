@@ -11,6 +11,8 @@ Plots.default(
     grid=true, minorgrid=true, framestyle=:box, widen=true,
 )
 using Plots.PlotMeasures
+FIG_EXT = "png"   # could be "pdf", "svg", etc.
+SAVE_FIG = false
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using LaTeXStrings, Printf, PrettyTables
@@ -29,11 +31,6 @@ using Alert
 # Data manipulation
 using OrderedCollections
 using DelimitedFiles, CSV, DataFrames, JLD2
-# Custom modules
-include("./Modules/atoms.jl");
-include("./Modules/samplings.jl");
-include("./Modules/TheoreticalSimulation.jl");
-using .TheoreticalSimulation;
 # include("./Modules/MyPolylogarithms.jl");
 # Multithreading setup
 using Base.Threads
@@ -53,11 +50,16 @@ hostname = gethostname();
 base_seed_set = 145;
 # rng_set = MersenneTwister(base_seed_set)
 rng_set = TaskLocalRNG();
-
-FIG_EXT = "png"   # could be "pdf", "svg", etc.
+# Custom modules
+include("./Modules/atoms.jl");
+include("./Modules/samplings.jl");
+include("./Modules/TheoreticalSimulation.jl");
+using .TheoreticalSimulation;
+TheoreticalSimulation.SAVE_FIG = SAVE_FIG;
+TheoreticalSimulation.FIG_EXT  = FIG_EXT;
+TheoreticalSimulation.OUTDIR   = OUTDIR;
 
 println("\n\t\tRunning process on:\t $(Dates.format(T_START, "yyyymmddTHHMMSS")) \n")
-
 
 atom        = "39K"  ;
 ## PHYSICAL CONSTANTS from NIST
@@ -142,10 +144,10 @@ SETUP FEATURES
 ***************************************************
 """)
 # Setting the variables for the module
-TheoreticalSimulation.default_x_furnace     = x_furnace;
-TheoreticalSimulation.default_z_furnace     = z_furnace;
-TheoreticalSimulation.default_x_slit        = x_slit;
-TheoreticalSimulation.default_z_slit        = z_slit;
+TheoreticalSimulation.default_x_furnace         = x_furnace;
+TheoreticalSimulation.default_z_furnace         = z_furnace;
+TheoreticalSimulation.default_x_slit            = x_slit;
+TheoreticalSimulation.default_z_slit            = z_slit;
 TheoreticalSimulation.default_y_FurnaceToSlit   = y_FurnaceToSlit;
 TheoreticalSimulation.default_y_SlitToSG        = y_SlitToSG;
 TheoreticalSimulation.default_y_SG              = y_SG;
@@ -159,27 +161,45 @@ Icoils = [0.001,0.002,0.003,0.005,0.007,
 ];
 nI = length(Icoils);
 
-plot_μeff(K39_params,joinpath(OUTDIR,"mm_effective.$(FIG_EXT)"))
 
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 2000000
+const Nss = 100_000
 
 # Monte Carlo generation of particles traersing the filtering slit
-crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = true, base_seed = base_seed_set);
+crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
 pairs_UP, pairs_DOWN = build_initial_conditions(Nss, crossing_slit, rng_set; mode=:total);
-crossing_slit = nothing
 
-
-
-pairs_UP
-pairs_DOWN
-
-
-
-if save_fig
-    display(plot_velocity_stats(alive_slit, joinpath(dir_path, "init_vel_stats.png")))
+if SAVE_FIG
+    plot_μeff(K39_params,"mm_effective")
+    plot_SG_geometry("SG_geometry")
+    plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
+    plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
+
+
+crossing_slit
+
+Io_i = 0.060
+j = 100
+QM_Screen_position(Io_i, 2,2, pairs_UP[j,1:3], pairs_UP[j,4:6], K39_params )
+QM_Screen_position(Io_i, 2,1, pairs_UP[j,1:3], pairs_UP[j,4:6], K39_params )
+QM_Screen_position(Io_i, 2,0, pairs_UP[j,1:3], pairs_UP[j,4:6], K39_params )
+QM_Screen_position(Io_i, 2,-1, pairs_UP[j,1:3], pairs_UP[j,4:6], K39_params )
+QM_Screen_position(Io_i, 2,-2, pairs_UP[j,1:3], pairs_UP[j,4:6], K39_params )
+QM_Screen_position(Io_i, 1,-1, pairs_UP[j,1:3], pairs_UP[j,4:6], K39_params )
+QM_Screen_position(Io_i, 1,0, pairs_UP[j,1:3], pairs_UP[j,4:6], K39_params )
+QM_Screen_position(Io_i, 1,1, pairs_UP[j,1:3], pairs_UP[j,4:6], K39_params )
+
+
+QM_find_bad_particles_ix(Icoils,crossing_slit, 2,2, K39_params)
+
+
+
+
+π
+
+
 
 #################################################################################
 # FUNCTIONS
@@ -192,99 +212,14 @@ end
 
 
 
-# Magnet shape
-function z_magnet_edge(x)
-    a = 2.5e-3;
-    z_center = 1.3*a 
-    r_edge = a
-    φ = π/6
-
-    if x <= -r_edge
-        z = z_center - tan(φ)*(x+r_edge)
-    elseif x > -r_edge && x <= r_edge
-        z = z_center - sqrt(r_edge^2 - x^2)
-    elseif x > r_edge
-        z = z_center + tan(φ)*(x-r_edge)
-    else
-        0
-    end
-
-    return z
-end
-
-function z_magnet_trench(x)
-    a = 2.5e-3;
-    z_center = 1.3*a 
-    r_edge = 1.0*a
-    r_trench = 1.362*a
-    r_trench_center = z_center - 1.018*a
-    lw = 1.58*a
-    φ = π/6
-
-    if x <= -r_trench - lw*cos(φ)
-        z = r_trench_center + lw*sin(φ)
-    elseif x > -r_trench-lw*cos(φ) && x <= -r_trench
-        z = r_trench_center - tan(φ)*(x+r_trench)
-    elseif x > -r_trench && x <= r_trench
-        z = r_trench_center - sqrt( r_trench^2 - x^2 )
-    elseif x > r_trench && x<= r_trench + lw*cos(φ)
-        z = r_trench_center + tan(φ)*(x-r_trench)
-    elseif x > r_trench + lw*cos(φ)
-        z = r_trench_center + lw*sin(φ)
-    else
-        0
-    end
-
-    return z
-end
-
-@inline function z_magnet_edge_time(t, r0::AbstractVector{Float64}, v0::AbstractVector{Float64})
-    a =2.5e-3;
-    z_center = 1.3*a 
-    r_edge = a
-    φ = π/6
-
-    x = r0[1] + v0[1]*t
-    if x <= -r_edge
-        z = z_center - tan(φ)*(x+r_edge)
-    elseif x <= r_edge
-        z = z_center - sqrt(r_edge^2 - x^2)
-    else # x > r_edge
-        z = z_center + tan(φ)*(x-r_edge)
-    end
-
-    return z
-end
-
-@inline function z_magnet_trench_time(t, r0::AbstractVector{Float64}, v0::AbstractVector{Float64})
-    a = 2.5e-3;
-    z_center = 1.3*a 
-    r_edge = 1.0*a
-    r_trench = 1.362*a
-    r_trench_center = z_center - 1.018*a
-    lw = 1.58*a
-    φ = π/6
-
-    x = r0[1] + v0[1]*t
-    if x <= -r_trench - lw*cos(φ)
-        z = r_trench_center + lw*sin(φ)
-    elseif x <= -r_trench
-        z = r_trench_center - tan(φ)*(x+r_trench)
-    elseif x <= r_trench
-        z = r_trench_center - sqrt( r_trench^2 - x^2 )
-    elseif x<= r_trench + lw*cos(φ)
-        z = r_trench_center + tan(φ)*(x-r_trench)
-    else # x > r_trench + lw*cos(φ)
-        z = r_trench_center + lw*sin(φ)
-    end
-
-    return z
-end
 
 
 
 
-function find_bad_particles_ix(Ix, pairs, kx::Float64)
+
+
+
+function CQD_find_bad_particles_ix(Ix, pairs, kx::Float64)
     No = size(pairs, 1)  # Number of particles
     ncurrents = length(Ix)
 
@@ -318,10 +253,10 @@ function find_bad_particles_ix(Ix, pairs, kx::Float64)
                     θn0 = pairs[j, 8]
                 end
 
-                t_sweep_sg = range(t_in, t_out, length=t_length)
-                z_val = CQDEqOfMotion_z.(t_sweep_sg, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(kx))
-                z_top = z_magnet_edge_time.(t_sweep_sg, Ref(r0), Ref(v0))
-                z_bottom = z_magnet_trench_time.(t_sweep_sg, Ref(r0), Ref(v0))
+                t_sweep_sg  = range(t_in, t_out, length=t_length)
+                z_val       = CQD_EqOfMotion_z.(t_sweep_sg, Ref(i0), Ref(μₑ), Ref(r0), Ref(v0), Ref(θe0), Ref(θn0), Ref(kx))
+                z_top       = z_magnet_edge_time.(t_sweep_sg, Ref(r0), Ref(v0))
+                z_bottom    = z_magnet_trench_time.(t_sweep_sg, Ref(r0), Ref(v0))
 
                 inside_cavity = (z_bottom .< z_val) .& (z_val .< z_top)
                 if !all(inside_cavity)
@@ -428,186 +363,7 @@ function FD_histograms(data_list::Vector{Float64},Label::LaTeXString,color)
             xticks=PlottingTools.pitick(0, π, 8; mode=:latex),)
 end
 
-"""
-    plot_velocity_stats(alive::Matrix{Float64}, path_filename::AbstractString) -> Nothing
 
-    Generate and save a multi-panel figure showing velocity statistics, angular
-    distributions, and spatial distribution for a set of particles.
-
-    The figure includes:
-    1. Speed distribution with mean and RMS markers.
-    2. Distributions for velocity components (vx, vy, vz).
-    3. Polar (θ) and azimuthal (φ) velocity angle distributions with mean markers.
-    4. 2D histogram of initial positions (x, z) in mm and μm.
-
-    # Arguments
-    - `alive::Matrix{Float64}`: Particle data matrix with columns:
-        1. x-position (m)
-        2. y-position (m)
-        3. z-position (m)
-        4. vx-velocity (m/s)
-        5. vy-velocity (m/s)
-        6. vz-velocity (m/s)
-    - `path_filename::AbstractString`: Output file path for saving the figure.
-
-    # Notes
-    - Uses Freedman–Diaconis binning for all histograms.
-    - Plots are normalized to probability density.
-"""
-function plot_velocity_stats(alive::Matrix{Float64}, path_filename::String)
-    @assert size(alive, 2) ≥ 6 "Expected at least 6 columns (x, y, z, vx, vy, vz)."
-
-    # --- Velocity magnitude and angles ---
-    vxs, vys, vzs = eachcol(alive[:, 4:6])
-    velocities = sqrt.(vxs.^2 .+ vys.^2 .+ vzs.^2)
-    theta_vals = acos.(vzs ./ velocities)       # polar angle
-    phi_vals   = atan.(vys, vxs)                 # azimuthal angle
-
-    # Means
-    mean_v, rms_v = mean(velocities), sqrt(mean(velocities.^2))
-    mean_theta, mean_phi = mean(theta_vals), mean(phi_vals)
-
-
-    # Histogram for velocities
-    figa = histogram(velocities;
-        bins = FreedmanDiaconisBins(velocities),
-        label = L"$v_0$", normalize = :pdf,
-        xlabel = L"v_{0} \ (\mathrm{m/s})",
-        alpha = 0.70,
-    )
-    vline!([mean_v], label = L"$\langle v_{0} \rangle = %$(round(mean_v, digits=1))\ \mathrm{m/s}$",
-           line = (:black, :solid, 2))
-    vline!([rms_v], label = L"$\sqrt{\langle v_{0}^2 \rangle} = %$(round(rms_v, digits=1))\ \mathrm{m/s}$",
-           line = (:red, :dash, 3))
-
-    figb = histogram(theta_vals;
-        bins = FreedmanDiaconisBins(theta_vals),
-        label = L"$\theta_v$", normalize = :pdf,
-        alpha = 0.70, xlabel = L"$\theta_{v}$"
-    )
-    vline!([mean_theta], label = L"$\langle \theta_{v} \rangle = %$(round(mean_theta/π, digits=3))\pi$",
-           line = (:black, :solid, 2))
-
-    figc = histogram(phi_vals;
-        bins = FreedmanDiaconisBins(phi_vals),
-        label = L"$\phi_v$", normalize = :pdf,
-        alpha = 0.70, xlabel = L"$\phi_{v}$"
-    )
-    vline!([mean_phi], label = L"$\langle \phi_{v} \rangle = %$(round(mean_phi/π, digits=3))\pi$",
-           line = (:black, :solid, 2))
-
-    # 2D Histogram of position (x, z)
-    # --- 2D position histogram ---
-    xs, zs = 1e3 .* alive[:, 1], 1e6 .* alive[:, 3]  # mm, μm
-    figd = histogram2d(xs, zs;
-        bins = (FreedmanDiaconisBins(xs), FreedmanDiaconisBins(zs)),
-        show_empty_bins = true, color = :plasma,
-        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
-        xticks = -1.0:0.25:1.0, yticks = -50:10:50,
-        colorbar_position = :bottom,
-    )
-
-    # --- Velocity component histograms ---
-    fige = histogram(vxs;
-        bins = FreedmanDiaconisBins(vxs), normalize = :pdf,
-        label = L"$v_{0,x}$", alpha = 0.65, color = :orange,
-        xlabel = L"$v_{0,x} \ (\mathrm{m/s})$"
-    )
-    figf = histogram(vys;
-        bins = FreedmanDiaconisBins(vys), normalize = :pdf,
-        label = L"$v_{0,y}$", alpha = 0.65, color = :blue,
-        xlabel = L"$v_{0,y} \ (\mathrm{m/s})$"
-    )
-    figg = histogram(vzs;
-        bins = FreedmanDiaconisBins(vzs), normalize = :pdf,
-        label = L"$v_{0,z}$", alpha = 0.65, color = :red,
-        xlabel = L"$v_{0,z} \ (\mathrm{m/s})$"
-    )
-
-    # Combine plots
-    fig = plot(
-        figa, fige, figb, figf, figc, figg, figd,
-        layout = @layout([a1 a2; a3 a4; a5 a6; a7]),
-        size = (650, 800),
-        legendfontsize = 8,
-        left_margin = 3mm,
-    );
-    savefig(fig, path_filename)
-    
-
-    return fig
-end
-
-"""
-    plot_SG_geometry(path_filename::AbstractString) -> Nothing
-
-    Plot the cross-sectional geometry of a Stern–Gerlach (SG) magnet slit and save it to file.
-
-    The plot shows:
-    - The rounded top edge of the magnet.
-    - The lower trench region.
-    - The rectangular slit opening.
-
-    # Arguments
-    - `path_filename::AbstractString`: Output file path for the saved plot (PDF, PNG, etc.).
-
-    # Assumptions
-    - The functions `z_magnet_edge(x::Real)` and `z_magnet_trench(x::Real)` are defined
-    and return vertical positions (in meters) of the magnet’s top and bottom surfaces
-    for a given horizontal position `x`.
-    - Global constants `x_slit` and `z_slit` (in meters) define the slit’s width and height.
-
-    # Units
-    - All distances in the plot are shown in millimeters.
-"""
-function plot_SG_geometry(path_filename::AbstractString)
-    @assert isdefined(Main, :z_magnet_edge) "Function `z_magnet_edge` must be defined."
-    @assert isdefined(Main, :z_magnet_trench) "Function `z_magnet_trench` must be defined."
-    @assert isdefined(Main, :x_slit) && isdefined(Main, :z_slit) "Global `x_slit` and `z_slit` must be defined."
-
-    # x positions for evaluation (in meters)
-    x_line = 1e-3 .* collect(range(-10, 10, length=10_001))
-
-    # Base figure
-    fig = plot(
-        xlabel = L"$x \ (\mathrm{mm})$",
-        xlim = (-8, 8), xticks = -8:2:8,
-        ylabel = L"$y \ (\mathrm{mm})$",
-        ylim = (-3, 7), yticks = -3:1:7,
-        aspect_ratio = :equal,
-        legend = :bottomright,
-        title = "Stern–Gerlach Slit Geometry"
-    )
-
-    # Top magnet edge shape
-    x_fill = 1e3 .* x_line
-    y_edge = 1e3 .* z_magnet_edge.(x_line)
-    y_top  = fill(10.0, length(x_fill))
-    plot!(fig, [x_fill; reverse(x_fill)], [y_edge; reverse(y_top)];
-        seriestype = :shape, label = "Rounded edge",
-        color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
-    )
-
-    # Bottom trench shape
-    y_trench = 1e3 .* z_magnet_trench.(x_line)
-    y_bottom = fill(-10.0, length(x_fill))
-    plot!(fig, [x_fill; reverse(x_fill)], [y_bottom; reverse(y_trench)];
-        seriestype = :shape, label = "Trench",
-        color = :grey60, line = (:solid, :grey60), fillalpha = 0.75
-    )
-
-    # Slit rectangle
-    plot!(fig,
-        1e3 .* 0.5 .* [-x_slit, -x_slit, x_slit, x_slit, -x_slit],
-        1e3 .* 0.5 .* [-z_slit,  z_slit,  z_slit, -z_slit, -z_slit];
-        seriestype = :shape, label = "Slit",
-        line = (:solid, :red, 1), color = :red, fillalpha = 0.2
-    )
-
-    savefig(fig, path_filename)
-    
-    return nothing
-end
 
 """
     plot_SG_magneticfield(path_filename::AbstractString) -> Nothing
