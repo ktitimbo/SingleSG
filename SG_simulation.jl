@@ -166,86 +166,15 @@ plot_μeff(K39_params,joinpath(OUTDIR,"mm_effective.$(FIG_EXT)"))
 const Nss = 2000000
 
 # Monte Carlo generation of particles traersing the filtering slit
-alive_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = true, base_seed = base_seed_set);
-θesUP, θnsUP, θesDOWN, θnsDOWN = generate_matched_pairs(Nss, rng_set; mode=:total)
+crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = true, base_seed = base_seed_set);
+pairs_UP, pairs_DOWN = build_initial_conditions(Nss, crossing_slit, rng_set; mode=:total);
+crossing_slit = nothing
 
-"""
-    build_init_cond(alive, UPθe, UPθn, DOWNθe, DOWNθn; mode=:total, add_label=false)
 
-Build paired arrays:
-- `mode = :total`:
-    returns `(pairsUP::Matrix, pairsDOWN::Matrix)` with sizes
-    `length(UPθe) × (8 or 9)` and `length(DOWNθe) × (8 or 9)`.
-- `mode = :bucket`:
-    returns `(pairsUP::Matrix, pairsDOWN::Matrix)`, both `No × (8 or 9)`.
 
-`alive[i,1:6]` is copied to the first 6 columns; columns 7–8 are θe, θn.
-If `add_label=true`, column 9 is 1.0 for UP and 0.0 for DOWN.
-"""
-function build_init_cond(
-    alive::AbstractMatrix{T},
-    UPθe::AbstractVector{T}, UPθn::AbstractVector{T},
-    DOWNθe::AbstractVector{T}, DOWNθn::AbstractVector{T};
-    mode::Symbol = :total
-) where {T<:Real}
+pairs_UP
+pairs_DOWN
 
-    No = size(alive, 1)
-    @assert length(UPθe)   == length(UPθn)   "UP θe/θn lengths must match"
-    @assert length(DOWNθe) == length(DOWNθn) "DOWN θe/θn lengths must match"
-
-    ncols = add_label ? 9 : 8
-
-    if mode === :total
-        n_up = length(UPθe)
-        n_dn = length(DOWNθe)
-        @assert n_up + n_dn == No "In :total, n_up + n_dn must equal size(alive,1)"
-
-        pairsUP   = Matrix{T}(undef, n_up, ncols)
-        pairsDOWN = Matrix{T}(undef, n_dn, ncols)
-
-        @inbounds @views begin
-            # UP block: rows 1:n_up from `alive`
-            for i in 1:n_up
-                pairsUP[i, 1:6] = alive[i, 1:6]
-                pairsUP[i, 7]   = UPθe[i]
-                pairsUP[i, 8]   = UPθn[i]
-            end
-            # DOWN block: rows (n_up+1):No from `alive`
-            for j in 1:n_dn
-                i_alive = n_up + j
-                pairsDOWN[j, 1:6] = alive[i_alive, 1:6]
-                pairsDOWN[j, 7]   = DOWNθe[j]
-                pairsDOWN[j, 8]   = DOWNθn[j]
-            end
-        end
-
-        return pairsUP, pairsDOWN
-
-    elseif mode === :bucket
-        @assert length(UPθe) == No == length(DOWNθe) "In :bucket, each θ list must have length No"
-
-        pairsUP   = Matrix{T}(undef, No, ncols)
-        pairsDOWN = Matrix{T}(undef, No, ncols)
-
-        @inbounds @views for i in 1:No
-            # UP
-            pairsUP[i, 1:6] = alive[i, 1:6]
-            pairsUP[i, 7]   = UPθe[i]
-            pairsUP[i, 8]   = UPθn[i]
-            if add_label; pairsUP[i, 9] = one(T); end
-            # DOWN
-            pairsDOWN[i, 1:6] = alive[i, 1:6]
-            pairsDOWN[i, 7]   = DOWNθe[i]
-            pairsDOWN[i, 8]   = DOWNθn[i]
-            if add_label; pairsDOWN[i, 9] = zero(T); end
-        end
-
-        return pairsUP, pairsDOWN
-
-    else
-        error("Unknown mode=$mode. Use :total or :bucket.")
-    end
-end
 
 
 if save_fig
@@ -352,54 +281,8 @@ end
     return z
 end
 
-function z_magnet_profile_time(t, r0::AbstractVector{Float64}, v0::AbstractVector{Float64}, side::String)
-    a = 2.5e-3;
-    z_center = 1.3*a 
-    r_edge = 1.0*a
-    r_trench = 1.362*a
-    r_trench_center = z_center - 1.018*a
-    lw = 1.58*a
-    φ = π/6
-
-    x = r0[1] + v0[1]*t
-
-    if side=="top"
-        if x <= -r_edge
-           return z_center - tan(φ)*(x+r_edge)
-        elseif x <= r_edge
-            return z_center - sqrt(r_edge^2 - x^2)
-        else # r> r_edge
-            return z_center + tan(φ)*(x-r_edge)
-        end
-    elseif side=="bottom" 
-        if x <= -r_trench - lw*cos(φ)
-            return r_trench_center + lw*sin(φ)
-        elseif x <= -r_trench
-            return r_trench_center - tan(φ)*(x+r_trench)
-        elseif x <= r_trench
-            return r_trench_center - sqrt( r_trench^2 - x^2 )
-        elseif x <= r_trench + lw*cos(φ)
-            return r_trench_center + tan(φ)*(x-r_trench)
-        else # x > r_trench + lw*cos(φ)
-            return r_trench_center + lw*sin(φ)
-        end
-    else
-        error("options are top and bottom")
-    end
-end
 
 
-
-function build_init_cond(alive::Matrix{Float64}, θes::Vector{Float64}, θns::Vector{Float64})
-    No = size(alive, 1)
-    pairs = Matrix{Float64}(undef, No, 8)
-    @inbounds for i in 1:No
-        pairs[i, 1:6] = alive[i,:]
-        pairs[i, 7] = θes[i]
-        pairs[i, 8] = θns[i]
-    end
-    return pairs
-end
 
 function find_bad_particles_ix(Ix, pairs, kx::Float64)
     No = size(pairs, 1)  # Number of particles

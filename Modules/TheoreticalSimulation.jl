@@ -769,7 +769,7 @@ end
         end
     end
 
-    function generate_matched_pairs(No::Integer, rng; mode::Symbol = :total)
+    function _generate_matched_pairs(No::Integer, rng; mode::Symbol = :total)
         @assert No > 0
         θes_up = Float64[]; θns_up = Float64[]
         θes_dn = Float64[]; θns_dn = Float64[]
@@ -810,7 +810,7 @@ end
     end
 
 
-    function build_init_conditions(
+    function _build_init_conditions(
         alive::AbstractMatrix{T},
         UPθe::AbstractVector{T}, UPθn::AbstractVector{T},
         DOWNθe::AbstractVector{T}, DOWNθn::AbstractVector{T};
@@ -874,6 +874,74 @@ end
     end
 
 
+    function build_initial_conditions(No::Integer, alive::AbstractMatrix{T}, rng::AbstractRNG; mode::Symbol = :total) where {T<:Real}
+    @assert No > 0 "No must be > 0"
+    @assert No == size(alive,1) "Total number of particles $No"
+
+    if mode === :total
+        # Two-pass: count UP with a cloned RNG → allocate exact sizes → fill.
+        @assert hasmethod(copy, Tuple{typeof(rng)}) "RNG must support copy() for two-pass mode"
+        rng1 = copy(rng)
+        n_up = 0
+        @inbounds for _ in 1:No
+            θe = T(2asin(sqrt(rand(rng1))))
+            θn = T(2asin(sqrt(rand(rng1))))
+            n_up += (θe < θn)
+        end
+        n_dn = No - n_up
+
+        UP   = Matrix{T}(undef, n_up, 8)
+        DOWN = Matrix{T}(undef, n_dn, 8)
+
+        iu = 0; id = 0
+        @inbounds @views for i in 1:No
+            θe = T(2asin(sqrt(rand(rng))))
+            θn = T(2asin(sqrt(rand(rng))))
+            if θe < θn
+                iu += 1
+                UP[iu, 1:6] = alive[i, 1:6]
+                UP[iu, 7]   = θe
+                UP[iu, 8]   = θn
+            else
+                id += 1
+                DOWN[id, 1:6] = alive[i, 1:6]
+                DOWN[id, 7]   = θe
+                DOWN[id, 8]   = θn
+            end
+        end
+        return UP, DOWN
+
+    elseif mode === :bucket
+        # --- Single pass: preallocate No×8 for both; write angles as we generate.
+        UP   = Matrix{T}(undef, No, 8)
+        DOWN = Matrix{T}(undef, No, 8)
+        nup = 0; ndn = 0
+        @inbounds while (nup < No) || (ndn < No)
+            θe = T(2asin(sqrt(rand(rng))))
+            θn = T(2asin(sqrt(rand(rng))))
+            if (θe < θn) && (nup < No)
+                nup += 1
+                UP[nup, 7] = θe
+                UP[nup, 8] = θn
+            elseif (θe > θn) && (ndn < No)
+                ndn += 1
+                DOWN[ndn, 7] = θe
+                DOWN[ndn, 8] = θn
+            end
+        end
+        # now copy alive rows once
+        @inbounds @views for i in 1:No
+            UP[i,   1:6] = alive[i, 1:6]
+            DOWN[i, 1:6] = alive[i, 1:6]
+        end
+        return UP, DOWN
+
+    else
+        error("Unknown mode=$mode. Use :total or :bucket.")
+    end
+
+end
+
     export AtomParams,
             clear_all,
             polylog,
@@ -887,7 +955,6 @@ end
             CQD_EqOfMotion, QM_EqOfMotion,
             CQD_EqOfMotion_z, QM_EqOfMotion_z,
             CQD_Screen_position, QM_Screen_position,
-            generate_matched_pairs,
-            build_init_conditions
+            build_initial_conditions
 
 end
