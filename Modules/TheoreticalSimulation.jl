@@ -21,7 +21,7 @@ module TheoreticalSimulation
     using DelimitedFiles, CSV, DataFrames, JLD2
     # Customo modules
     include("./atoms.jl");
-    include("./samplings,jl");
+    include("./samplings.jl");
 
     # Defaults only if not already present in this module
     if !isdefined(@__MODULE__, :OUTDIR)
