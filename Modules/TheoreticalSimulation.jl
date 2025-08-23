@@ -21,6 +21,7 @@ module TheoreticalSimulation
     using DelimitedFiles, CSV, DataFrames, JLD2
     # Customo modules
     include("./atoms.jl");
+    include("./samplings,jl");
 
     # Defaults only if not already present in this module
     if !isdefined(@__MODULE__, :OUTDIR)
@@ -53,6 +54,9 @@ module TheoreticalSimulation
     const INV_E = exp(-1);
 
     # STERN--GERLACH EXPERIMENT
+    default_camera_pixel_size = 6.5e-6 ; # (mm)
+    default_x_pixels = 2160;
+    default_z_pixels = 2560;
     # Furnace aperture
     default_x_furnace = 2.0e-3 ;
     default_z_furnace = 100e-6 ;
@@ -68,14 +72,7 @@ module TheoreticalSimulation
     default_R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
 
 
-    include("TheoreticalSimulation_Params.jl")
-    include("TheoreticalSimulation_MagneticField.jl")
-    include("TheoreticalSimulation_muF.jl")
-    include("TheoreticalSimulation_EquationsOfMotion.jl")
-    include("TheoreticalSimulation_VelocityPDF.jl")
-    include("TheoreticalSimulation_Sampling.jl")
-    include("TheoreticalSimulation_DiscardedParticles.jl")
-    include("TheoreticalSimulation_Plots.jl")
+
 
 
 
@@ -192,6 +189,36 @@ module TheoreticalSimulation
         return bins
     end
 
+    # Function to plot histogram using Freedman-Diaconis binning rule
+    function FD_histograms(data_list::Vector{Float64},Label::LaTeXString,color)
+        # Calculate the interquartile range (IQR)
+        Q1 = quantile(data_list, 0.25)
+        Q3 = quantile(data_list, 0.75)
+        IQR = Q3 - Q1
+
+        # Calculate Freedman-Diaconis bin width
+        n = length(data_list)
+        bin_width = 2 * IQR / (n^(1/3))
+
+        # Calculate the number of bins using the range of the data
+        data_range = maximum(data_list) - minimum(data_list)
+        bins = ceil(Int, data_range / bin_width)
+
+        # Plot the histogram
+        histogram(data_list, bins=bins, normalize=:pdf,
+                label=Label,
+                # xlabel="Polar angle", 
+                color=color,
+                alpha=0.8,
+                xlim=(0,π),
+                xticks=PlottingTools.pitick(0, π, 8; mode=:latex),)
+    end
+
+    function bin_centers(edges::AbstractVector)
+        return (edges[1:end-1] .+ edges[2:end]) ./ 2
+    end
+
+
     """
     Centers of binned pixels (1D) in physical units. First center at (bin_size*pixel_size)/2. Requires img_size % bin_size == 0.
     """
@@ -202,79 +229,16 @@ module TheoreticalSimulation
         return Δ .* (1:n) .- Δ/2
     end
 
-    
-    function QM_find_bad_particles_ix(Ix, pairs,f,mf, p::AtomParams)
-        No = size(pairs, 1)  # Number of particles
-        ncurrents = length(Ix)
+    include("TheoreticalSimulation_Params.jl")
+    include("TheoreticalSimulation_MagneticField.jl")
+    include("TheoreticalSimulation_muF.jl")
+    include("TheoreticalSimulation_EquationsOfMotion.jl")
+    include("TheoreticalSimulation_VelocityPDF.jl")
+    include("TheoreticalSimulation_Sampling.jl")
+    include("TheoreticalSimulation_DiscardedParticles.jl")
+    include("TheoreticalSimulations_QMSpline.jl")
+    include("TheoreticalSimulation_Plots.jl")
 
-        # Indexed by idx, NOT threadid
-        bad_particles_per_current = Vector{Vector{Int}}(undef, ncurrents)
-        for i in 1:ncurrents
-            bad_particles_per_current[i] = Int[]
-        end
-
-        Threads.@threads for idx in 1:ncurrents
-        # for idx in 1:ncurrents
-            i0 = Ix[idx]
-            println("Analyzing current I₀ = $(@sprintf("%.3f", i0))A")
-
-            local_bad_particles = Int[]  # local to this thread and current
-            hits_SG = 0
-            hits_post = 0
-
-            for j = 1:No
-                try
-                    @inbounds begin
-                        v_y = pairs[j, 5]
-                        t_in = (default_y_FurnaceToSlit + default_y_SlitToSG) / v_y
-                        t_out = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG) / v_y
-                        # t_screen = (y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen) / v_y
-                        t_length = 1000
-
-                        r0 = @view pairs[j, 1:3]
-                        v0 = @view pairs[j, 4:6]
-                    end
-
-                    t_sweep_sg  = range(t_in, t_out, length=t_length)
-                    z_val       = QM_EqOfMotion_z.(t_sweep_sg, Ref(i0), Ref(f), Ref(mf), Ref(r0), Ref(v0), Ref(p))
-                    z_top       = z_magnet_edge_time.(t_sweep_sg, Ref(r0), Ref(v0))
-                    z_bottom    = z_magnet_trench_time.(t_sweep_sg, Ref(r0), Ref(v0))
-
-                    inside_cavity = (z_bottom .< z_val) .& (z_val .< z_top)
-                    if !all(inside_cavity)
-                        push!(local_bad_particles, j)
-                        hits_SG += 1
-                        continue
-                    end
-
-                    # Post-SG pipe check
-                    x_screen, _ ,  z_screen = QM_Screen_position(i0, f, mf, r0, v0, p)
-                    if x_screen^2 + z_screen^2 .>= default_R_tube^2
-                        push!(local_bad_particles, j)
-                        hits_post += 1 
-                        continue
-                    end
-
-                catch err
-                    @error "Thread $(Threads.threadid()), particle $j crashed" exception=err
-                end
-            end
-
-            println("\t→ SG hits   = $hits_SG")
-            println("\t→ Pipe hits = $hits_post\n")
-
-            sort!(local_bad_particles)
-            bad_particles_per_current[idx] = local_bad_particles
-        end
-
-        # Final result as Dict for compatibility
-        bad_particles = Dict{Int8, Vector{Int}}()
-        for idx in 1:ncurrents
-            bad_particles[Int8(idx)] = bad_particles_per_current[idx]
-        end
-
-        return bad_particles
-    end
 
     
 
@@ -283,12 +247,14 @@ module TheoreticalSimulation
             compute_weights,
             FreedmanDiaconisBins,
             pixel_coordinates,
-            fmf_pairs, μF_effective, 
+            fmf_levels, μF_effective, 
             generate_samples, build_initial_conditions,
+            z_magnet_edge_time, z_magnet_trench_time,
             CQD_EqOfMotion, QM_EqOfMotion,
             CQD_EqOfMotion_z, QM_EqOfMotion_z,
             CQD_Screen_position, QM_Screen_position,
+            CQD_Screen_velocity, QM_Screen_velocity,
             plot_μeff, plot_SG_geometry, plot_velocity_stats,
-            QM_find_bad_particles_ix
+            QM_find_discarded_particles, QM_build_filtered_pairs, QM_build_alive_screen
 
 end

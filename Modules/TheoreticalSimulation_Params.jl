@@ -115,7 +115,7 @@ Keywords
 
 Returns a vector of `(F, mF)` as `Float64`.
 """
-function fmf_pairs(p::AtomParams; J=1//2, stretched_only::Bool=false, Fsel=nothing)
+function fmf_levels(p::AtomParams; J=1//2, stretched_only::Bool=false, Fsel=nothing)
     I = float(p.Ispin)
     Jf = float(J)
     Fs = reverse(collect(range(abs(I - Jf), I + Jf; step=1.0)))
