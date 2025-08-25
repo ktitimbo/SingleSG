@@ -143,7 +143,7 @@ SETUP FEATURES
 """)
 # Setting the variables for the module
 TheoreticalSimulation.default_camera_pixel_size = cam_pixelsize;
-TheoreticalSimulation.default_x_pixels          = nx_pixles;
+TheoreticalSimulation.default_x_pixels          = nx_pixels;
 TheoreticalSimulation.default_z_pixels          = nz_pixels;
 TheoreticalSimulation.default_x_furnace         = x_furnace;
 TheoreticalSimulation.default_z_furnace         = z_furnace;
