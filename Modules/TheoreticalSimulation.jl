@@ -236,7 +236,7 @@ module TheoreticalSimulation
     include("TheoreticalSimulation_VelocityPDF.jl")
     include("TheoreticalSimulation_Sampling.jl")
     include("TheoreticalSimulation_DiscardedParticles.jl")
-    include("TheoreticalSimulations_QMSpline.jl")
+    include("TheoreticalSimulation_QMSpline.jl")
     include("TheoreticalSimulation_Plots.jl")
 
 
