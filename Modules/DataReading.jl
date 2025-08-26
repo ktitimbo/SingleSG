@@ -70,6 +70,18 @@ module DataReading
         return (binning_val, smoothing_val)
     end
 
+    # Read `experiment_report.txt` and return the "Data directory" value,
+    # with whitespace trimmed and any trailing / or \ removed.
+    function extract_data_dir(report_path::AbstractString)::Union{String,Missing}
+        txt = read(report_path, String)
+        m = match(r"Data\s*directory\s*:\s*([^\r\n]+)", txt)
+        if m === nothing
+            return missing
+        else
+            s = strip(m.captures[1])
+            return replace(s, r"[\\/]+$" => "")  # drop trailing slash/backslash if present
+        end
+    end
 # ─────────────────────────────────────────────────────────────────────────────
 # 3) Find fw_data CSV inside a folder
 # ─────────────────────────────────────────────────────────────────────────────
@@ -139,16 +151,29 @@ module DataReading
                             filename::AbstractString="fw_data.csv",
                             report_name::AbstractString="experiment_report.txt",
                             skip_missing::Bool=true,
-                            sort_on::Symbol=:folder)
+                            sort_on::Symbol=:folder,
+                            data_dir_filter::String="20250814")
 
         out = OrderedDict{String, NamedTuple{(:binning,:smoothing,:df),
             Tuple{Union{Int,Missing},Union{Float64,Missing},DataFrame}}}()
+
+        # normalize the user-provided filter once (allow "20250820" or "20250820/")
+        data_dir_filter_norm = data_dir_filter === nothing ? nothing : replace(strip(data_dir_filter), r"[\\/]+$" => "")
 
         for f in folder_read(parent)
             folder_path = joinpath(parent, f)
 
             report_path = joinpath(folder_path, report_name)
             !isfile(report_path) && skip_missing && (@warn "Skipping (missing report)" folder=f report=report_name; continue)
+
+            # --------- apply Data directory filter if requested ---------
+            if data_dir_filter_norm !== nothing
+                rep_dir = extract_data_dir(report_path)  # "20250820" (or missing)
+                if rep_dir === missing || rep_dir != data_dir_filter_norm
+                    continue  # skip folders whose report doesn't match the requested data dir
+                end
+            end
+            # ------------------------------------------------------------
 
             fw_path = find_fw_data_csv(folder_path; filename=filename)
             fw_path === nothing && skip_missing && (@warn "Skipping (missing fw_data CSV)" folder=f csv=filename; continue)

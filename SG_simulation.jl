@@ -12,7 +12,7 @@ Plots.default(
 )
 using Plots.PlotMeasures
 FIG_EXT = "png"   # could be "pdf", "svg", etc.
-SAVE_FIG = false
+SAVE_FIG = true
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using LaTeXStrings, Printf, PrettyTables
