@@ -167,18 +167,19 @@ nI = length(Icoils);
 
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 50_000
+const Nss = 5_000
 @info "Number of MonteCarlo particles : $(Nss)"
 
 # Monte Carlo generation of particles traersing the filtering slit
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
-pairs_UP, pairs_DOWN = build_initial_conditions(Nss, crossing_slit, rng_set; mode=:total);
+# pairs_UP, pairs_DOWN = build_initial_conditions(Nss, crossing_slit, rng_set; mode=:total);
 
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
     plot_SG_geometry("SG_geometry")
-    plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
-    plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
+    plot_velocity_stats(crossing_slit, "data μ" , "velocity_pdf_up")
+    # plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
+    # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
 
 

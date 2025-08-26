@@ -68,8 +68,8 @@ cols = palette(:darkrainbow, length(key_labels))
 fig=plot(title="Experimental Data : binning & spline smoothing factor",
 titlefontsize = 12)
 for (i,key) in enumerate(key_labels)
-    plot!(fig,abs.(m[key][3][4:end,"I_coil_mA"]/1000), abs.(m[key][3][4:end,"F1_z_centroid_mm"]/magnification_factor), 
-    # yerror = sqrt(30)*m[key][3][3:end,"F1_z_centroid_se_mm"],
+    plot!(fig,abs.(m[key][3][2:end,"I_coil_mA"]/1000), abs.(m[key][3][2:end,"F1_z_centroid_mm"]/magnification_factor), 
+    yerror = m[key][3][2:end,"F1_z_centroid_se_mm"],
     label="n=$(m[key][1]) | λ=$(m[key][2])", 
     color=cols[i],
     marker=(:circle,cols[i],2),
@@ -84,8 +84,9 @@ plot!(fig,
     yaxis=:log10,
     xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(1e-3,1),
+    xlims=(1e-3,1.2),
     ylims=(1e-3,5),
+    size=(800,600),
     legend=:outerright,
     legend_columns=1,
     legendfontsize=8,
@@ -113,48 +114,58 @@ alert("Experiment analysis finished!")
 
 
 
-# I_coils_ssk = 1e-3 * [0,2,4,6,8,10,12,16,22,32,44,58,74,94,114,134,154,174,195,215,236,260,285,310,340,380,420,460,500,550,600,750,850];
-# kis         = [1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5]
-# # N=4e6 
-# cqd_set1 = CSV.read("./simulation_data/results_CQD_20250819T150057.csv",DataFrame; header=false);   # n_bins = 1
-# qm_set1  = CSV.read("./simulation_data/results_QM_20250819T150057.csv",DataFrame; header=false);    # n_bins = 1
-# cqd_set2 = CSV.read("./simulation_data/results_CQD_20250820T180324.csv",DataFrame; header=false);   # n_bins = 2
-# qm_set2  = CSV.read("./simulation_data/results_QM_20250820T180324.csv",DataFrame; header=false);    # n_bins = 2
-# cqd_set3 = CSV.read("./simulation_data/results_CQD_20250821T174824.csv",DataFrame; header=false);   # n_bins = 4
-# qm_set3  = CSV.read("./simulation_data/results_QM_20250821T174824.csv",DataFrame; header=false);    # n_bins = 4
+I_coils_ssk = 1e-3 * [0,2,4,6,8,10,12,16,22,32,44,58,74,94,114,134,154,174,195,215,236,260,285,310,340,380,420,460,500,550,600,750,850];
+kis         = [1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5]
+# N=4e6 
+cqd_set1 = CSV.read("./simulation_data/results_CQD_20250819T150057.csv",DataFrame; header=false);   # n_bins = 1
+cqd_set2 = CSV.read("./simulation_data/results_CQD_20250820T180324.csv",DataFrame; header=false);   # n_bins = 2
+cqd_set3 = CSV.read("./simulation_data/results_CQD_20250821T174824.csv",DataFrame; header=false);   # n_bins = 4
+cqd_set4 = CSV.read("./simulation_data/results_CQD_20250825T114325.csv",DataFrame; header=false);   # n_bins = 8
+cqd_set5 = CSV.read("./simulation_data/results_CQD_20250825T100550.csv",DataFrame; header=false);   # n_bins = 2
 
 
-# fig1 = plot(
-#     xlabel="Current (A)",
-#     ylabel=L"$z_{F_{1}}$ (mm)"
-# )
-# cols = palette(:darkrainbow, length(kis))
-# for i in eachindex(kis)
-#     plot!(fig1, cqd_set1[7:end,1], abs.(cqd_set1[7:end,23+i]), line=(:solid, cols[i], 1), label=L"$k_{i} = %$(kis[i])\times 10^{-6}$" )
-# end
-# plot!(fig1, 
-#     xaxis=:log10,
-#     yaxis=:log10,
-#     xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     xlims=(1e-3,1),
-#     ylims=(1e-3,5),
-#     legend=:outerright,
-#     legend_title = L"sim $n=1$"
-# )
-# key0 = "20250820T171728"
-# plot!(fig1,abs.(m[key0][3][4:end,"I_coil_mA"]/1000), abs.(m[key0][3][4:end,"F1_z_centroid_mm"]/1.2697), 
-#     # yerror = sqrt(30)*m[key][3][3:end,"F1_z_centroid_se_mm"],
-#     label="Experiment : n=$(m[key0][1]) | λ=$(m[key0][2])", 
-#     color=:black,
-#     marker=(:circle,:black,2),
-#     markerstrokewidth = 1,
-#     markerstrokecolor=:black
-# )
-# plot!(data_JSF[:model][:,1],data_JSF[:model][:,2],
-#     label="Alexander's data : CQD",
-# )
-# display(fig1)
+qm_set1  = CSV.read("./simulation_data/results_QM_20250819T150057.csv",DataFrame; header=false);    # n_bins = 1
+qm_set2  = CSV.read("./simulation_data/results_QM_20250820T180324.csv",DataFrame; header=false);    # n_bins = 2
+qm_set3  = CSV.read("./simulation_data/results_QM_20250821T174824.csv",DataFrame; header=false);    # n_bins = 4
+qm_set4  = CSV.read("./simulation_data/results_QM_20250825T114325.csv",DataFrame; header=false);    # n_bins = 8
+qm_set5  = CSV.read("./simulation_data/results_QM_20250825T100550.csv",DataFrame; header=false);    # n_bins = 2
+
+# CO-QUANTUM DYNAMICS
+fig1 = plot(
+    xlabel="Current (A)",
+    ylabel=L"$z_{F_{1}}$ (mm)"
+)
+cols = palette(:darkrainbow, length(kis))
+for i in eachindex(kis)
+    plot!(fig1, cqd_set5[3:end,1], abs.(cqd_set5[3:end,23+i]), line=(:solid, cols[i], 1), label=L"$k_{i} = %$(kis[i])\times 10^{-6}$" )
+end
+plot!(fig1, 
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(1e-3,1.2),
+    ylims=(1e-4,5),
+    legend=:outerright,
+    legend_title = L"sim $n=8$",
+    size=(800,400),
+    left_margin = 4mm,
+    bottom_margin = 3mm,
+)
+key0 = "20250825T183729" # "20250820T171728"
+plot!(fig1,abs.(m[key0][3][2:end,"I_coil_mA"]/1000), abs.(m[key0][3][2:end,"F1_z_centroid_mm"]/1.2697), 
+    # yerror = sqrt(30)*m[key][3][3:end,"F1_z_centroid_se_mm"],
+    label="Experiment : n=$(m[key0][1]) | λ=$(m[key0][2])", 
+    color=:black,
+    marker=(:circle,:black,2),
+    markerstrokewidth = 1,
+    markerstrokecolor=:black
+)
+plot!(data_JSF[:exp][:,1],data_JSF[:exp][:,2],
+    label="Alexander's data",
+    line=(:dash,:blue, 2),
+)
+display(fig1)
 
 
 
