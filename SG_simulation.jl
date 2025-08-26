@@ -167,7 +167,7 @@ nI = length(Icoils);
 
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 2_000_000
+const Nss = 500_000
 @info "Number of MonteCarlo particles : $(Nss)"
 
 # Monte Carlo generation of particles traersing the filtering slit

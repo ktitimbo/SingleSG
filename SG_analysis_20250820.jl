@@ -103,8 +103,8 @@ MyExperimentalAnalysis.x_pixels = x_pixels;
 MyExperimentalAnalysis.z_pixels = z_pixels;
       
 # Binning for the analysis
-λ0 = 0.04; # Fitting factor
-n_bins = 1
+λ0 = 0.05; # Fitting factor
+n_bins = 4
 z_mm = 1e3 .* pixel_positions(z_pixels, n_bins, exp_pixelsize_z)
 
 

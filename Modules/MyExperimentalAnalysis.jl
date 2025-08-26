@@ -710,6 +710,7 @@ module MyExperimentalAnalysis
     function summarize_framewise(f1, f2, Icoils, centroid_mean, centroid_std; rev_order::Bool=false)
         @assert size(f1) == size(f2) "f1 and f2 must have the same size"
         n = size(f1, 1)
+        @info "Number of frames : $(n)"
         @assert size(f1, 2) == length(Icoils) "length(Icoils) must match number of columns"
 
         # Means / std / SEMs per column
