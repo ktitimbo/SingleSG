@@ -98,6 +98,89 @@ function QM_find_discarded_particles(Ix, pairs, p::AtomParams;
     return result
 end
 
+function QM_find_discarded_particles_multithreading(Ix, pairs, p::AtomParams;
+                                        t_length::Int=1000, verbose::Bool=false)
+
+    No        = size(pairs, 1)            # number of particles
+    ncurrents = length(Ix)                # number of currents
+    fmf       = fmf_levels(p)
+    nlevels   = length(fmf)               # number of (F, mF) levels
+
+    # Thread-local results bucket (no locking needed because each idx is unique)
+    results = Vector{Vector{Vector{Int}}}(undef, ncurrents)
+
+    # Optional: serialize prints to avoid interleaving
+    print_lock = ReentrantLock()
+
+    @threads for idx in 1:ncurrents
+        i0 = Ix[idx]
+        if verbose
+            lock(print_lock); try
+                println("Analyzing I₀ = $(round(i0, sigdigits=5))A \t (levels = $nlevels)")
+            finally
+                unlock(print_lock)
+            end
+        end
+
+        # One vector-of-vectors per current; one Int[] per (F,mF)
+        bad_for_levels = [Int[] for _ in 1:nlevels]
+
+        # Sweep particles once; reuse geometry envelopes for all (F,mF)
+        @inbounds for j in 1:No
+            # Unpack this particle
+            r0 = @view pairs[j, 1:3]
+            v0 = @view pairs[j, 4:6]
+            v_y = v0[2]
+
+            # Time window inside SG for this particle
+            t_in   = (default_y_FurnaceToSlit + default_y_SlitToSG) / v_y
+            t_out  = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG) / v_y
+            t_sweep = range(t_in, t_out; length=t_length)
+
+            # Geometry bounds (independent of (F,mF))
+            z_top    = z_magnet_edge_time.(t_sweep, Ref(r0), Ref(v0))
+            z_bottom = z_magnet_trench_time.(t_sweep, Ref(r0), Ref(v0))
+
+            # Evaluate each (F,mF) against this particle
+            @inbounds for k in 1:nlevels
+                F, mF = fmf[k]
+
+                # Trajectory z(t) depends on (F,mF)
+                z_val = QM_EqOfMotion_z.(t_sweep, Ref(i0), Ref(F), Ref(mF), Ref(r0), Ref(v0), Ref(p))
+
+                # SG cavity check
+                inside = (z_bottom .< z_val) .& (z_val .< z_top)
+                if !all(inside)
+                    push!(bad_for_levels[k], j)
+                    continue
+                end
+
+                # Post-SG pipe (screen) check
+                x_scr, _, z_scr = QM_Screen_position(i0, F, mF, r0, v0, p)
+                if x_scr^2 + z_scr^2 ≥ default_R_tube^2
+                    push!(bad_for_levels[k], j)
+                    continue
+                end
+            end
+        end
+
+        # Optional: sort each level’s list for reproducibility
+        @inbounds for k in 1:nlevels
+            sort!(bad_for_levels[k])
+        end
+
+        results[idx] = bad_for_levels
+    end
+
+    # Stitch into the same OrderedDict shape you had before
+    out = OrderedDict{Int8, Vector{Vector{Int}}}()
+    @inbounds for idx in 1:ncurrents
+        out[Int8(idx)] = results[idx]
+    end
+    return out
+end
+
+
 
 """
     build_filtered_pairs(pairs, bad; copy=false) -> Dict{Int8, Vector{<:AbstractMatrix}}

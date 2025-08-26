@@ -167,7 +167,7 @@ nI = length(Icoils);
 
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 500_000
+const Nss = 50_000
 @info "Number of MonteCarlo particles : $(Nss)"
 
 # Monte Carlo generation of particles traersing the filtering slit
@@ -181,8 +181,10 @@ if SAVE_FIG
     plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
 
-particles_colliding         = QM_find_discarded_particles(Icoils,crossing_slit, K39_params; verbose=true) # heavy loop: goes in series
-particles_reaching_screen   = QM_build_alive_screen(Icoils,crossing_slit, particles_colliding,K39_params) 
+
+
+particles_colliding       = QM_find_discarded_particles_multithreading(Icoils,crossing_slit, K39_params; verbose=true) # heavy loop: goes in series
+particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit, particles_colliding,K39_params) 
 
 jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_reaching_screen))
 
