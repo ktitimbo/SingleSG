@@ -190,17 +190,17 @@ fig = plot_velocity_stats(alive, "Beam velocity statistics", "vel_stats_run42")
 """
 function plot_velocity_stats(alive::Matrix{Float64}, title::String, filename::String)
     @assert size(alive, 2) ≥ 6 "Expected at least 6 columns (x, y, z, vx, vy, vz)."
+    No = size(alive,1)
 
     # --- Velocity magnitude and angles ---
     vxs, vys, vzs = eachcol(alive[:, 4:6])
     velocities = sqrt.(vxs.^2 .+ vys.^2 .+ vzs.^2)
-    theta_vals = acos.(vzs ./ velocities)       # polar angle
-    phi_vals   = atan.(vys, vxs)                 # azimuthal angle
+    theta_vals = acos.(vzs ./ velocities) # polar angle
+    phi_vals   = atan.(vys, vxs)          # azimuthal angle
 
     # Means
     mean_v, rms_v = mean(velocities), sqrt(mean(velocities.^2))
     mean_theta, mean_phi = mean(theta_vals), mean(phi_vals)
-
 
     # Histogram for velocities
     figa = histogram(velocities;
@@ -262,7 +262,7 @@ function plot_velocity_stats(alive::Matrix{Float64}, title::String, filename::St
     fig = plot(
         figa, fige, figb, figf, figc, figg, figd,
         layout = @layout([a1 a2; a3 a4; a5 a6; a7]),
-        plot_title = title,
+        plot_title = title*" with Nₒ=$(No) particles",
         size = (650, 800),
         legendfontsize = 8,
         left_margin = 3mm,
