@@ -171,32 +171,41 @@ const Nss = 5_000
 @info "Number of MonteCarlo particles : $(Nss)"
 
 # Monte Carlo generation of particles traersing the filtering slit
-crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
+# crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
 # pairs_UP, pairs_DOWN = build_initial_conditions(Nss, crossing_slit, rng_set; mode=:total);
 
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
     plot_SG_geometry("SG_geometry")
-    plot_velocity_stats(crossing_slit, "data μ" , "velocity_pdf_up")
+    # plot_velocity_stats(crossing_slit, "data μ" , "velocity_pdf_up")
     # plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
     # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
 
 
 
-particles_colliding       = QM_find_discarded_particles_multithreading(Icoils,crossing_slit, K39_params; verbose=true) # heavy loop: goes in series
-particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit, particles_colliding,K39_params) 
+# particles_colliding       = QM_find_discarded_particles_multithreading(Icoils,crossing_slit,K39_params;verbose=true) # heavy loop: goes in series
+# particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params) # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
+# jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_reaching_screen))
 
-jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_reaching_screen))
+data = load(joinpath(@__DIR__, "simulation_data", "20250822T203747","qm_2000000_valid_particles_data.jld2"))["data"]
+
+nx_bins , nz_bins = 32, 1 ;
+
+profiles_top = QM_analyze_profiles_to_dict(data, K39_params;
+    manifold=:F_top, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, λ_raw=0.01, λ_smooth = 0.001)
+
+profiles_bottom = QM_analyze_profiles_to_dict(data, K39_params;
+    manifold=:F_bottom, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, λ_raw=0.01, λ_smooth = 0.001)
 
 
 
-
-aa[25][1]
-aa[25][8]
-
+jldsave( joinpath(OUTDIR,"zmax_profiles_top_$(nx_bins)x$(nz_bins).jld2"), data=profiles_top)
+jldsave( joinpath(OUTDIR,"zmax_profiles_bottom_top_$(nx_bins)x$(nz_bins).jld2"), data=profiles_bottom)
 
 
+
+load(joinpath(OUTDIR,"zmax_profiles_top.jld2"))["data"]
 
 bb = jldopen(joinpath(OUTDIR,"qm_data.jld2"))["data"]
 
@@ -490,113 +499,16 @@ end
 
 
 
-function gaussian_kernel(x,wd)
-    # Create Gaussian kernel around zero
-    kernel = (1 / (sqrt(2π) * wd)) .* exp.(-x .^ 2 ./ (2 * wd^2))
-    kernel ./= sum(kernel)  # normalize to sum to 1
-    return kernel
-end
-
-function smooth_profile(z_vals, pdf_vals, wd)
-    kernel = gaussian_kernel(z_vals,wd)
-    # Convolve pdf values with kernel, pad=true means full convolution
-    smoothed = DSP.conv(pdf_vals, kernel)
-    # Trim convolution result to same length as input, like MATLAB 'same'
-    n = length(pdf_vals)
-    start_idx = div(length(kernel), 2) + 1
-    return smoothed[start_idx:start_idx + n - 1]
-end
 
 
 
-"""
-    analyze_profiles_to_dict(
-        Icoils::AbstractVector,
-        screen_up::AbstractDict{<:Integer,<:AbstractMatrix};
-        n_bins::Integer = 2,
-        width_mm::Float64 = 0.1,
-        add_plot::Bool = false,
-        λ_raw::Float64 = 0.01,
-        λ_smooth::Float64 = 1e-3,
-        store_profiles::Bool = true,
-    ) -> OrderedDict{Int, OrderedDict{Symbol, Any}}
 
-    Run `analyze_screen_profile` for each coil current `Icoils[i]` with its
-    corresponding screen data `screen_up[i]`, collecting results in a nested
-    dictionary keyed by the **index** `i` (1..length(Icoils)).
 
-    This is the batch companion to `analyze_screen_profile(Ix, data_mm; ...)`.
-    It converts each dataset from meters to millimeters (taking columns 1=x and
-    3=z), calls the single-dataset analyzer (passing `Ix = Icoils[i]` so the
-    plots are titled per current), and aggregates the outputs.
 
-    # Arguments
-    - `Icoils`: Vector of coil currents (A). Length must match `screen_up`.
-    - `screen_up`: Dict-like container (e.g. `OrderedDict{Int, Matrix}`) whose
-    keys include `1:length(Icoils)` and whose values are N×M matrices of hit
-    positions in **meters** (columns: 1=x, 3=z).
-    - `n_bins`: Histogram binning multiplier used by `analyze_screen_profile`.
-    - `width_mm`: Gaussian kernel σ (mm) used by `smooth_profile`.
-    - `add_plot`: If `true`, each call plots the profiles titled with `Icoils[i]`.
-    - `λ_raw`, `λ_smooth`: Spline regularization parameters for raw and smoothed
-    profiles, respectively.
-    - `store_profiles`: If `true`, store the full `z_profile` array for each
-    current (can be large). If `false`, omit it to save memory.
 
-    # Returns
-    An `OrderedDict{Int, OrderedDict{Symbol, Any}}` such that:
-    - `out[i][:Icoil]`                       → `Icoils[i]`
-    - `out[i][:z_max_raw_mm]`                → raw-profile maximum z [mm]
-    - `out[i][:z_max_raw_spline_mm]`         → spline fit (raw) maximum z [mm]
-    - `out[i][:z_max_smooth_mm]`             → smoothed-profile maximum z [mm]
-    - `out[i][:z_max_smooth_spline_mm]`      → spline fit (smoothed) maximum z [mm]
-    - `out[i][:z_profile]` (optional)        → Nz×3 matrix `[z, raw, smooth]`
 
-    # Notes
-    - Expects `screen_up[i]` to have at least 3 columns (x=col 1, z=col 3).
-    - This function assumes `analyze_screen_profile(Ix, data_mm; ...)` accepts
-    hit data in **mm** and will handle the histogramming/plotting.
-    - If you prefer keys by current value instead of index, use a
-    `Dict{Float64, ...}` and set `out[Icoils[i]] = inner`.
-"""
-function analyze_profiles_to_dict(Icoils::AbstractVector, screen_up::AbstractDict{<:Integer,<:AbstractMatrix};
-    m_mom::Symbol = :up, n_bins::Integer = 2, width_mm::Float64 = 0.1, add_plot::Bool = false,
-    λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, store_profiles::Bool = true,)
 
-    @assert length(Icoils) == length(screen_up)
-    @assert all(haskey(screen_up, i) for i in 1:length(Icoils))
-    @assert all(size(screen_up[i], 2) ≥ 3 for i in 1:length(Icoils)) "screen_up[i] must have at least 3 columns (x in col 1, z in col 3)"
-    @assert eltype(Icoils) <: Real "Icoils must be numeric"
 
-    out = OrderedDict{Int, OrderedDict{Symbol, Any}}()
-    for i in eachindex(Icoils)
-        data_mm = 1e3 .* screen_up[i][:, [1, 3]]
-
-        res = analyze_screen_profile(
-            Icoils[i],
-            data_mm;
-            m_mom=m_mom,
-            n_bins=n_bins,
-            width_mm=width_mm,
-            add_plot=add_plot,
-            λ_raw=λ_raw,
-            λ_smooth=λ_smooth,
-        )
-
-        inner = OrderedDict{Symbol, Any}(
-            :Icoil => Icoils[i],
-            :z_max_raw_mm => res.z_max_raw_mm,
-            :z_max_raw_spline_mm => res.z_max_raw_spline_mm,
-            :z_max_smooth_mm => res.z_max_smooth_mm,
-            :z_max_smooth_spline_mm => res.z_max_smooth_spline_mm,
-        )
-        if store_profiles
-            inner[:z_profile] = res.z_profile
-        end
-        out[i] = inner
-    end
-    return out
-end
 
 save_fig = true
 if save_fig == true

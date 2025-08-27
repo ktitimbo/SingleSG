@@ -229,6 +229,25 @@ module TheoreticalSimulation
         return Δ .* (1:n) .- Δ/2
     end
 
+
+    function gaussian_kernel(x,wd)
+        # Create Gaussian kernel around zero
+        kernel = (1 / (sqrt(2π) * wd)) .* exp.(-x .^ 2 ./ (2 * wd^2))
+        kernel ./= sum(kernel)  # normalize to sum to 1
+        return kernel
+    end
+
+    function smooth_profile(z_vals, pdf_vals, wd)
+        kernel = gaussian_kernel(z_vals,wd)
+        # Convolve pdf values with kernel, pad=true means full convolution
+        smoothed = DSP.conv(pdf_vals, kernel)
+        # Trim convolution result to same length as input, like MATLAB 'same'
+        n = length(pdf_vals)
+        start_idx = div(length(kernel), 2) + 1
+        return smoothed[start_idx:start_idx + n - 1]
+    end
+
+
     include("TheoreticalSimulation_Params.jl")
     include("TheoreticalSimulation_MagneticField.jl")
     include("TheoreticalSimulation_muF.jl")
@@ -256,6 +275,8 @@ module TheoreticalSimulation
             CQD_Screen_velocity, QM_Screen_velocity,
             plot_μeff, plot_SG_geometry, plot_velocity_stats,
             QM_find_discarded_particles, QM_find_discarded_particles_multithreading,
-            QM_build_filtered_pairs, QM_build_alive_screen
+            QM_build_filtered_pairs, QM_build_alive_screen,
+	        analyze_screen_profile,
+            QM_analyze_profiles_to_dict
 
 end
