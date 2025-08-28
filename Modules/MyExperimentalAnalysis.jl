@@ -1312,33 +1312,47 @@ module MyExperimentalAnalysis
     - Binning is along z (the 2nd dimension).
     """
     function extract_profiles(data_processed, key::Symbol, nI::Integer, z_pixels::Integer;
-                            T::Type{<:Real}=Float64, n_bin::Integer=1)
+                            T::Type{<:Real}=Float64, n_bin::Integer=1, with_std::Bool = false)
         @assert n_bin ≥ 1 "n_bin must be ≥ 1"
         @assert z_pixels % n_bin == 0 "z_pixels ($z_pixels) must be divisible by n_bin ($n_bin)"
         z_out = div(z_pixels, n_bin)
         P = Matrix{T}(undef, nI, z_out)
+        Q = with_std ? Matrix{T}(undef, nI, z_out) : nothing  # temporal std (optional)
 
         @inbounds @views for j in 1:nI
             # stack_raw :: (Nx, Nz, Nframes)
             stack_raw = data_processed[key][:,:,:,j]
             stack = T <: eltype(stack_raw) ? stack_raw : T.(stack_raw)
 
+            Nx, Nz, Nf = size(stack)
+            @assert Nz == z_pixels
+
             if n_bin == 1
-                # Average over x (dim 1) and frames (dim 3) → length Nz
-                prof = dropdims(mean(stack; dims=(1,3)); dims=(1,3))
+                # Average over x_pixels → (1,Nz,Nf)
+                xmean = mean(stack; dims=1)
+                # Mean across frames → (Nz,)
+                prof = dropdims(mean(xmean; dims=3); dims=(1,3))
                 P[j, :] = prof
+                if with_std
+                    σ_std = dropdims(std(xmean; dims=3, corrected=true); dims=(1,3))
+                    Q[j, :] = σ_std
+                end 
             else
                 # Bin z first: reshape to (Nx, n_bin, z_out, Nframes)
-                Nx, Nz, Nf = size(stack)
-                @assert Nz == z_pixels  # sanity check
                 B = reshape(stack, Nx, n_bin, z_out, Nf)
-                # Mean over x (1), bin group (2), frames (4) → (1,1,z_out,1)
-                prof_binned = dropdims(mean(B; dims=(1,2,4)); dims=(1,2,4))
+                # Average over x and bin group → (1, 1, z_out, Nf)
+                xbmean = mean(B; dims=(1,2))
+                # Mean across frames → (z_out,)
+                prof_binned = dropdims(mean(xbmean; dims=4); dims=(1,2,4))
                 P[j, :] = prof_binned
+                if with_std
+                    σ_std = dropdims(std(xbmean; dims=4, corrected=true); dims=(1,2,4))
+                    Q[j, :] = σ_std
+                end
             end
         end
 
-        return P
+        return with_std ? (mean = P, std = Q::Matrix{T}) : P
     end
 
     """

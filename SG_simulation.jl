@@ -162,31 +162,33 @@ Icoils = [0.00,
             0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.60,0.70,0.75,0.80,0.90,
             1.00
 ];
+Icoils = reverse([0.993, 0.739, 0.549, 0.01164, 0.0])
+
 nI = length(Icoils);
 
 
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 5_000
+const Nss = 2_000_000
 @info "Number of MonteCarlo particles : $(Nss)"
 
 # Monte Carlo generation of particles traersing the filtering slit
-# crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
+crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
 # pairs_UP, pairs_DOWN = build_initial_conditions(Nss, crossing_slit, rng_set; mode=:total);
 
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
     plot_SG_geometry("SG_geometry")
-    # plot_velocity_stats(crossing_slit, "data μ" , "velocity_pdf_up")
+    plot_velocity_stats(crossing_slit, "data μ" , "velocity_pdf_up")
     # plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
     # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
 
 
 
-# particles_colliding       = QM_find_discarded_particles_multithreading(Icoils,crossing_slit,K39_params;verbose=true) # heavy loop: goes in series
-# particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params) # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
-# jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_reaching_screen))
+particles_colliding       = QM_find_discarded_particles_multithreading(Icoils,crossing_slit,K39_params;verbose=true) # heavy loop: goes in series
+particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params) # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
+jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_reaching_screen))
 
 data = load(joinpath(@__DIR__, "simulation_data", "20250822T203747","qm_2000000_valid_particles_data.jld2"))["data"]
 
@@ -198,16 +200,14 @@ profiles_top = QM_analyze_profiles_to_dict(data, K39_params;
 profiles_bottom = QM_analyze_profiles_to_dict(data, K39_params;
     manifold=:F_bottom, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, λ_raw=0.01, λ_smooth = 0.001)
 
-
-
 jldsave( joinpath(OUTDIR,"zmax_profiles_top_$(nx_bins)x$(nz_bins).jld2"), data=profiles_top)
-jldsave( joinpath(OUTDIR,"zmax_profiles_bottom_top_$(nx_bins)x$(nz_bins).jld2"), data=profiles_bottom)
+jldsave( joinpath(OUTDIR,"zmax_profiles_bottom_$(nx_bins)x$(nz_bins).jld2"), data=profiles_bottom)
 
 
 
-load(joinpath(OUTDIR,"zmax_profiles_top.jld2"))["data"]
+# load(joinpath(OUTDIR,"zmax_profiles_top.jld2"))["data"]
 
-bb = jldopen(joinpath(OUTDIR,"qm_data.jld2"))["data"]
+# bb = jldopen(joinpath(OUTDIR,"qm_data.jld2"))["data"]
 
 
 

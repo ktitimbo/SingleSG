@@ -103,10 +103,10 @@ MyExperimentalAnalysis.x_pixels = x_pixels;
 MyExperimentalAnalysis.z_pixels = z_pixels;
       
 # Binning for the analysis
-λ0 = 0.01; # Fitting factor
-n_bins = 2
-z_mm = 1e3 .* pixel_positions(z_pixels, n_bins, exp_pixelsize_z)
-
+λ0      = 0.01; # Fitting factor
+n_bins  = 1; # binning for the z component
+z_mm    = 1e3 .* pixel_positions(z_pixels, n_bins, exp_pixelsize_z)
+std_profiles = true
 
 # Importing data
 if !isfile(outfile2) # check if the processed images exists
@@ -192,8 +192,23 @@ saveplot(fig_I0, "current_range")
 
 
 # --- Compute F1 / F2 mean profiles ----------------------------------------
-profiles_F1 = extract_profiles(data_processed, :F1ProcessedImages, nI, z_pixels; n_bin=n_bins)
-profiles_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels; n_bin=n_bins)
+profiles_F1 = extract_profiles(data_processed, :F1ProcessedImages, nI, z_pixels; n_bin=n_bins);
+profiles_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels; n_bin=n_bins);
+
+if std_profiles
+    prof_F1 = extract_profiles(data_processed, :F1ProcessedImages, nI, z_pixels; n_bin=n_bins, with_std=true);
+    prof_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels; n_bin=n_bins, with_std=true);
+    jldsave(joinpath(OUTDIR, "profiles.jld2"),
+        profiles = OrderedDict(:Icoils => reverse(Icoils), 
+                                :F1_profile => reverse(prof_F1.mean, dims=1),
+                                :F1_err     => reverse(prof_F1.std, dims=1), 
+                                :F2_profile => reverse(prof_F2.mean, dims=1),
+                                :F2_err     => reverse(prof_F2.std, dims=1)
+                    )
+    )
+end
+
+
 
 # --- Plot ------------------------------------------------------------------
 fig1 = plot_profiles(z_mm, profiles_F1, Icoils; title="F1 processed data")
