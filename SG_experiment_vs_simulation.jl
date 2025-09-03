@@ -52,22 +52,12 @@ data_exp        = load(joinpath("analysis_data","20250827T133507","profiles.jld2
 data_exp_fw     = CSV.read(joinpath("analysis_data","20250827T133507","fw_data.csv"),DataFrame)
 data_exp_mean   = CSV.read(joinpath("analysis_data","20250827T133507","mean_data.csv"),DataFrame)
 
-data_exp_mean
 centroid = mean((data_exp_mean[!,"F1_z_peak_mm"]+ data_exp_mean[!,"F2_z_peak_mm"])/2)
 
 # import simulated data
 data_simulation         = load(joinpath("simulation_data", "20250822T203747","qm_2000000_valid_particles_data.jld2"))["data"]
 data_simulation_top     = load(joinpath("simulation_data", "20250822T203747","zmax_profiles_top_32x1.jld2"))["data"]
 data_simulation_bottom  = load(joinpath("simulation_data", "20250822T203747","zmax_profiles_bottom_32x1.jld2"))["data"]
-
-
-
-data_simulation_top
-data_simulation_top[30][:z_max_smooth_spline_mm]
-data_simulation_bottom[30][:z_max_smooth_spline_mm]
-
-data_exp[:Icoils]
-data_simulation[:Icoils]
 
 
 z_mm = 1e3*(6.5e-6 .* (1:2560) .- 6.5e-6 / 2)
