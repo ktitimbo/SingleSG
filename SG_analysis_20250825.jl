@@ -1228,8 +1228,9 @@ EXPERIMENT CONDITIONS
 ANALYSIS PROPERTIES
     Binning                 : $(n_bins)
     Smoothing parameter     : $(λ0)
-    Mean F1 peak (mm)       : $(round.(df_mean[!,:F1_z_centroid_mm],digits=6))
-    Framewise F1 peak (mm)  : $(round.(df_fw[!,:F1_z_centroid_mm], digits=6))
+    Mean F1 peak (mm)       : $(round.(df_mean[!,:F1_z_centroid_mm],digits=9))
+    Framewise F1 peak (mm)  : $(round.(df_fw[!,:F1_z_centroid_mm], digits=9))
+    Framewise F1 STDE (mm)  : $(round.(df_fw[!,:F1_z_centroid_se_mm], digits=9))
 
 CODE
     Code name               : $(PROGRAM_FILE),
