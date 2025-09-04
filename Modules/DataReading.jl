@@ -202,7 +202,103 @@ module DataReading
         return OrderedCollections.OrderedDict(kvs)
     end
 
+    """
+    Find and extract arrays from the report that matches the given keys.
 
+    Arguments
+    - root            : directory containing many subfolders, each with a report file
+    - wanted_data_dir : the `Data directory` to match (e.g. "20250825/")
+    - wanted_binning  : the `Binning` under ANALYSIS PROPERTIES (integer)
+    - wanted_smooth   : the `Smoothing parameter` under ANALYSIS PROPERTIES (Float64)
+    - report_name     : filename or list of filenames to look for in each subfolder
+                        (default = "experiment_report.txt")
+
+    Returns
+    - NamedTuple(path, data_dir, name, binning, smoothing, magnification, currents_mA, framewise_mm)
+    or `nothing` if no match is found.
+    """
+    function find_report_data(root::AbstractString;
+        wanted_data_dir::AbstractString,
+        wanted_binning::Integer,
+        wanted_smooth::Real,
+        report_name::Union{AbstractString,AbstractVector{<:AbstractString}}="experiment_report.txt"
+    )
+
+        # --- helpers ---
+        normdir(s) = replace(strip(s), r"[\\/]+$" => "")  # drop trailing / or \
+        function parse_float_vec(line::AbstractString)
+            m = match(r"\[(.*?)\]"s, line)
+            m === nothing && return Float64[]
+            xs = split(m.captures[1], ',')
+            return parse.(Float64, strip.(xs))
+        end
+
+        # normalize to a list of candidate names
+        report_names = isa(report_name, AbstractString) ? (report_name,) : report_name
+
+        # read all subfolders (non-recursive; use walkdir for recursive)
+        for name in readdir(root)
+            for rname in report_names
+                path = joinpath(root, name, rname)
+                isfile(path) || continue
+
+                txt = read(path, String)
+                txt = replace(txt, "\r\n" => "\n")  # normalize newlines
+
+                # --- Data directory (from EXPERIMENT) ---
+                m_dir = match(r"(?m)^\s*Data directory\s*:\s*(.+?)\s*$", txt)
+                m_dir === nothing && continue
+                data_dir = m_dir.captures[1]
+                normdir(data_dir) == normdir(wanted_data_dir) || continue
+
+                # --- Slice the ANALYSIS PROPERTIES block to avoid other 'Binning' labels ---
+                lines = split(txt, '\n')
+                idx_ap = findfirst(l -> occursin(r"^\s*ANALYSIS PROPERTIES\s*$", l), lines)
+                idx_ap === nothing && continue
+                is_header(l) = occursin(r"^[A-Z][A-Z \-–]+$", strip(l))
+                j = idx_ap + 1
+                while j <= length(lines) && !is_header(lines[j])
+                    j += 1
+                end
+                ap_block = join(lines[idx_ap:j-1], "\n")
+
+                # --- Binning (analysis) ---
+                m_bin = match(r"(?m)^\s*Binning\s*:\s*(\d+)\s*$", ap_block)
+                m_bin === nothing && continue
+                binning = parse(Int, m_bin.captures[1])
+                binning == wanted_binning || continue
+
+                # --- Smoothing parameter (analysis) ---
+                m_sm = match(r"(?m)^\s*Smoothing parameter\s*:\s*([0-9eE\.\+\-]+)\s*$", ap_block)
+                m_sm === nothing && continue
+                smoothing = parse(Float64, m_sm.captures[1])
+                isapprox(smoothing, float(wanted_smooth); rtol=0, atol=1e-12) || continue
+
+                # --- Magnification factor (from IMAGES INFORMATION) ---
+                m_mag = match(r"(?m)^\s*Magnification factor\s*:\s*([0-9eE\.\+\-]+)\s*$", txt)
+                magnification = m_mag === nothing ? missing : parse(Float64, m_mag.captures[1])
+
+                # --- Arrays to extract (search globally) ---
+                m_I  = match(r"(?m)^\s*Currents \(mA\)\s*:\s*(\[.*\])\s*$", txt)
+                m_F1 = match(r"(?m)^\s*Framewise F1 peak \(mm\)\s*:\s*(\[.*\])\s*$", txt)
+                (m_I === nothing || m_F1 === nothing) && continue
+
+                currents_mA  = parse_float_vec(m_I.match)
+                framewise_mm = parse_float_vec(m_F1.match)
+
+                return (path=path,
+                        data_dir=strip(data_dir),
+                        name=name,
+                        binning=binning,
+                        smoothing=smoothing,
+                        magnification=magnification,
+                        currents_mA=currents_mA,
+                        framewise_mm=framewise_mm)
+            end
+        end
+
+        return nothing
+    end
 
 
 end

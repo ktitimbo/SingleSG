@@ -103,8 +103,8 @@ MyExperimentalAnalysis.x_pixels = x_pixels;
 MyExperimentalAnalysis.z_pixels = z_pixels;
       
 # Binning for the analysis
-λ0      = 0.05; # Fitting factor
-n_bins  = 8; # binning for the z component
+λ0      = 0.02; # Fitting factor
+n_bins  = 2; # binning for the z component
 z_mm    = 1e3 .* pixel_positions(z_pixels, n_bins, exp_pixelsize_z)
 std_profiles = true
 
@@ -1214,14 +1214,14 @@ CAMERA FEATURES
 
 IMAGES INFORMATION
     Magnification factor    : $magnification_factor
-    Binning                 : $(exp_bin_x) × $(exp_bin_z)
+    Camera Binning          : $(exp_bin_x) × $(exp_bin_z)
     Effective pixels        : $(x_pixels) × $(z_pixels)
     Pixel size              : $(1e6*exp_pixelsize_x)μm × $(1e6*exp_pixelsize_z)μm
     xlims                   : ($(round(minimum(1e6*x_position), digits=6)) μm, $(round(maximum(1e3*x_position), digits=4)) mm)
     zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
 
 EXPERIMENT CONDITIONS
-    Currents (mA)           : $(round.(1e3*Icoils,digits=5))
+    Currents (mA)           : $(sort(round.(1e3*Icoils,digits=5)))
     No. of currents         : $(nI)
     Temperature (K)         : $(Temperature)
 

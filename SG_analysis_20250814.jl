@@ -1164,7 +1164,7 @@ CAMERA FEATURES
 
 IMAGES INFORMATION
     Magnification factor    : $magnification_factor
-    Binning                 : $(exp_bin_x) × $(exp_bin_z)
+    Camera Binning          : $(exp_bin_x) × $(exp_bin_z)
     Effective pixels        : $(x_pixels) × $(z_pixels)
     Pixel size              : $(1e6*exp_pixelsize_x)μm × $(1e6*exp_pixelsize_z)μm
     xlims                   : ($(round(minimum(1e6*x_position), digits=6)) μm, $(round(maximum(1e3*x_position), digits=4)) mm)
