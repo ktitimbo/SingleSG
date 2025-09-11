@@ -1,6 +1,6 @@
 # Kelvin Titimbo, Xukun Lin, S. Suleyman Kahraman, and Lihong V. Wang
 # California Institute of Technology
-# July 2025
+# August 2025
 
 ############## EXPERIMENT ANALYSIS PREAMBLE ##############
 # Headless/Windows-safe GR: set before using Plots

@@ -163,17 +163,370 @@ function fit_ki_with_error(itp, data;
         result=res)
 end
 
+"""
+    load_blocks(paths; z_group::Integer, header::Bool=false) -> Matrix{T}
 
-# import Suleyman's ki simulation:
+Read a list result CSVs and horizontally concatenate the column block
+for a given `z_group` (1-based). Each file is expected to have columns laid out as:
+
+    [ col1 | group1(ki_sim cols) | group2(ki_sim cols) | group3(ki_sim cols) ]
+
+where `col1` is typically the x-axis (e.g., z) and `(ncol - 1)` is divisible by 3.
+
+# Arguments
+- `paths`     : Vector of file paths to CSVs.
+- `z_group`   : Which group to extract (1, 2, or 3).
+- `header`    : Forwarded to `CSV.read` (`false` for your files).
+
+# Returns
+A dense matrix formed by `hcat` of the selected block from each file.
+
+# Throws
+- An assertion error if `(ncol - 1) % 3 != 0`.
+- An assertion error if `z_group ∉ 1:3`.
+"""
+function load_blocks(paths::AbstractVector{<:AbstractString};
+                         z_group::Integer=3,
+                         header::Bool=false)
+
+    @assert z_group in 1:3 "z_group must be 1, 2, or 3"
+
+    zcols = Vector{Vector{Float64}}()
+
+    blocks = map(paths) do p
+        df = CSV.read(p, DataFrame; header=header)
+        ncol = size(df, 2)
+        @assert (ncol - 1) % 3 == 0 "File $p: (ncol - 1) must be divisible by 3; got ncol=$ncol."
+
+        ki_sim = (ncol - 1) ÷ 3                    # number of columns per group
+        start  = 2 + (z_group - 1) * ki_sim        # first column of the chosen group
+        stop   = start + ki_sim - 1                # last column of the chosen group
+        @assert stop <= ncol "File $p: computed slice $start:$stop exceeds ncol=$ncol."
+
+        # stash z (first column) as Float64
+        push!(zcols, collect(Float64.(df[:, 1])))
+
+        # Convert just this block to a Matrix once (keeps memory use modest)
+        Matrix(df[:, start:stop])
+    end
+
+    data = reduce(hcat, blocks)
+
+
+    rtol = 1e-8
+    atol = 1e-12
+    ref = zcols[1]
+    all_same_len = all(length(z) == length(ref) for z in zcols)
+    all_close = all(all(isapprox.(z, ref; rtol=rtol, atol=atol)) for z in zcols)
+    if all_same_len && all_close
+        Icurrent = ref
+    else
+        @error "Data cannot be concatenated because they were simulated for different currents"
+    end
+
+    return (Icurrent, data)
+
+end
+
+
+# Import Suleyman's ki simulation:
+data_collected_exp = Vector{Matrix{Float64}}()
+data_collected_qm  = Vector{Matrix{Float64}}()
+data_collected_cqd = Vector{Matrix{Float64}}()
+for n_bin = 2:2:4 
+
+if n_bin ==4 
+    # # bin = 4
+    cqd_paths = [
+        "./simulation_data/nbin4/results_CQD_20250909T095554.csv",
+        "./simulation_data/nbin4/results_CQD_20250909T095606.csv",
+        "./simulation_data/nbin4/results_CQD_20250909T095619.csv",
+        "./simulation_data/nbin4/results_CQD_20250909T095645.csv",
+    ];
+    qm_paths = [
+        "./simulation_data/nbin4/results_QM_20250909T095554.csv",
+        "./simulation_data/nbin4/results_QM_20250909T095606.csv",
+        "./simulation_data/nbin4/results_QM_20250909T095619.csv",
+        "./simulation_data/nbin4/results_QM_20250909T095645.csv",
+    ];
+elseif n_bin == 2 
+    cqd_paths = [
+        "./simulation_data/nbin2/results_CQD_20250905T150919.csv",
+        "./simulation_data/nbin2/results_CQD_20250905T110806.csv",
+        "./simulation_data/nbin2/results_CQD_20250905T110819.csv",
+        "./simulation_data/nbin2/results_CQD_20250905T110834.csv",
+    ];
+    qm_paths = [
+        "./simulation_data/nbin2/results_QM_20250905T150919.csv",
+        "./simulation_data/nbin2/results_QM_20250905T110806.csv",
+        "./simulation_data/nbin2/results_QM_20250905T110819.csv",
+        "./simulation_data/nbin2/results_QM_20250905T110834.csv",
+    ];
+elseif n_bin == 1
+    cqd_paths = [
+        "./simulation_data/nbin2/results_CQD_20250905T190626.csv",
+        "./simulation_data/nbin2/results_CQD_20250905T190640.csv",
+        "./simulation_data/nbin2/results_CQD_20250905T190659.csv",
+        "./simulation_data/nbin2/results_CQD_20250905T190714.csv",
+    ];
+    qm_paths = [
+        "./simulation_data/nbin1/results_QM_20250905T190626.csv",
+        "./simulation_data/nbin1/results_QM_20250905T190640.csv",
+        "./simulation_data/nbin1/results_QM_20250905T190659.csv", # *********
+        "./simulation_data/nbin1/results_QM_20250905T190714.csv",
+    ];
+else
+    println("no data corresponding to the chosen binning")
+end
+
+ki_sim = collect(0.10:0.10:7.5);
+Ic_cqd , data_sim_cqd = load_blocks(cqd_paths; z_group=3);
+Ic_qm  , data_sim_qm  = load_blocks(qm_paths; z_group=3);
+
+
+
+# Quantum mechanics
+z_QMsim = vec(mean(data_sim_qm, dims=2))
+z_QMsim_err = vec(std(data_sim_qm, dims=2; corrected=true))/sqrt(length(ki_sim))
+
+cols = palette(:darkrainbow, length(ki_sim));
+fig=plot(title="MonteCarlo QM simulation: n=$(n_bin)",
+    xlabel="Coil Current (A)",
+    ylabel=L"$z_{F_{1}}$ (mm)"
+)
+for i=1:length(ki_sim)
+    plot!(fig,
+    Ic_qm[2:end],abs.(data_sim_qm[2:end, i]), 
+    label=false,
+    line=(:solid,cols[i],1),
+    alpha=0.33,
+    marker=(:xcross,2, cols[i]))
+end
+plot!(fig,
+    Ic_qm[4:end], abs.(z_QMsim[4:end]),
+    label="QM + Class.Trajs.",
+    ribbon = z_QMsim_err[6:end],
+    line=(:dash,:black,2),
+    fillalpha=0.23, 
+    fillcolor=:black, 
+)
+plot!(fig, 
+    legend=:bottomright,
+    legendfontsize=6,
+    xaxis=:log10,
+    yaxis=:log10,
+)
+display(fig)
+
+# Co-Quantum Dymamics
+cols = palette(:darkrainbow, length(ki_sim));
+fig = plot(
+    xlabel=L"$I_{c}$ (A)",
+    ylabel=L"$z_{F_{1}}$ (mm)",)
+for i=15:length(ki_sim)
+    plot!(fig,Ic_cqd[2:end], abs.(data_sim_cqd[2:end,i]) , 
+        label = L"$k_{i} =%$(round(ki_sim[i], digits=2)) \times 10^{-6}$",
+        line=(:solid,cols[i],1)
+    )
+end
+plot!(fig, 
+    Ic_qm[2:end], abs.(z_QMsim[2:end]),
+    label="QM + Class.Trajs.",
+    ribbon = z_QMsim_err,
+    line=(:dash,:black,2),
+    fillcolor=:black,
+    fillalpha=0.35,
+)
+plot!(fig, 
+    title="CQD Simulation. n=$(n_bin)",
+    xlims=(1e-3,1.5),
+    ylims=(8e-5,2.5),
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerright,
+    legendfontsize=7,
+    legend_columns=2,
+    size=(950,600),
+    left_margin=5mm,
+)
+display(fig)
+
+# Interpolated surface
+ki_start , ki_stop = 19 , 42#length(ki_sim)
+ki_sim[ki_start:ki_stop]
+itp = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+
+# Select data
+wanted_data_dir = "20250825/"
+wanted_binning  = 2
+wanted_smooth   = 0.02 
+
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+)
+if res === nothing
+    @warn "No matching report found"
+else
+    @info "Matched" res.path res.data_dir res.name res.binning res.smoothing
+    # I_exp = sort(res.currents_mA / 1_000);
+    # z_exp = res.framewise_mm/res.magnification;
+end
+
+load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
+I_exp = load_data[!,"I_coil_mA"]/1_000
+z_exp = load_data[!,"F1_z_centroid_mm"]/res.magnification
+z_exp_stde = load_data[!,"F1_z_centroid_se_mm"]
+
+# choose a few points for low currents and high currents
+data = hcat(I_exp, z_exp, z_exp_stde)
+data = data[[10,11,12,14,22:25...],:] # for fitting purposes
+# data = data[[9,10,11,15,19:22...],:] # for fitting purposes
+
+function loss(ki) # loss function
+    # ni=12
+    z_pred = itp.(data[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data[:,2]))
+end
+
+
+fit_param = optimize(loss, minimum(ki_sim[ki_start:ki_stop]), maximum(ki_sim[ki_start:ki_stop]),Brent())
+k_fit = Optim.minimizer(fit_param)
+
+# diagnostics
+mse = loss(k_fit);
+pred = itp.(I_exp, Ref(k_fit));
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+
+# given: itp, data (N×2), ki_sim
+out = fit_ki_with_error(itp, data; bounds=(minimum(ki_sim[ki_start:ki_stop]), maximum(ki_sim[ki_start:ki_stop])))
+@info "Fitting" out.k_hat out.k_err out.ci
+
+I_scan = logspace10(10e-3,1.00; n=30)
+fig= plot(
+    title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(n_bin))",
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)"
+)
+plot!(fig,
+    I_exp[9:end], z_exp[9:end], 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = z_exp_stde[9:end],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data[:,1], data[:,2],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:black,2),
+    markerstrokecolor=:black,
+    markerstrokewidth=2,)
+# plot!(fig,
+#     I_scan,itp.(I_scan, Ref(out.ci[2])),
+#     color=:royalblue1,
+#     label=false,
+#     linewidth=0,
+#     fillrange= itp.(I_scan, Ref(out.ci[1])),
+#     fillcolor=:royalblue1,
+#     fillalpha=0.35,
+# )
+plot!(fig,
+    I_scan, itp.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,1),
+    marker=(:xcross, :blue, 1),
+)
+plot!(fig, 
+    Ic_qm[6:end], z_QMsim[6:end],
+    label="QM + Class.Trajs.",
+    ribbon = z_QMsim_err[6:end],
+    line=(:dash,:green,2),
+    fillalpha=0.23, 
+    fillcolor=:green, 
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+display(fig)
+
+push!(data_collected_qm,  hcat(Ic_qm, z_QMsim, z_QMsim_err))
+push!(data_collected_exp, hcat(I_exp, z_exp, z_exp_stde))
+push!(data_collected_cqd, hcat(I_scan, itp.(I_scan, Ref(k_fit)), k_fit*ones(length(I_scan))))
+end
+
+fig= plot(
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)"
+)
+plot!(fig, data_collected_exp[1][9:end,1],data_collected_exp[1][9:end,2],
+    label="Experiment",
+    seriestype=:scatter,
+    yerror = data_collected_exp[1][9:end,3],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+     )
+plot!(fig,data_collected_qm[1][2:end,1],abs.(data_collected_qm[1][2:end,2]), 
+    label="QM n=$(2)",
+    line=(:dash,2))
+plot!(fig,data_collected_qm[2][2:end,1],abs.(data_collected_qm[2][2:end,2]),
+        label="QM n=$(4)",
+        line=(:dash,2))
+plot!(fig,data_collected_cqd[1][2:end,1],abs.(data_collected_cqd[1][2:end,2]), 
+    label=L"CQD n=%$(2). $k_{i}=%$(round(data_collected_cqd[1][1,3],digits=3))\times 10^{-6}$",
+    line=(:solid,2))
+plot!(fig,data_collected_cqd[2][2:end,1],abs.(data_collected_cqd[2][2:end,2]),
+    label=L"CQD n=%$(4). $k_{i}=%$(round(data_collected_cqd[2][1,3],digits=3))\times 10^{-6}$",
+    line=(:solid,2))
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(2e-4,2),
+    legend=:bottomright,
+)
+display(fig)
+
+
+2+2
+
+
+
+
+
+
+
+
+
+
 # 20250829T005913: no binning
-sim_data = CSV.read("./simulation_data/results_CQD_20250829T005913.csv",DataFrame; header=false)
-sim_QMdata = CSV.read("./simulation_data/results_QM_20250829T005913.csv",DataFrame; header=false)
+sim_data    = CSV.read("./simulation_data/results_CQD_20250829T005913.csv",DataFrame; header=false)
+sim_QMdata  = CSV.read("./simulation_data/results_QM_20250829T005913.csv",DataFrame; header=false)
 Ic_sim = sim_data[!,1]
 ki_sim = collect(1.50:0.10:3.50) ./ 1_000_000
 n_col = (1+2*length(ki_sim)) + 1 
 z_sim = Matrix(sim_data[1:end,n_col:end])
 z_QMsim = vec(mean(Matrix(sim_QMdata[1:end,n_col:end]), dims=2))
 z_QMsim_err = vec(std(Matrix(sim_QMdata[1:end,n_col:end]), dims=2; corrected=true))/sqrt(length(ki_sim))
+
+
+
+
 
 cols = palette(:darkrainbow, length(ki_sim));
 fig = plot(xlabel=L"$I_{c}$ (A)",ylabel=L"$z$ (mm)",)
