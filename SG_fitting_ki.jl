@@ -126,7 +126,6 @@ function fit_ki_with_error(itp, data;
         h
     end
     h₀ = isnothing(h) ? fd_step(k̂, ki_min, ki_max) : float(h)
-    println(h₀)
     z⁺   = itp.(I, Ref(k̂ + h₀))
     z⁻   = itp.(I, Ref(k̂ - h₀))
     r⁺   = log10.(z⁺) .- log10.(Z)
@@ -229,97 +228,157 @@ function load_blocks(paths::AbstractVector{<:AbstractString};
 end
 
 
-# Import Suleyman's ki simulation:
-data_collected_exp = Vector{Matrix{Float64}}()
-data_collected_qm  = Vector{Matrix{Float64}}()
-data_collected_cqd = Vector{Matrix{Float64}}()
-for n_bin in [1,2,4,8] 
 
-    if n_bin == 8
-        # # bin = 4
-        cqd_paths = [
+"""
+    simulation_paths(n_bin::Integer) -> (cqd::Vector{String}, qm::Vector{String})
+
+Return the lists of CSV paths for CQD and QM simulations corresponding to the
+requested binning `n_bin ∈ {8, 4, 2, 1}`.
+
+Throws an error if there is no data for the chosen binning.
+
+# Example
+c = simulation_paths(4)c.cqd  # -> Vector of CQD CSVs for n_bin = 4
+c.qm   # -> Vector of QM  CSVs for n_bin = 4
+"""
+function simulation_paths(n_bin::Integer)
+    cqd_map = Dict(
+        8 => [
             "./simulation_data/nbin8/results_CQD_20250910T132101.csv",
             "./simulation_data/nbin8/results_CQD_20250910T132211.csv",
             "./simulation_data/nbin8/results_CQD_20250910T132250.csv",
             "./simulation_data/nbin8/results_CQD_20250910T132323.csv",
-        ];
-        qm_paths = [
-            "./simulation_data/nbin8/results_QM_20250910T132101.csv",
-            "./simulation_data/nbin8/results_QM_20250910T132211.csv",
-            "./simulation_data/nbin8/results_QM_20250910T132250.csv",
-            "./simulation_data/nbin8/results_QM_20250910T132323.csv",
-        ];  
-    elseif n_bin ==4 
-        # # bin = 4
-        cqd_paths = [
+        ],
+        4 => [
             "./simulation_data/nbin4/results_CQD_20250909T095554.csv",
             "./simulation_data/nbin4/results_CQD_20250909T095606.csv",
             "./simulation_data/nbin4/results_CQD_20250909T095619.csv",
             "./simulation_data/nbin4/results_CQD_20250909T095645.csv",
-        ];
-        qm_paths = [
-            "./simulation_data/nbin4/results_QM_20250909T095554.csv",
-            "./simulation_data/nbin4/results_QM_20250909T095606.csv",
-            "./simulation_data/nbin4/results_QM_20250909T095619.csv",
-            "./simulation_data/nbin4/results_QM_20250909T095645.csv",
-        ];
-    elseif n_bin == 2 
-        cqd_paths = [
+        ],
+        2 => [
             "./simulation_data/nbin2/results_CQD_20250905T150919.csv",
             "./simulation_data/nbin2/results_CQD_20250905T110806.csv",
             "./simulation_data/nbin2/results_CQD_20250905T110819.csv",
             "./simulation_data/nbin2/results_CQD_20250905T110834.csv",
-        ];
-        qm_paths = [
-            "./simulation_data/nbin2/results_QM_20250905T150919.csv",
-            "./simulation_data/nbin2/results_QM_20250905T110806.csv",
-            "./simulation_data/nbin2/results_QM_20250905T110819.csv",
-            "./simulation_data/nbin2/results_QM_20250905T110834.csv",
-        ];
-    elseif n_bin == 1
-        cqd_paths = [
+        ],
+        1 => [
             "./simulation_data/nbin1/results_CQD_20250905T190626.csv",
             "./simulation_data/nbin1/results_CQD_20250905T190640.csv",
             "./simulation_data/nbin1/results_CQD_20250910T113900.csv",
             "./simulation_data/nbin1/results_CQD_20250905T190714.csv",
-        ];
-        qm_paths = [
+        ],
+    )
+
+    qm_map = Dict(
+        8 => [
+            "./simulation_data/nbin8/results_QM_20250910T132101.csv",
+            "./simulation_data/nbin8/results_QM_20250910T132211.csv",
+            "./simulation_data/nbin8/results_QM_20250910T132250.csv",
+            "./simulation_data/nbin8/results_QM_20250910T132323.csv",
+        ],
+        4 => [
+            "./simulation_data/nbin4/results_QM_20250909T095554.csv",
+            "./simulation_data/nbin4/results_QM_20250909T095606.csv",
+            "./simulation_data/nbin4/results_QM_20250909T095619.csv",
+            "./simulation_data/nbin4/results_QM_20250909T095645.csv",
+        ],
+        2 => [
+            "./simulation_data/nbin2/results_QM_20250905T150919.csv",
+            "./simulation_data/nbin2/results_QM_20250905T110806.csv",
+            "./simulation_data/nbin2/results_QM_20250905T110819.csv",
+            "./simulation_data/nbin2/results_QM_20250905T110834.csv",
+        ],
+        1 => [
             "./simulation_data/nbin1/results_QM_20250905T190626.csv",
             "./simulation_data/nbin1/results_QM_20250905T190640.csv",
             "./simulation_data/nbin1/results_QM_20250910T113900.csv",
             "./simulation_data/nbin1/results_QM_20250905T190714.csv",
-        ];
-    else
-        println("no data corresponding to the chosen binning")
+        ],
+    )
+
+    cqd_paths = get(cqd_map, n_bin, String[])
+    qm_paths  = get(qm_map,  n_bin, String[])
+
+    if isempty(cqd_paths) || isempty(qm_paths)
+        error("No data corresponding to the chosen binning (n_bin = $n_bin).")
     end
+    @assert length(cqd_paths) == length(qm_paths) "CQD/QM path counts differ for n_bin=$n_bin."
 
-    ki_sim = collect(0.10:0.10:7.5);
-    Ic_cqd , data_sim_cqd = load_blocks(cqd_paths; z_group=3);
-    Ic_qm  , data_sim_qm  = load_blocks(qm_paths; z_group=3);
+    return (cqd = cqd_paths, qm = qm_paths)
+end
 
+# Select experimental data
+wanted_data_dir = "20250820/" ;
+wanted_binning  = 2 ; 
+wanted_smooth   = 0.02 ;
+# Simulation
+ki_sim = collect(0.10:0.10:7.5);
+cols = palette(:darkrainbow, length(ki_sim));
 
+# Data loading
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+);
+if res === nothing
+    @warn "No matching report found"
+else
+    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+    # I_exp = sort(res.currents_mA / 1_000);
+    # z_exp = res.framewise_mm/res.magnification;
+end
+load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
+I_exp = load_data[!,"I_coil_mA"]/1_000
+z_exp = load_data[!,"F1_z_centroid_mm"]/res.magnification
+z_exp_stde = load_data[!,"F1_z_centroid_se_mm"]
+data = hcat(I_exp, z_exp, z_exp_stde)
+
+# pre allocation of vectors
+data_collected_exp = Vector{Matrix{Float64}}();
+data_collected_qm  = Vector{Matrix{Float64}}();
+data_collected_cqd = Vector{Matrix{Float64}}();
+for n_bin in [1,2,4,8] 
+    println("\t\tUsing simulated data with binning nz=$(n_bin)")
+
+    Ic_cqd , data_sim_cqd = load_blocks(simulation_paths(n_bin).cqd; z_group=3);
+    Ic_qm  , data_sim_qm  = load_blocks(simulation_paths(n_bin).qm; z_group=3);
 
     # Quantum mechanics
-    z_QMsim = vec(mean(data_sim_qm, dims=2))
-    z_QMsim_err = vec(std(data_sim_qm, dims=2; corrected=true))/sqrt(length(ki_sim))
+    z_QMsim = vec(mapslices(x -> mean(skipmissing(x)), 
+                map(x-> x < 0.0 ? missing : x, data_sim_qm); 
+                dims=2))
+    z_QMsim_err = vec(mapslices(r -> begin
+                    xs = collect(skipmissing(r))
+                    isempty(xs) ? missing : std(xs) / sqrt(length(xs))
+                    end, map(x-> x < 0.0 ? missing : x, data_sim_qm); dims=2))
 
-    cols = palette(:darkrainbow, length(ki_sim));
     fig=plot(title="MonteCarlo QM simulation: n=$(n_bin)",
         xlabel="Coil Current (A)",
         ylabel=L"$z_{F_{1}}$ (mm)"
     )
-    for i=1:length(ki_sim)
+    for i in eachindex(ki_sim)
+        data_qm_ki = hcat(Ic_qm, data_sim_qm[:, i])
+
+        # filtered pairs
+        mask = (data_qm_ki[:,2] .> 0) .& (data_qm_ki[:,1] .> 0)
+        x = data_qm_ki[mask, 1]; y = data_qm_ki[mask, 2]
+
         plot!(fig,
-        Ic_qm[2:end],abs.(data_sim_qm[2:end, i]), 
+        x,y, 
         label=false,
         line=(:solid,cols[i],1),
         alpha=0.33,
         marker=(:xcross,2, cols[i]))
     end
+    data_QM = hcat(Ic_qm, z_QMsim, z_QMsim_err)
+    mask = (data_QM[:,1] .> 0) .& (data_QM[:,2] .> 0) .& (abs.(data_QM[:,2] .- data_QM[:,3]) .> 0)
+    x = data_QM[mask, 1]; y = data_QM[mask, 2]; y_err = data_QM[mask,3]
     plot!(fig,
-        Ic_qm[4:end], abs.(z_QMsim[4:end]),
+        x, y,
         label="QM + Class.Trajs.",
-        ribbon = z_QMsim_err[6:end],
+        ribbon = y_err,
         line=(:dash,:black,2),
         fillalpha=0.23, 
         fillcolor=:black, 
@@ -331,14 +390,21 @@ for n_bin in [1,2,4,8]
         yaxis=:log10,
     )
     display(fig)
+    savefig(fig,joinpath(OUTDIR,"montecarlo_qm_$(n_bin).$(FIG_EXT)"))
 
     # Co-Quantum Dymamics
-    cols = palette(:darkrainbow, length(ki_sim));
     fig = plot(
         xlabel=L"$I_{c}$ (A)",
         ylabel=L"$z_{F_{1}}$ (mm)",)
     for i=15:length(ki_sim)
-        plot!(fig,Ic_cqd[2:end], abs.(data_sim_cqd[2:end,i]) , 
+
+        data_cqd_ki = hcat(Ic_cqd, data_sim_cqd[:, i])
+        # filtered pairs
+        mask = (data_cqd_ki[:,2] .> 0) .& (data_cqd_ki[:,1] .> 0)
+        x = data_cqd_ki[mask, 1]; y = data_cqd_ki[mask, 2]
+
+        plot!(fig, 
+            x, y, 
             label = L"$k_{i} =%$(round(ki_sim[i], digits=2)) \times 10^{-6}$",
             line=(:solid,cols[i],1)
         )
@@ -346,7 +412,7 @@ for n_bin in [1,2,4,8]
     plot!(fig, 
         Ic_qm[2:end], abs.(z_QMsim[2:end]),
         label="QM + Class.Trajs.",
-        ribbon = z_QMsim_err,
+        ribbon = z_QMsim_err[2:end],
         line=(:dash,:black,2),
         fillcolor=:black,
         fillalpha=0.35,
@@ -366,60 +432,88 @@ for n_bin in [1,2,4,8]
         left_margin=5mm,
     )
     display(fig)
+    savefig(fig,joinpath(OUTDIR,"montecarlo_cqd_$(n_bin).$(FIG_EXT)"))
 
     # Interpolated surface
-    ki_start , ki_stop = 19 , 42#length(ki_sim)
-    ki_sim[ki_start:ki_stop]
-    global itp = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+    ki_start , ki_stop = 19 , 65 #length(ki_sim)
+    println("Interpolation in the induction term goes from $(ki_sim[ki_start])×10⁻⁶ to $(ki_sim[ki_stop])×10⁻⁶")
+    itp = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
-    # Select data
-    wanted_data_dir = "20250814/"
-    wanted_binning  = 2
-    wanted_smooth   = 0.02 
+    i_surface = range(10e-3,1.0; length = 60)
+    ki_surface = range(ki_sim[ki_start],ki_sim[ki_stop]; length = 41)
+    Z = [itp(x, y) for y in ki_surface, x in i_surface] 
 
-    res = DataReading.find_report_data(
-            joinpath(@__DIR__, "analysis_data");
-            wanted_data_dir=wanted_data_dir,
-            wanted_binning=wanted_binning,
-            wanted_smooth=wanted_smooth
+    fit_surface = surface(log10.(i_surface), ki_surface, log10.(abs.(Z));
+        title = "Fitting surface",
+        xlabel = L"I_{c}",
+        ylabel = L"$k_{i}\times 10^{-6}$",
+        zlabel = L"$z\ (\mathrm{mm})$",
+        legend = false,
+        color = :viridis,
+        xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+        camera = (20, 25),     # (azimuth, elevation)
+        xlims = log10.((8e-4,2.05)),
+        zlims = log10.((2e-4,10.0)),
+        gridalpha = 0.3,
     )
-    if res === nothing
-        @warn "No matching report found"
+
+    Zp   = max.(abs.(Z), 1e-12)      # guard against zeros
+    logZ = log10.(Zp)
+    lo , hi  = floor(minimum(logZ)) , ceil(maximum(logZ)) 
+    decades = collect(lo:1:hi) # [-4,-3,-2,-1,0] 
+    labels = [L"10^{%$k}" for k in decades]
+    fit_contour = contourf(i_surface, ki_surface, logZ; 
+        levels=101,
+        title="Fitting contour",
+        xlabel=L"$I_{c}$ (A)", 
+        ylabel=L"$k_{i}\times 10^{-6}$", 
+        color=:viridis, 
+        linewidth=0.2,
+        linestyle=:dash,
+        xaxis=:log10,
+        xlims = (9e-3,1.05),
+        xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        clims = (lo, hi),   # optional explicit range
+        colorbar_ticks = (decades, labels),      # show ticks as 10^k
+        colorbar_title = L"$ z \ \mathrm{(mm)}$",   # what the values mean
+    )
+
+    fit_figs = plot(fit_surface, fit_contour,
+        layout=@layout([a b]),
+        size = (1800,750),
+        bottom_margin = 8mm,
+        top_margin = 3mm,
+    )
+    display(fit_figs)
+    savefig(fit_figs,joinpath(OUTDIR,"fitting_parameters_$(n_bin).$(FIG_EXT)"))
+
+
+    # # choose a few points for low currents and high currents
+    if wanted_data_dir[1:end-1] == "20250820"
+        data_fitting = data[[9,10,11,15,19:22...],:] # for fitting purposes
     else
-        @info "Matched" res.path res.data_dir res.name res.binning res.smoothing
-        # I_exp = sort(res.currents_mA / 1_000);
-        # z_exp = res.framewise_mm/res.magnification;
+        data_fitting = data[[10,11,12,14,22:25...],:] # for fitting purposes
     end
-
-    load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-    I_exp = load_data[!,"I_coil_mA"]/1_000
-    z_exp = load_data[!,"F1_z_centroid_mm"]/res.magnification
-    z_exp_stde = load_data[!,"F1_z_centroid_se_mm"]
-
-    # choose a few points for low currents and high currents
-    data = hcat(I_exp, z_exp, z_exp_stde)
-    data = data[[10,11,12,14,22:25...],:] # for fitting purposes
-    # data = data[[9,10,11,15,19:22...],:] # for fitting purposes
-
+    
     function loss(ki) # loss function
         # ni=12
-        z_pred = itp.(data[:,1], Ref(ki))
-        return mean(abs2,log10.(z_pred) .- log10.(data[:,2]))
+        z_pred = itp.(data_fitting[:,1], Ref(ki))
+        return mean(abs2,log10.(z_pred) .- log10.(data_fitting[:,2]))
     end
 
-
-    fit_param = optimize(loss, minimum(ki_sim[ki_start:ki_stop]), maximum(ki_sim[ki_start:ki_stop]),Brent())
+    #(
+    fit_param = optimize(loss, ki_sim[ki_start], ki_sim[ki_stop],Brent())
     k_fit = Optim.minimizer(fit_param)
-
     # diagnostics
     mse = loss(k_fit);
     pred = itp.(I_exp, Ref(k_fit));
     coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+    #)
 
     # given: itp, data (N×2), ki_sim
-    out = fit_ki_with_error(itp, data; bounds=(minimum(ki_sim[ki_start:ki_stop]), maximum(ki_sim[ki_start:ki_stop])))
-    @info "Fitting" out.k_hat out.k_err out.ci
-
+    out = fit_ki_with_error(itp, data_fitting; bounds=(ki_sim[ki_start], ki_sim[ki_stop]))
+    @info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
     I_scan = logspace10(10e-3,1.00; n=30)
     fig= plot(
         title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(n_bin))",
@@ -436,21 +530,21 @@ for n_bin in [1,2,4,8]
         markerstrokewidth=2
     )
     plot!(fig,
-        data[:,1], data[:,2],
+        data_fitting[:,1], data_fitting[:,2],
         seriestype=:scatter,
         label="Used for fitting",
         marker=(:xcross,:black,2),
         markerstrokecolor=:black,
         markerstrokewidth=2,)
-    # plot!(fig,
-    #     I_scan,itp.(I_scan, Ref(out.ci[2])),
-    #     color=:royalblue1,
-    #     label=false,
-    #     linewidth=0,
-    #     fillrange= itp.(I_scan, Ref(out.ci[1])),
-    #     fillcolor=:royalblue1,
-    #     fillalpha=0.35,
-    # )
+    # # plot!(fig,
+    # #     I_scan,itp.(I_scan, Ref(out.ci[2])),
+    # #     color=:royalblue1,
+    # #     label=false,
+    # #     linewidth=0,
+    # #     fillrange= itp.(I_scan, Ref(out.ci[1])),
+    # #     fillcolor=:royalblue1,
+    # #     fillalpha=0.35,
+    # # )
     plot!(fig,
         I_scan, itp.(I_scan, Ref(k_fit)),
         label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
@@ -458,9 +552,9 @@ for n_bin in [1,2,4,8]
         marker=(:xcross, :blue, 1),
     )
     plot!(fig, 
-        Ic_qm[6:end], z_QMsim[6:end],
+        Ic_qm[2:end], z_QMsim[2:end],
         label="QM + Class.Trajs.",
-        ribbon = z_QMsim_err[6:end],
+        ribbon = z_QMsim_err[2:end],
         line=(:dash,:green,2),
         fillalpha=0.23, 
         fillcolor=:green, 
@@ -475,59 +569,15 @@ for n_bin in [1,2,4,8]
         legend=:bottomright,
     )
     display(fig)
+    savefig(fig,joinpath(OUTDIR,"fitting_$(wanted_data_dir[1:end-1])_cqd_qm_$(n_bin).$(FIG_EXT)"))
 
     push!(data_collected_qm,  hcat(Ic_qm, z_QMsim, z_QMsim_err))
     push!(data_collected_exp, hcat(I_exp, z_exp, z_exp_stde))
     push!(data_collected_cqd, hcat(I_scan, itp.(I_scan, Ref(k_fit)), k_fit*ones(length(I_scan))))
+    
+    println("\n")
+
 end
-
-itp(0.25,2.3)
-
-i_s = range(8e-3,1.0; length = 60)
-ki_s = range(1.8,6; length = 31)
-Z = [itp(x, y) for y in ki_s, x in i_s] 
-
-Z
-
-surface(log10.(i_s), ki_s, log10.(abs.(Z));
-    xlabel = L"I_{c}",
-    ylabel = L"$k_{i}\times 10^{-6}$",
-    zlabel = L"$z\ (\mathrm{mm})$",
-    legend = false,
-    color = :viridis,
-    xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
-    camera = (25, 25),     # (azimuth, elevation)
-    xlims = log10.((8e-4,2.05)),
-    zlims = log10.((2e-4,10.0)),
-    gridalpha = 0.3,
-)
-
-# B) Filled contours
-# Ensure strictly positive values for log; keep your abs if you like
-Zp   = max.(abs.(Z), 1e-12)      # guard against zeros
-logZ = log10.(Zp)
-lo = floor(minimum(logZ))        # e.g. -4
-hi = ceil(maximum(logZ))         # e.g. 0
-decades = collect(lo:1:hi) # [-4,-3,-2,-1,0] 
-labels = [L"10^{%$k}" for k in decades]
-contourf(i_s, ki_s, logZ; 
-    levels=101, 
-    xlabel=L"$I_{c}$ (A)", 
-    ylabel=L"$k_{i}\times 10^{-6}$", 
-    color=:viridis, 
-    linewidth=0.2,
-    linestyle=:dash,
-    xaxis=:log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    clims = (lo, hi),   # optional explicit range
-    colorbar_ticks = (decades, labels),      # show ticks as 10^k
-    colorbar_title = L"$ z \ \mathrm{(mm)}$",   # what the values mean
-)
-
-
-
-
 
 
 cols = palette(:rainbow, 2*4);
@@ -540,7 +590,7 @@ fig= plot(
 plot!(fig, 
     data_collected_exp[1][9:end,1],
     data_collected_exp[1][9:end,2],
-    label="Experiment",
+    label="Experiment $(wanted_data_dir[1:end-1])",
     seriestype=:scatter,
     yerror = data_collected_exp[1][9:end,3],
     marker=(:circle,:white,2.2), 
@@ -579,159 +629,14 @@ plot!(fig,
     left_margin=3mm,
 )
 display(fig)
-
-
-2+2
-
+savefig(fig,joinpath(OUTDIR,"summary_$(wanted_data_dir[1:end-1]).$(FIG_EXT)"))
 
 
 
-
-
-
-
-
-
-# 20250829T005913: no binning
-sim_data    = CSV.read("./simulation_data/results_CQD_20250829T005913.csv",DataFrame; header=false)
-sim_QMdata  = CSV.read("./simulation_data/results_QM_20250829T005913.csv",DataFrame; header=false)
-Ic_sim = sim_data[!,1]
-ki_sim = collect(1.50:0.10:3.50) ./ 1_000_000
-n_col = (1+2*length(ki_sim)) + 1 
-z_sim = Matrix(sim_data[1:end,n_col:end])
-z_QMsim = vec(mean(Matrix(sim_QMdata[1:end,n_col:end]), dims=2))
-z_QMsim_err = vec(std(Matrix(sim_QMdata[1:end,n_col:end]), dims=2; corrected=true))/sqrt(length(ki_sim))
+T_END = Dates.now()
+T_RUN = Dates.canonicalize(T_END-T_START)
+println("kᵢ fitting done in $(T_RUN)")
 
 
 
 
-
-cols = palette(:darkrainbow, length(ki_sim));
-fig = plot(xlabel=L"$I_{c}$ (A)",ylabel=L"$z$ (mm)",)
-for i=1:length(ki_sim)
-    plot!(fig,Ic_sim[6:end], abs.(z_sim[6:end,i]) , 
-        label = L"$k_{i} =%$(round(1e6*ki_sim[i], digits=2)) \times 10^{-6}$",
-        line=(:solid,cols[i],1)
-    )
-end
-plot!(fig, Ic_sim[6:end], abs.(z_QMsim[6:end]),
-    label="QM + Class.Trajs.",
-    ribbon = z_QMsim_err,
-    line=(:dash,:green,2) )
-plot!(fig, 
-    title="CQD Simulation",
-    xlims=(8e-3,1.5),
-    ylims=(8e-3,2.5),
-    xaxis=:log10,
-    yaxis=:log10,
-    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    legend=:outerright,
-    legendfontsize=7,
-    size=(800,600),
-)
-display(fig)
-
-
-# Interpolated surface
-itp = Spline2D(Ic_sim, ki_sim, z_sim; kx=3, ky=3, s=0.00);
-
-# Select data
-wanted_data_dir = "20250825/"
-wanted_binning  = 2
-wanted_smooth   = 0.02 
-
-res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
-        wanted_data_dir=wanted_data_dir,
-        wanted_binning=wanted_binning,
-        wanted_smooth=wanted_smooth
-)
-
-if res === nothing
-    @warn "No matching report found"
-else
-    @info "Matched" res.path res.data_dir res.name res.binning res.smoothing
-    # I_exp = sort(res.currents_mA / 1_000);
-    # z_exp = res.framewise_mm/res.magnification;
-end
-
-load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp = load_data[!,"I_coil_mA"]/1_000
-z_exp = load_data[!,"F1_z_centroid_mm"]/res.magnification
-z_exp_stde = load_data[!,"F1_z_centroid_se_mm"]
-
-# choose a few points for low currents and high currents
-data = hcat(I_exp, z_exp, z_exp_stde)
-data = data[[10,12,14,22:25...],:] # for fitting purposes
-# data = data[[9,10,11,15,19:22...],:] # for fitting purposes
-
-function loss(ki) # loss function
-    # ni=12
-    z_pred = itp.(data[:,1], Ref(ki))
-    return mean(abs2,log10.(z_pred) .- log10.(data[:,2]))
-end
-
-
-fit_param = optimize(loss, minimum(ki_sim), maximum(ki_sim),Brent())
-k_fit = Optim.minimizer(fit_param)
-
-# diagnostics
-mse = loss(k_fit);
-pred = itp.(I_exp, Ref(k_fit));
-coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(itp, data; bounds=(minimum(ki_sim), maximum(ki_sim)))
-@info "Fitting" out.k_hat out.k_err out.ci
-
-I_scan = logspace10(20e-3,1; n=30)
-fig= plot(
-    title =L"$R^{2}=%$(round(coef_r2,digits=4))$",
-    xlabel=L"$I_{c}$ (A)",
-    ylabel=L"$z$ (mm)"
-)
-plot!(fig,I_exp[9:end], z_exp[9:end], 
-    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
-    seriestype=:scatter,
-    yerror = z_exp_stde[9:end],
-    marker=(:circle,:white,1.8), 
-    markerstrokecolor=:red, 
-    markerstrokewidth=2
-)
-plot!(fig,data[:,1], data[:,2],
-    seriestype=:scatter,
-    label="Used for fitting",
-    marker=(:xcross,:black,2),
-    markerstrokecolor=:black,
-    markerstrokewidth=2,)
-plot!(fig,I_scan,itp.(I_scan, Ref(out.ci[2])),
-    color=:royalblue1,
-    label=false,
-    linewidth=0,
-    fillrange= itp.(I_scan, Ref(out.ci[1])),
-    fillcolor=:royalblue1,
-    fillalpha=0.35,
-    )
-plot!(fig,I_scan, itp.(I_scan, Ref(k_fit)),
-    label=L"$k_{i}= \left( %$(round(1e6*k_fit, digits=4)) \pm %$(round(1e6*out.k_err, digits=4)) \right) \times 10^{-6} $",
-    line=(:solid,:blue,1),
-    marker=(:xcross, :blue, 1),
-)
-plot!(fig, Ic_sim[6:end], abs.(z_QMsim[6:end]),
-    label="QM + Class.Trajs.",
-    ribbon = z_QMsim_err,
-    line=(:dash,:green,2),
-    fillalpha=0.23, 
-    fillcolor=:green, 
-)
-plot!(fig,
-    xaxis=:log10,
-    yaxis=:log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(8e-3,1.5),
-    ylims=(8e-3,2),
-    legend=:bottomright,
-)
-display(fig)
