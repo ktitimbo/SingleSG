@@ -370,10 +370,10 @@ for n_bin in [1,2,4,8]
     # Interpolated surface
     ki_start , ki_stop = 19 , 42#length(ki_sim)
     ki_sim[ki_start:ki_stop]
-    itp = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+    global itp = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
     # Select data
-    wanted_data_dir = "20250825/"
+    wanted_data_dir = "20250814/"
     wanted_binning  = 2
     wanted_smooth   = 0.02 
 
@@ -481,42 +481,93 @@ for n_bin in [1,2,4,8]
     push!(data_collected_cqd, hcat(I_scan, itp.(I_scan, Ref(k_fit)), k_fit*ones(length(I_scan))))
 end
 
+itp(0.25,2.3)
+
+i_s = range(8e-3,1.0; length = 60)
+ki_s = range(1.8,6; length = 31)
+Z = [itp(x, y) for y in ki_s, x in i_s] 
+
+Z
+
+surface(log10.(i_s), ki_s, log10.(abs.(Z));
+    xlabel = L"I_{c}",
+    ylabel = L"$k_{i}\times 10^{-6}$",
+    zlabel = L"$z\ (\mathrm{mm})$",
+    legend = false,
+    color = :viridis,
+    xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+    camera = (25, 25),     # (azimuth, elevation)
+    xlims = log10.((8e-4,2.05)),
+    zlims = log10.((2e-4,10.0)),
+    gridalpha = 0.3,
+)
+
+# B) Filled contours
+# Ensure strictly positive values for log; keep your abs if you like
+Zp   = max.(abs.(Z), 1e-12)      # guard against zeros
+logZ = log10.(Zp)
+lo = floor(minimum(logZ))        # e.g. -4
+hi = ceil(maximum(logZ))         # e.g. 0
+decades = collect(lo:1:hi) # [-4,-3,-2,-1,0] 
+labels = [L"10^{%$k}" for k in decades]
+contourf(i_s, ki_s, logZ; 
+    levels=101, 
+    xlabel=L"$I_{c}$ (A)", 
+    ylabel=L"$k_{i}\times 10^{-6}$", 
+    color=:viridis, 
+    linewidth=0.2,
+    linestyle=:dash,
+    xaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    clims = (lo, hi),   # optional explicit range
+    colorbar_ticks = (decades, labels),      # show ticks as 10^k
+    colorbar_title = L"$ z \ \mathrm{(mm)}$",   # what the values mean
+)
+
+
+
+
+
+
+cols = palette(:rainbow, 2*4);
 fig= plot(
     xlabel=L"Coil current $I_{c}$ (A)",
-    ylabel=L"$z$ (mm)"
+    ylabel=L"$z$ (mm)",
+    size=(800,560),
 )
-plot!(fig, data_collected_exp[1][9:end,1],data_collected_exp[1][9:end,2],
+# --- Experiment (scatter with error bars) --
+plot!(fig, 
+    data_collected_exp[1][9:end,1],
+    data_collected_exp[1][9:end,2],
     label="Experiment",
     seriestype=:scatter,
     yerror = data_collected_exp[1][9:end,3],
-    marker=(:circle,:white,1.8), 
-    markerstrokecolor=:red, 
-    markerstrokewidth=2
-     )
-plot!(fig,data_collected_qm[1][2:end,1],abs.(data_collected_qm[1][2:end,2]), 
-    label="QM n=$(1)",
-    line=(:dash,2))
-plot!(fig,data_collected_qm[2][2:end,1],abs.(data_collected_qm[2][2:end,2]),
-        label="QM n=$(2)",
-        line=(:dash,2))
-plot!(fig,data_collected_qm[3][2:end,1],abs.(data_collected_qm[3][2:end,2]),
-        label="QM n=$(4)",
-        line=(:dash,2))
-plot!(fig,data_collected_qm[4][2:end,1],abs.(data_collected_qm[4][2:end,2]),
-        label="QM n=$(8)",
-        line=(:dash,2))
-plot!(fig,data_collected_cqd[1][2:end,1],abs.(data_collected_cqd[1][2:end,2]), 
-    label=L"CQD n=%$(1). $k_{i}=%$(round(data_collected_cqd[1][1,3],digits=3))\times 10^{-6}$",
-    line=(:solid,2))
-plot!(fig,data_collected_cqd[2][2:end,1],abs.(data_collected_cqd[2][2:end,2]),
-    label=L"CQD n=%$(2). $k_{i}=%$(round(data_collected_cqd[2][1,3],digits=3))\times 10^{-6}$",
-    line=(:solid,2))
-plot!(fig,data_collected_cqd[3][2:end,1],abs.(data_collected_cqd[3][2:end,2]),
-    label=L"CQD n=%$(4). $k_{i}=%$(round(data_collected_cqd[3][1,3],digits=3))\times 10^{-6}$",
-    line=(:solid,2))
-plot!(fig,data_collected_cqd[4][2:end,1],abs.(data_collected_cqd[4][2:end,2]),
-    label=L"CQD n=%$(8). $k_{i}=%$(round(data_collected_cqd[4][1,3],digits=3))\times 10^{-6}$",
-    line=(:solid,2))
+    marker=(:circle,:white,2.2), 
+    markerstrokecolor=:black, 
+    markerstrokewidth=1.8
+)
+# --- QM curves (dashed) ---
+nvals = (1, 2, 4, 8)
+for (i, n) in enumerate(nvals)
+    plot!(fig,
+        data_collected_qm[i][2:end, 1],
+        data_collected_qm[i][2:end, 2];
+        label = "QM n=$(n)",
+        line  = (:dash, 2.2, cols[i]),
+    )
+end
+# --- CQD curves (solid) with LaTeX labels showing k_i × 10^{-6} ---
+for (i, n) in enumerate(nvals)
+    ki = round(data_collected_cqd[i][1, 3], digits = 3)  # value in 10^-6 units per your original
+    plot!(fig,
+        data_collected_cqd[i][2:end, 1],
+        data_collected_cqd[i][2:end, 2];
+        label = L"CQD n=%$(n). $k_{i}=%$(ki) \times 10^{-6}$",
+        line  = (:solid, 2.4, cols[4 + i]),
+    )
+end
+# --- Axes: log scales, ticks, limits ---
 plot!(fig,
     xaxis=:log10,
     yaxis=:log10,
@@ -525,6 +576,7 @@ plot!(fig,
     xlims=(8e-3,1.5),
     ylims=(2e-4,2),
     legend=:bottomright,
+    left_margin=3mm,
 )
 display(fig)
 
