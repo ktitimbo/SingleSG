@@ -262,31 +262,34 @@ df_mean = DataFrame(
 sort!(df_mean, :I_coil_mA)
 CSV.write(joinpath(OUTDIR, "mean_data.csv"), df_mean);
 
-hl_Ic = Highlighter(
+hl_Ic = TextHighlighter(
            (data, i, j) -> data[i, 1] == minimum(data[:, 1]),
            crayon"fg:white bold bg:dark_gray"
        );
-hl_F1 = Highlighter(
+hl_F1 = TextHighlighter(
            (data, i, j) -> data[i,5]<0,
            crayon"fg:red bold bg:dark_gray"
        );
-hl_F2 = Highlighter(
+hl_F2 = TextHighlighter(
            (data, i, j) -> data[i,6]>0,
            crayon"fg:green bold bg:dark_gray"
        );
 pretty_table(
     df_mean;
-    formatters    = (ft_printf("%8.3f",1), ft_printf("%8.5f",2:6)),
-    alignment=:c,
-    header        = (
+    title         = "Mean analysis",
+    formatters    = [fmt__printf("%8.3f", [1]), fmt__printf("%8.5f", 2:6)],
+    alignment     = :c,
+    column_labels  = [
         ["Current", "F1 z", "F2 z", "Δz", "Centroid F1 z","Centroid F2 z"], 
         ["[mA]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
-        ),
-    border_crayon = crayon"blue bold",
-    tf            = tf_unicode_rounded,
-    header_crayon = crayon"yellow bold",
-    equal_columns_width= true,
-    highlighters  = (hl_Ic,hl_F1,hl_F2),
+    ],
+    table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    style = TextTableStyle(first_line_column_label = crayon"yellow bold",
+                    column_label  = crayon"yellow",
+                    table_border  = crayon"blue bold",
+                ),
+    equal_data_column_widths = true,
+    highlighters  = [hl_Ic,hl_F1,hl_F2],
 )
 
 fig_01 = plot(abs.(df_mean[!,:I_coil_mA]/1000), df_mean[!,:F1_z_peak_mm],
@@ -695,33 +698,35 @@ df_fw = DataFrame(
 )
 CSV.write(joinpath(OUTDIR, "fw_data.csv"), df_fw);
 
-hl_Ic = Highlighter(
+hl_Ic = TextHighlighter(
            (data, i, j) -> data[i, 1] == minimum(data[:, 1]),
            crayon"fg:white bold bg:dark_gray"
        );
-hl_F1 = Highlighter(
+hl_F1 = TextHighlighter(
            (data, i, j) -> data[i,8]<0,
            crayon"fg:red bold bg:dark_gray"
        );
-hl_F2 = Highlighter(
+hl_F2 = TextHighlighter(
            (data, i, j) -> data[i,10]>0,
            crayon"fg:green bold bg:dark_gray"
        );
 pretty_table(
     df_fw;
-    formatters    = (ft_printf("%8.3f",1), ft_printf("%8.5f",2:6)),
-    alignment=:c,
-    header        = (
+    title         = "Framewise Analysis",
+    formatters    = [fmt__printf("%8.3f",[1]), fmt__printf("%8.5f",2:6)],
+    alignment     = :c,
+    column_labels = [
         ["Current", "F1 z", "Std.Err.",  "F2 z", "Std.Err.", "Δz", "Std.Err.", "Centroid F1 z", "Std.Err.", "Centroid F2 z", "Std.Err."], 
         ["[mA]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
-        ),
-    border_crayon = crayon"blue bold",
-    tf            = tf_unicode_rounded,
-    header_crayon = crayon"yellow bold",
-    equal_columns_width= true,
-    highlighters  = (hl_Ic,hl_F1,hl_F2),
+    ],
+    table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    style = TextTableStyle(first_line_column_label = crayon"yellow bold",
+                    column_label  = crayon"yellow",
+                    table_border  = crayon"blue bold",
+    ),
+    equal_data_column_widths = true,
+    highlighters  = [hl_Ic,hl_F1,hl_F2],
 )
-
 
 
 fig_01 = plot(abs.(df_fw[!,:I_coil_mA]/1000), df_fw[!,:F1_z_peak_mm ],

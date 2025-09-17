@@ -1,4 +1,4 @@
-# Kelvin Titimbo, Xukun Lin, S. Suleyman Kahraman, and Lihong V. Wang
+# Kelvin Titimbo
 # California Institute of Technology
 # August 2025
 
@@ -81,12 +81,18 @@ for data_directory in data_directories
     pretty_table(hcat(collect(keys(m)),
                         [v.binning   for v in values(m)],
                         [v.smoothing for v in values(m)]); 
-                header=["Run Label","Binning","Smoothing"],
+                title = "Analysis for $(data_directory)",
+                column_labels=["Run Label","Binning","Smoothing"],
                 alignment=:c,
-                border_crayon = crayon"blue bold",
-                tf = tf_unicode_rounded,
-                header_crayon = crayon"yellow bold",
-                equal_columns_width= true,
+                style = TextTableStyle(
+                        first_line_column_label = crayon"yellow bold",
+                        table_border  = crayon"blue bold",
+                        # column_label  = crayon"yellow bold",
+                ),
+                # border_crayon = crayon"blue bold",
+                table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+                # header_crayon = crayon"yellow bold",
+                equal_data_column_widths= true,
     )
 
     key_labels = collect(keys(m))
@@ -120,6 +126,8 @@ for data_directory in data_directories
         left_margin=3mm,
     )
     saveplot(fig,"bin_vs_smoothing_$(data_directory)")
+
+    println("\n")
 
 end
 
