@@ -233,6 +233,16 @@ function analyze_screen_profile(Ix, data_mm::AbstractMatrix;
     # 2D histogram
     x = @view data_mm[:, 1]
     z = @view data_mm[:, 2]
+
+    if mode === :none
+        h = fit(Histogram, (x, z), (edges_x, edges_z))                    # raw counts (no normalization)
+    elseif mode in (:probability, :pdf, :density)
+        h = normalize(fit(Histogram, (x, z), (edges_x, edges_z)); mode=mode)
+    else
+        throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $mode"))
+    end
+
+
     h = normalize(fit(Histogram, (x, z), (edges_x, edges_z)); mode=mode)
     counts = h.weights  # size: (length(centers_x), length(centers_z))
 

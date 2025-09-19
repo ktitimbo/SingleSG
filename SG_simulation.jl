@@ -336,9 +336,80 @@ plot!(xaxis=:log10, yaxis=:log10,
 savefig(fig, joinpath(dir_load_string,"qm_peaks.$(FIG_EXT)"))
 
 
-data[:Icoils]
 
-data_range = sortslices(vcat(data[:data][29][7][:,[5,7,8]],data[:data][29][8][:,[5,7,8]]); dims = 1, by = row -> (row[1], row[3], row[2]))
+# helper: symmetric bin centers/edges in mm
+function symmetric_centers_edges(lims::Tuple{<:Real,<:Real}, bin_mm::Real)
+    a, b = lims
+    half = max(abs(a), abs(b))
+    k = max(1, ceil(Int, half / bin_mm))
+    centers = collect((-k:k) .* bin_mm)
+    edges   = collect((-(k + 0.5)) * bin_mm : bin_mm : ((k + 0.5) * bin_mm))
+    return centers, edges
+end
+
+# speed windows (change step to taste)
+speed_edges = collect(range(200,2100,5))           # 200–300, 300–400, …, 2000–2100
+windows = zip(speed_edges[1:end-1], speed_edges[2:end])
+
+# fixed analysis (mm)
+xlim = (-8.0, 8.0); 
+zlim = (-12.5, 12.5)
+x_bin_mm = 1e3 * 32 * 6.5e-6                   # 32 px @ 6.5 µm → 0.208 mm
+z_bin_mm = 1e3 *  4 * 6.5e-6                   #  4 px → 0.026 mm
+centers_x, edges_x = symmetric_centers_edges(xlim, x_bin_mm)
+centers_z, edges_z = symmetric_centers_edges(zlim, z_bin_mm)
+
+for i in eachindex(data[:Icoils])
+    # build once per current: columns [5,7,8] = [speed, x, z] (speed in m/s; x,z in meters)
+    data_range = sortslices(
+        vcat(data[:data][i][6][:, [5, 7, 8]],
+             data[:data][i][7][:, [5, 7, 8]],
+             data[:data][i][8][:, [5, 7, 8]]);
+        dims = 1, by = row -> (row[1], row[3], row[2])
+    )
+
+    figh = plot(xlabel=L"$z$ (mm)", ylabel="mean counts (au)", legend=:topleft, legendtitle = @sprintf("%.3f A", data[:Icoils][i])  )
+    for (lo, hi) in windows
+        mask = (data_range[:, 1] .>= lo) .& (data_range[:, 1] .< hi)  # [lo, hi)
+        if !any(mask)
+            @info "no points in window [$lo, $hi) for i=$i"; continue
+        end
+
+        # x,z in meters -> mm for histogram (edges are in mm)
+        x_mm = 1e3 .* @view(data_range[mask, 2])
+        z_mm = 1e3 .* @view(data_range[mask, 3])
+
+        h = fit(Histogram, (x_mm, z_mm), (edges_x, edges_z))   # raw counts
+        counts = h.weights
+
+        ttl = @sprintf("I = %.3f A   v ∈ [%g, %g) m/s", data[:Icoils][i], lo, hi)
+        fig = heatmap(centers_x, centers_z, counts';
+                      xlabel="x (mm)", ylabel="z (mm)",
+                      title=ttl, 
+                      # aspect_ratio=:equal,
+                      # zscale=:log10,                 # uncomment if dynamic range is huge
+                      colorbar_title="count")
+        display(fig)
+        # savefig(fig, joinpath(outdir, @sprintf("i%03d_v%04d-%04d.png", i, Int(round(lo)), Int(round(hi)))))
+        # close(fig)
+
+        s = analyze_screen_profile(data[:Icoils][i], hcat(x_mm,z_mm); 
+            manifold=:F_bottom, 
+            nx_bins = 1, nz_bins = 2, 
+            add_plot=false, plot_xrange= :all,
+            width_mm=0.150, λ_raw=0.01, λ_smooth = 1e-3, 
+            mode=:density)
+        plot!(figh,s.z_profile[:,1],s.z_profile[:,2], label=@sprintf("[%g,%g) m/s", lo, hi))
+    end
+    display(figh)
+end
+
+
+
+
+# for i in eachindex(data[:Icoils])
+i=28
+data_range = sortslices(vcat(data[:data][i][6][:,[5,7,8]],data[:data][i][7][:,[5,7,8]],data[:data][i][8][:,[5,7,8]]); dims = 1, by = row -> (row[1], row[3], row[2]))
 lo, hi = 300.0, 500.0;
 mask = (data_range[:, 1] .>= lo) .& (data_range[:, 1] .<= hi)
 A_in = data_range[mask,:]
@@ -348,7 +419,7 @@ xlim = (-8.0, 8.0)
 zlim = (-12.5, 12.5)
 xmin, xmax = xlim
 zmin, zmax = zlim
-x_bin_size = 1e3 * 4 * 6.5e-6
+x_bin_size = 1e3 * 32 * 6.5e-6
 z_bin_size = 1e3 * 4 * 6.5e-6
 x_half_range = max(abs(xmin), abs(xmax))
 kx = max(1, ceil(Int, x_half_range / x_bin_size))
@@ -362,9 +433,9 @@ x = @view A_in[:, 2]
 z = @view A_in[:, 3]
 h = fit(Histogram, (1e3*x, 1e3*z), (edges_x, edges_z))
 counts = h.weights  # size: (length(centers_x), length(centers_z))
-heatmap(centers_x, centers_z, counts', xlabel="x (mm)", ylabel="z (mm)", title="2D Histogram")
-
-
+fig = heatmap(centers_x, centers_z, counts', xlabel="x (mm)", ylabel="z (mm)", title="2D Histogram")
+display(fig)
+# end
 
 s = analyze_screen_profile(0.01, 1e3*A_in[:,[2,3]]; manifold=:lvl1, 
     nx_bins = 1, nz_bins = 2, 
