@@ -59,7 +59,7 @@ TheoreticalSimulation.SAVE_FIG = SAVE_FIG;
 TheoreticalSimulation.FIG_EXT  = FIG_EXT;
 TheoreticalSimulation.OUTDIR   = OUTDIR;
 
-println("\n\t\tRunning process on:\t $(Dates.format(T_START, "yyyymmddTHHMMSS")) \n")
+println("\n\t\tRunning process on:\t $(RUN_STAMP) \n")
 
 atom        = "39K"  ;
 ## PHYSICAL CONSTANTS from NIST
@@ -157,24 +157,20 @@ TheoreticalSimulation.default_R_tube            = R_tube;
 
 # Coil currents
 Icoils = [0.00,
-            0.001,0.002,0.003,0.005,0.007,
+            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
             0.010,0.020,0.030,0.040,0.050,0.060,0.070,0.080,0.090,
-            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.60,0.70,0.75,0.80,0.90,
-            1.00
+            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.60,0.70,0.75,0.80,0.90,1.00
 ];
-Icoils = reverse([0.993, 0.739, 0.549, 0.01164, 0.0])
-
+# Icoils = reverse([0.993, 0.739, 0.549, 0.01164, 0.0])
 nI = length(Icoils);
 
-
-
 # Sample size: number of atoms arriving to the screen
-const Nss = 2_000_000
+const Nss = 5_000
 @info "Number of MonteCarlo particles : $(Nss)"
 
 # Monte Carlo generation of particles traersing the filtering slit
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
-# pairs_UP, pairs_DOWN = build_initial_conditions(Nss, crossing_slit, rng_set; mode=:total);
+# pairs_UP, pairs_DOWN = build_initial_conditions(Nss, crossing_slit, rng_set; mode=:bucket);
 
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
@@ -184,25 +180,176 @@ if SAVE_FIG
     # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
 
-
-
 particles_colliding       = QM_find_discarded_particles_multithreading(Icoils,crossing_slit,K39_params;verbose=true) # heavy loop: goes in series
 particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params) # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
 jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_reaching_screen))
 
-data = load(joinpath(@__DIR__, "simulation_data", "20250822T203747","qm_2000000_valid_particles_data.jld2"))["data"]
 
-nx_bins , nz_bins = 32, 1 ;
+#########################################################################################
+T_END = Dates.now()
+T_RUN = Dates.canonicalize(T_END-T_START)
+report = """
+***************************************************
+EXPERIMENT
+    Single Stern–Gerlach Experiment
+    atom                    : $(atom)
+    Output directory        : $(OUTDIR)
 
-profiles_top = QM_analyze_profiles_to_dict(data, K39_params;
-    manifold=:F_top, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, λ_raw=0.01, λ_smooth = 0.001)
+CAMERA FEATURES
+    Number of pixels        : $(nx_pixels) × $(nz_pixels)
+    Pixel size              : $(1e6*cam_pixelsize) μm
 
-profiles_bottom = QM_analyze_profiles_to_dict(data, K39_params;
-    manifold=:F_bottom, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, λ_raw=0.01, λ_smooth = 0.001)
+SETUP FEATURES
+    Temperature             : $(T_K)
+    Furnace aperture (x,z)  : ($(1e3*x_furnace)μm , $(1e6*z_furnace)μm)
+    Slit (x,z)              : ($(1e3*x_slit)μm , $(1e6*z_slit)μm)
+    Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
+    Slit → SG magnet        : $(1e3*y_SlitToSG)mm
+    SG magnet               : $(1e3*y_SG)mm
+    SG magnet → Screen      : $(1e3*y_SGToScreen)mm
+    Tube radius             : $(1e3*R_tube)mm
 
-jldsave( joinpath(OUTDIR,"zmax_profiles_top_$(nx_bins)x$(nz_bins).jld2"), data=profiles_top)
-jldsave( joinpath(OUTDIR,"zmax_profiles_bottom_$(nx_bins)x$(nz_bins).jld2"), data=profiles_bottom)
+SIMULATION INFORMATION
+    Number of atoms         : $(Nss)
+    Binning                 : $(sim_bin_x) × $(sim_bin_z)
+    Effective pixels        : $(x_pixels) × $(z_pixels)
+    Pixel size              : $(1e6*sim_pixelsize_x)μm × $(1e6*sim_pixelsize_z)μm
+    xlims                   : ($(round(minimum(1e6*x_position), digits=6)) μm, $(round(maximum(1e3*x_position), digits=4)) mm)
+    zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
 
+    Currents (A)            : $(round.(Icoils,digits=5))
+    No. of currents         : $(nI)
+
+CODE
+    Code name               : $(PROGRAM_FILE),
+    Start date              : $(T_START)
+    End data                : $(T_END)
+    Run time                : $(T_RUN)
+    Hostname                : $(hostname)
+
+***************************************************
+"""
+# Print to terminal
+println(report)
+
+# Save to file
+open(joinpath(OUTDIR,"simulation_report.txt"), "w") do io
+    write(io, report)
+end
+#########################################################################################
+#########################################################################################
+#########################################################################################
+#########################################################################################
+
+dir_load_string = joinpath(@__DIR__, "simulation_data", "qm_analytic_sim")
+
+data = load(joinpath(dir_load_string,"qm_2000000_valid_particles_data.jld2"))["data"]
+for nz_iter in [1,2,4,8]
+    println("\tCreates the z-profile with bin_nz = $(nz_iter)")
+    nx_bins , nz_bins = 32 , nz_iter ;
+    println("F=$(K39_params.Ispin+0.5) profiles")
+    profiles_top = QM_analyze_profiles_to_dict(data, K39_params;
+        manifold=:F_top, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
+    println("F=$(K39_params.Ispin-0.5) profiles")
+    profiles_bottom = QM_analyze_profiles_to_dict(data, K39_params;
+        manifold=:F_bottom, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, λ_raw=0.01, λ_smooth = 0.001, mode=:pdf)
+
+    jldsave( joinpath(dir_load_string, "zmax_profiles_top_$(nx_bins)x$(nz_bins).jld2"), data=profiles_top)
+    jldsave( joinpath(dir_load_string, "zmax_profiles_bottom_$(nx_bins)x$(nz_bins).jld2"), data=profiles_bottom)
+end
+
+
+data_num = load(joinpath(dir_load_string,"data_num_20250820.jld2"))["data"]
+x1=load(joinpath(dir_load_string,"zmax_profiles_bottom_32x1.jld2"))["data"]
+x2=load(joinpath(dir_load_string,"zmax_profiles_bottom_32x2.jld2"))["data"]
+x4=load(joinpath(dir_load_string,"zmax_profiles_bottom_32x4.jld2"))["data"]
+x8=load(joinpath(dir_load_string,"zmax_profiles_bottom_32x8.jld2"))["data"]
+
+anim = @animate for i in eachindex(x1)
+    fig = plot(
+        xlabel=L"$z$ (mm)", 
+        ylabel="Intensity (au)",
+        xlims = (-5.0,12.5),
+    )
+    plot!(x1[i][:z_profile][:,1],x1[i][:z_profile][:,3], label=L"$n_{z}=1$")
+    plot!(x2[i][:z_profile][:,1],x2[i][:z_profile][:,3], label=L"$n_{z}=2$")
+    plot!(x4[i][:z_profile][:,1],x4[i][:z_profile][:,3], label=L"$n_{z}=4$")
+    plot!(x8[i][:z_profile][:,1],x8[i][:z_profile][:,3], label=L"$n_{z}=8$")
+    plot!(
+        legendtitle= L"$I_{c}=%$(x1[i][:Icoil])\mathrm{A}$",
+        legendtitlefontsize = 8,
+    )
+    display(fig)
+end
+gif(anim, joinpath(dir_load_string,"z_dw_profiles.gif"); fps=2) 
+
+cols = palette(:darkrainbow,8)
+fig = plot(xlabel="Current (A)", ylabel=L"$z_{max}$ (mm)")
+plot!([4.5, 6.2, 7.8, 9.53, 12.93, 16.38, 21.6, 28.46, 35.39, 45.8, 57.86, 73.34, 92.38, 117.0, 148.1, 187.9, 239.9, 304.0, 387.0, 489.0, 623.0, 789.0]/1000, 
+    [0.002286, 0.009615, 0.012025, 0.020023, 0.026224, 0.036606, 0.053704, 0.075875, 0.090899, 0.1277, 0.162333, 0.215772, 0.269977, 0.344652, 0.434583, 0.546819, 0.675259, 0.824128, 1.052232, 1.295606, 1.629635, 1.98437]/1.2697,
+    label="Experimental data 20250814",
+    seriestype=:scatter,
+    marker=(:circle,:white,3),
+    markerstrokewidth=2,
+    markerstrokecolor=:brown,)
+plot!([1.06, 2.81, 4.6, 6.39, 8.06, 11.64, 15.17, 20.47, 27.53, 35.94, 49.83, 67.16, 91.48, 121.5, 165.2, 222.9, 298.1, 407.0, 549.0, 739.0, 993.0]/1000, 
+    [ 0.006027, 0.00683, 0.008836, 0.005707, 0.003933, 0.008094, 0.011108, 0.025917, 0.045916, 0.071526, 0.117163, 0.175239, 0.253787, 0.342267, 0.472704, 0.629466, 0.821751, 1.083423, 1.412981, 1.807272, 2.165861]/1.2697,
+    label="Experimental data 20250820",
+    seriestype=:scatter,
+    marker=(:rect,:white,3.),
+    markerstrokewidth=2,
+    markerstrokecolor=:black,)
+plot!([ 1.025, 2.835, 4.6, 6.34, 7.98, 9.8, 13.32, 16.83, 22.07, 27.4, 35.76, 46.22, 56.57, 72.12, 92.89, 117.7, 149.0, 189.1, 239.7, 308.0, 386.0, 494.0, 622.0, 787.0, 995.0]/1000, 
+    [0.024406123, 0.025163373, 0.022424218, 0.023249073, 0.024653974, 0.023975278, 0.028969559, 0.033020055, 0.046727542, 0.062208333, 0.088430282, 0.121899207, 0.159090754, 0.212299474, 0.280313781, 0.354560784, 0.446607844, 0.556555544, 0.697296481, 0.865196889, 1.053177508, 1.328516385, 1.575994256, 1.949320167, 2.137558111]/1.2697,
+    label="Experimental data 20250825",
+    seriestype=:scatter,
+    marker=(:diamond,:white,2.5),
+    markerstrokewidth=2,
+    markerstrokecolor=:gray36,)
+#  [x8[i][s] for i in eachindex(x8), s in (:Icoil, :z_max_smooth_spline_mm)]
+plot!([x1[i][:Icoil] for i =2:length(x1)] , [x1[i][:z_max_smooth_spline_mm] for i =2:length(x1)],
+    label=L"Analytic QM ($n_{z}=1$)",
+    line=(:dash,cols[1],1))
+plot!([x2[i][:Icoil] for i =2:length(x2)] , [x2[i][:z_max_smooth_spline_mm] for i =2:length(x2)],
+    label=L"Analytic QM ($n_{z}=2$)",
+    line=(:dash,cols[2],1))
+plot!([x4[i][:Icoil] for i =2:length(x4)] , [x4[i][:z_max_smooth_spline_mm] for i =2:length(x4)],
+    label=L"Analytic QM ($n_{z}=4$)",
+    line=(:dash,cols[3],1))
+plot!([x8[i][:Icoil] for i =2:length(x8)] , [x8[i][:z_max_smooth_spline_mm] for i =2:length(x8)],
+    label=L"Analytic QM ($n_{z}=8$)",
+    line=(:dash,cols[4],1))
+plot!(data_num[:runs][1][:data_QM][:,1], data_num[:runs][1][:data_QM][:,2],
+    label=L"Numeric QM $(n_{z}=1$)",
+    line=(:dot,cols[5],2))
+plot!(data_num[:runs][2][:data_QM][:,1], data_num[:runs][2][:data_QM][:,2],
+    label=L"Numeric QM $(n_{z}=2$)",
+    line=(:dot,cols[6],2))
+plot!(data_num[:runs][4][:data_QM][:,1], data_num[:runs][4][:data_QM][:,2],
+    label=L"Numeric QM $(n_{z}=4$)",
+    line=(:dot,cols[7],2))
+plot!(data_num[:runs][8][:data_QM][:,1], data_num[:runs][8][:data_QM][:,2],
+    label=L"Numeric QM $(n_{z}=8$)",
+    line=(:dot,cols[8],2))
+plot!(xaxis=:log10, yaxis=:log10,
+    legend=:bottomright)
+savefig(fig, joinpath(dir_load_string,"qm_peaks.$(FIG_EXT)"))
+
+
+data[:data][2][1][:,[5,7,8]]
+
+histogram(vcat(data[:data][30][6][:,9],data[:data][30][7][:,9],data[:data][30][8][:,9]), normalize=:probability, label=L"$v_{z}$ (m/s)")
+histogram!(vcat(data[:data][1][6][:,6]), normalize=:probability, label=L"$v_{0,z}$ (m/s)")
+
+data[:data][30][6][:,6]
+[[length(data[:data][i][j][:,6]) for i=1:30] for j=1:8]
+
+
+
+#########################################################################################
+#########################################################################################
+#########################################################################################
+#########################################################################################
 
 
 # load(joinpath(OUTDIR,"zmax_profiles_top.jld2"))["data"]

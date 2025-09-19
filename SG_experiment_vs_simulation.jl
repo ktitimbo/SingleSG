@@ -48,9 +48,9 @@ include("./Modules/TheoreticalSimulation.jl");
 
 
 # import experimental data
-data_exp        = load(joinpath("analysis_data","20250827T133507","profiles.jld2"))["profiles"]
-data_exp_fw     = CSV.read(joinpath("analysis_data","20250827T133507","fw_data.csv"),DataFrame)
-data_exp_mean   = CSV.read(joinpath("analysis_data","20250827T133507","mean_data.csv"),DataFrame)
+data_exp        = load(joinpath("analysis_data","20250917T144110","profiles.jld2"))["profiles"]
+data_exp_fw     = CSV.read(joinpath("analysis_data","20250917T144110","fw_data.csv"),DataFrame)
+data_exp_mean   = CSV.read(joinpath("analysis_data","20250917T144110","mean_data.csv"),DataFrame)
 
 centroid = mean((data_exp_mean[!,"F1_z_peak_mm"]+ data_exp_mean[!,"F2_z_peak_mm"])/2)
 

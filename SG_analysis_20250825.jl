@@ -250,7 +250,6 @@ hline!([centroid_mean], label=L"Centroid $z=%$(round(centroid_mean,digits=3))$mm
 hspan!( [centroid_mean - centroid_std,centroid_mean + centroid_std], color=:orangered, alpha=0.30, label=L"St.Err. = $\pm%$(round(centroid_std,digits=3))$mm")
 saveplot(fig,"mean_centroid")
 
-
 df_mean = DataFrame(
     I_coil_mA          = 1000 .* Icoils,
     F1_z_peak_mm       = f1_mean_max,

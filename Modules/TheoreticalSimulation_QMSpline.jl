@@ -148,7 +148,10 @@ end
     sequence.
 """
 function analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
-    m_mom::Symbol = :qm, manifold::Symbol = :F_top, nx_bins::Integer = 2, nz_bins::Integer = 2, width_mm::Float64 = 0.150, add_plot::Bool = false, λ_raw::Float64=0.01, λ_smooth::Float64 = 1e-3)
+    m_mom::Symbol = :qm, manifold::Symbol = :F_top, nx_bins::Integer = 2, nz_bins::Integer = 2, 
+    width_mm::Float64 = 0.150, add_plot::Bool = false, 
+    λ_raw::Float64=0.01, λ_smooth::Float64 = 1e-3, 
+    mode::Symbol=:probability)
 
     @assert size(data_mm,2) == 2 "data_mm must be N×2 (columns: x,z in mm)"
     @assert nx_bins > 0 "nx_bins must be > 0"
@@ -157,7 +160,7 @@ function analyze_screen_profile(Ix, data_mm::AbstractMatrix;
 
     # Fixed analysis limits
     xlim = (-8.0, 8.0)
-    zlim = (-10.5, 10.5)
+    zlim = (-12.5, 12.5)
     xmin, xmax = xlim
     zmin, zmax = zlim
 
@@ -184,7 +187,7 @@ function analyze_screen_profile(Ix, data_mm::AbstractMatrix;
     # 2D histogram
     x = @view data_mm[:, 1]
     z = @view data_mm[:, 2]
-    h = fit(Histogram, (x, z), (edges_x, edges_z))
+    h = normalize(fit(Histogram, (x, z), (edges_x, edges_z)); mode=mode)
     counts = h.weights  # size: (length(centers_x), length(centers_z))
 
     # z-profile = mean over x bins
@@ -316,7 +319,7 @@ end
 """
 function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParams;
     manifold::Symbol =:F_bottom, n_bins::Tuple = (1,4), width_mm::Float64 = 0.150, add_plot::Bool = false,
-    λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3)
+    λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, mode::Symbol = :probability)
 
     @assert haskey(data, :Icoils) "missing :Icoils"
     @assert haskey(data, :data)   "missing :data"
@@ -329,7 +332,6 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
     for i in eachindex(Ix)
         if manifold===:F_top
             img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][1:Int(2*p.Ispin+2)])...) # 7:8 is [x,z] in mm from 1:2I+2
-
         elseif manifold===:F_bottom
             img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][Int(2*p.Ispin+3):Int(4*p.Ispin+2)])...) # 7:8 is [x,z] in mm from 2I+3:4I+2
         else
@@ -341,7 +343,7 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
                 nx_bins=nx_bins, nz_bins=nz_bins, 
                 width_mm=width_mm, 
                 add_plot=add_plot, 
-                λ_raw=λ_raw, λ_smooth=λ_smooth)
+                λ_raw=λ_raw, λ_smooth=λ_smooth,mode=mode)
     
         inner = OrderedDict{Symbol, Any}(
         :Icoil                  => Ix[i],

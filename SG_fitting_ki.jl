@@ -227,8 +227,6 @@ function load_blocks(paths::AbstractVector{<:AbstractString};
 
 end
 
-
-
 """
     simulation_paths(n_bin::Integer) -> (cqd::Vector{String}, qm::Vector{String})
 
@@ -308,12 +306,13 @@ function simulation_paths(n_bin::Integer)
 end
 
 # Select experimental data
-wanted_data_dir = "20250820/" ;
+wanted_data_dir = "20250825/" ;
 wanted_binning  = 2 ; 
 wanted_smooth   = 0.02 ;
 # Simulation
 ki_sim = collect(0.10:0.10:7.5);
 cols = palette(:darkrainbow, length(ki_sim));
+nz_vals = [1, 2, 4, 8]
 
 # Data loading
 res = DataReading.find_report_data(
@@ -339,7 +338,9 @@ data = hcat(I_exp, z_exp, z_exp_stde)
 data_collected_exp = Vector{Matrix{Float64}}();
 data_collected_qm  = Vector{Matrix{Float64}}();
 data_collected_cqd = Vector{Matrix{Float64}}();
-for n_bin in [1,2,4,8] 
+qm_export  = OrderedDict{Int,Matrix{Float64}}();
+data_export = OrderedDict( :dir=>wanted_data_dir[1:end-1,], :nz_bin => wanted_binning, :λ_spline => wanted_smooth)
+for n_bin in nz_vals 
     println("\t\tUsing simulated data with binning nz=$(n_bin)")
 
     Ic_cqd , data_sim_cqd = load_blocks(simulation_paths(n_bin).cqd; z_group=3);
@@ -375,6 +376,7 @@ for n_bin in [1,2,4,8]
     data_QM = hcat(Ic_qm, z_QMsim, z_QMsim_err)
     mask = (data_QM[:,1] .> 0) .& (data_QM[:,2] .> 0) .& (abs.(data_QM[:,2] .- data_QM[:,3]) .> 0)
     x = data_QM[mask, 1]; y = data_QM[mask, 2]; y_err = data_QM[mask,3]
+    qm_export[n_bin] = hcat(x,y, y_err)
     plot!(fig,
         x, y,
         label="QM + Class.Trajs.",
@@ -579,7 +581,6 @@ for n_bin in [1,2,4,8]
 
 end
 
-
 cols = palette(:rainbow, 2*4);
 fig= plot(
     xlabel=L"Coil current $I_{c}$ (A)",
@@ -598,8 +599,7 @@ plot!(fig,
     markerstrokewidth=1.8
 )
 # --- QM curves (dashed) ---
-nvals = (1, 2, 4, 8)
-for (i, n) in enumerate(nvals)
+for (i, n) in enumerate(nz_vals)
     plot!(fig,
         data_collected_qm[i][2:end, 1],
         data_collected_qm[i][2:end, 2];
@@ -608,7 +608,7 @@ for (i, n) in enumerate(nvals)
     )
 end
 # --- CQD curves (solid) with LaTeX labels showing k_i × 10^{-6} ---
-for (i, n) in enumerate(nvals)
+for (i, n) in enumerate(nz_vals)
     ki = round(data_collected_cqd[i][1, 3], digits = 3)  # value in 10^-6 units per your original
     plot!(fig,
         data_collected_cqd[i][2:end, 1],
@@ -632,11 +632,17 @@ display(fig)
 savefig(fig,joinpath(OUTDIR,"summary_$(wanted_data_dir[1:end-1]).$(FIG_EXT)"))
 
 
+data_export[:runs] = OrderedDict(
+    k => OrderedDict(
+        :ki       => data_collected_cqd[i][1, 3],
+        :data_QM  => qm_export[k],
+        :data_CQD => @view data_collected_cqd[i][:, 1:2]
+    )
+    for (k, i) in zip(nz_vals, eachindex(nz_vals))
+)
+
+jldsave( joinpath(OUTDIR,"data_num_$(wanted_data_dir[1:end-1]).jld2"), data = data_export)
 
 T_END = Dates.now()
 T_RUN = Dates.canonicalize(T_END-T_START)
 println("kᵢ fitting done in $(T_RUN)")
-
-
-
-

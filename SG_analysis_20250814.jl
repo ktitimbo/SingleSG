@@ -103,8 +103,8 @@ MyExperimentalAnalysis.x_pixels = x_pixels;
 MyExperimentalAnalysis.z_pixels = z_pixels;
       
 # Binning for the analysis
-λ0 = 0.05; # Fitting factor
-n_bins = 8
+λ0 = 0.02; # Fitting factor
+n_bins = 2
 z_mm = 1e3 .* pixel_positions(z_pixels, n_bins, exp_pixelsize_z)
 
 
@@ -1176,7 +1176,7 @@ IMAGES INFORMATION
     zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
 
 EXPERIMENT CONDITIONS
-    Currents (mA)           : $(round.(1e3*Icoils,digits=5))
+    Currents (mA)           : $(sort(round.(1e3*Icoils,digits=5)))
     No. of current          : $(nI)
     Temperature (K)         : $(Temperature)
 
