@@ -1,30 +1,51 @@
 """
-    max_of_bspline_positions(z, y; λ0=1e-3, order=4, n_peaks=1, n_scan=max(400, length(z)), sep=1e-6)
+    max_of_bspline_positions(z, y; λ0=0.01, order=4, n_peaks=1,
+                             n_scan=max(400, length(z)), sep=1e-6)
 
-    Fit a smoothing B-spline to `(z, y)` data and return the positions of the most prominent local maxima.
+Fit a smoothing B-spline `S(z)` to `(z, y)` and return the locations of the most
+prominent local maxima of the fitted curve.
 
-    # Arguments
-    - `z::AbstractVector`: Sorted vector of x-coordinates (domain points).
-    - `y::AbstractVector`: Vector of y-values corresponding to `z`.
-    - `λ0::Real=1e-3`: Smoothing parameter for the spline fit. Smaller values follow the data more closely; larger values yield smoother curves.
-    - `order::Int=4`: B-spline order (4 = cubic).
-    - `n_peaks::Int=1`: Number of top peaks to return, sorted by descending spline value.
-    - `n_scan::Int=max(400, length(z))`: Number of points in the dense scan for detecting candidate peaks.
-    - `sep::Real=1e-6`: Minimum separation between peaks (in `z` units) to consider them distinct.
+# Arguments
+- `z::AbstractVector`:
+  Sorted vector of abscissae (domain points). Must satisfy `issorted(z)`.
+- `y::AbstractVector`:
+  Ordinates corresponding to `z`. Must have `length(y) == length(z)`.
+- `λ0::Real = 0.01`:
+  Smoothing parameter for the spline fit (smaller = follows data more closely;
+  larger = smoother curve).
+- `order::Int = 4`:
+  B-spline order (`order = degree + 1`; e.g. `4` → cubic).
+- `n_peaks::Int = 1`:
+  Number of peak positions to return (sorted by descending spline height).
+- `n_scan::Int = max(400, length(z))`:
+  Number of points in a dense scan used to locate candidate maxima.
+- `sep::Real = 1e-6`:
+  Minimum separation between reported peaks (same units as `z`).
 
-    # Method
-    1. Fits a smoothing B-spline `S(z)` using `BSplineKit.fit` with uniform weights from `compute_weights`.
-    2. Performs a dense scan to find candidate peak locations by detecting sign changes in the finite-difference slope.
-    3. Refines each candidate's position using a local Brent optimization in a small bracket around the candidate.
-    4. Removes peaks closer than `sep` to each other.
-    5. Sorts the remaining peaks by their spline height and returns the positions of the top `n_peaks`.
+# Method
+1. Fit a smoothing spline `S` via `BSplineKit.fit(BSplineOrder(order), z, y, λ0; weights=compute_weights(z, λ0))`.
+   (Assumes a helper `compute_weights(z, λ0)` is available; adapt if using
+   uniform weights.)
+2. Densely sample `S` on `n_scan` points over `extrema(z)` and detect candidate
+   maxima by sign changes in the finite-difference slope.
+3. Refine each candidate position with a 1-D Brent search (`Optim.optimize`)
+   in a small bracket around the candidate.
+4. Remove near-duplicates closer than `sep`.
+5. Sort remaining candidates by `S` height (descending) and keep the top `n_peaks`.
 
-    # Returns
-    - `Vector{Float64}`: Positions of the most prominent peaks in descending order of height.
+# Returns
+- `(positions::Vector{Float64}, S::Function)`:
+  Peak positions (highest first) and the callable fitted spline `S`.
 
-    # Notes
-    - Only peak positions are returned; heights can be obtained by evaluating the returned spline at those positions if needed.
-    - The function is robust to multiple local maxima and will always include endpoints as candidates in case the maximum lies at the boundary.
+# Notes
+- Endpoints are included as candidates so a boundary maximum can be returned.
+- Throws an `AssertionError` if `z` is unsorted or `length(z) != length(y)`.
+- Peak heights can be obtained as `S.(positions)` if needed.
+
+# Example
+```julia
+pos, S = max_of_bspline_positions(z, y; λ0=0.005, order=4, n_peaks=2)
+heights = S.(pos)
 """
 function max_of_bspline_positions(z::AbstractVector,y::AbstractVector;
     λ0::Real=0.01, order::Int=4, n_peaks::Int=1, n_scan::Int=max(400, length(z)),sep::Real=1e-6)
@@ -53,7 +74,7 @@ function max_of_bspline_positions(z::AbstractVector,y::AbstractVector;
     # --- 2) Refine each candidate in a small bracket with Brent
     negS(x) = -S(x)
     function refine(x0)
-        δ = 2dx
+        δ = 2*dx
         lo = max(a, x0 - δ)
         hi = min(b, x0 + δ)
         if lo == hi
@@ -82,81 +103,99 @@ end
     analyze_screen_profile(
         Ix::Real,
         data_mm::AbstractMatrix;
+        manifold::Symbol = :F_top,
+        nx_bins::Integer = 2,
         nz_bins::Integer = 2,
-        width_mm::Float64 = 0.1,
         add_plot::Bool = false,
+        plot_xrange::Symbol = :all,
+        width_mm::Float64 = 0.150,
         λ_raw::Float64 = 0.01,
-        λ_smooth::Float64 = 1e-3
+        λ_smooth::Float64 = 1e-3,
+        mode::Symbol = :probability
     ) -> NamedTuple
 
-    Analyze the vertical (z) profile of particle hits on a screen for a given
-    coil current, using 2D histogramming, smoothing, and spline fitting to
-    identify peak positions.
+Analyze the vertical **z** profile of particle hits on a screen for a given coil
+current. The routine builds a 2D histogram in **mm** over fixed x/z windows,
+averages over x to obtain a z-profile, smooths it, and finds peak locations
+using both discrete maxima and spline-fitted maxima.
 
-    This version is designed for both **single-current analysis** and **batch
-    processing** via `analyze_profiles_to_dict`. The first argument `Ix` is
-    the coil current (in A) and is used to annotate plots, allowing you to
-    automatically generate titled plots for each current in a loop.
+This function supports single-current analysis and batch workflows (see the
+companion batch function). The `Ix` argument is used for plot labels/titles.
 
-    The function:
-    1. Builds a 2D histogram of hit positions (x, z) in **millimeters** with
-    bin centers symmetric about zero.
-    2. Extracts the mean **z-profile** (averaged over x) from the histogram.
-    3. Finds the z-location of the maximum in the raw profile and in the raw
-    profile fitted with a smoothing spline.
-    4. Smooths the profile with a Gaussian kernel, then finds the z-location
-    of the maximum from both the smoothed data and a smoothing spline fit.
-    5. Optionally plots raw, smoothed, and spline-fitted profiles, annotated
-    with the corresponding maxima and titled with the coil current.
+# Arguments
+- `Ix::Real`:
+  Coil current (A). Used for plot annotation; does not affect the analysis.
+- `data_mm::AbstractMatrix`:
+  `N×2` array of hit positions **in millimeters** with columns:
+  `(:, 1) = x`, `(:, 2) = z`.
 
-    # Arguments
-    - `Ix::Real`:  
-        Coil current (in A) for labeling the plot (especially in batch runs).
-    - `data_mm::AbstractMatrix`:  
-        N×2 array of hit positions in **mm**, where column 1 = x, column 2 = z.
-    - `nz_bins::Integer`:  
-        Binning multiplier; bin size in mm is  
-        `bin_size = 1e3 * nz_bins * default_camera_pixel_size`,  
-        with `default_camera_pixel_size` assumed global in meters.
-    - `width_mm::Float64`:  
-        Gaussian kernel width σ (mm) for `smooth_profile`.
-    - `add_plot::Bool`:  
-        If `true`, plots the raw, smoothed, and spline profiles.
-    - `λ_raw::Float64`:  
-        Regularization parameter for spline fitting of raw profile.
-    - `λ_smooth::Float64`:  
-        Regularization parameter for spline fitting of smoothed profile.
+# Keyword Arguments
+- `manifold::Symbol = :F_top`:
+  Label forwarded to plot titles/filenames (no effect on computation).
+- `nx_bins::Integer = 2`, `nz_bins::Integer = 2`:
+  Binning multipliers. The physical bin sizes (mm) are
+  `x_bin_size = 1e3 * nx_bins * default_camera_pixel_size` and
+  `z_bin_size = 1e3 * nz_bins * default_camera_pixel_size`,
+  where `default_camera_pixel_size` is a **global** in meters.
+- `add_plot::Bool = false`:
+  If `true`, plot raw/smoothed/spline profiles and mark their maxima.
+- `plot_xrange::Symbol = :all`:
+  Limits for the x-axis of the profile plot.
+  `:all` → full z window; `:left` → left quarter; `:right` → right quarter.
+- `width_mm::Float64 = 0.150`:
+  Gaussian kernel σ (mm) used by `smooth_profile`.
+- `λ_raw::Float64 = 0.01`, `λ_smooth::Float64 = 1e-3`:
+  Spline regularization parameters for the raw and smoothed profiles.
+- `mode::Symbol = :probability`:
+  Normalization mode passed to `StatsBase.normalize` for the 2D histogram
+  (e.g., `:probability`, `:pdf`, `:density`).
 
-    # Implementation details
-    - Analysis limits: `x ∈ [-9.0, 9.0]` mm, `z ∈ [-12.5, 12.5]` mm.
-    - Bin centers are symmetric around 0 with a center exactly at 0.
-    - Maxima are identified using `argmax` for discrete data and
-    `max_of_bspline_positions` for spline fits.
+# Method (overview)
+1. Fixed analysis windows: `x ∈ [-8.0, 8.0]` mm, `z ∈ [-12.5, 12.5]` mm.
+   Bin **centers** are symmetric about 0 (with a center exactly at 0).
+2. Build a 2D histogram in `(x, z)`; average over x to get a 1D `z` profile.
+3. Find raw discrete maximum (`argmax`).
+4. Smooth the profile with a Gaussian (σ = `width_mm`) and find its discrete maximum.
+5. Fit smoothing splines to both raw and smoothed profiles and extract peak
+   positions via `max_of_bspline_positions`.
 
-    # Returns
-    A `NamedTuple` with:
-    - `z_profile` :: Matrix (Nz × 3) → `[z_center, raw_counts, smoothed_counts]`
-    - `z_max_raw_mm` :: z at raw profile maximum [mm]
-    - `z_max_raw_spline_mm` :: z at spline-fitted raw maximum [mm]
-    - `z_max_smooth_mm` :: z at smoothed profile maximum [mm]
-    - `z_max_smooth_spline_mm` :: z at spline-fitted smoothed maximum [mm]
+# Returns
+A `NamedTuple` with fields:
+- `z_profile::Matrix{Float64}` — `Nz × 3` matrix: `[z_center  raw  smooth]`
+- `z_max_raw_mm::Float64` — z at raw-profile maximum (mm)
+- `z_max_raw_spline_mm::Float64` — z at spline-fitted raw maximum (mm)
+- `z_max_smooth_mm::Float64` — z at smoothed-profile maximum (mm)
+- `z_max_smooth_spline_mm::Float64` — z at spline-fitted smoothed maximum (mm)
 
-    # Notes
-    - Pass `Ix` from a loop over coil currents in `analyze_profiles_to_dict` to
-    automatically label each plot with its current.
-    - Intended for integration into workflows that analyze many currents in
-    sequence.
+# Notes
+- Requires a global `default_camera_pixel_size::Real` (meters).
+- Uses `max_of_bspline_positions` to obtain sub-bin-accurate maxima.
+- The `manifold` only affects labels/filenames, not the numerical results.
+
+# Throws
+- `AssertionError` if `data_mm` is not `N×2` (x,z in mm), if `nx_bins/nz_bins ≤ 0`,
+  if `width_mm ≤ 0`, or if `default_camera_pixel_size` is not defined.
+
+# Example
+```julia
+res = analyze_screen_profile(0.125, hits_mm;
+    manifold=:F_top, nx_bins=1, nz_bins=4,
+    width_mm=0.15, λ_raw=0.01, λ_smooth=1e-3, add_plot=true)
+
+@show res.z_max_smooth_spline_mm
+
 """
 function analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
-    m_mom::Symbol = :qm, manifold::Symbol = :F_top, nx_bins::Integer = 2, nz_bins::Integer = 2, 
-    width_mm::Float64 = 0.150, add_plot::Bool = false, 
-    λ_raw::Float64=0.01, λ_smooth::Float64 = 1e-3, 
+    manifold::Symbol = :F_top, nx_bins::Integer = 2, nz_bins::Integer = 2, 
+    add_plot::Bool = false, plot_xrange::Symbol = :all,
+    width_mm::Float64 = 0.150, λ_raw::Float64=0.01, λ_smooth::Float64 = 1e-3, 
     mode::Symbol=:probability)
 
     @assert size(data_mm,2) == 2 "data_mm must be N×2 (columns: x,z in mm)"
     @assert nx_bins > 0 "nx_bins must be > 0"
     @assert nz_bins > 0 "nz_bins must be > 0"
     @assert width_mm > 0 "width_mm must be positive"
+    @assert @isdefined(default_camera_pixel_size) "define `default_camera_pixel_size` (meters)"
 
     # Fixed analysis limits
     xlim = (-8.0, 8.0)
@@ -213,7 +252,7 @@ function analyze_screen_profile(Ix, data_mm::AbstractMatrix;
 
         # Profiles
         z = range(zmin,zmax,length=max(2000,length(centers_z)))
-        xlims_plot = m_mom == :up ? (zmin/4, zmax) : m_mom == :dw ? (zmin, zmax/4) : (zmin, zmax)
+        xlims_plot = plot_xrange== :right ? (zmin/4, zmax) : plot_xrange == :left ? (zmin, zmax/4) : (zmin, zmax)
         fig=plot(       
             title =L"$I_{c}=%$(Ix)\mathrm{A}$",
             xlabel = L"$z$ (mm)", 
@@ -268,57 +307,83 @@ end
 
 
 """
-    analyze_profiles_to_dict(
-        Icoils::AbstractVector,
-        screen_up::AbstractDict{<:Integer,<:AbstractMatrix};
-        n_bins::Integer = 2,
-        width_mm::Float64 = 0.1,
+    QM_analyze_profiles_to_dict(
+        data::OrderedDict{Symbol,Any},
+        p::AtomParams;
+        manifold::Symbol = :F_bottom,
+        n_bins::Tuple = (1, 4),
+        width_mm::Float64 = 0.150,
         add_plot::Bool = false,
+        plot_xrange::Symbol = :all,
         λ_raw::Float64 = 0.01,
         λ_smooth::Float64 = 1e-3,
-        store_profiles::Bool = true,
-    ) -> OrderedDict{Int, OrderedDict{Symbol, Any}}
+        mode::Symbol = :probability
+    ) -> OrderedDict{Int, OrderedDict{Symbol,Any}}
 
-    Run `analyze_screen_profile` for each coil current `Icoils[i]` with its
-    corresponding screen data `screen_up[i]`, collecting results in a nested
-    dictionary keyed by the **index** `i` (1..length(Icoils)).
+Batch-process screen-hit datasets across multiple coil currents by repeatedly
+calling [`analyze_screen_profile`](@ref). For each current `Ix = data[:Icoils][i]`,
+this function extracts the (x, z) hit positions from `data[:data][i]`, converts
+them from **meters** to **millimeters**, analyzes the vertical z-profile, and
+stores the peak summaries in a nested dictionary keyed by the dataset index `i`.
 
-    This is the batch companion to `analyze_screen_profile(Ix, data_mm; ...)`.
-    It converts each dataset from meters to millimeters (taking columns 1=x and
-    3=z), calls the single-dataset analyzer (passing `Ix = Icoils[i]` so the
-    plots are titled per current), and aggregates the outputs.
+# Inputs
+- `data::OrderedDict{Symbol,Any}`:
+  Must contain:
+  - `:Icoils :: AbstractVector{<:Real}` — coil currents (A), length `N`.
+  - `:data` — a length-`N` container; each `data[:data][i]` is an indexable
+    collection of matrices whose **columns 7:8** are `[x, z]` in **meters**.
+- `p::AtomParams`:
+  Used to determine level grouping via `p.Ispin` when selecting manifolds.
 
-    # Arguments
-    - `Icoils`: Vector of coil currents (A). Length must match `screen_up`.
-    - `screen_up`: Dict-like container (e.g. `OrderedDict{Int, Matrix}`) whose
-    keys include `1:length(Icoils)` and whose values are N×M matrices of hit
-    positions in **meters** (columns: 1=x, 3=z).
-    - `n_bins`: Histogram binning multiplier used by `analyze_screen_profile`.
-    - `width_mm`: Gaussian kernel σ (mm) used by `smooth_profile`.
-    - `add_plot`: If `true`, each call plots the profiles titled with `Icoils[i]`.
-    - `λ_raw`, `λ_smooth`: Spline regularization parameters for raw and smoothed
-    profiles, respectively.
-    - `store_profiles`: If `true`, store the full `z_profile` array for each
-    current (can be large). If `false`, omit it to save memory.
+# Keyword Arguments
+- `manifold::Symbol = :F_bottom`:
+  Which manifold(s) to aggregate:
+  - `:F_top`    → vertically concatenate levels `1 : (2I + 2)`
+  - `:F_bottom` → vertically concatenate levels `(2I + 3) : (4I + 2)`
+  - `:1`, `:2`, … (numeric-like symbol) → use that single level
+  Here `I = p.Ispin`. In all cases, columns `7:8` are taken and multiplied by
+  `1e3` to convert to **mm**.
+- `n_bins::Tuple = (1, 4)`:
+  `(nx_bins, nz_bins)` binning multipliers forwarded to `analyze_screen_profile`.
+- `width_mm::Float64 = 0.150`:
+  Gaussian σ (mm) used for profile smoothing.
+- `add_plot::Bool = false`, `plot_xrange::Symbol = :all`:
+  Plot options forwarded to `analyze_screen_profile`.
+- `λ_raw::Float64 = 0.01`, `λ_smooth::Float64 = 1e-3`:
+  Spline regularization parameters forwarded downstream.
+- `mode::Symbol = :probability`:
+  Histogram normalization mode (`:probability`, `:pdf`, etc.).
 
-    # Returns
-    An `OrderedDict{Int, OrderedDict{Symbol, Any}}` such that:
-    - `out[i][:Icoil]`                       → `Icoils[i]`
-    - `out[i][:z_max_raw_mm]`                → raw-profile maximum z [mm]
-    - `out[i][:z_max_raw_spline_mm]`         → spline fit (raw) maximum z [mm]
-    - `out[i][:z_max_smooth_mm]`             → smoothed-profile maximum z [mm]
-    - `out[i][:z_max_smooth_spline_mm]`      → spline fit (smoothed) maximum z [mm]
-    - `out[i][:z_profile]` (optional)        → Nz×3 matrix `[z, raw, smooth]`
+# Returns
+`OrderedDict{Int, OrderedDict{Symbol,Any}}` where, for each index `i`:
+- `:Icoil`                   → current `data[:Icoils][i]` (A)
+- `:z_max_raw_mm`            → z at raw-profile maximum (mm)
+- `:z_max_raw_spline_mm`     → z at spline-fitted raw maximum (mm)
+- `:z_max_smooth_mm`         → z at smoothed-profile maximum (mm)
+- `:z_max_smooth_spline_mm`  → z at spline-fitted smoothed maximum (mm)
+- `:z_profile`               → `Nz × 3` matrix `[z_center  raw  smooth]`
 
-    # Notes
-    - Expects `screen_up[i]` to have at least 3 columns (x=col 1, z=col 3).
-    - This function assumes `analyze_screen_profile(Ix, data_mm; ...)` accepts
-    hit data in **mm** and will handle the histogramming/plotting.
-    - If you prefer keys by current value instead of index, use a
-    `Dict{Float64, ...}` and set `out[Icoils[i]] = inner`.
+# Notes
+- Requires that `analyze_screen_profile` is available and that the global
+  `default_camera_pixel_size` (meters) is defined for bin sizing in that
+  routine.
+- Level selection uses `p.Ispin`; e.g., for `I = 3/2`, `:F_top` picks levels
+  `1:5` and `:F_bottom` picks `6:8` (1-based).
+- Throws an `AssertionError` if `data` is missing `:Icoils` or `:data`, or if
+  `manifold` is a non-numeric symbol not equal to `:F_top`/`:F_bottom`.
+
+# Example
+```julia
+out = QM_analyze_profiles_to_dict(run_data, atom_params;
+    manifold=:F_top, n_bins=(1,4), width_mm=0.15,
+    add_plot=true, plot_xrange=:right, λ_raw=0.01, λ_smooth=1e-3)
+
+z_first = out[1][:z_max_smooth_spline_mm]
+
 """
 function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParams;
-    manifold::Symbol =:F_bottom, n_bins::Tuple = (1,4), width_mm::Float64 = 0.150, add_plot::Bool = false,
+    manifold::Symbol =:F_bottom, n_bins::Tuple = (1,4), width_mm::Float64 = 0.150, 
+    add_plot::Bool = false, plot_xrange::Symbol = :all,
     λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, mode::Symbol = :probability)
 
     @assert haskey(data, :Icoils) "missing :Icoils"
@@ -335,14 +400,17 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
         elseif manifold===:F_bottom
             img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][Int(2*p.Ispin+3):Int(4*p.Ispin+2)])...) # 7:8 is [x,z] in mm from 2I+3:4I+2
         else
-            img_F = data[:data][i][tryparse(Int, string(manifold))][:,7:8] # 7:8 is [x,z] in mm for the manifold: level
+            lvl = tryparse(Int, string(manifold))
+            @assert lvl !== nothing "Non-numeric manifold '$manifold' (expected e.g. :1, :2, ...)"
+            img_F = 1e3 .* data[:data][i][lvl][:, 7:8]   # convert to mm to match other branches
         end
     
         result = analyze_screen_profile(Ix[i], img_F;
-                m_mom=:qm, manifold=manifold, 
+                manifold=manifold, 
                 nx_bins=nx_bins, nz_bins=nz_bins, 
                 width_mm=width_mm, 
                 add_plot=add_plot, 
+                plot_xrange=plot_xrange,
                 λ_raw=λ_raw, λ_smooth=λ_smooth,mode=mode)
     
         inner = OrderedDict{Symbol, Any}(

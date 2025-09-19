@@ -165,7 +165,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 5_000
+const Nss = 1_000
 @info "Number of MonteCarlo particles : $(Nss)"
 
 # Monte Carlo generation of particles traersing the filtering slit
@@ -249,10 +249,10 @@ for nz_iter in [1,2,4,8]
     nx_bins , nz_bins = 32 , nz_iter ;
     println("F=$(K39_params.Ispin+0.5) profiles")
     profiles_top = QM_analyze_profiles_to_dict(data, K39_params;
-        manifold=:F_top, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
+        manifold=:F_top, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
     println("F=$(K39_params.Ispin-0.5) profiles")
     profiles_bottom = QM_analyze_profiles_to_dict(data, K39_params;
-        manifold=:F_bottom, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, λ_raw=0.01, λ_smooth = 0.001, mode=:pdf)
+        manifold=:F_bottom, n_bins= (nx_bins,nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:pdf)
 
     jldsave( joinpath(dir_load_string, "zmax_profiles_top_$(nx_bins)x$(nz_bins).jld2"), data=profiles_top)
     jldsave( joinpath(dir_load_string, "zmax_profiles_bottom_$(nx_bins)x$(nz_bins).jld2"), data=profiles_bottom)
@@ -336,7 +336,22 @@ plot!(xaxis=:log10, yaxis=:log10,
 savefig(fig, joinpath(dir_load_string,"qm_peaks.$(FIG_EXT)"))
 
 
-data[:data][2][1][:,[5,7,8]]
+data_range = sortslices(data[:data][2][1][:,[5,7,8]]; dims = 1, by = row -> (row[1], row[3], row[2]))
+lo, hi = 0.0, 200.0
+mask = (data_range[:, 1] .>= lo) .& (data_range[:, 1] .<= hi)
+
+A_in = data_range[mask,:]
+
+analyze_screen_profile(0.01, A_in[:,2:3]; manifold=:F_top, nx_bins = 32, nz_bins = 2, 
+    add_plot=true, plot_xrange= :all,
+    width_mm=0.150, λ_raw=0.01, λ_smooth = 1e-3, 
+    mode=:probability); 
+
+analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
+    manifold::Symbol = :F_top, nx_bins::Integer = 2, nz_bins::Integer = 2, 
+    add_plot::Bool = false, plot_xrange::Symbol = :all,
+    width_mm::Float64 = 0.150, λ_raw::Float64=0.01, λ_smooth::Float64 = 1e-3, 
+    mode::Symbol=:probability)
 
 histogram(vcat(data[:data][30][6][:,9],data[:data][30][7][:,9],data[:data][30][8][:,9]), normalize=:probability, label=L"$v_{z}$ (m/s)")
 histogram!(vcat(data[:data][1][6][:,6]), normalize=:probability, label=L"$v_{0,z}$ (m/s)")
