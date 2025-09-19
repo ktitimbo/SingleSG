@@ -46,6 +46,10 @@ prominent local maxima of the fitted curve.
 ```julia
 pos, S = max_of_bspline_positions(z, y; λ0=0.005, order=4, n_peaks=2)
 heights = S.(pos)
+
+# See also
+[`analyze_screen_profile`](@ref), [`QM_analyze_profiles_to_dict`](@ref), [`smooth_profile`](@ref)
+
 """
 function max_of_bspline_positions(z::AbstractVector,y::AbstractVector;
     λ0::Real=0.01, order::Int=4, n_peaks::Int=1, n_scan::Int=max(400, length(z)),sep::Real=1e-6)
@@ -183,6 +187,9 @@ res = analyze_screen_profile(0.125, hits_mm;
     width_mm=0.15, λ_raw=0.01, λ_smooth=1e-3, add_plot=true)
 
 @show res.z_max_smooth_spline_mm
+
+# See also
+[`max_of_bspline_positions`](@ref), [`QM_analyze_profiles_to_dict`](@ref), [`smooth_profile`](@ref)
 
 """
 function analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
@@ -379,6 +386,9 @@ out = QM_analyze_profiles_to_dict(run_data, atom_params;
     add_plot=true, plot_xrange=:right, λ_raw=0.01, λ_smooth=1e-3)
 
 z_first = out[1][:z_max_smooth_spline_mm]
+
+# See also
+[`analyze_screen_profile`](@ref), [`max_of_bspline_positions`](@ref), [`smooth_profile`](@ref)
 
 """
 function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParams;

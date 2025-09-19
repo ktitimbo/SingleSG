@@ -336,16 +336,44 @@ plot!(xaxis=:log10, yaxis=:log10,
 savefig(fig, joinpath(dir_load_string,"qm_peaks.$(FIG_EXT)"))
 
 
-data_range = sortslices(data[:data][2][1][:,[5,7,8]]; dims = 1, by = row -> (row[1], row[3], row[2]))
-lo, hi = 0.0, 200.0
-mask = (data_range[:, 1] .>= lo) .& (data_range[:, 1] .<= hi)
+data[:Icoils]
 
+data_range = sortslices(vcat(data[:data][29][7][:,[5,7,8]],data[:data][29][8][:,[5,7,8]]); dims = 1, by = row -> (row[1], row[3], row[2]))
+lo, hi = 300.0, 500.0;
+mask = (data_range[:, 1] .>= lo) .& (data_range[:, 1] .<= hi)
 A_in = data_range[mask,:]
 
-analyze_screen_profile(0.01, A_in[:,2:3]; manifold=:F_top, nx_bins = 32, nz_bins = 2, 
+# Fixed analysis limits
+xlim = (-8.0, 8.0)
+zlim = (-12.5, 12.5)
+xmin, xmax = xlim
+zmin, zmax = zlim
+x_bin_size = 1e3 * 4 * 6.5e-6
+z_bin_size = 1e3 * 4 * 6.5e-6
+x_half_range = max(abs(xmin), abs(xmax))
+kx = max(1, ceil(Int, x_half_range / x_bin_size))
+centers_x = collect((-kx:kx) .* x_bin_size)
+edges_x = collect((-(kx + 0.5)) * x_bin_size : x_bin_size : ((kx + 0.5) * x_bin_size))
+z_half_range = max(abs(zmin), abs(zmax))
+kz = max(1, ceil(Int, z_half_range / z_bin_size))
+centers_z = collect((-kz:kz) .* z_bin_size)
+edges_z = collect((-(kz + 0.5)) * z_bin_size : z_bin_size : ((kz + 0.5) * z_bin_size))
+x = @view A_in[:, 2]
+z = @view A_in[:, 3]
+h = fit(Histogram, (1e3*x, 1e3*z), (edges_x, edges_z))
+counts = h.weights  # size: (length(centers_x), length(centers_z))
+heatmap(centers_x, centers_z, counts', xlabel="x (mm)", ylabel="z (mm)", title="2D Histogram")
+
+
+
+s = analyze_screen_profile(0.01, 1e3*A_in[:,[2,3]]; manifold=:lvl1, 
+    nx_bins = 1, nz_bins = 2, 
     add_plot=true, plot_xrange= :all,
     width_mm=0.150, λ_raw=0.01, λ_smooth = 1e-3, 
-    mode=:probability); 
+    mode=:density)
+
+plot(s.z_profile[:,1],s.z_profile[:,2])
+
 
 analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
     manifold::Symbol = :F_top, nx_bins::Integer = 2, nz_bins::Integer = 2, 
