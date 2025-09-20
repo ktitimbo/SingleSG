@@ -61,7 +61,7 @@ data_JSF = OrderedDict(
 
 
 parent_folder = joinpath(@__DIR__, "analysis_data")
-data_directories = ["20250814", "20250820", "20250825"];
+data_directories = ["20250814", "20250820", "20250825","20250919"];
 magnification_factor = 1.2697 ;
 # only load a few columns from each fw_data.csv
 sel = [:I_coil_mA, :F1_z_centroid_mm, :F1_z_centroid_se_mm]; 
@@ -138,151 +138,131 @@ println("Experiment analysis finished!")
 alert("Experiment analysis finished!")
 
 
+m_sets = map(d -> DataReading.collect_fw_map(
+                 parent_folder;
+                 select=sel,
+                 filename="fw_data.csv",
+                 report_name="experiment_report.txt",
+                 sort_on=:binning,
+                 data_dir_filter=d
+             ), data_directories)
 
 
-I_coils_ssk = 1e-3 * [0,2,4,6,8,10,12,16,22,32,44,58,74,94,114,134,154,174,195,215,236,260,285,310,340,380,420,460,500,550,600,750,850];
-kis         = [1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5]
-# N=4e6 
-cqd_set1 = CSV.read("./simulation_data/results_CQD_20250819T150057.csv",DataFrame; header=false);   # n_bins = 1
-cqd_set2 = CSV.read("./simulation_data/results_CQD_20250820T180324.csv",DataFrame; header=false);   # n_bins = 2
-cqd_set3 = CSV.read("./simulation_data/results_CQD_20250821T174824.csv",DataFrame; header=false);   # n_bins = 4
-cqd_set4 = CSV.read("./simulation_data/results_CQD_20250825T114325.csv",DataFrame; header=false);   # n_bins = 8
-cqd_set5 = CSV.read("./simulation_data/results_CQD_20250825T100550.csv",DataFrame; header=false);   # n_bins = 2
+# desired values
+selected_bin = 4
+selected_spl = 0.02
 
-qm_set1  = CSV.read("./simulation_data/results_QM_20250819T150057.csv",DataFrame; header=false);    # n_bins = 1
-qm_set2  = CSV.read("./simulation_data/results_QM_20250820T180324.csv",DataFrame; header=false);    # n_bins = 2
-qm_set3  = CSV.read("./simulation_data/results_QM_20250821T174824.csv",DataFrame; header=false);    # n_bins = 4
-qm_set4  = CSV.read("./simulation_data/results_QM_20250825T114325.csv",DataFrame; header=false);    # n_bins = 8
-qm_set5  = CSV.read("./simulation_data/results_QM_20250825T100550.csv",DataFrame; header=false);    # n_bins = 2
-
-
-
-
-m_1 = DataReading.collect_fw_map(parent_folder; 
-                                select=sel, 
-                                filename="fw_data.csv", 
-                                report_name="experiment_report.txt", 
-                                sort_on=:binning, 
-                                data_dir_filter=data_directories[1]);
-
-m_2 = DataReading.collect_fw_map(parent_folder; 
-                                select=sel, 
-                                filename="fw_data.csv", 
-                                report_name="experiment_report.txt", 
-                                sort_on=:binning, 
-                                data_dir_filter=data_directories[2]);
-
-m_3 = DataReading.collect_fw_map(parent_folder; 
-                                select=sel, 
-                                filename="fw_data.csv", 
-                                report_name="experiment_report.txt", 
-                                sort_on=:binning, 
-                                data_dir_filter=data_directories[3]);
-
-key_run = ["20250820T171704","20250825T183729","20250828T130751"]
-
-# CO-QUANTUM DYNAMICS
-fig1 = plot(
-    xlabel="Current (A)",
-    ylabel=L"$z_{F_{1}}$ (mm)"
-)
-cols = palette(:thermal, length(kis))
-for i in eachindex(kis)
-    plot!(fig1, cqd_set2[3:end,1], abs.(cqd_set2[3:end,23+i]), line=(:solid, cols[i], 1), label=L"$k_{i} = %$(kis[i])\times 10^{-6}$" )
+# exact match (safe for Int; Float uses == here)
+key_run = Vector{Union{Nothing,String}}(undef, length(m_sets))
+for (midx,ms) in enumerate(m_sets)
+    keys_match = [k for (k, nt) in ms if nt.binning == selected_bin && nt.smoothing == selected_spl]
+    key_run[midx] = isempty(keys_match) ? nothing : first(keys_match)
 end
-plot!(fig1, 
-    xaxis=:log10,
-    yaxis=:log10,
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(1e-3,1.2),
-    ylims=(1e-4,5),
-    legend=:outerright,
-    legend_title = L"sim $n=2$",
-    size=(800,400),
+
+# ---------- common axis + style ----------
+xticks_vals = 10.0 .^ (-6:-1); xticks_vals = vcat(xticks_vals, 1.0)
+yticks_vals = 10.0 .^ (-6:-1); yticks_vals = vcat(yticks_vals, 1.0)
+xtick_labels = [L"10^{%$k}" for k in -6:-1]; xtick_labels = vcat(xtick_labels, L"10^{0}")
+ytick_labels = [L"10^{%$k}" for k in -6:-1]; ytick_labels = vcat(ytick_labels, L"10^{0}")
+
+# ---------- experimental series (4 runs) ----------
+# pack your inputs to avoid repetition
+runs    = key_run
+dirs    = data_directories
+colors  = [:black, :red, :blue, :purple]
+
+fig1 = plot(
+    xlabel = "Current (A)",
+    ylabel = L"$z_{F_{1}}$ (mm)",
+    xaxis  = :log10,
+    yaxis  = :log10,
+    xticks = (xticks_vals, xtick_labels),
+    yticks = (yticks_vals, ytick_labels),
+    xlims  = (1e-3, 1.2),
+    ylims  = (1e-4, 5.0),
+    legend = :outerright,
+    legend_title = L"sim $n=%$(selected_bin)$",
+    size   = (900, 420),
     left_margin = 4mm,
     bottom_margin = 3mm,
 )
-plot!(fig1,abs.(m_1[key_run[1]][3][2:end,"I_coil_mA"]/1000), abs.(m_1[key_run[1]][3][2:end,"F1_z_centroid_mm"]/magnification_factor), 
-    # yerror = sqrt(30)*m[key][3][3:end,"F1_z_centroid_se_mm"],
-    label="Experiment $(data_directories[1]): n=$(m_1[key_run[1]][1]) | λ=$(m_1[key_run[1]][2])", 
-    color=:black,
-    marker=(:circle,:black,2),
-    markerstrokewidth = 1,
-    markerstrokecolor=:black
-)
-plot!(fig1,abs.(m_2[key_run[2]][3][2:end,"I_coil_mA"]/1000), abs.(m_2[key_run[2]][3][2:end,"F1_z_centroid_mm"]/magnification_factor), 
-    # yerror = sqrt(30)*m[key][3][3:end,"F1_z_centroid_se_mm"],
-    label="Experiment $(data_directories[2]): n=$(m_2[key_run[2]][1]) | λ=$(m_2[key_run[2]][2])", 
-    color=:red,
-    marker=(:circle,:red,2),
-    markerstrokewidth = 1,
-    markerstrokecolor=:red
-)
-plot!(fig1,abs.(m_3[key_run[3]][3][2:end,"I_coil_mA"]/1000), abs.(m_3[key_run[3]][3][2:end,"F1_z_centroid_mm"]/magnification_factor), 
-    # yerror = sqrt(30)*m[key][3][3:end,"F1_z_centroid_se_mm"],
-    label="Experiment $(data_directories[3]): n=$(m_3[key_run[3]][1]) | λ=$(m_3[key_run[3]][2])", 
-    color=:blue,
-    marker=(:circle,:blue,2),
-    markerstrokewidth = 1,
-    markerstrokecolor=:blue
-)
-plot!(fig1,data_JSF[:exp][:,1],data_JSF[:exp][:,2],
-    label="Alexander's data",
-    line=(:dash,:green, 2),
+for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, colors))
+    # columns and transforms
+    I_A   = M[r][3][2:end, "I_coil_mA"] ./ 1000            # mA -> A, abs
+    z_mm  = M[r][3][2:end, "F1_z_centroid_mm"] ./ magnification_factor
+
+    println(hcat(I_A,z_mm))
+
+    # guard for log10 axes: filter out non-positive values
+    I_A   = ifelse.(I_A .> 0, I_A, missing)
+    z_mm  = ifelse.(z_mm .> 0, z_mm, missing)
+
+    plot!(fig1, I_A, z_mm;
+        label = "Experiment $(d): n=$(M[r][1]) | λ=$(M[r][2])",
+        marker = (:circle,c,3),
+        markerstrokewidth = 1,
+        markerstrokecolor = c,
+        line = (:solid,c,1) # pure markers; change to :solid if you want lines
+    )
+
+    # If you later want y-error bars, uncomment and make sure the column exists:
+    # yerr = sqrt(30) .* M[r][3][3:end, "F1_z_centroid_se_mm"] ./ magnification_factor
+    # plot!(fig1, I_A, z_mm; yerror = yerr, label = "", color = c, lw = 0)
+end
+# ---------- Alexander's data ----------
+plot!(fig1,
+    data_JSF[:exp][:, 1],
+    data_JSF[:exp][:, 2],
+    label = "Alexander's data",
+    line = (:dash, :green, 2),
 )
 display(fig1)
-saveplot(fig1,"bin_vs_smoothing_log")
+savefig(fig1, "bin_vs_smoothing_log.pdf")   # use explicit extension; pdf/png/svg as you like
 
 
 fig2 = plot(
-    xlabel="Current (A)",
-    ylabel=L"$z_{F_{1}}$ (mm)"
-)
-cols = palette(:thermal, length(kis))
-for i in eachindex(kis)
-    plot!(fig2, cqd_set2[3:end,1], abs.(cqd_set2[3:end,23+i]), line=(:solid, cols[i], 1), label=L"$k_{i} = %$(kis[i])\times 10^{-6}$" )
-end
-plot!(fig2, 
-    # xaxis=:log10,
-    # yaxis=:log10,
-    # xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    # yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(1e-3,1.2),
-    ylims=(1e-4,2),
-    legend=:outerright,
-    legend_title = L"sim $n=2$",
-    size=(800,400),
+    xlabel = "Current (A)",
+    ylabel = L"$z_{F_{1}}$ (mm)",
+    # xticks = (xticks_vals, xtick_labels),
+    # yticks = (yticks_vals, ytick_labels),
+    xlims  = (1e-3, 1.2),
+    ylims  = (1e-4, 2.0),
+    legend = :outerright,
+    legend_title = L"sim $n=%$(selected_bin)$",
+    size   = (900, 420),
     left_margin = 4mm,
     bottom_margin = 3mm,
 )
-plot!(fig2,abs.(m_1[key_run[1]][3][2:end,"I_coil_mA"]/1000), abs.(m_1[key_run[1]][3][2:end,"F1_z_centroid_mm"]/magnification_factor), 
-    # yerror = sqrt(30)*m[key][3][3:end,"F1_z_centroid_se_mm"],
-    label="Experiment $(data_directories[1]): n=$(m_1[key_run[1]][1]) | λ=$(m_1[key_run[1]][2])", 
-    color=:black,
-    marker=(:circle,:black,2),
-    markerstrokewidth = 1,
-    markerstrokecolor=:black
-)
-plot!(fig2,abs.(m_2[key_run[2]][3][2:end,"I_coil_mA"]/1000), abs.(m_2[key_run[2]][3][2:end,"F1_z_centroid_mm"]/magnification_factor), 
-    # yerror = sqrt(30)*m[key][3][3:end,"F1_z_centroid_se_mm"],
-    label="Experiment $(data_directories[2]): n=$(m_2[key_run[2]][1]) | λ=$(m_2[key_run[2]][2])", 
-    color=:red,
-    marker=(:circle,:red,2),
-    markerstrokewidth = 1,
-    markerstrokecolor=:red
-)
-plot!(fig2,abs.(m_3[key_run[3]][3][2:end,"I_coil_mA"]/1000), abs.(m_3[key_run[3]][3][2:end,"F1_z_centroid_mm"]/magnification_factor), 
-    # yerror = sqrt(30)*m[key][3][3:end,"F1_z_centroid_se_mm"],
-    label="Experiment $(data_directories[3]): n=$(m_3[key_run[3]][1]) | λ=$(m_3[key_run[3]][2])", 
-    color=:blue,
-    marker=(:circle,:blue,2),
-    markerstrokewidth = 1,
-    markerstrokecolor=:blue
-)
-plot!(fig2,data_JSF[:exp][:,1],data_JSF[:exp][:,2],
-    label="Alexander's data",
-    line=(:dash,:green, 2),
+for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, colors))
+    # columns and transforms
+    I_A   = M[r][3][2:end, "I_coil_mA"] ./ 1000            # mA -> A, abs
+    z_mm  = M[r][3][2:end, "F1_z_centroid_mm"] ./ magnification_factor
+
+    println(hcat(I_A,z_mm))
+
+    # guard for log10 axes: filter out non-positive values
+    I_A   = ifelse.(I_A .> 0, I_A, missing)
+    z_mm  = ifelse.(z_mm .> 0, z_mm, missing)
+
+    plot!(fig2, I_A, z_mm;
+        label = "Experiment $(d): n=$(M[r][1]) | λ=$(M[r][2])",
+        marker = (:circle,c,3),
+        markerstrokewidth = 1,
+        markerstrokecolor = c,
+        line = (:solid,c,1) # pure markers; change to :solid if you want lines
+    )
+
+    # If you later want y-error bars, uncomment and make sure the column exists:
+    # yerr = sqrt(30) .* M[r][3][3:end, "F1_z_centroid_se_mm"] ./ magnification_factor
+    # plot!(fig1, I_A, z_mm; yerror = yerr, label = "", color = c, lw = 0)
+end
+# ---------- Alexander's data ----------
+plot!(fig2,
+    data_JSF[:exp][:, 1],
+    data_JSF[:exp][:, 2],
+    label = "Alexander's data",
+    line = (:dash, :green, 2),
 )
 display(fig2)
-saveplot(fig2,"bin_vs_smoothing_lin")
+savefig(fig2, "bin_vs_smoothing_lin.pdf")   # use explicit extension; pdf/png/svg as you like
+
