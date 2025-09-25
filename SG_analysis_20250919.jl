@@ -53,8 +53,8 @@ MyExperimentalAnalysis.OUTDIR   = OUTDIR;
 
 # Data Directory
 data_directory = "20250919/" ;
-outfile     = joinpath(data_directory, "data.jld2")
-outfile2    = joinpath(data_directory, "data_processed.jld2")
+outfile_raw     = joinpath(data_directory, "data.jld2")
+outfile_processed    = joinpath(data_directory, "data_processed.jld2")
 # Previous experiment data for comparison
 data_JSF = OrderedDict(
     :exp => hcat(
@@ -109,14 +109,14 @@ z_mm    = 1e3 .* pixel_positions(z_pixels, n_bins, exp_pixelsize_z)
 std_profiles = true
 
 # Importing data
-if !isfile(outfile2) # check if the processed images exists
-    if !isfile(outfile) # check if the raw data exists
-        @info "Not found → building $outfile"
-        data_raw = stack_data(data_directory; order=:desc, keynames=("BG","F1","F2"))
-        jldsave(outfile, data=data_raw)
+if !isfile(outfile_processed) # check if the processed images exists
+    if !isfile(outfile_raw) # check if the raw data exists
+        @info "Not found → building $outfile_raw"
+        data_raw = stack_data(data_directory; order=:asc, keynames=("BG","F1","F2"))
+        jldsave(outfile_raw, data=data_raw)
         data_raw = nothing
     else
-        @info "Found $outfile → skipping build"
+        @info "Found $outfile_raw → skipping build"
     end
 
     # Background and Flat with no binning
@@ -139,20 +139,21 @@ if !isfile(outfile2) # check if the processed images exists
     bottom_margin=3mm)
     saveplot(fig, "dark_flat")
 
-    data_raw = load(outfile)["data"]
+    data_raw = load(outfile_raw)["data"]
     data_processed = build_processed_dict(data_raw, img_dk,img_fl)
-    jldsave(outfile2, data=data_processed)
+    jldsave(outfile_processed, data=data_processed)
     data_processed = nothing
     data_raw = nothing
 else
-    @info "Found $outfile2 → skipping build"
+    @info "Found $outfile_processed → skipping build"
 end
-data_processed = load(outfile2)["data"]
+data_processed = load(outfile_processed)["data"]
 
 Icoils = data_processed[:Currents]
 nI = length(Icoils)
 
-fig_I0 = plot(abs.(reverse(Icoils)), 
+fig_I0 = plot(Icoils, 
+    yerror = data_processed[:CurrentsError],
     seriestype=:scatter,
     label = "Currents sampled",
     marker = (:circle, :white, 2),
@@ -163,7 +164,7 @@ plot!(
     yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$", :log),
     ylim = (1e-6,1),
     title = "Coil Currents",
-    label = "20250725",
+    label = "20250919",
     legend = :bottomright,
     grid = true,
     minorgrid = true,
@@ -177,7 +178,7 @@ plot!(
     guidefontsize=14,
     legendfontsize=10,
 );
-idx = findlast(<(0), reverse(Icoils))
+idx = findlast(<(0), Icoils)
 if isnothing(idx)
     @warn "No negative values in Icoils, skipping vspan"
 else
@@ -192,23 +193,17 @@ saveplot(fig_I0, "current_range")
 
 
 # --- Compute F1 / F2 mean profiles ----------------------------------------
-profiles_F1 = extract_profiles(data_processed, :F1ProcessedImages, nI, z_pixels; n_bin=n_bins);
-profiles_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels; n_bin=n_bins);
+profiles_F1 = extract_profiles(data_processed, :F1ProcessedImages, nI, z_pixels; n_bin=n_bins, with_error=true);
+profiles_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels; n_bin=n_bins, with_error=true);
 
-if std_profiles
-    prof_F1 = extract_profiles(data_processed, :F1ProcessedImages, nI, z_pixels; n_bin=n_bins, with_std=true);
-    prof_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels; n_bin=n_bins, with_std=true);
-    jldsave(joinpath(OUTDIR, "profiles.jld2"),
-        profiles = OrderedDict(:Icoils => reverse(Icoils), 
-                                :F1_profile => reverse(prof_F1.mean, dims=1),
-                                :F1_err     => reverse(prof_F1.std, dims=1), 
-                                :F2_profile => reverse(prof_F2.mean, dims=1),
-                                :F2_err     => reverse(prof_F2.std, dims=1)
-                    )
-    )
-end
-
-
+jldsave(joinpath(OUTDIR, "profiles.jld2"),
+    profiles = OrderedDict(:Icoils => Icoils, 
+                            :F1_profile => profiles_F1.mean,
+                            :F1_err     => profiles_F1.sem,
+                            :F2_profile => profiles_F2.mean,
+                            :F2_err     => profiles_F2.sem,
+                )
+)
 
 # --- Plot ------------------------------------------------------------------
 fig1 = plot_profiles(z_mm, profiles_F1, Icoils; title="F1 processed data")
@@ -230,10 +225,15 @@ saveplot(fig, "mean_profiles_processed")
 f1_mean_max = my_process_mean_maxima("F1", data_processed, n_bins; half_max=true, λ0=λ0)
 f2_mean_max = my_process_mean_maxima("F2", data_processed, n_bins; half_max=true, λ0=λ0)
 
+
 data_centroid = (f1_mean_max .+ f2_mean_max)/2
-centroid_mean = mean(data_centroid, Weights(nI-1:-1:0))
+centroid_mean = post_threshold_mean(data_centroid, Icoils; 
+                    threshold=0.010,
+                    half_life=5, # in samples
+                    eps=1e-6,
+                    weighted=true) #mean(data_centroid, Weights(nI-1:-1:0))
 centroid_std = std(data_centroid, Weights(nI-1:-1:0); corrected=false) / sqrt(nI)
-fig = plot(abs.(Icoils), data_centroid,
+fig = plot(Icoils, data_centroid,
     label=false,
     color=:purple,
     marker=(:cross,5),

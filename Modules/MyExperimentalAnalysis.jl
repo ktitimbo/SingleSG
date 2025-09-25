@@ -746,41 +746,86 @@ module MyExperimentalAnalysis
     end
 
     """
-        stack_data(data_directory;
+        stack_data(data_directory::AbstractString;
                 pattern = r"Cur(.*?)A",
+                ampmeter_scale = r"Ran(.*?)A",
+                error_factor = 0.015,
                 order::Symbol = :desc,
                 keynames = ("BG","F1","F2"),
                 verbose::Bool = true)
 
-    Scan `data_directory` for .mat files whose paths contain `Cur...A`.
-    Parse the current tokens (`...` may end with `u` or `m`), convert to amperes,
-    sort by current (default `:desc`), and stack variables into 4-D arrays:
+    Load and stack `F1`, `F2`, and `BG` image cubes from `.mat` files in `data_directory`,
+    parsing coil currents from filenames and computing a per-file current uncertainty from
+    an ammeter range token.
 
-    Returns an OrderedDict with:
-    :Directory :: String
-    :Files     :: Vector{String}              # ordered to match currents
-    :Currents  :: Vector{Float64}             # in amperes, ordered
-    :F1_data   :: Array{T,4}  (X,Y,T,N)
-    :F2_data   :: Array{T,4}
-    :BG_data   :: Array{T,4}
+    # Filename expectations
+    Each filename must contain **both**:
+    - a current token matching `pattern` (default: `r"Cur(.*?)A"`), and
+    - a range token matching `ampmeter_scale` (default: `r"Ran(.*?)A"`).
 
-    Keyword args:
-    - `pattern`: regex used to capture the token between `Cur` and `A` (first capture group).
-    - `order`: `:asc` or `:desc` sort by current magnitude.
-    - `keynames`: tuple with the variable names in the .mat files (default ("BG","F1","F2")).
+    In each regex, the **first capture group** `(.*?)` must yield a numeric token that may end
+    with a unit suffix:
+    - `"…u"` → micro (×1e-6 A)
+    - `"…m"` → milli (×1e-3 A)
+    - no suffix → amps (×1 A)
+
+    Examples: `Cur373mA_Bin1x4_Exp2000ms_Ran10mA`, `Cur990uA_…_Ran1000uA`.
+
+    # Arguments
+    - `data_directory`: Folder containing the `.mat` files to load.
+    - `pattern`: Regex used to extract the coil current from each filename.
+    - `ampmeter_scale`: Regex used to extract the ammeter range (used for uncertainty).
+    - `error_factor`: Multiplicative factor applied to the parsed range to form the current
+    uncertainty; `CurrentsError[i] = error_factor * Ran[i]` (default `0.015`).
+    - `order`: Sort order for the stacked data by current; `:asc` or `:desc` (default).
+    - `keynames`: Tuple `(BG, F1, F2)` giving the MAT variable names to read from each file.
+    - `verbose`: If `true`, logs progress every 5 files.
+
+    # Returns
+    An `OrderedDict` with:
+    - `:Directory::String` — the input directory.
+    - `:Files::Vector{String}` — file paths in sorted order.
+    - `:Currents::Vector{Float64}` — parsed currents in amperes.
+    - `:CurrentsError::Vector{Float64}` — per-file uncertainties in amperes,
+    computed as `error_factor * Ran` (units converted as above).
+    - `:F1_data::Array{T,4}`, `:F2_data::Array{T,4}`, `:BG_data::Array{T,4}` —
+    arrays of shape `(Nx, Nz, Nframes, Ncurrents)`.
+
+    # Behavior & assumptions
+    - All files must have identical shapes for `BG`, `F1`, and `F2`; the first file defines
+    `(Nx, Nz, Nframes)` and element type `T`.
+    - Sorting is performed by `:Currents`, and `:Files`/`:CurrentsError` are permuted to match.
+    - Throws an error if no files match, tokens cannot be parsed, required keys are missing,
+    or array sizes differ.
+
+    # Example
+    ```julia
+    st = stack_data("20250814"; order = :asc)
+    st[:Currents]        # => e.g., [9.90e-4, 3.73e-1, …]
+    st[:CurrentsError]   # => 0.015 .* parsed Ran values (A)
+    size(st[:F1_data])   # => (Nx, Nz, Nframes, length(st[:Currents]))
     """
     function stack_data(data_directory::AbstractString;
                         pattern = r"Cur(.*?)A",
+                        ampmeter_scale = r"Ran(.*?)A",
+                        error_factor = 0.015,
                         order::Symbol = :desc,
                         keynames = ("BG","F1","F2"),
                         verbose::Bool = true)
 
+        # ----------------------------- -----------------------------------------
+        parse_amp(tok::AbstractString) =
+            endswith(tok, "u") ? parse(Float64, chop(tok; tail=1)) * 1e-6 :
+            endswith(tok, "m") ? parse(Float64, chop(tok; tail=1)) * 1e-3 :
+                                parse(Float64, tok)
+        # -----------------------------------------------------------------------
+                        
         # 1) Collect only .mat files that match the pattern
         all_files = readdir(data_directory; join=true)
         files = [f for f in all_files if endswith(lowercase(f), ".mat") && occursin(pattern, f)]
         @assert !isempty(files) "No matching .mat files found in $data_directory"
 
-        # 2) Extract current tokens and convert to amperes
+        # 2a) Extract current tokens and convert to amperes
         tokens = Vector{SubString{String}}(undef, length(files))
         for (i, f) in enumerate(files)
             m = match(pattern, f)
@@ -788,9 +833,17 @@ module MyExperimentalAnalysis
             tokens[i] = m.captures[1]  # e.g. "-7u", "117m", "12930u"
         end
 
-        currents = [endswith(tok, "u") ? parse(Float64, chop(tok, tail=1)) * 1e-6 :
-                    endswith(tok, "m") ? parse(Float64, chop(tok, tail=1)) * 1e-3 :
-                    parse(Float64, tok) for tok in tokens]
+        # 2b) Extract uncertainties of the currents
+        ran_tokens = Vector{SubString{String}}(undef, length(files))
+        for (i, f) in enumerate(files)
+            mr = match(ampmeter_scale, f)
+            @assert mr !== nothing "Couldn't parse range (Ran...A) from: $f"
+            ran_tokens[i] = mr.captures[1]  # e.g. "10m", "1000m", "500u"
+        end
+
+        # Convert both Cur and Ran to amps (use the helper)
+        currents = parse_amp.(tokens)
+        ran_vals = parse_amp.(ran_tokens)   # amplitude in A (from Ran...)
 
         # 3) Sort by current (asc/desc)
         p = order === :desc ? sortperm(currents; rev=true) :
@@ -798,6 +851,7 @@ module MyExperimentalAnalysis
             throw(ArgumentError("order must be :asc or :desc"))
         files    = files[p]
         currents = Float64.(currents[p])
+        currents_errors = error_factor * Float64.(ran_vals[p])
 
         # 4) Probe sizes & eltype from first file
         keyBG, keyF1, keyF2 = keynames
@@ -831,12 +885,13 @@ module MyExperimentalAnalysis
         end
 
         return OrderedDict(
-            :Directory => String(data_directory),
-            :Files     => files,
-            :Currents  => currents,   # amperes
-            :F1_data   => F1,         # 540×2560×30×N
-            :F2_data   => F2,
-            :BG_data   => BG
+            :Directory      => String(data_directory),
+            :Files          => files,
+            :Currents       => currents,        # amperes
+            :CurrentsError  => currents_errors,  # amperes (0.015 * Ran in A)
+            :F1_data        => F1,              # 540×2560×number of images× number of currents
+            :F2_data        => F2,
+            :BG_data        => BG
         )
     end
 
@@ -1253,8 +1308,9 @@ module MyExperimentalAnalysis
 
     return OrderedDict(
         :Currents            => raw_data[:Currents],
-        :F1ProcessedImages   => F1proc,   # size: 540×2560×30×25
-        :F2ProcessedImages   => F2proc,   # size: 540×2560×30×25
+        :CurrentsError       => raw_data[:CurrentsError],
+        :F1ProcessedImages   => F1proc,   # size: 540 × 2560 × number of images× number of currents
+        :F2ProcessedImages   => F2proc,   # size: 540 × 2560 × number of images× number of currents
     )
     end
 
@@ -1312,12 +1368,12 @@ module MyExperimentalAnalysis
     - Binning is along z (the 2nd dimension).
     """
     function extract_profiles(data_processed, key::Symbol, nI::Integer, z_pixels::Integer;
-                            T::Type{<:Real}=Float64, n_bin::Integer=1, with_std::Bool = false)
+                            T::Type{<:Real}=Float64, n_bin::Integer=1, with_error::Bool = false)
         @assert n_bin ≥ 1 "n_bin must be ≥ 1"
         @assert z_pixels % n_bin == 0 "z_pixels ($z_pixels) must be divisible by n_bin ($n_bin)"
         z_out = div(z_pixels, n_bin)
         P = Matrix{T}(undef, nI, z_out)
-        Q = with_std ? Matrix{T}(undef, nI, z_out) : nothing  # temporal std (optional)
+        Q = with_error ? Matrix{T}(undef, nI, z_out) : nothing  # SEM (optional)
 
         @inbounds @views for j in 1:nI
             # stack_raw :: (Nx, Nz, Nframes)
@@ -1333,9 +1389,10 @@ module MyExperimentalAnalysis
                 # Mean across frames → (Nz,)
                 prof = dropdims(mean(xmean; dims=3); dims=(1,3))
                 P[j, :] = prof
-                if with_std
+                if with_error
                     σ_std = dropdims(std(xmean; dims=3, corrected=true); dims=(1,3))
-                    Q[j, :] = σ_std
+                    σ_sem = σ_std ./ sqrt(Nf) 
+                    Q[j, :] = σ_sem 
                 end 
             else
                 # Bin z first: reshape to (Nx, n_bin, z_out, Nframes)
@@ -1345,14 +1402,15 @@ module MyExperimentalAnalysis
                 # Mean across frames → (z_out,)
                 prof_binned = dropdims(mean(xbmean; dims=4); dims=(1,2,4))
                 P[j, :] = prof_binned
-                if with_std
+                if with_error
                     σ_std = dropdims(std(xbmean; dims=4, corrected=true); dims=(1,2,4))
-                    Q[j, :] = σ_std
+                    σ_sem = σ_std ./ sqrt(Nf) 
+                    Q[j, :] = σ_sem  
                 end
             end
         end
 
-        return with_std ? (mean = P, std = Q::Matrix{T}) : P
+        return with_error ? (mean = P, sem = Q::Matrix{T}) : P
     end
 
     """
@@ -1362,12 +1420,16 @@ module MyExperimentalAnalysis
     Returns the figure.
     """
     function plot_profiles(z_mm, profiles, Icoils; title::AbstractString)
-        nI = size(profiles, 1)
+        nI = size(profiles.mean, 1)
         cols = palette(:darkrainbow, nI)
         fig = plot(title=title, xlabel=L"$z$ (mm)", ylabel="Intensity (au)")
         @inbounds for i in 1:nI
-            plot!(fig, z_mm, profiles[i, :],
+            plot!(fig, 
+                z_mm, profiles.mean[i, :],
+                ribbon = profiles.sem[i, :],
                 line = (:solid, cols[i], 1),
+                fillcolor = cols[i],
+                fillalpha = 0.25,
                 label = L"$I_{c}=%$(round(1e3*Icoils[i]; digits=3))\,\mathrm{mA}$")
         end
         plot!(fig, legend=:outerright, legend_columns=2, foreground_color_legend=nothing)
@@ -1375,7 +1437,32 @@ module MyExperimentalAnalysis
     end
 
 
+    function post_threshold_mean(x, Icoils; threshold,
+                                   half_life::Real=5, # in samples
+                                   eps::Real=1e-6,
+                                   weighted::Bool=true)
+        @assert length(x) == length(Icoils)
+        @assert eps ≥ 0
+        idx0 = findfirst(>(threshold), Icoils)
+        @assert idx0 !== nothing "No Icoils entry greater than threshold."
 
+        if !weighted
+            return mean(x)  # plain mean of post-threshold tail
+        end
+
+        n  = length(x)
+        τ  = half_life / log(2)                 # convert half-life to exp scale
+
+        # Build weights for ALL entries:
+        # - Pre-threshold indices get tiny weight `eps`
+        # - From idx0 onward, exponentially increasing weights (recent samples dominate)
+        w = fill(eps, n)
+        w[idx0:end] .= exp.( (0:(n - idx0)) ./ τ )
+
+        println("weights = $w")
+
+        return mean(x, Weights(w))
+    end
 
     # Public API
     export saveplot, 
@@ -1396,6 +1483,7 @@ module MyExperimentalAnalysis
            build_processed_dict,
            mean_z_profile,
            extract_profiles,
-           plot_profiles
+           plot_profiles,
+           post_threshold_mean
 
 end

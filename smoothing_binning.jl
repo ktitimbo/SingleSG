@@ -149,7 +149,7 @@ m_sets = map(d -> DataReading.collect_fw_map(
 
 
 # desired values
-selected_bin = 4
+selected_bin = 2
 selected_spl = 0.02
 
 # exact match (safe for Int; Float uses == here)
