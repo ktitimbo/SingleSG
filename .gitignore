@@ -5,6 +5,7 @@
 *.csv
 *.jld2
 *.pdf
+*.gif
 
 # Ignore folders
 2025*/ 
