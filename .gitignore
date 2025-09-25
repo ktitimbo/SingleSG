@@ -4,6 +4,7 @@
 *.mat
 *.csv
 *.jld2
+*.pdf
 
 # Ignore folders
 2025*/ 
