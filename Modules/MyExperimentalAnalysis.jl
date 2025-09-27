@@ -707,35 +707,37 @@ module MyExperimentalAnalysis
     - `F1_z_centroid_mm`, `F1_z_centroid_sem_mm`
     - `F2_z_centroid_mm`, `F2_z_centroid_sem_mm`
     """
-    function summarize_framewise(f1, f2, Icoils, centroid_mean, centroid_std; rev_order::Bool=false)
+    function summarize_framewise(f1, f2, Icoils, centroid_data, δz ; rev_order::Bool=false)
         @assert size(f1) == size(f2) "f1 and f2 must have the same size"
         n = size(f1, 1)
         @info "Number of frames : $(n)"
         @assert size(f1, 2) == length(Icoils) "length(Icoils) must match number of columns"
 
         # Means / std / SEMs per column
-        m1   = vec(mean(f1, dims=1));  s1   = vec(std(f1,  dims=1));  se1 = s1 ./ sqrt(n)
-        m2   = vec(mean(f2, dims=1));  s2   = vec(std(f2,  dims=1));  se2 = s2 ./ sqrt(n)
+        m1   = vec(mean(f1, dims=1));  s1   = vec(std(f1,  dims=1));  se1 = sqrt.( (s1 ./ sqrt(n)).^2 .+ δz.^2 )
+        m2   = vec(mean(f2, dims=1));  s2   = vec(std(f2,  dims=1));  se2 = sqrt.( (s2 ./ sqrt(n)).^2 .+ δz.^2 )
 
         # Differences and propagated SEMs
         Δz       = m1 .- m2
-        Δz_se   = sqrt.(s1.^2 .+ s2.^2) ./ sqrt(n)              # SEM(μ1-μ2)
+        Δz_se   = sqrt.(s1.^2 .+ s2.^2)               # SEM(μ1-μ2)
 
         # Center relative to global centroid (allow centroid_* to be scalar or length-N vectors)
-        F1_centroid      = m1 .- centroid_mean
-        F1_centroid_se  = sqrt.( (se1).^2 .+ centroid_std.^2 )
+        F1_centroid      = m1 .- centroid_data.mean
+        F1_centroid_se  = sqrt.( (se1).^2 .+ centroid_data.sem.^2 )
 
-        F2_centroid      = m2 .- centroid_mean
-        F2_centroid_se  = sqrt.( (se2).^2 .+ centroid_std.^2 )
+        F2_centroid      = m2 .- centroid_data.mean
+        F2_centroid_se  = sqrt.( (se2).^2 .+ centroid_data.sem.^2 )
 
-        I_coil_mA = -1000 .* Icoils
+        Icoil_A = Icoils
 
-        out = (; I_coil_mA,
+        out = (; Icoil_A,
                 F1_z_peak_mm=m1, F1_z_se_mm=se1,
                 F2_z_peak_mm=m2, F2_z_se_mm=se2,
                 Δz_mm=Δz, Δz_se_mm=Δz_se,
-                F1_z_centroid_mm=F1_centroid, F1_z_centroid_se_mm=F1_centroid_se,
-                F2_z_centroid_mm=F2_centroid, F2_z_centroid_se_mm=F2_centroid_se)
+                F1_z_centroid_mm=F1_centroid, 
+                F1_z_centroid_se_mm=F1_centroid_se,
+                F2_z_centroid_mm=F2_centroid, 
+                F2_z_centroid_se_mm=F2_centroid_se)
 
         if rev_order
             # reverse every vector in the NamedTuple
@@ -1437,31 +1439,60 @@ module MyExperimentalAnalysis
     end
 
 
-    function post_threshold_mean(x, Icoils; threshold,
+    function post_threshold_mean(x, Icoils, δx ; threshold,
                                    half_life::Real=5, # in samples
                                    eps::Real=1e-6,
                                    weighted::Bool=true)
         @assert length(x) == length(Icoils)
         @assert eps ≥ 0
+
+
+        if !weighted
+            # Plain mean over ALL entries (no threshold), as in your original
+            N   = length(x)
+            μ   = mean(x)
+            s   = std(x; corrected=true)
+            sem_data = (N > 1) ? s / sqrt(N) : 0.0
+            # independent per-sample measurement errors δx_i:
+            sem_meas = sqrt(sum(δx.^2)) / N              # = sqrt( (1/N^2)∑δx_i^2 )
+            sem = sqrt(sem_data^2 + sem_meas^2)
+            return (mean=μ, sem=sem)
+        end
+
+        # Weighted branch:
         idx0 = findfirst(>(threshold), Icoils)
         @assert idx0 !== nothing "No Icoils entry greater than threshold."
 
-        if !weighted
-            return mean(x)  # plain mean of post-threshold tail
-        end
-
+        # Weighted branch
         n  = length(x)
         τ  = half_life / log(2)                 # convert half-life to exp scale
 
         # Build weights for ALL entries:
-        # - Pre-threshold indices get tiny weight `eps`
-        # - From idx0 onward, exponentially increasing weights (recent samples dominate)
+        # - pre-threshold: tiny eps
+        # - post-threshold: exponentially increasing (stabilized to avoid overflow)
         w = fill(eps, n)
         w[idx0:end] .= exp.( (0:(n - idx0)) ./ τ )
-
         println("weights = $w")
+        
+        μ = mean(x, Weights(w))
 
-        return mean(x, Weights(w))
+        # normalize to probabilities ω (sum=1) for simple formulas
+        ω = w ./ sum(w)
+
+        # println("The result from the function is $(μ), whereas force is $(sum(ω .* x))")
+
+        # process SEM (from residual scatter, scaled by Kish n_eff)
+        res2    = (x .- μ).^2
+        s_w2    = sum(ω .* res2)             # weighted residual variance (biased form)
+        n_eff   = 1 / sum(ω.^2)              # Kish effective N
+        sem_proc = sqrt(s_w2 / n_eff)
+
+        # measurement SEM (from known per-sample errors δx_i)
+        sem_meas = sqrt(sum((ω.^2) .* (δx.^2)))
+
+        sem = sqrt(sem_proc^2 + sem_meas^2)
+
+        return (mean=μ, sem=sem)
     end
 
     # Public API

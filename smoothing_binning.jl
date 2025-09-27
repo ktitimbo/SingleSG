@@ -23,7 +23,7 @@ using Statistics, StatsBase, OrderedCollections
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using Printf, LaTeXStrings, PrettyTables
-using CSV, DataFrames, DelimitedFiles
+using CSV, DataFrames, DelimitedFiles, JLD2
 # Time-stamping/logging
 using Dates
 using Alert
@@ -63,8 +63,56 @@ data_JSF = OrderedDict(
 parent_folder = joinpath(@__DIR__, "analysis_data")
 data_directories = ["20250814", "20250820", "20250825","20250919"];
 magnification_factor = 1.2697 ;
+
+n_runs = length(data_directories)
+I_all  = Vector{Vector{Float64}}(undef, n_runs)
+dI_all = Vector{Vector{Float64}}(undef, n_runs)
+
+for (i, dir) in enumerate(data_directories)
+    d   = load(joinpath(@__DIR__, dir, "data_processed.jld2"), "data")
+    I_all[i]  = Vector{Float64}(d[:Currents])
+    dI_all[i] = Vector{Float64}(d[:CurrentsError])
+end
+
+fig_Is = plot(
+        title = "Coil Currents",
+        legend = :bottomright,
+        xgrid=false,
+        gridalpha = 0.25,
+        gridstyle = :dot,
+        minorgridalpha = 0.05,
+        tickfontsize=11,
+        guidefontsize=14,
+    );
+cols = palette(:darkrainbow, n_runs)
+for (idx,data_directory) in enumerate(data_directories)
+    scatter!(fig_Is,
+        idx .* ones(length(I_all[idx])), 
+        I_all[idx],
+        yerror=dI_all[idx],
+        label=false,
+        marker = (:circle, :white, 2.5),
+        markerstrokecolor = cols[idx],
+        markerstrokewidth = 1.5,)
+end
+plot!(fig_Is,
+    ylim = (1e-3,1.05),
+    xlim=(-1,n_runs+2),
+    yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$"),
+    xticks = (1:length(data_directories), data_directories),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xminorticks = false,
+    xrotation=65,
+    bottom_margin=-2mm,
+    left_margin = 6mm,
+    size=(350,720)
+)
+display(fig_Is)
+saveplot(fig_Is, "currents_sampled")
+
+
 # only load a few columns from each fw_data.csv
-sel = [:I_coil_mA, :F1_z_centroid_mm, :F1_z_centroid_se_mm]; 
+sel = [:Icoil_A, :Icoil_error_A, :F1_z_centroid_mm, :F1_z_centroid_se_mm]; 
 
 for data_directory in data_directories
     # Data Directory
@@ -77,6 +125,7 @@ for data_directory in data_directories
                                     report_name="experiment_report.txt", 
                                     sort_on=:binning, 
                                     data_dir_filter=data_directory)
+    
 
     pretty_table(hcat(collect(keys(m)),
                         [v.binning   for v in values(m)],
@@ -100,8 +149,9 @@ for data_directory in data_directories
     fig=plot(title="Experimental Data : binning & spline smoothing factor",
     titlefontsize = 12)
     for (i,key) in enumerate(key_labels)
-        plot!(fig,abs.(m[key][3][2:end,"I_coil_mA"]/1000), abs.(m[key][3][2:end,"F1_z_centroid_mm"]/magnification_factor), 
-        yerror = m[key][3][2:end,"F1_z_centroid_se_mm"],
+        plot!(fig,m[key][3][2:end,"Icoil_A"], abs.(m[key][3][2:end,"F1_z_centroid_mm"]/magnification_factor), 
+        xerror = m[key][3][2:end,"Icoil_error_A"],
+        yerror = m[key][3][2:end,"F1_z_centroid_se_mm"]/magnification_factor,
         label="n=$(m[key][1]) | λ=$(m[key][2])", 
         color=cols[i],
         marker=(:circle,cols[i],2),
@@ -124,15 +174,13 @@ for data_directory in data_directories
         legendfontsize=8,
         foreground_color_legend = nothing,
         left_margin=3mm,
+        legend_title = data_directory,
     )
     saveplot(fig,"bin_vs_smoothing_$(data_directory)")
 
     println("\n")
 
 end
-
-
-
 
 println("Experiment analysis finished!")
 alert("Experiment analysis finished!")
@@ -150,7 +198,9 @@ m_sets = map(d -> DataReading.collect_fw_map(
 
 # desired values
 selected_bin = 2
-selected_spl = 0.02
+selected_spl = 0.01
+
+
 
 # exact match (safe for Int; Float uses == here)
 key_run = Vector{Union{Nothing,String}}(undef, length(m_sets))
@@ -171,6 +221,13 @@ runs    = key_run
 dirs    = data_directories
 colors  = [:black, :red, :blue, :purple]
 
+using Dierckx
+
+spl = Spline1D(m_sets[1][runs[1]][3][!,"Icoil_A"], m_sets[1][runs[1]][3][!,"F1_z_centroid_mm"]; k=3, s=0.0)   # k=3 cubic; s=0 exact interpolate, s>0 smoothing
+
+spl(0.2)
+
+
 fig1 = plot(
     xlabel = "Current (A)",
     ylabel = L"$z_{F_{1}}$ (mm)",
@@ -178,7 +235,7 @@ fig1 = plot(
     yaxis  = :log10,
     xticks = (xticks_vals, xtick_labels),
     yticks = (yticks_vals, ytick_labels),
-    xlims  = (1e-3, 1.2),
+    xlims  = (8e-3, 1.2),
     ylims  = (1e-4, 5.0),
     legend = :outerright,
     legend_title = L"sim $n=%$(selected_bin)$",
@@ -188,16 +245,18 @@ fig1 = plot(
 )
 for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, colors))
     # columns and transforms
-    I_A   = M[r][3][2:end, "I_coil_mA"] ./ 1000            # mA -> A, abs
+    I_A   = M[r][3][2:end, "Icoil_A"]            # mA -> A, abs
+    δI_A  = M[r][3][2:end, "Icoil_error_A"]
     z_mm  = M[r][3][2:end, "F1_z_centroid_mm"] ./ magnification_factor
-
-    println(hcat(I_A,z_mm))
+    δz_mm = M[r][3][2:end, "F1_z_centroid_se_mm"] ./ magnification_factor
 
     # guard for log10 axes: filter out non-positive values
     I_A   = ifelse.(I_A .> 0, I_A, missing)
     z_mm  = ifelse.(z_mm .> 0, z_mm, missing)
 
     plot!(fig1, I_A, z_mm;
+        xerror = δI_A,
+        yerror = δz_mm,
         label = "Experiment $(d): n=$(M[r][1]) | λ=$(M[r][2])",
         marker = (:circle,c,3),
         markerstrokewidth = 1,
@@ -217,7 +276,7 @@ plot!(fig1,
     line = (:dash, :green, 2),
 )
 display(fig1)
-savefig(fig1, "bin_vs_smoothing_log.pdf")   # use explicit extension; pdf/png/svg as you like
+saveplot(fig1, "bin_vs_smoothing_log")   # use explicit extension; pdf/png/svg as you like
 
 
 fig2 = plot(
@@ -225,7 +284,7 @@ fig2 = plot(
     ylabel = L"$z_{F_{1}}$ (mm)",
     # xticks = (xticks_vals, xtick_labels),
     # yticks = (yticks_vals, ytick_labels),
-    xlims  = (1e-3, 1.2),
+    xlims  = (8e-3, 1.2),
     ylims  = (1e-4, 2.0),
     legend = :outerright,
     legend_title = L"sim $n=%$(selected_bin)$",
@@ -235,10 +294,10 @@ fig2 = plot(
 )
 for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, colors))
     # columns and transforms
-    I_A   = M[r][3][2:end, "I_coil_mA"] ./ 1000            # mA -> A, abs
+    I_A   = M[r][3][2:end, "Icoil_A"]            # mA -> A, abs
+    δI_A  = M[r][3][2:end, "Icoil_error_A"]
     z_mm  = M[r][3][2:end, "F1_z_centroid_mm"] ./ magnification_factor
-
-    println(hcat(I_A,z_mm))
+    δz_mm = M[r][3][2:end, "F1_z_centroid_se_mm"] ./ magnification_factor
 
     # guard for log10 axes: filter out non-positive values
     I_A   = ifelse.(I_A .> 0, I_A, missing)
@@ -264,5 +323,5 @@ plot!(fig2,
     line = (:dash, :green, 2),
 )
 display(fig2)
-savefig(fig2, "bin_vs_smoothing_lin.pdf")   # use explicit extension; pdf/png/svg as you like
+saveplot(fig2, "bin_vs_smoothing_lin")   # use explicit extension; pdf/png/svg as you like
 
