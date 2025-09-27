@@ -223,9 +223,10 @@ colors  = [:black, :red, :blue, :purple]
 
 using Dierckx
 
-spl = Spline1D(m_sets[1][runs[1]][3][!,"Icoil_A"], m_sets[1][runs[1]][3][!,"F1_z_centroid_mm"]; k=3, s=0.0)   # k=3 cubic; s=0 exact interpolate, s>0 smoothing
-
-spl(0.2)
+spl = Spline1D(m_sets[1][runs[1]][3][!,"Icoil_A"], m_sets[1][runs[1]][3][!,"F1_z_centroid_mm"]; k=3, s=0.0, bc="extrapolate")   # k=3 cubic; s=0 exact interpolate, s>0 smoothing
+i_xx = range(10e-3,0.775,length=100)
+plot(m_sets[1][runs[1]][3][5:end,"Icoil_A"], m_sets[1][runs[1]][3][5:end,"F1_z_centroid_mm"], xaxis=:log10,)
+plot!(i_xx,spl.(i_xx))
 
 
 fig1 = plot(
