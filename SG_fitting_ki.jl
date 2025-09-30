@@ -80,7 +80,7 @@ function fit_ki_with_error(itp, data;
 
     # --- unpack data ---
     I = collect(Float64, data[:, 1])
-    Z = collect(Float64, data[:, 2])
+    Z = collect(Float64, data[:, 3])
 
     # drop nonpositive / nonfinite (log10 requires > 0)
     mask0 = isfinite.(I) .& isfinite.(Z) .& (Z .> 0)
@@ -211,7 +211,6 @@ function load_blocks(paths::AbstractVector{<:AbstractString};
 
     data = reduce(hcat, blocks)
 
-
     rtol = 1e-8
     atol = 1e-12
     ref = zcols[1]
@@ -254,10 +253,18 @@ function simulation_paths(n_bin::Integer)
             "./simulation_data/nbin4/results_CQD_20250909T095645.csv",
         ],
         2 => [
-            "./simulation_data/nbin2/results_CQD_20250905T150919.csv",
-            "./simulation_data/nbin2/results_CQD_20250905T110806.csv",
-            "./simulation_data/nbin2/results_CQD_20250905T110819.csv",
-            "./simulation_data/nbin2/results_CQD_20250905T110834.csv",
+            "./simulation_data/nbin2/results_CQD_20250926T163642PDT.csv",
+            "./simulation_data/nbin2/results_CQD_20250926T163725PDT.csv",
+            "./simulation_data/nbin2/results_CQD_20250926T162134PDT.csv",
+            "./simulation_data/nbin2/results_CQD_20250926T162714PDT.csv",
+            "./simulation_data/nbin2/results_CQD_20250926T162801PDT.csv",
+            "./simulation_data/nbin2/results_CQD_20250926T162912PDT.csv",
+            "./simulation_data/nbin2/results_CQD_20250926T163017PDT.csv",
+            "./simulation_data/nbin2/results_CQD_20250926T163123PDT.csv",
+            # "./simulation_data/nbin2/results_CQD_20250905T150919.csv",
+            # "./simulation_data/nbin2/results_CQD_20250905T110806.csv",
+            # "./simulation_data/nbin2/results_CQD_20250905T110819.csv",
+            # "./simulation_data/nbin2/results_CQD_20250905T110834.csv",
         ],
         1 => [
             "./simulation_data/nbin1/results_CQD_20250905T190626.csv",
@@ -281,10 +288,18 @@ function simulation_paths(n_bin::Integer)
             "./simulation_data/nbin4/results_QM_20250909T095645.csv",
         ],
         2 => [
-            "./simulation_data/nbin2/results_QM_20250905T150919.csv",
-            "./simulation_data/nbin2/results_QM_20250905T110806.csv",
-            "./simulation_data/nbin2/results_QM_20250905T110819.csv",
-            "./simulation_data/nbin2/results_QM_20250905T110834.csv",
+            "./simulation_data/nbin2/results_QM_20250926T163642PDT.csv",
+            "./simulation_data/nbin2/results_QM_20250926T163725PDT.csv",
+            "./simulation_data/nbin2/results_QM_20250926T162134PDT.csv",
+            "./simulation_data/nbin2/results_QM_20250926T162714PDT.csv",
+            "./simulation_data/nbin2/results_QM_20250926T162801PDT.csv",
+            "./simulation_data/nbin2/results_QM_20250926T162912PDT.csv",
+            "./simulation_data/nbin2/results_QM_20250926T163017PDT.csv",
+            "./simulation_data/nbin2/results_QM_20250926T163123PDT.csv",
+            # "./simulation_data/nbin2/results_QM_20250905T150919.csv",
+            # "./simulation_data/nbin2/results_QM_20250905T110806.csv",
+            # "./simulation_data/nbin2/results_QM_20250905T110819.csv",
+            # "./simulation_data/nbin2/results_QM_20250905T110834.csv",
         ],
         1 => [
             "./simulation_data/nbin1/results_QM_20250905T190626.csv",
@@ -306,13 +321,13 @@ function simulation_paths(n_bin::Integer)
 end
 
 # Select experimental data
-wanted_data_dir = "20250825/" ;
+wanted_data_dir = "20250919" ;
 wanted_binning  = 2 ; 
 wanted_smooth   = 0.02 ;
 # Simulation
-ki_sim = collect(0.10:0.10:7.5);
+ki_sim = collect(0.10:0.10:8.0);
 cols = palette(:darkrainbow, length(ki_sim));
-nz_vals = [1, 2, 4, 8]
+nz_vals = [2]
 
 # Data loading
 res = DataReading.find_report_data(
@@ -329,22 +344,26 @@ else
     # z_exp = res.framewise_mm/res.magnification;
 end
 load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp = load_data[!,"I_coil_mA"]/1_000
-z_exp = load_data[!,"F1_z_centroid_mm"]/res.magnification
-z_exp_stde = load_data[!,"F1_z_centroid_se_mm"]
-data = hcat(I_exp, z_exp, z_exp_stde)
+I_exp       = load_data[!,"Icoil_A"]
+I_exp_error = load_data[!,"Icoil_error_A"]
+z_exp       = load_data[!,"F1_z_centroid_mm"]/res.magnification
+z_exp_error = load_data[!,"F1_z_centroid_se_mm"]/res.magnification
+data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[8:end,:]
 
 # pre allocation of vectors
 data_collected_exp = Vector{Matrix{Float64}}();
 data_collected_qm  = Vector{Matrix{Float64}}();
 data_collected_cqd = Vector{Matrix{Float64}}();
 qm_export  = OrderedDict{Int,Matrix{Float64}}();
-data_export = OrderedDict( :dir=>wanted_data_dir[1:end-1,], :nz_bin => wanted_binning, :λ_spline => wanted_smooth)
+data_export = OrderedDict( :dir=>wanted_data_dir, :nz_bin => wanted_binning, :λ_spline => wanted_smooth)
 for n_bin in nz_vals 
     println("\t\tUsing simulated data with binning nz=$(n_bin)")
 
-    Ic_cqd , data_sim_cqd = load_blocks(simulation_paths(n_bin).cqd; z_group=3);
-    Ic_qm  , data_sim_qm  = load_blocks(simulation_paths(n_bin).qm; z_group=3);
+    Ic_cqd , data_sim_cqd = load_blocks(simulation_paths(n_bin).cqd; z_group=3)
+    Ic_qm  , data_sim_qm  = load_blocks(simulation_paths(n_bin).qm; z_group=3)
+
+    Ic_cqd , data_sim_cqd = Ic_cqd[6:end] , data_sim_cqd[6:end,:]
+    Ic_qm  , data_sim_qm  = Ic_qm[6:end]  , data_sim_qm[6:end,:]
 
     # Quantum mechanics
     z_QMsim = vec(mapslices(x -> mean(skipmissing(x)), 
@@ -437,7 +456,7 @@ for n_bin in nz_vals
     savefig(fig,joinpath(OUTDIR,"montecarlo_cqd_$(n_bin).$(FIG_EXT)"))
 
     # Interpolated surface
-    ki_start , ki_stop = 19 , 65 #length(ki_sim)
+    ki_start , ki_stop = 20 , 50 #length(ki_sim)
     println("Interpolation in the induction term goes from $(ki_sim[ki_start])×10⁻⁶ to $(ki_sim[ki_stop])×10⁻⁶")
     itp = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
@@ -492,8 +511,14 @@ for n_bin in nz_vals
 
 
     # # choose a few points for low currents and high currents
-    if wanted_data_dir[1:end-1] == "20250820"
+    if wanted_data_dir == "20250815"
         data_fitting = data[[9,10,11,15,19:22...],:] # for fitting purposes
+    elseif wanted_data_dir == "20250820"
+        data_fitting = data[[2:4; (end-3):(end-1)], :]
+    elseif wanted_data_dir == "20250825"
+        data_fitting = data[[2:4; (end-3):(end-1)], :]
+    elseif wanted_data_dir == "20250919"
+        data_fitting = data[[2:4; (end-3):(end-1)], :]
     else
         data_fitting = data[[10,11,12,14,22:25...],:] # for fitting purposes
     end
@@ -501,15 +526,15 @@ for n_bin in nz_vals
     function loss(ki) # loss function
         # ni=12
         z_pred = itp.(data_fitting[:,1], Ref(ki))
-        return mean(abs2,log10.(z_pred) .- log10.(data_fitting[:,2]))
+        return mean(abs2,log10.(z_pred) .- log10.(data_fitting[:,3]))
     end
 
     #(
     fit_param = optimize(loss, ki_sim[ki_start], ki_sim[ki_stop],Brent())
     k_fit = Optim.minimizer(fit_param)
     # diagnostics
-    mse = loss(k_fit);
-    pred = itp.(I_exp, Ref(k_fit));
+    mse = loss(k_fit)
+    pred = itp.(I_exp, Ref(k_fit))
     coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
     #)
 
@@ -523,30 +548,30 @@ for n_bin in nz_vals
         ylabel=L"$z$ (mm)"
     )
     plot!(fig,
-        I_exp[9:end], z_exp[9:end], 
+        I_exp[8:end], z_exp[8:end], 
         label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
         seriestype=:scatter,
-        yerror = z_exp_stde[9:end],
+        yerror = z_exp_error[8:end],
         marker=(:circle,:white,1.8), 
         markerstrokecolor=:red, 
         markerstrokewidth=2
     )
     plot!(fig,
-        data_fitting[:,1], data_fitting[:,2],
+        data_fitting[:,1], data_fitting[:,3],
         seriestype=:scatter,
         label="Used for fitting",
         marker=(:xcross,:black,2),
         markerstrokecolor=:black,
         markerstrokewidth=2,)
-    # # plot!(fig,
-    # #     I_scan,itp.(I_scan, Ref(out.ci[2])),
-    # #     color=:royalblue1,
-    # #     label=false,
-    # #     linewidth=0,
-    # #     fillrange= itp.(I_scan, Ref(out.ci[1])),
-    # #     fillcolor=:royalblue1,
-    # #     fillalpha=0.35,
-    # # )
+    plot!(fig,
+        I_scan,itp.(I_scan, Ref(out.ci[2])),
+        color=:royalblue1,
+        label=false,
+        linewidth=0,
+        fillrange= itp.(I_scan, Ref(out.ci[1])),
+        fillcolor=:royalblue1,
+        fillalpha=0.35,
+    )
     plot!(fig,
         I_scan, itp.(I_scan, Ref(k_fit)),
         label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
@@ -554,9 +579,9 @@ for n_bin in nz_vals
         marker=(:xcross, :blue, 1),
     )
     plot!(fig, 
-        Ic_qm[2:end], z_QMsim[2:end],
+        Ic_qm[1:end], z_QMsim[1:end],
         label="QM + Class.Trajs.",
-        ribbon = z_QMsim_err[2:end],
+        ribbon = z_QMsim_err[1:end],
         line=(:dash,:green,2),
         fillalpha=0.23, 
         fillcolor=:green, 
@@ -571,10 +596,10 @@ for n_bin in nz_vals
         legend=:bottomright,
     )
     display(fig)
-    savefig(fig,joinpath(OUTDIR,"fitting_$(wanted_data_dir[1:end-1])_cqd_qm_$(n_bin).$(FIG_EXT)"))
+    savefig(fig,joinpath(OUTDIR,"fitting_$(wanted_data_dir)_cqd_qm_$(n_bin).$(FIG_EXT)"))
 
     push!(data_collected_qm,  hcat(Ic_qm, z_QMsim, z_QMsim_err))
-    push!(data_collected_exp, hcat(I_exp, z_exp, z_exp_stde))
+    push!(data_collected_exp, hcat(I_exp, z_exp, z_exp_error))
     push!(data_collected_cqd, hcat(I_scan, itp.(I_scan, Ref(k_fit)), k_fit*ones(length(I_scan))))
     
     println("\n")
@@ -591,7 +616,7 @@ fig= plot(
 plot!(fig, 
     data_collected_exp[1][9:end,1],
     data_collected_exp[1][9:end,2],
-    label="Experiment $(wanted_data_dir[1:end-1])",
+    label="Experiment $(wanted_data_dir)",
     seriestype=:scatter,
     yerror = data_collected_exp[1][9:end,3],
     marker=(:circle,:white,2.2), 
@@ -629,7 +654,7 @@ plot!(fig,
     left_margin=3mm,
 )
 display(fig)
-savefig(fig,joinpath(OUTDIR,"summary_$(wanted_data_dir[1:end-1]).$(FIG_EXT)"))
+savefig(fig,joinpath(OUTDIR,"summary_$(wanted_data_dir).$(FIG_EXT)"))
 
 
 data_export[:runs] = OrderedDict(
@@ -641,8 +666,232 @@ data_export[:runs] = OrderedDict(
     for (k, i) in zip(nz_vals, eachindex(nz_vals))
 )
 
-jldsave( joinpath(OUTDIR,"data_num_$(wanted_data_dir[1:end-1]).jld2"), data = data_export)
+jldsave( joinpath(OUTDIR,"data_num_$(wanted_data_dir).jld2"), data = data_export)
 
 T_END = Dates.now()
 T_RUN = Dates.canonicalize(T_END-T_START)
 println("kᵢ fitting done in $(T_RUN)")
+
+
+
+#####################################################################################################
+#####################################################################################################
+#####################################################################################################
+#####################################################################################################
+#####################################################################################################
+
+avg_data = load(joinpath(@__DIR__, "analysis_data", "smoothing_binning","data_averaged.jld2"), "data" )
+
+n_bin           = 2
+lower_cut_off   = 7
+ki_start , ki_stop = 25 , 50 
+
+qm_export  = OrderedDict{Int,Matrix{Float64}}();
+
+Ic_cqd , data_sim_cqd = load_blocks(simulation_paths(n_bin).cqd; z_group=3)
+Ic_qm  , data_sim_qm  = load_blocks(simulation_paths(n_bin).qm; z_group=3)
+
+Ic_cqd , data_sim_cqd = Ic_cqd[lower_cut_off:end] , data_sim_cqd[lower_cut_off:end,:]
+Ic_qm  , data_sim_qm  = Ic_qm[lower_cut_off:end]  , data_sim_qm[lower_cut_off:end,:]
+
+row_missing = [count(ismissing, row) for row in eachrow(ifelse.(data_sim_cqd .< 0, missing, data_sim_cqd)[:,ki_start:ki_stop])]
+sum(row_missing)
+
+# Quantum mechanics
+z_QMsim = vec(mapslices(x -> mean(skipmissing(x)), 
+            map(x-> x < 0.0 ? missing : x, data_sim_qm); 
+            dims=2))
+z_QMsim_err = vec(mapslices(r -> begin
+                xs = collect(skipmissing(r))
+                isempty(xs) ? missing : std(xs) / sqrt(length(xs))
+                end, map(x-> x < 0.0 ? missing : x, data_sim_qm); dims=2))
+
+fig=plot(title="QM simulation: n=$(n_bin)",
+    xlabel="Coil Current (A)",
+    ylabel=L"$z_{F_{1}}$ (mm)"
+)
+data_QM = hcat(Ic_qm, z_QMsim, z_QMsim_err)
+mask = (data_QM[:,1] .> 0) .& (data_QM[:,2] .> 0) .& (abs.(data_QM[:,2] .- data_QM[:,3]) .> 0)
+x = data_QM[mask, 1]; y = data_QM[mask, 2]; y_err = data_QM[mask,3]
+qm_export[n_bin] = hcat(x,y, y_err)
+plot!(fig,
+    x, y,
+    label="QM + Class.Trajs.",
+    ribbon = y_err,
+    line=(:dash,:black,2),
+    fillalpha=0.23, 
+    fillcolor=:black, 
+)
+plot!(fig, 
+    legend=:bottomright,
+    legendfontsize=6,
+    xaxis=:log10,
+    yaxis=:log10,
+)
+display(fig)
+
+# Co-Quantum Dymamics
+cols = palette(:darkrainbow, length(ki_sim));
+fig = plot(
+    xlabel=L"$I_{c}$ (A)",
+    ylabel=L"$z_{F_{1}}$ (mm)",)
+for i=ki_start:ki_stop
+    data_cqd_ki = hcat(Ic_cqd, data_sim_cqd[:, i])
+    # pretty_table(data_cqd_ki)
+    # filtered pairs
+    mask = (data_cqd_ki[:,2] .> 0) .& (data_cqd_ki[:,1] .> 0)
+    x = data_cqd_ki[mask, 1]; 
+    y = data_cqd_ki[mask, 2]
+
+    plot!(fig, 
+        x, y, 
+        label = L"$k_{i} =%$(round(ki_sim[i], digits=2)) \times 10^{-6}$",
+        line=(:solid,cols[i],1)
+    )
+end
+plot!(fig, 
+    Ic_qm, z_QMsim,
+    label="QM + Class.Trajs.",
+    ribbon = z_QMsim_err,
+    line=(:dash,:black,2),
+    fillcolor=:black,
+    fillalpha=0.35,
+)
+plot!(fig, 
+    title="CQD Simulation. n=$(n_bin)",
+    xlims=(10e-3,1.5),
+    ylims=(8e-5,2.5),
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerright,
+    legendfontsize=7,
+    legend_columns=2,
+    size=(950,600),
+    left_margin=5mm,
+)
+display(fig)
+
+# Interpolated surface
+println("Interpolation in the induction term goes from $(ki_sim[ki_start])×10⁻⁶ to $(ki_sim[ki_stop])×10⁻⁶")
+itp_ki = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+
+data_fitting = hcat(avg_data[:i_mc], ones(length(avg_data[:i_mc])), avg_data[:z_mc], avg_data[:δz_mc])[8:end,:]
+
+function loss(ki) # loss function
+    # ni=12
+    z_pred = itp_ki.(data_fitting[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data_fitting[:,3]))
+end
+
+#(
+fit_param = optimize(loss, ki_sim[ki_start], ki_sim[ki_stop],Brent())
+k_fit = Optim.minimizer(fit_param)
+# diagnostics
+mse = loss(k_fit)
+pred = itp_ki.(I_exp, Ref(k_fit))
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+#)
+
+# given: itp, data (N×2), ki_sim
+out = fit_ki_with_error(itp_ki, data_fitting; bounds=(ki_sim[ki_start], ki_sim[ki_stop]))
+@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+I_scan = logspace10(minimum(data_fitting[:,1]),1.00; n=30)
+fig= plot(
+    title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(n_bin))",
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)"
+)
+plot!(fig,
+    data_fitting[:,1], data_fitting[:,3], 
+    label="Experiment: n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_fitting[:,4],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    I_scan,itp_ki.(I_scan, Ref(out.ci[2])),
+    color=:royalblue1,
+    label=false,
+    linewidth=0,
+    fillrange= itp_ki.(I_scan, Ref(out.ci[1])),
+    fillcolor=:royalblue1,
+    fillalpha=0.35,
+)
+plot!(fig,
+    I_scan, itp_ki.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,1),
+    marker=(:xcross, :blue, 1),
+)
+plot!(fig, 
+    Ic_qm, z_QMsim,
+    label="QM + Class.Trajs.",
+    ribbon = z_QMsim_err,
+    line=(:dash,:green,2),
+    fillalpha=0.23, 
+    fillcolor=:green, 
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([ 1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([ 1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(10e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+display(fig)
+savefig(fig,joinpath(OUTDIR,"avg_comparison_$(n_bin).$(FIG_EXT)"))
+
+include("./Modules/TheoreticalSimulation.jl");
+
+
+fig = plot(
+    xlabel="Magnetic field gradient  (T/m)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+)
+plot!(fig,TheoreticalSimulation.GvsI(data_fitting[:,1]), data_fitting[:,3],
+    ribbon = data_fitting[:,4],
+    fillalpha=0.40, 
+    fillcolor=:red, 
+    label="Experiment",
+    line=(:dot,:red,:2),
+)
+plot!(fig,
+    TheoreticalSimulation.GvsI(I_scan),itp_ki.(I_scan, Ref(out.ci[2])),
+    color=:orangered2,
+    label=false,
+    linewidth=0,
+    fillrange= itp_ki.(I_scan, Ref(out.ci[1])),
+    fillcolor=:orangered2,
+    fillalpha=0.35,
+)
+plot!(fig,
+    TheoreticalSimulation.GvsI(I_scan), itp_ki.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,1),
+    marker=(:xcross, :blue, 1),
+)
+plot!(fig, 
+    TheoreticalSimulation.GvsI(Ic_qm), z_QMsim,
+    label="QM + Class.Trajs.",
+    ribbon = z_QMsim_err,
+    line=(:dash,:green,2),
+    fillalpha=0.23, 
+    fillcolor=:green, 
+)
+plot!(fig,
+xaxis=:log10, 
+yaxis=:log10,
+xticks = ([ 1.0, 10, 100, 1000], [L"10^{0}", L"10^{1}", L"10^{2}", L"10^{3}"]),
+yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+xlims = (3,400,),
+ylims = (8e-3, 2),
+legend=:bottomright,
+)
+display(fig)
+savefig(fig,joinpath(OUTDIR,"avg_comparison_grad_$(n_bin).$(FIG_EXT)"))

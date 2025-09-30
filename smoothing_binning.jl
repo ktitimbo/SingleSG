@@ -18,8 +18,8 @@ Plots.default(
 )
 using Plots.PlotMeasures
 # Data I/O and numerical tools
-using LinearAlgebra
-using Statistics, StatsBase, OrderedCollections
+using LinearAlgebra, Random
+using Statistics, StatsBase, OrderedCollections, Interpolations
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using Printf, LaTeXStrings, PrettyTables
@@ -86,6 +86,7 @@ fig_Is = plot(
     );
 cols = palette(:darkrainbow, n_runs)
 for (idx,data_directory) in enumerate(data_directories)
+    println(I_all[idx])
     scatter!(fig_Is,
         idx .* ones(length(I_all[idx])), 
         I_all[idx],
@@ -200,8 +201,6 @@ m_sets = map(d -> DataReading.collect_fw_map(
 selected_bin = 2
 selected_spl = 0.01
 
-
-
 # exact match (safe for Int; Float uses == here)
 key_run = Vector{Union{Nothing,String}}(undef, length(m_sets))
 for (midx,ms) in enumerate(m_sets)
@@ -220,14 +219,6 @@ ytick_labels = [L"10^{%$k}" for k in -6:-1]; ytick_labels = vcat(ytick_labels, L
 runs    = key_run
 dirs    = data_directories
 colors  = [:black, :red, :blue, :purple]
-
-using Dierckx
-
-spl = Spline1D(m_sets[1][runs[1]][3][!,"Icoil_A"], m_sets[1][runs[1]][3][!,"F1_z_centroid_mm"]; k=3, s=0.0, bc="extrapolate")   # k=3 cubic; s=0 exact interpolate, s>0 smoothing
-i_xx = range(10e-3,0.775,length=100)
-plot(m_sets[1][runs[1]][3][5:end,"Icoil_A"], m_sets[1][runs[1]][3][5:end,"F1_z_centroid_mm"], xaxis=:log10,)
-plot!(i_xx,spl.(i_xx))
-
 
 fig1 = plot(
     xlabel = "Current (A)",
@@ -326,3 +317,347 @@ plot!(fig2,
 display(fig2)
 saveplot(fig2, "bin_vs_smoothing_lin")   # use explicit extension; pdf/png/svg as you like
 
+#######################################################################################################################
+#######################################################################################################################
+#######################################################################################################################
+######################################### AVERAGING ###################################################################
+#######################################################################################################################
+#######################################################################################################################
+#######################################################################################################################
+
+"""
+Monte-Carlo average of multiple (x,y) sets onto a common grid, propagating x- and y-uncertainties.
+
+Inputs:
+  xsets :: Vector{<:AbstractVector}        # e.g. [x1,x2,x3,x4]
+  ysets :: Vector{<:AbstractVector}        #       [y1,y2,y3,y4]
+Keywords:
+  σxsets::Union{Nothing,Vector} = nothing  # [σx1, σx2, ...] (per-point abs. σ; vectors match xsets)
+  σysets::Union{Nothing,Vector} = nothing  # [σy1, σy2, ...] (optional)
+  xq     :: Union{Symbol,AbstractVector} = :union  # :union or provide custom grid vector
+  B      :: Int = 400                      # MC replicates
+  outside::Symbol = :mask                  # :mask | :linear | :flat handling outside each set’s range
+  relx   :: Bool = false                   # if true, σx interpreted as relative (fractional) error
+
+Returns: (xq, μ, σ) where μ is the MC mean and σ the pointwise std (≈ 1σ band).
+"""
+function average_on_grid_mc(xsets, ysets;
+                            σxsets=nothing, σysets=nothing,
+                            xq=:union, B=400, outside=:mask, relx=false,
+                            rng = Random.default_rng())
+
+    @assert length(xsets) == length(ysets)
+    nset = length(xsets)
+
+    # Build common grid
+    xq_vec = xq === :union ? sort!(unique(vcat(xsets...))) : collect(xq)
+    m = length(xq_vec)
+    preds = Matrix{Float64}(undef, B, m); fill!(preds, NaN)
+
+    # small helper: eval with chosen outside policy
+    function eval_on_grid(xb, yb, xq)
+        p = sortperm(xb); xb = xb[p]; yb = yb[p]
+        itp = Interpolations.interpolate((xb,), yb, Gridded(Linear()))
+        ext = outside === :linear ? extrapolate(itp, Line()) :
+              outside === :flat   ? extrapolate(itp, Flat()) :
+                                    extrapolate(itp, Throw())
+        vals = similar(xq, Float64); fill!(vals, NaN)
+        if outside === :mask
+            mask = (xq .>= first(xb)) .& (xq .<= last(xb))
+            vals[mask] = itp.(xq[mask])  # safe since on-grid
+        else
+            vals .= ext.(xq)
+        end
+        return vals
+    end
+
+    # Monte-Carlo
+    for b in 1:B
+        # gather each set’s curve on xq for this replicate
+        curves = Vector{Vector{Float64}}(undef, nset)
+        for i in 1:nset
+            x = collect(xsets[i])
+            y = collect(ysets[i])
+
+            # jitter x
+            if σxsets === nothing
+                xb = x
+            else
+                σx = σxsets[i]
+                dx = relx ? (σx .* x) : σx                      # abs σ from relative if requested
+                xb = x .+ randn(rng, length(x)) .* dx
+            end
+
+            # jitter y
+            if σysets === nothing
+                yb = y
+            else
+                σy = σysets[i]
+                yb = y .+ randn(rng, length(y)) .* σy
+            end
+
+            curves[i] = eval_on_grid(xb, yb, xq_vec)
+        end
+
+        # combine across sets at each xq (ignore NaNs)
+        for j in 1:m
+            s = 0.0; k = 0
+            @inbounds for i in 1:nset
+                v = curves[i][j]
+                if !isnan(v); s += v; k += 1; end
+            end
+            preds[b, j] = k == 0 ? NaN : (s / k)
+        end
+    end
+
+    # MC mean & std at each xq (ignore NaNs if some points had no coverage)
+    μ  = similar(xq_vec, Float64)
+    σ  = similar(xq_vec, Float64)
+    for j in 1:m
+        col = @view preds[:, j]
+        vals = [v for v in col if !isnan(v)]
+        if isempty(vals)
+            μ[j] = NaN; σ[j] = NaN
+        else
+            μ[j] = mean(vals)
+            σ[j] = std(vals; corrected=true)
+        end
+    end
+    return xq_vec, μ, σ
+end
+
+ROW_START = 8
+scale_mag_factor = inv(magnification_factor)   # = 1 / magnification_factor
+i_sampled_length = 300
+
+# Grab the table once per (M, run)
+tables = [M[r][3] for (M, r) in zip(m_sets, runs)]
+col = Dict(
+    :x  => :Icoil_A,
+    :y  => :F1_z_centroid_mm,
+    :sx => :Icoil_error_A,
+    :sy => :F1_z_centroid_se_mm,
+)
+
+xsets  = [t[ROW_START:end, col[:x]]                         for t in tables]
+ysets  = [scale_mag_factor .* t[ROW_START:end, col[:y]]     for t in tables]
+σxsets = [t[ROW_START:end, col[:sx]]                        for t in tables]
+σysets = [scale_mag_factor .* t[ROW_START:end, col[:sy]]    for t in tables]
+
+# pick a log-spaced grid across the overall x-range (nice for decades-wide currents)
+xlo = minimum(first.(xsets))
+xhi = maximum(last.(xsets))
+xq  = exp10.(range(log10(xlo), log10(xhi), length=i_sampled_length))
+
+xq, μ, σ = average_on_grid_mc(xsets, ysets; σxsets=σxsets, σysets=σysets,
+                              xq=:union, B=500, outside=:mask, relx=false)
+
+# xq, μ, σ_xy = average_on_grid_mc(xsets, ysets; σxsets=σxsets, σysets=σysets)
+# _,  _, σ_y  = average_on_grid_mc(xsets, ysets; σxsets=nothing,   σysets=σysets)
+# _,  _, σ_x  = average_on_grid_mc(xsets, ysets; σxsets=σxsets,    σysets=nothing)
+# # If x and y errors are independent, typically:
+# σ_quad = sqrt.(σ_x.^2 .+ σ_y.^2)  # should be close to σ_xy
+# hcat(σ_xy, σ_quad )
+
+fig = plot(
+    xlabel="Current (A)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+)
+for i=1:length(data_directories)
+    xs = m_sets[i][runs[i]][3][ROW_START:end,"Icoil_A"]
+    ys = m_sets[i][runs[i]][3][ROW_START:end,"F1_z_centroid_mm"]/magnification_factor
+    scatter!(fig,xs, ys,
+        label=data_directories[i],
+        marker=(:circle, :white,3),
+        markerstrokecolor=cols[i],
+        markerstrokewidth=1,
+        )
+end
+plot!(fig, xq, μ; 
+    ribbon=σ, 
+    xscale=:log10,
+    yscale=:log10, 
+    title = "Interpolation MC",
+    label=false,
+    color=:black,
+)
+saveplot(fig, "MC_interpolation")
+
+
+# using Dierckx
+# spl = Spline1D(m_sets[1][runs[1]][3][!,"Icoil_A"], m_sets[1][runs[1]][3][!,"F1_z_centroid_mm"]; k=3, s=0.5, bc="extrapolate")   # k=3 cubic; s=0 exact interpolate, s>0 smoothing
+
+using BSplineKit
+
+fig = plot(
+    xlabel="Current (A)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+)
+i_xx = range(15e-3,0.999,length=i_sampled_length)
+z_final = zeros(length(data_directories),i_sampled_length)
+cols = palette(:darkrainbow, length(data_directories))
+for i=1:length(data_directories)
+    xs = m_sets[i][runs[i]][3][ROW_START:end,"Icoil_A"]
+    ys = m_sets[i][runs[i]][3][ROW_START:end,"F1_z_centroid_mm"]*scale_mag_factor
+    spl = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
+    z_final[i,:] = spl.(i_xx)
+    scatter!(fig,xs, ys,
+        label=data_directories[i],
+        marker=(:circle, :white,3),
+        markerstrokecolor=cols[i],
+        markerstrokewidth=1,
+        )
+    plot!(fig,i_xx,spl.(i_xx),
+        label=false,
+        line=(cols[i],1))
+end
+display(fig)
+plot!(fig,
+title="Interpolation: cubic splines",
+xaxis=:log10, 
+yaxis=:log10,
+xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+)
+display(fig)
+zf1 = vec(mean(z_final, dims=1))
+δzf1 = vec(std(z_final; dims=1, corrected=true)/sqrt(length(data_directories)))
+plot!(fig, i_xx, zf1,
+    ribbon = δzf1,
+    fillalpha=0.40, 
+    fillcolor=:gray36, 
+    label="Average",
+    line=(:dash,:black,:2))
+display(fig)
+saveplot(fig, "interpolation")
+
+fig = plot(
+    xlabel="Current (A)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+)
+i_xx = range(15e-3,0.999,length=i_sampled_length)
+z_final_fit = zeros(length(data_directories),i_sampled_length)
+cols = palette(:darkrainbow, length(data_directories))
+for i=1:length(data_directories)
+    xs = m_sets[i][runs[i]][3][ROW_START:end,"Icoil_A"]
+    ys = m_sets[i][runs[i]][3][ROW_START:end,"F1_z_centroid_mm"]*scale_mag_factor
+    δys = m_sets[i][runs[i]][3][ROW_START:end,"F1_z_centroid_se_mm"]*scale_mag_factor
+    spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
+    z_final_fit[i,:] = spl.(i_xx)
+    scatter!(fig,xs, ys,
+        label=data_directories[i],
+        marker=(:circle, :white,3),
+        markerstrokecolor=cols[i],
+        markerstrokewidth=1,
+        )
+    plot!(fig,i_xx,spl.(i_xx),
+        label=false,
+        line=(cols[i],1))
+end
+display(fig)
+plot!(fig,
+title = "Smoothing cubic spline",
+xaxis=:log10, 
+yaxis=:log10,
+xticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+xlims = (10e-3,1.0),
+ylims = (8e-3, 2),
+)
+display(fig)
+zf1_fit = vec(mean(z_final_fit, dims=1))
+δzf1_fit = vec(std(z_final_fit; dims=1, corrected=true)/sqrt(length(data_directories)))
+plot!(fig, i_xx, zf1_fit,
+    ribbon = δzf1_fit,
+    fillalpha=0.40, 
+    fillcolor=:gray36, 
+    label="Average",
+    line=(:dash,:black,:2))
+display(fig)
+saveplot(fig, "smoothing_interpolation")
+
+fig = plot(
+    xlabel="Current (A)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+)
+plot!(fig,i_xx, zf1_fit,
+    ribbon = δzf1_fit,
+    fillalpha=0.40, 
+    fillcolor=:green, 
+    label="Average: smoothing cubic spline",
+    line=(:dot,:green,:2))
+plot!(fig, i_xx, zf1,
+    ribbon = δzf1,
+    fillalpha=0.40, 
+    fillcolor=:dodgerblue, 
+    label="Average: interpolation cubic spline",
+    line=(:dash,:dodgerblue,:2))
+plot!(fig, xq, μ; 
+    ribbon=σ, 
+    label="Interpolation MC",
+    color=:orangered2
+)
+plot!(fig,
+xaxis=:log10, 
+yaxis=:log10,
+xticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+xlims = (10e-3,1.0),
+ylims = (8e-3, 2),
+legend=:bottomright,
+)
+display(fig)
+saveplot(fig, "inter_vs_mc_vs_fit")
+
+
+include("./Modules/TheoreticalSimulation.jl");
+
+
+fig = plot(
+    xlabel="Magnetic field gradient  (T/m)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+)
+plot!(fig,TheoreticalSimulation.GvsI(i_xx), zf1_fit,
+    ribbon = δzf1_fit,
+    fillalpha=0.40, 
+    fillcolor=:green, 
+    label="Average: smoothing cubic spline",
+    line=(:dot,:green,:2))
+plot!(fig, TheoreticalSimulation.GvsI(i_xx), zf1,
+    ribbon = δzf1,
+    fillalpha=0.40, 
+    fillcolor=:dodgerblue, 
+    label="Average: interpolation cubic spline",
+    line=(:dash,:dodgerblue,:2))
+plot!(fig, TheoreticalSimulation.GvsI(xq), μ; 
+    ribbon=σ, 
+    label="Interpolation MC",
+    color=:orangered2
+)
+plot!(fig,
+xaxis=:log10, 
+yaxis=:log10,
+xticks = ([ 1.0, 10, 100, 1000], [L"10^{0}", L"10^{1}", L"10^{2}", L"10^{3}"]),
+yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+xlims = (3,400,),
+ylims = (8e-3, 2),
+legend=:bottomright,
+)
+display(fig)
+saveplot(fig, "g_inter_vs_mc_vs_fit")
+
+
+
+jldsave(joinpath(OUTDIR,"data_averaged.jld2"), 
+    data=OrderedDict(
+        :i_interp   => i_xx,
+        :z_interp   => zf1,
+        :δz_interp  => δzf1,
+        :i_smooth   => i_xx,
+        :z_smooth   => zf1_fit,
+        :δz_smooth  => zf1_fit,
+        :i_mc       => xq,
+        :z_mc       => μ,
+        :δz_mc      => σ
+    )
+)

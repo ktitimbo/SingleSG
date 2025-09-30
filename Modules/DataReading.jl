@@ -279,20 +279,21 @@ module DataReading
                 magnification = m_mag === nothing ? missing : parse(Float64, m_mag.captures[1])
 
                 # --- Arrays to extract (search globally) ---
-                m_I  = match(r"(?m)^\s*Currents \(mA\)\s*:\s*(\[.*\])\s*$", txt)
+                m_I  = match(r"(?m)^\s*Currents \(A\)\s*:\s*(\[.*\])\s*$", txt)
                 m_F1 = match(r"(?m)^\s*Framewise F1 peak \(mm\)\s*:\s*(\[.*\])\s*$", txt)
                 (m_I === nothing || m_F1 === nothing) && continue
 
-                currents_mA  = parse_float_vec(m_I.match)
+                currents_A  = parse_float_vec(m_I.match)
                 framewise_mm = parse_float_vec(m_F1.match)
 
                 return (path=path,
+                        directory=dirname(path),
                         data_dir=strip(data_dir),
                         name=name,
                         binning=binning,
                         smoothing=smoothing,
                         magnification=magnification,
-                        currents_mA=currents_mA,
+                        currents_A=currents_A,
                         framewise_mm=framewise_mm)
             end
         end

@@ -204,7 +204,8 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     profiles_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels; n_bin=n_bins, with_error=true);
 
     jldsave(joinpath(OUTDIR, "profiles.jld2"),
-        profiles = OrderedDict(:Icoils => Icoils, 
+        profiles = OrderedDict(:Icoils => Icoils,
+                                :Icoils_err => ΔIcoils,
                                 :F1_profile => profiles_F1.mean,
                                 :F1_err     => profiles_F1.sem,
                                 :F2_profile => profiles_F2.mean,

@@ -331,6 +331,7 @@ plot!(data_num[:runs][4][:data_QM][:,1], data_num[:runs][4][:data_QM][:,2],
 plot!(data_num[:runs][8][:data_QM][:,1], data_num[:runs][8][:data_QM][:,2],
     label=L"Numeric QM $(n_{z}=8$)",
     line=(:dot,cols[8],2))
+plot!(xlim=(12e-3,1.1))
 plot!(xaxis=:log10, yaxis=:log10,
     legend=:bottomright)
 savefig(fig, joinpath(dir_load_string,"qm_peaks.$(FIG_EXT)"))
@@ -348,7 +349,7 @@ function symmetric_centers_edges(lims::Tuple{<:Real,<:Real}, bin_mm::Real)
 end
 
 # speed windows (change step to taste)
-speed_edges = collect(range(200,2100,5))           # 200–300, 300–400, …, 2000–2100
+speed_edges = collect(range(500,700,5))           # 200–300, 300–400, …, 2000–2100
 windows = zip(speed_edges[1:end-1], speed_edges[2:end])
 
 # fixed analysis (mm)
@@ -403,7 +404,6 @@ for i in eachindex(data[:Icoils])
     end
     display(figh)
 end
-
 
 
 

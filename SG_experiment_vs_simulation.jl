@@ -1,4 +1,5 @@
 # Simulation of atom trajectories in the Stern–Gerlach experiment
+# Profiles comparison
 # Kelvin Titimbo
 # California Institute of Technology
 # August 2025
@@ -45,32 +46,95 @@ isdir(OUTDIR) || mkpath(OUTDIR);
 hostname = gethostname();
 @info "Running on host" hostname=hostname
 include("./Modules/TheoreticalSimulation.jl");
+include("./Modules/MyExperimentalAnalysis.jl")
+include("./Modules/DataReading.jl")
 
 
 # import experimental data
-data_exp        = load(joinpath("analysis_data","20250917T144110","profiles.jld2"))["profiles"]
-data_exp_fw     = CSV.read(joinpath("analysis_data","20250917T144110","fw_data.csv"),DataFrame)
-data_exp_mean   = CSV.read(joinpath("analysis_data","20250917T144110","mean_data.csv"),DataFrame)
+# Select experimental data
+wanted_data_dir = "20250919" ;
+wanted_binning  = 1 ; 
+wanted_smooth   = 0.01 ;
+
+# Data loading
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+);
+
+keys(res)
+data_exp        = load(joinpath(dirname(res[:path]),"profiles.jld2"))["profiles"]
+data_exp_fw     = CSV.read(joinpath(dirname(res[:path]),"fw_data.csv"),DataFrame)
+data_exp_mean   = CSV.read(joinpath(dirname(res[:path]),"mean_data.csv"),DataFrame)
 
 centroid = mean((data_exp_mean[!,"F1_z_peak_mm"]+ data_exp_mean[!,"F2_z_peak_mm"])/2)
 
 # import simulated data
-data_simulation         = load(joinpath("simulation_data", "20250822T203747","qm_2000000_valid_particles_data.jld2"))["data"]
-data_simulation_top     = load(joinpath("simulation_data", "20250822T203747","zmax_profiles_top_32x1.jld2"))["data"]
-data_simulation_bottom  = load(joinpath("simulation_data", "20250822T203747","zmax_profiles_bottom_32x1.jld2"))["data"]
+data_simulation         = load(joinpath("simulation_data", "qm_analytic_sim","qm_2000000_valid_particles_data.jld2"))["data"]
+data_simulation_top     = load(joinpath("simulation_data", "qm_analytic_sim","zmax_profiles_top_32x1.jld2"))["data"]
+data_simulation_bottom  = load(joinpath("simulation_data", "qm_analytic_sim","zmax_profiles_bottom_32x1.jld2"))["data"]
 
 
-z_mm = 1e3*(6.5e-6 .* (1:2560) .- 6.5e-6 / 2)
+data_simulation_bottom[2][:z_profile]
+z_mm = 1e3 .* MyExperimentalAnalysis.pixel_positions(2560, wanted_binning, 6.5e-6)
 # z_mm = (1e3 * 6.5e-6) .* ((1:2560) .- (2560 + 1)/2)
 
+"""
+Pair each B[j] to the closest A[i] (no repetitions) if B[j] is within
+reltol*abs(A[i]) of A[i]. For A[i]==0, uses `abstol` instead.
 
-I_pairs = [ 1 1 ; 2 2 ; 3 4 ; 9 8 ; 12 11 ; 14 15 ; 18 20 ; 19 22 ; 21 27 ; 22 30 ]
+Assumes A and B are sorted ascending.
+Returns a vector of NamedTuples: (i, j, a, b, delta, relerr)
+"""
+function pair_sorted_closest_unique(A::AbstractVector, B::AbstractVector; reltol=0.10, abstol=0.0)
+    usedA = falses(length(A))
+    pairs = NamedTuple{(:i,:j,:a,:b,:delta),Tuple{Int,Int,Float64,Float64,Float64}}[]
+    @inbounds for j in eachindex(B)
+        b = float(B[j])
+
+        # Find the nearest A index via binary search (candidates: i, i+1)
+        i = searchsortedlast(A, b)
+        candidates = Int[]
+        if 1 <= i <= length(A);         push!(candidates, i);      end
+        if 1 <= i+1 <= length(A);       push!(candidates, i+1);    end
+        if isempty(candidates);         continue;                  end
+
+        # Evaluate both candidates, pick the closest valid & unused
+        best = (i=0, dist=Inf, k=0)
+        for k in candidates
+            a = float(A[k])
+            base = max(abs(a), abs(b))
+            tol  = base == 0 ? abstol : reltol * base
+            if abs(b - a) <= tol && !usedA[k]
+                d = abs(b - a)
+                if d < best.dist
+                    best = (i=k, dist=d, k=k)
+                end
+            end
+        end
+
+        if best.i != 0
+            k = best.i
+            a = float(A[k])
+            delta = b - a
+            relerr = a == 0 ? (b == 0 ? 0.0 : Inf) : delta / a
+            usedA[k] = true
+            push!(pairs, (i=k, j=j, a=a, b=b, delta=delta))
+        end
+    end
+    return pairs
+end
+pairs = pair_sorted_closest_unique(1000*data_simulation[:Icoils], 1000*data_exp[:Icoils]; reltol=0.05, abstol=0.0)
+
+
+I_pairs = hcat(getproperty.(pairs, :i), getproperty.(pairs, :j))
 new_width = 0.300
 for row in eachrow(I_pairs)
-    icoil_idx_exp = row[1]
-    icoil_idx_sim = row[2]
-    
-
+  
+    icoil_idx_sim = row[1]
+    icoil_idx_exp = row[2]
 
     y_conv_f1 = TheoreticalSimulation.smooth_profile(data_simulation_bottom[icoil_idx_sim][:z_profile][:,1], data_simulation_bottom[icoil_idx_sim][:z_profile][:,2], new_width)
     y_conv_f2 = TheoreticalSimulation.smooth_profile(data_simulation_top[icoil_idx_sim][:z_profile][:,1], data_simulation_top[icoil_idx_sim][:z_profile][:,2], new_width)
