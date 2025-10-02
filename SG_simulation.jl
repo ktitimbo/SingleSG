@@ -242,8 +242,11 @@ end
 #########################################################################################
 
 dir_load_string = joinpath(@__DIR__, "simulation_data", "qm_analytic_sim")
-
 data = load(joinpath(dir_load_string,"qm_2000000_valid_particles_data.jld2"))["data"]
+
+
+
+
 for nz_iter in [1,2,4,8]
     println("\tCreates the z-profile with bin_nz = $(nz_iter)")
     nx_bins , nz_bins = 32 , nz_iter ;
@@ -259,7 +262,12 @@ for nz_iter in [1,2,4,8]
 end
 
 
-data_num = load(joinpath(dir_load_string,"data_num_20250820.jld2"))["data"]
+data[:Icoils]
+data[:data][28][8]
+
+
+
+|data_num = load(joinpath(dir_load_string,"data_num_20250820.jld2"))["data"]
 x1=load(joinpath(dir_load_string,"zmax_profiles_bottom_32x1.jld2"))["data"]
 x2=load(joinpath(dir_load_string,"zmax_profiles_bottom_32x2.jld2"))["data"]
 x4=load(joinpath(dir_load_string,"zmax_profiles_bottom_32x4.jld2"))["data"]
@@ -349,7 +357,7 @@ function symmetric_centers_edges(lims::Tuple{<:Real,<:Real}, bin_mm::Real)
 end
 
 # speed windows (change step to taste)
-speed_edges = collect(range(500,700,5))           # 200–300, 300–400, …, 2000–2100
+speed_edges = collect(range(400,800,10))           # 200–300, 300–400, …, 2000–2100
 windows = zip(speed_edges[1:end-1], speed_edges[2:end])
 
 # fixed analysis (mm)

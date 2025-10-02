@@ -1,0 +1,269 @@
+# Simulation of atom trajectories in the Stern–Gerlach experiment : QM approach
+# Kelvin Titimbo
+# California Institute of Technology
+# September 2025
+
+#  Plotting Setup
+# ENV["GKS_WSTYPE"] = "101"
+using Plots; gr()
+Plots.default(
+    show=true, dpi=800, fontfamily="Computer Modern", 
+    grid=true, minorgrid=true, framestyle=:box, widen=true,
+)
+using Plots.PlotMeasures
+FIG_EXT = "png"   # could be "pdf", "svg", etc.
+SAVE_FIG = true
+# Aesthetics and output formatting
+using Colors, ColorSchemes
+using LaTeXStrings, Printf, PrettyTables
+# Time-stamping/logging
+using Dates
+const T_START = Dates.now() ; # Timestamp start for execution timing
+# Numerical tools
+using LinearAlgebra, DataStructures
+using Interpolations, Roots, Loess, Optim
+using BSplineKit
+using DSP
+using LambertW, PolyLog
+using StatsBase
+using Random, Statistics, NaNStatistics, Distributions, StaticArrays
+using Alert
+# Data manipulation
+using OrderedCollections
+using DelimitedFiles, CSV, DataFrames, JLD2
+# include("./Modules/MyPolylogarithms.jl");
+# Multithreading setup
+using Base.Threads
+LinearAlgebra.BLAS.set_num_threads(4)
+@info "BLAS threads" count = BLAS.get_num_threads()
+@info "Julia threads" count = Threads.nthreads()
+# Set the working directory to the current location
+cd(@__DIR__) ;
+const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
+const OUTDIR    = joinpath(@__DIR__, "simulation_data", RUN_STAMP);
+isdir(OUTDIR) || mkpath(OUTDIR);
+@info "Created output directory" OUTDIR
+# General setup
+hostname = gethostname();
+@info "Running on host" hostname=hostname
+# Random seeds
+base_seed_set = 145;
+# rng_set = MersenneTwister(base_seed_set)
+rng_set = TaskLocalRNG();
+# Custom modules
+include("./Modules/atoms.jl");
+include("./Modules/samplings.jl");
+include("./Modules/TheoreticalSimulation.jl");
+using .TheoreticalSimulation;
+TheoreticalSimulation.SAVE_FIG = SAVE_FIG;
+TheoreticalSimulation.FIG_EXT  = FIG_EXT;
+TheoreticalSimulation.OUTDIR   = OUTDIR;
+
+println("\n\t\tRunning process on:\t $(RUN_STAMP) \n")
+
+atom        = "39K"  ;
+## PHYSICAL CONSTANTS from NIST
+# RSU : Relative Standard Uncertainty
+const kb    = 1.380649e-23 ;       # Boltzmann constant (J/K)
+const ħ     = 6.62607015e-34/2π ;  # Reduced Planck constant (J s)
+const μ₀    = 1.25663706127e-6;    # Vacuum permeability (Tm/A)
+const μB    = 9.2740100657e-24 ;   # Bohr magneton (J/T)
+const γₑ    = -1.76085962784e11 ;  # Electron gyromagnetic ratio  (1/sT). Relative Standard Uncertainty = 3.0e-10
+const μₑ    = 9.2847646917e-24 ;   # Electron magnetic moment (J/T). RSU = 3.0e-10
+const Sspin = 1/2 ;                # Electron spin
+const gₑ    = -2.00231930436092 ;  # Electron g-factor
+## ATOM INFORMATION: 
+# atom_info       = AtomicSpecies.atoms(atom);
+K39_params = AtomParams(atom);
+# const R         = atom_info[1];
+# const μₙ        = atom_info[2];
+# const γₙ        = atom_info[3];
+# const Ispin    = atom_info[4];
+# const Ahfs     = atom_info[6];
+# const M        = atom_info[7];
+# Math constants
+const TWOπ = 2π;
+const INV_E = exp(-1);
+
+# STERN--GERLACH EXPERIMENT
+# Camera and pixel geometry : intrinsic properties
+cam_pixelsize = 6.5e-6 ;  # Physical pixel size of camera [m]
+nx_pixels , nz_pixels= (2160, 2560); # (Nx,Nz) pixels
+# Simulation resolution
+sim_bin_x, sim_bin_z = (1,1) ;  # Camera binning
+sim_pixelsize_x, sim_pixelsize_z = (sim_bin_x, sim_bin_z).*cam_pixelsize ; # Effective pixel size after binning [m]
+# Image dimensions (adjusted for binning)
+x_pixels = Int(nx_pixels / sim_bin_x);  # Number of x-pixels after binning
+z_pixels = Int(nz_pixels / sim_bin_z);  # Number of z-pixels after binning
+# Spatial axes shifted to center the pixels
+x_position = pixel_coordinates(x_pixels, sim_bin_x, sim_pixelsize_x);
+z_position = pixel_coordinates(z_pixels, sim_bin_z, sim_pixelsize_z);
+println("""
+***************************************************
+CAMERA FEATURES
+    Number of pixels        : $(nx_pixels) × $(nz_pixels)
+    Pixel size              : $(1e6*cam_pixelsize) μm
+
+SIMULATION INFORMATION
+    Binning                 : $(sim_bin_x) × $(sim_bin_z)
+    Effective pixels        : $(x_pixels) × $(z_pixels)
+    Pixel size              : $(1e6*sim_pixelsize_x)μm × $(1e6*sim_pixelsize_z)μm
+    xlims                   : ($(round(minimum(1e6*x_position), digits=6)) μm, $(round(maximum(1e3*x_position), digits=4)) mm)
+    zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
+***************************************************
+""")
+# Furnace
+T_K = 273.15 + 205 ; # Furnace temperature (K)
+# Furnace aperture
+const x_furnace = 2.0e-3 ;
+const z_furnace = 100e-6 ;
+# Slit
+const x_slit  = 4.0e-3 ;
+const z_slit  = 300e-6 ;
+# Propagation distances
+const y_FurnaceToSlit = 224.0e-3 ;
+const y_SlitToSG      = 44.0e-3 ;
+const y_SG            = 7.0e-2 ;
+const y_SGToScreen    = 32.0e-2 ;
+# Connecting pipes
+const R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
+effusion_params = BeamEffusionParams(x_furnace,z_furnace,x_slit,z_slit,y_FurnaceToSlit,T_K,K39_params);
+println("""
+***************************************************
+SETUP FEATURES
+    Temperature             : $(T_K)
+    Furnace aperture (x,z)  : ($(1e3*x_furnace)μm , $(1e6*z_furnace)μm)
+    Slit (x,z)              : ($(1e3*x_slit)μm , $(1e6*z_slit)μm)
+    Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
+    Slit → SG magnet        : $(1e3*y_SlitToSG)mm
+    SG magnet               : $(1e3*y_SG)mm
+    SG magnet → Screen      : $(1e3*y_SGToScreen)mm
+    Tube radius             : $(1e3*R_tube)mm
+***************************************************
+""")
+# Setting the variables for the module
+TheoreticalSimulation.default_camera_pixel_size = cam_pixelsize;
+TheoreticalSimulation.default_x_pixels          = nx_pixels;
+TheoreticalSimulation.default_z_pixels          = nz_pixels;
+TheoreticalSimulation.default_x_furnace         = x_furnace;
+TheoreticalSimulation.default_z_furnace         = z_furnace;
+TheoreticalSimulation.default_x_slit            = x_slit;
+TheoreticalSimulation.default_z_slit            = z_slit;
+TheoreticalSimulation.default_y_FurnaceToSlit   = y_FurnaceToSlit;
+TheoreticalSimulation.default_y_SlitToSG        = y_SlitToSG;
+TheoreticalSimulation.default_y_SG              = y_SG;
+TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
+TheoreticalSimulation.default_R_tube            = R_tube;
+
+
+
+dir_load_string = joinpath(@__DIR__, "simulation_data", "qm_analytic_sim")
+
+data = load(joinpath(dir_load_string,"qm_2000000_valid_particles_data.jld2"))["data"]
+
+Icoils = data[:Icoils];
+r = 1:3:length(Icoils)
+for j in (r[end] == 30 ? r : Iterators.flatten((r, (30,))))
+    data_set_5 = data[:data][j][5];
+
+    #Furnace
+    xs_a = 1e3 .* data_set_5[:,1]; # mm
+    zs_a = 1e6 .* data_set_5[:,3]; # μm
+    figa = histogram2d(xs_a, zs_a;
+        bins = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -1.0:0.25:1.0, yticks = -50:10:50,
+        # clims = (0, 0.0003),
+        # colorbar_position = :bottom,
+    );
+
+    # Slit
+    r_at_slit = Matrix{Float64}(undef, size(data_set_5, 1), 3);
+    for i in axes(data_set_5,1)
+        r , _ = QM_EqOfMotion(y_FurnaceToSlit ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+        r_at_slit[i,:] = r
+    end
+    xs_b = 1e3 .* r_at_slit[:,1]; # mm
+    zs_b = 1e6 .* r_at_slit[:,3]; # μm
+    figb = histogram2d(xs_b, zs_b;
+        bins = (FreedmanDiaconisBins(xs_b), FreedmanDiaconisBins(zs_b)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -4.0:0.50:4.0, yticks = -200:50:200,
+        xlims=(-4,4),
+        # clims = (0, 0.0003),
+        # colorbar_position = :bottom,
+    ) ;
+
+    # SG entrance
+    r_at_SG_entrance = Matrix{Float64}(undef, size(data_set_5, 1), 3);
+    for i in axes(data_set_5,1)
+        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG) ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+        r_at_SG_entrance[i,:] = r
+    end
+    xs_c = 1e3 .* r_at_SG_entrance[:,1]; # mm
+    zs_c = 1e6 .* r_at_SG_entrance[:,3]; # μm
+    figc = histogram2d(xs_c, zs_c;
+        bins = (FreedmanDiaconisBins(xs_c), FreedmanDiaconisBins(zs_c)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -4.0:0.50:4.0, yticks = -1000:100:1000,
+        xlims=(-4,4),
+        # clims = (0, 0.0003),
+        # colorbar_position = :bottom,
+    );
+
+    # SG exit
+    r_at_SG_exit = Matrix{Float64}(undef, size(data_set_5, 1), 3);
+    for i in axes(data_set_5,1)
+        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG) ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+        r_at_SG_exit[i,:] = r
+    end
+    xs_d = 1e3 .* r_at_SG_exit[:,1]; # mm
+    zs_d = 1e6 .* r_at_SG_exit[:,3]; # μm
+    figd = histogram2d(xs_d, zs_d;
+        bins = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -4.0:0.50:4.0, yticks = -1000:200:1000,
+        xlims=(-4,4),
+        # clims = (0, 0.0003),
+        # colorbar_position = :bottom,
+    );
+
+    # Screen
+    r_at_screen = Matrix{Float64}(undef, size(data_set_5, 1), 3);
+    for i in axes(data_set_5,1)
+        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG+y_SGToScreen) ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+        r_at_screen[i,:] = r
+    end
+    xs_e = 1e3 .* r_at_screen[:,1]; # mm
+    zs_e = 1e3 .* r_at_screen[:,3]; # μm
+    fige = histogram2d(xs_e, zs_e;
+        bins = (FreedmanDiaconisBins(xs_e), FreedmanDiaconisBins(zs_e)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{mm})$",
+        # xticks = -4.0:0.50:4.0, yticks = -1250:50:1250,
+        # clims = (0, 0.0003),
+        # colorbar_position = :bottom,
+    );
+
+
+    fig = plot(figa,figb,figc,figd,fige,
+    layout=(5,1),
+    suptitle = L"$%$(1000*Icoils[j]) \mathrm{mA}$",
+    size=(750,800),
+    right_margin=2mm,
+    )
+    plot!(fig[1], xlabel="", bottom_margin=-3mm),
+    plot!(fig[2], xlabel="", bottom_margin=-3mm),
+    plot!(fig[3], xlabel="", bottom_margin=-3mm),
+    plot!(fig[4], xlabel="", bottom_margin=-3mm),
+    display(fig)
+
+end
+
+for j =1:3:30
+    println(j)
+end

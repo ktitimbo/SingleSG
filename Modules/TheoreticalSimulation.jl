@@ -72,10 +72,6 @@ module TheoreticalSimulation
     default_R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
 
 
-
-
-
-
     """
         clear_all() -> Nothing
 
@@ -248,23 +244,21 @@ module TheoreticalSimulation
     end
 
 
-    include("TheoreticalSimulation_Params.jl")
-    include("TheoreticalSimulation_MagneticField.jl")
-    include("TheoreticalSimulation_muF.jl")
-    include("TheoreticalSimulation_EquationsOfMotion.jl")
-    include("TheoreticalSimulation_VelocityPDF.jl")
-    include("TheoreticalSimulation_Sampling.jl")
-    include("TheoreticalSimulation_DiscardedParticles.jl")
-    include("TheoreticalSimulation_QMSpline.jl")
-    include("TheoreticalSimulation_Plots.jl")
+    include(joinpath(@__DIR__, "TheoreticalSimulation_Params.jl"))
+    include(joinpath(@__DIR__, "TheoreticalSimulation_MagneticField.jl"))
+    include(joinpath(@__DIR__, "TheoreticalSimulation_muF.jl"))
+    include(joinpath(@__DIR__, "TheoreticalSimulation_EquationsOfMotion.jl"))
+    include(joinpath(@__DIR__, "TheoreticalSimulation_VelocityPDF.jl"))
+    include(joinpath(@__DIR__, "TheoreticalSimulation_Sampling.jl"))
+    include(joinpath(@__DIR__, "TheoreticalSimulation_DiscardedParticles.jl"))
+    include(joinpath(@__DIR__, "TheoreticalSimulation_QMSpline.jl"))
+    include(joinpath(@__DIR__, "TheoreticalSimulation_Plots.jl"))
 
 
     
 
     export AtomParams, EffusionParams, BeamEffusionParams,
-            clear_all,
-            compute_weights,
-            FreedmanDiaconisBins,
+            clear_all, compute_weights, FreedmanDiaconisBins,
             pixel_coordinates,
             fmf_levels, μF_effective, 
             generate_samples, build_initial_conditions,
