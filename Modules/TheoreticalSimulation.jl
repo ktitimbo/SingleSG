@@ -262,6 +262,7 @@ module TheoreticalSimulation
             pixel_coordinates,
             fmf_levels, μF_effective, 
             generate_samples, build_initial_conditions,
+            z_magnet_edge, z_magnet_trench,
             z_magnet_edge_time, z_magnet_trench_time,
             CQD_EqOfMotion, QM_EqOfMotion,
             CQD_EqOfMotion_z, QM_EqOfMotion_z,
