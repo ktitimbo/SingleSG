@@ -39,7 +39,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 @info "Julia threads" count = Threads.nthreads()
 # Set the working directory to the current location
 cd(@__DIR__) ;
-const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSS");
+const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const OUTDIR    = joinpath(@__DIR__, "simulation_data", RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
@@ -165,7 +165,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 1_000
+const Nss = 100
 @info "Number of MonteCarlo particles : $(Nss)"
 
 # Monte Carlo generation of particles traersing the filtering slit
@@ -180,9 +180,26 @@ if SAVE_FIG
     # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
 
-particles_colliding       = QM_find_discarded_particles_multithreading(Icoils,crossing_slit,K39_params;verbose=true) # heavy loop: goes in series
-particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params) # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
+@time particles_colliding  = QM_find_discarded_particles_multithreading(Icoils,crossing_slit,K39_params; t_length=1000, verbose=true)   # heavy loop: goes in series
+@time particles_colliding2 = TheoreticalSimulation.alternative_QM_find_discarded_particles_multithreading(Icoils, crossing_slit, K39_params; y_length=1000, verbose=true)
+
+
+
+particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params)   # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
 jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_reaching_screen))
+
+length.(particles_colliding[30])
+
+particles_colliding2
+
+
+n_nonzero = map(v -> count(!iszero, v), particles_colliding2[30])
+n_top = map(v -> count(==(1), v), particles_colliding2[30])
+n_bot = map(v -> count(==(3), v), particles_colliding2[30])
+n_tube = map(v -> count(==(2), v), particles_colliding2[30])
+
+
+n_top+n_bot+n_tube == n_nonzero
 
 
 #########################################################################################

@@ -68,5 +68,5 @@ function μF_effective(Ix,F,mF,p::AtomParams)
         μF = gₑ * μB * ( mF*ratio - (1 - ratio)/denom * ( mF/(2*II + 1) - 0.5*normalized_B ) )
     end
 
-    return μF
+    return Float64(μF)
 end

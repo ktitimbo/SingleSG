@@ -624,8 +624,10 @@ function QM_Screen_position(Ix,f,mf,r0::AbstractVector{<:Real},v0::AbstractVecto
     @assert length(r0) == 3 "r0 must have length 3"
     @assert length(v0) == 3 "v0 must have length 3"
 
-    x0, y0, z0 = r0
-    v0x, v0y, v0z = v0
+    @inbounds begin
+        x0  = r0[1];  y0  = r0[2];  z0  = r0[3]
+        v0x = v0[1];  v0y = v0[2];  v0z = v0[3]
+    end
     @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
 
     # Geometry
@@ -634,8 +636,8 @@ function QM_Screen_position(Ix,f,mf,r0::AbstractVector{<:Real},v0::AbstractVecto
     Ltot = default_y_FurnaceToSlit  + default_y_SlitToSG + Lsg + Ld
 
     # Physics parameters
-    μ =  μF_effective(Ix,f,mf,p)
-    acc_z = μ * GvsI(Ix) / p.M
+    μG =  μF_effective(Ix,f,mf,p) * GvsI(Ix)
+    acc_z = μG / p.M
 
     x = x0 + Ltot * v0x / v0y
     y = y0 + Ltot

@@ -242,8 +242,6 @@ function analyze_screen_profile(Ix, data_mm::AbstractMatrix;
         throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $mode"))
     end
 
-
-    h = normalize(fit(Histogram, (x, z), (edges_x, edges_z)); mode=mode)
     counts = h.weights  # size: (length(centers_x), length(centers_z))
 
     # z-profile = mean over x bins

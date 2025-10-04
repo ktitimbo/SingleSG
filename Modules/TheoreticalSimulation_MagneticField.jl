@@ -90,6 +90,67 @@ end
 
 # MAGNET SHAPE
 
+##############################
+# Geometry structs + builders
+##############################
+
+struct EdgeGeom{T<:AbstractFloat}
+    zc::T        # z_center
+    a::T         # arc radius
+    a2::T        # a^2
+    tanφ::T
+end
+
+"""
+    EdgeGeom(; a=2.5e-3, z_center_factor=1.3, φ=π/6, T=Float64)
+
+Precompute constants for the top *edge* profile.
+"""
+function EdgeGeom(; a::Float64=2.5e-3, z_center_factor::Float64=1.3, φ::Float64=π/6, T=Float64)
+    aa  = T(a)
+    zc  = T(z_center_factor) * aa
+    tφ  = T(tan(φ))
+    EdgeGeom{T}(zc, aa, aa*aa, tφ)
+end
+
+struct TrenchGeom{T<:AbstractFloat}
+    rtc::T       # r_trench_center
+    rt::T        # r_trench
+    rt2::T       # r_trench^2
+    tanφ::T
+    lw::T
+    cosφ::T
+    sinφ::T
+    lwcos::T     # lw*cosφ
+    lwsin::T     # lw*sinφ
+    cutL::T      # -rt - lwcos
+    cutR::T      #  rt + lwcos
+end
+
+"""
+    TrenchGeom(; a=2.5e-3, z_center_factor=1.3, r_trench_factor=1.362,
+                trench_drop_factor=1.018, lw_factor=1.58, φ=π/6, T=Float64)
+
+Precompute constants for the bottom *trench* profile.
+"""
+function TrenchGeom(; a::Float64=2.5e-3, z_center_factor::Float64=1.3, r_trench_factor::Float64=1.362,
+                     trench_drop_factor::Float64=1.018, lw_factor::Float64=1.58,
+                     φ::Float64=π/6, T=Float64)
+    aa   = T(a)
+    zc   = T(z_center_factor) * aa
+    rt   = T(r_trench_factor) * aa
+    rt2  = rt*rt
+    tφ   = T(tan(φ)); cφ = T(cos(φ)); sφ = T(sin(φ))
+    lw   = T(lw_factor) * aa
+    lwc  = lw * cφ
+    lws  = lw * sφ
+    rtc  = zc - T(trench_drop_factor) * aa
+    cutL = -rt - lwc
+    cutR =  rt + lwc
+    TrenchGeom{T}(rtc, rt, rt2, tφ, lw, cφ, sφ, lwc, lws, cutL, cutR)
+end
+
+
 """
     z_magnet_edge(x::Real) -> Float64
 
@@ -101,27 +162,38 @@ Geometry (hard-coded inside the function)
 - `φ = π/6` (flank angle)
 
 Piecewise definition
-- `x ≤ −a`        : straight flank with slope `−tan(φ)` ending at `x = −a`
+- `x < −a`        : straight flank with slope `−tan(φ)` ending at `x = −a`
 - `|x| ≤ a`       : circular arc `z = z_center − √(a² − x²)`
 - `x > a`         : straight flank with slope `+tan(φ)` starting at `x = +a`
 
 Returns the vertical coordinate `z` (m) of the edge at horizontal position `x` (m).
 The profile is continuous at `x = ±a` (slope changes there).
 """
-function z_magnet_edge(x)
-    a = 2.5e-3;
-    z_center = 1.3*a 
-    r_edge = a
-    φ = π/6
-    if x <= -r_edge
-        z = z_center - tan(φ)*(x+r_edge)
-    elseif x <= r_edge
-        z = z_center - sqrt(r_edge^2 - x^2)
-    else # x > r_edge
-        z = z_center + tan(φ)*(x-r_edge)
-    end
+# function z_magnet_edge(x)
+#     a = 2.5e-3;
+#     z_center = 1.3*a 
+#     r_edge = a
+#     φ = π/6
+#     if x <= -r_edge
+#         z = z_center - tan(φ)*(x+r_edge)
+#     elseif x <= r_edge
+#         z = z_center - sqrt(r_edge^2 - x^2)
+#     else # x > r_edge
+#         z = z_center + tan(φ)*(x-r_edge)
+#     end
 
-    return z
+#     return z
+# end
+"""
+    z_magnet_edge(x, g::EdgeGeom) -> Float64
+
+Top edge profile using precomputed geometry `g`.
+"""
+@inline function z_magnet_edge(x::Float64, g::EdgeGeom{T}) where {T<:AbstractFloat}
+    xx = T(x)
+    xx <= -g.a ? (g.zc - g.tanφ * (xx + g.a)) :
+    xx >=  g.a ? (g.zc + g.tanφ * (xx - g.a)) :
+                 (g.zc - sqrt(max(zero(T), g.a2 - xx*xx)))
 end
 
 
@@ -148,29 +220,60 @@ Piecewise definition (left → right; symmetric about `x = 0`)
 
 Returns the vertical coordinate `z` (m) at horizontal position `x` (m).
 """
-function z_magnet_trench(x)
-    a = 2.5e-3;
-    z_center = 1.3*a 
-    r_edge = 1.0*a
-    r_trench = 1.362*a
-    r_trench_center = z_center - 1.018*a
-    lw = 1.58*a
-    φ = π/6
+# function z_magnet_trench(x)
+#     a = 2.5e-3;
+#     z_center = 1.3*a 
+#     r_edge = 1.0*a
+#     r_trench = 1.362*a
+#     r_trench_center = z_center - 1.018*a
+#     lw = 1.58*a
+#     φ = π/6
 
-    if x <= -r_trench - lw*cos(φ)
-        z = r_trench_center + lw*sin(φ)
-    elseif x <= -r_trench
-        z = r_trench_center - tan(φ)*(x+r_trench)
-    elseif x <= r_trench
-        z = r_trench_center - sqrt( r_trench^2 - x^2 )
-    elseif x<= r_trench + lw*cos(φ)
-        z = r_trench_center + tan(φ)*(x-r_trench)
-    else # x > r_trench + lw*cos(φ)
-        z = r_trench_center + lw*sin(φ)
+#     if x <= -r_trench - lw*cos(φ)
+#         z = r_trench_center + lw*sin(φ)
+#     elseif x <= -r_trench
+#         z = r_trench_center - tan(φ)*(x+r_trench)
+#     elseif x <= r_trench
+#         z = r_trench_center - sqrt( r_trench^2 - x^2 )
+#     elseif x<= r_trench + lw*cos(φ)
+#         z = r_trench_center + tan(φ)*(x-r_trench)
+#     else # x > r_trench + lw*cos(φ)
+#         z = r_trench_center + lw*sin(φ)
+#     end
+
+#     return z
+# end
+"""
+    z_magnet_trench(x, g::TrenchGeom) -> Float64
+
+Bottom trench profile using precomputed geometry `g`.
+"""
+@inline function z_magnet_trench(x::Float64, g::TrenchGeom{T}) where {T<:AbstractFloat}
+    xx = T(x)
+    if xx <= g.cutL
+        return g.rtc + g.lwsin
+    elseif xx <= -g.rt
+        return g.rtc - g.tanφ * (xx + g.rt)
+    elseif xx <=  g.rt
+        return g.rtc - sqrt(max(zero(T), g.rt2 - xx*xx))
+    elseif xx <= g.cutR
+        return g.rtc + g.tanφ * (xx - g.rt)
+    else
+        return g.rtc + g.lwsin
     end
-
-    return z
 end
+
+########################################
+# Backward-compatible no-arg wrappers
+########################################
+
+const _EDGE_DEFAULT   = EdgeGeom()
+const _TRENCH_DEFAULT = TrenchGeom()
+
+# Keep your old signatures working (use the default geometry)
+@inline z_magnet_edge(x::Float64)::Float64   = z_magnet_edge(x, _EDGE_DEFAULT)
+@inline z_magnet_trench(x::Float64)::Float64 = z_magnet_trench(x, _TRENCH_DEFAULT)
+
 
 """
     z_magnet_edge_time(t, r0::AbstractVector{Float64}, v0::AbstractVector{Float64}) -> Float64
@@ -240,3 +343,67 @@ Arguments
 
     return z
 end
+
+
+"""
+    QM_cavity_crash(Ix, f, mf, r0, v0, p;
+                    N=2048, eps=0.0,
+                    a=2.5e-3, φ=π/6,
+                    z_center_factor=1.3,
+                    r_edge_factor=1.0,
+                    r_trench_factor=1.362,
+                    trench_drop_factor=1.018,
+                    lw_factor=1.58,
+                    ygrid=nothing)
+
+Return 1 if z(y) exceeds the TOP wall, -1 if it goes below the BOTTOM wall,
+and 0 if neither happens, for y ∈ [y_in, y_in + default_y_SG].
+
+- `eps` is a safety/touch tolerance (set >0 to require clearance).
+- Pass a precomputed `ygrid` (vector of y values spanning [y_in,y_in + default_y_SG]) to avoid rebuilding it per call.
+"""
+function QM_cavity_crash(μG_ix::Float64,
+                         x0::Float64, y0::Float64, z0::Float64,
+                         v0x::Float64, v0y::Float64, v0z::Float64,
+                         p::AtomParams,
+                         ygrid::AbstractVector{Float64},
+                         eps::Float64
+                         )::UInt8
+
+    @assert v0y != 0 "v0y must be nonzero"
+
+    # Cavity y-span (replace globals with fields in `p` if available)
+    y_in   = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
+    Lsg    = (default_y_SG)::Float64
+    Ld     = (default_y_SGToScreen)::Float64
+    Ltot   = (y_in + Lsg + Ld)::Float64
+    R2tube = (default_R_tube * default_R_tube)::Float64
+
+    # Kinematics
+    inv_vy  = 1.0 / v0y
+    inv_vy2 = inv_vy * inv_vy
+
+    κ = 0.5 * (μG_ix  / p.M) * inv_vy2
+    α = v0x * inv_vy
+    γ = v0z * inv_vy
+
+    # --- Cavity scan; short-circuit on first breach ---
+    @inbounds for y in ygrid
+        dy = y - y0
+        x  = x0 + α * dy
+        Δ  = dy - y_in
+        z  = z0 + γ * dy + κ * Δ * Δ
+
+        # Crash if above ceiling or below trench (with tolerance)
+        (z - z_magnet_edge(x))   >=  eps && return 0x01 # 1 top
+        (z - z_magnet_trench(x)) <= -eps && return 0x02 # 2 bottom
+    end
+
+    # --- Screen check (only if cavity was clear) ---
+    x_screen = x0 + Ltot * v0x * inv_vy 
+    z_screen = z0 + Ltot * v0z * inv_vy  + κ * (Lsg*Lsg + 2*Lsg*Ld)
+    return (x_screen*x_screen + z_screen*z_screen >= R2tube) ? UInt8(0x03) : UInt8(0x00) # 3 tubes
+end
+
+
+ 

@@ -327,3 +327,81 @@ function QM_build_alive_screen(Ix::AbstractVector{<:Real},
 
     return out
 end
+
+"""
+    alternative_QM_find_discarded_particles_multithreading(Ix, pairs, p;
+        t_length=1000, verbose=false)
+
+Return an OrderedDict mapping each current index (Int8) -> Vector of length nlevels;
+each element is a Vector{Int8} of length No with entries:
+    +1 = top-wall crash, 0 = no crash, -1 = bottom-wall crash
+
+Notes:
+- Uses a precomputed y-grid of length `t_length` shared by all threads.
+- Relies on `QM_cavity_crash(i0, F, mF, r0, v0, p; ygrid=ygrid)` returning 1/0/-1.
+"""
+function alternative_QM_find_discarded_particles_multithreading(Ix, pairs, p::AtomParams;
+                                                    y_length::Int=1000,
+                                                    verbose::Bool=false)
+
+    No        = size(pairs, 1)      # number of particles
+    ncurrents = length(Ix)          # number of currents
+    fmf       = fmf_levels(p)
+    nlevels   = length(fmf)         # number of (F, mF) levels
+
+    # --- Precompute and share the y-grid for the SG span ---
+    y_in  = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
+    y_out = (y_in + default_y_SG)::Float64
+    ygrid = range(y_in, y_out; length=y_length)
+
+    # Thread-local results bucket (each idx is unique, so no locking needed)
+    results = Vector{Vector{Vector{UInt8}}}(undef, ncurrents)
+
+    # Optional: serialize prints to avoid interleaving
+    print_lock = ReentrantLock()
+
+    Threads.@threads for idx in 1:ncurrents
+        i0 = Ix[idx]
+
+        if verbose
+            lock(print_lock); try
+                # println("Analyzing I₀ = $(round(i0, sigdigits=5)) A \t (levels = $nlevels)")
+                @printf "Analyzing I₀ = %.3f A \t (levels = %d)\n" i0 nlevels
+            finally
+                unlock(print_lock)
+            end
+        end
+
+        # For this current: one Int8[No] vector per (F,mF), initialized to 0
+        codes_for_levels = [fill(UInt8(0x00), No) for _ in 1:nlevels]
+
+        # --- hoist G(I) once per current ---
+        gI = GvsI(i0)
+
+        # --- loop levels outer, particles inner (μ computed once per level) ---
+        @inbounds for k in 1:nlevels
+            F, mF = fmf[k]
+            μ     = μF_effective(i0, F, mF, p)   # once per (current, level)
+            μG    = μ * gI
+
+            @inbounds for j in 1:No
+                # zero-alloc scalar loads (faster than building SVectors/views)
+                x0  = Float64(pairs[j,1]);  y0  = Float64(pairs[j,2]);  z0  = Float64(pairs[j,3])
+                v0x = Float64(pairs[j,4]);  v0y = Float64(pairs[j,5]);  v0z = Float64(pairs[j,6])
+
+                code = QM_cavity_crash(μG,x0,y0,z0,v0x,v0y,v0z,p,ygrid,0.0)
+
+                codes_for_levels[k][j] = code
+            end
+        end
+
+        results[idx] = codes_for_levels
+    end
+
+    # Assemble as an OrderedDict keyed by current index (Int8)
+    out = OrderedDict{Int8, Vector{Vector{UInt8}}}()
+    @inbounds for idx in 1:ncurrents
+        out[Int8(idx)] = results[idx]
+    end
+    return out
+end
