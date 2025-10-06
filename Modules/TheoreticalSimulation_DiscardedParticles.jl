@@ -406,13 +406,19 @@ function alternative_QM_find_discarded_particles_multithreading(Ix, pairs, p::At
     # Optional: serialize prints to avoid interleaving
     print_lock = ReentrantLock()
 
+    # NEW: global progress counter, safe across threads
+    progress = Threads.Atomic{Int}(0)
+
     Threads.@threads for idx in 1:ncurrents
         i0 = Ix[idx]
 
         if verbose
-            lock(print_lock); try
+            # increment progress *before* doing the work
+            c = Threads.atomic_add!(progress, 1) + 1
+            lock(print_lock); 
+            try
                 # println("Analyzing I₀ = $(round(i0, sigdigits=5)) A \t (levels = $nlevels)")
-                @printf "Analyzing I₀ = %.3f A \t (levels = %d)\n" i0 nlevels
+                @printf "[%d/%d]\tAnalyzing I₀ = %.3f A \t (levels = %d)\n" c ncurrents i0 nlevels
             finally
                 unlock(print_lock)
             end
@@ -452,7 +458,7 @@ function alternative_QM_find_discarded_particles_multithreading(Ix, pairs, p::At
     return out
 end
 
-function QM_build_screen_with_flags(
+function alternative_QM_build_screen_with_flags(
     Ix::Vector{Float64},
     pairs::Matrix{Float64},
     codes::OrderedDict{Int8, Vector{Vector{UInt8}}},

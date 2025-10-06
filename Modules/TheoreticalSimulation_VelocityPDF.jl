@@ -54,3 +54,76 @@ Notes
     sθ = sin(θ); cθ = cos(θ); sϕ = sin(ϕ); cϕ = cos(ϕ)
     return SVector(v*sθ*sϕ, v*cθ, v*sθ*cϕ)
 end
+
+
+function getProbDist_v3(μ::Float64, dBzdz::Float64, zd::AbstractVector, p::AtomParams, q::EffusionParams;
+                     wfurnace::Float64=default_z_furnace, npts::Int=2001, pdf::Symbol=:point)
+    
+    @assert pdf === :point || pdf === :finite "pdf must be :point or :finite"
+
+    # --- Geometry (m) ---
+    LOS   = default_y_FurnaceToSlit
+    LSSG  = default_y_SlitToSG
+    LSG   = default_y_SG
+    LSGD  = default_y_SGToScreen
+    Ltot  = LOS + LSSG + LSG + LSGD
+    lfrac = Ltot / LOS
+    inv_lfrac  = inv(lfrac)
+
+    # --- Slit width at SG entrance (m) ---
+    w     = default_z_slit
+    halfw = w/2
+
+    # --- Derived quantities (scalar path) ---
+    aSG = μ * dBzdz / p.M
+    a   = aSG * LSG * (LSG + 2*LSGD) / 2
+    c   = a / (2*q.α2)  # = a/β²
+
+    # preallocate once
+    out = similar(zd, Float64)
+    tmp = similar(zd, Float64)
+
+    # in-place version of shifted_core
+    @inline function _shifted_core!(dest, z0::Real)
+        @inbounds @simd for i in eachindex(dest, zd)
+            zi = zd[i]
+            # denominators
+            d1 = zi - z0 - (halfw - z0) * lfrac
+            d2 = zi - z0 + (halfw + z0) * lfrac
+
+            t = 0.0
+            if d1 > 0.0
+                p1 = c / d1
+                t += -exp(-p1) * (p1 + 1.0) * inv_lfrac
+            end
+            if d2 > 0.0
+                p2 = c / d2
+                t -= -exp(-p2) * (p2 + 1.0) * inv_lfrac
+            end
+            dest[i] = t
+        end
+        return dest
+    end
+
+    # --- Mode selection ---
+    if pdf === :point
+        # Infinitely thin source (z0 = 0)
+        return _shifted_core!(out, 0.0)
+    else
+        @assert wfurnace > 0 "wfurnace must be > 0."
+        @assert npts ≥ 3 "npts must be ≥ 3 and odd"
+
+        z0s = range(-wfurnace/2, wfurnace/2; length=npts)
+        h   = step(z0s)
+
+        # Trapezoidal integration over z0 (streaming to reduce allocations)
+        _shifted_core!(out, first(z0s));  @. out *= (h/2)
+        _shifted_core!(tmp, last(z0s));   @. out += (h/2) * tmp
+        @inbounds for z0 in z0s[2:end-1]
+            _shifted_core!(tmp, z0)
+            @. out += h * tmp
+        end
+        @. out /= wfurnace
+        return out
+    end
+end

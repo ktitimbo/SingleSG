@@ -166,8 +166,8 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 500_000
-@info "Number of MonteCarlo particles : $(Nss) \n"
+const Nss = 10_000
+@info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
@@ -185,13 +185,12 @@ end
 # particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params)   # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
 
 @time particles_colliding  = TheoreticalSimulation.alternative_QM_find_discarded_particles_multithreading(Icoils, crossing_slit, K39_params; y_length=1000, verbose=true)
-@time particles_travelling = TheoreticalSimulation.QM_build_screen_with_flags(
+@time particles_travelling = TheoreticalSimulation.alternative_QM_build_screen_with_flags(
         Icoils,
         crossing_slit,
         particles_colliding,
         K39_params
         )
-
 
 
 function show_particles_summary(Icoils, quantum_numbers, particles_travelling;
@@ -256,60 +255,59 @@ end
 
 show_particles_summary(Icoils, quantum_numbers, particles_travelling;use_rowcount=true)
 
-for i in eachindex(Icoils)
-    @printf("Analyzing I₀ = %.3f A \n ", Icoils[i])
-    for j in eachindex(quantum_numbers)
-        @printf("\tAnalyzing (F,mf) = (%.1f, %.1f)\n ", quantum_numbers[j][1], quantum_numbers[j][2])
-        M = particles_travelling[i][j]
-        c = counts(M)
-        pretty_table([c.pass,c.top,c.bot,c.tub,Nss],
-        )
-    end
-end
+zd = range(-10,10,20001)*1e-3
+dBzdz = 29.86/1.01 ;
 
-M = particles_travelling[1][1]
+pp = TheoreticalSimulation.getProbDist_v3(μB, dBzdz,zd, K39_params, effusion_params; wfurnace=0.100e-3, npts=401, pdf=:point)
+dd = TheoreticalSimulation.getProbDist_v3(μB, dBzdz,zd, K39_params, effusion_params; wfurnace=0.100e-3, npts=1001, pdf=:finite)
+dsds = TheoreticalSimulation.smooth_profile(zd,dd,150e-6)
 
-# Count how many of each outcome in a matrix M (flag is column 10)
-counts(M::AbstractMatrix{<:Real}) = (
-    pass  = count(==(0.0), @view M[:,10]),
-    top   = count(==(1.0), @view M[:,10]),
-    bot   = count(==(2.0), @view M[:,10]),
-    tub   = count(==(3.0), @view M[:,10]),
-)
-
-# Boolean masks for quick filtering (avoids allocations with @view and findall)
-mask_pass(M) = (@view M[:,10]) .== 0.0
-mask_top(M)  = (@view M[:,10]) .== 1.0
-mask_bot(M)  = (@view M[:,10]) .== 2.0
-mask_scr(M)  = (@view M[:,10]) .== 3.0
-
-M[mask_pass(M),:]
-
-# If you ever need the flags as UInt8 later:
-flags_u8(M) = UInt8.(round.(Int, @view M[:,10]))
+plot(zd,pp)
+plot!(zd,dd)
+plot!(zd,dsds)
 
 
-mats = M          # current index 1, level 3 -> No×10 matrix
-c = counts(mats)                # (pass=…, top=…, bot=…, scr=…)
-c.pass
-@show c
 
-alive = @view mats[mask_pass(mats), :]   # rows that passed everything
 
-particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params)   # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
+zd = range(-10,10,20001)*1e-3
+dBzdz = 28.6/1.01 ;
+
+plot(zd,getProbDist(zd, dBzdz, K39_params, effusion_params; wfurnace=0.200e-3, npts=401, pdf=:width))
+plot!(zd,getProbDist(zd, dBzdz, K39_params, effusion_params; wfurnace=0.200e-3, npts=401, pdf=:point))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---- return a submatrix (copies the selected rows) ----
+rows_pass(M) = M[(@view M[:,10]) .== 0.0, :]
+rows_top(M)  = M[(@view M[:,10]) .== 1.0, :]
+rows_bot(M)  = M[(@view M[:,10]) .== 2.0, :]
+rows_scr(M)  = M[(@view M[:,10]) .== 3.0, :]
+# generic:
+rows_by_flag(M, flag::Real) = M[(@view M[:,10]) .== flag, :]
+
+
+rows_by_flag(particles_travelling[30][5],0)
+
 jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_reaching_screen))
 
-length.(particles_colliding[30])
-
-particles_colliding2
 
 
-n_nonzero = map(v -> count(!iszero, v), particles_colliding2[30])
-n_top = map(v -> count(==(1), v), particles_colliding2[30])
-n_bot = map(v -> count(==(3), v), particles_colliding2[30])
-n_tube = map(v -> count(==(2), v), particles_colliding2[30])
-
-
+n_nonzero   = map(v -> count(!iszero, v), particles_colliding[30])
+n_top       = map(v -> count(==(1), v), particles_colliding[30])
+n_bot       = map(v -> count(==(3), v), particles_colliding[30])
+n_tube      = map(v -> count(==(2), v), particles_colliding[30])
 n_top+n_bot+n_tube == n_nonzero
 
 
