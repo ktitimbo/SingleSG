@@ -329,16 +329,62 @@ function QM_build_alive_screen(Ix::AbstractVector{<:Real},
 end
 
 """
-    alternative_QM_find_discarded_particles_multithreading(Ix, pairs, p;
-        t_length=1000, verbose=false)
+    alternative_QM_find_discarded_particles_multithreading(
+        Ix, pairs, p::AtomParams; y_length::Int=1000, verbose::Bool=false
+    ) -> OrderedDict{Int8, Vector{Vector{UInt8}}}
 
-Return an OrderedDict mapping each current index (Int8) -> Vector of length nlevels;
-each element is a Vector{Int8} of length No with entries:
-    +1 = top-wall crash, 0 = no crash, -1 = bottom-wall crash
+Parallel, per-current / per-(F,mF) classification of particle trajectories through
+the Stern–Gerlach (SG) cavity.
 
-Notes:
-- Uses a precomputed y-grid of length `t_length` shared by all threads.
-- Relies on `QM_cavity_crash(i0, F, mF, r0, v0, p; ygrid=ygrid)` returning 1/0/-1.
+For each coil current `I₀ ∈ Ix` and each hyperfine sublevel `(F, mF)`, the function
+evaluates every particle trajectory given by `pairs[j, 1:6]` across `y_length`
+sample points spanning the cavity and assigns a 1-byte code from `QM_cavity_crash`:
+
+Codes (`UInt8`):
+- `0x00` — clears the cavity **and** passes the downstream tube/screen.
+- `0x01` — hits the **top edge** (ceiling) somewhere inside the cavity.
+- `0x02` — hits the **bottom trench** somewhere inside the cavity.
+- `0x03` — clears the cavity but **misses the tube/screen** aperture.
+
+# Arguments
+- `Ix::AbstractVector{<:Real}`: Coil currents (A). Each is processed on a thread.
+- `pairs::AbstractMatrix{<:Real}`: `(No × 6)` matrix of initial states per particle
+  with columns `(x0, y0, z0, v0x, v0y, v0z)` (SI units).
+- `p::AtomParams`: Atomic/physics parameters (e.g. `p.M`), used via `μF_effective`/`GvsI`.
+
+# Keyword Arguments
+- `y_length::Int=1000`: Number of y-samples over the cavity span
+  `y ∈ [y_in, y_out]`, where `y_in = default_y_FurnaceToSlit + default_y_SlitToSG`
+  and `y_out = y_in + default_y_SG`.
+- `verbose::Bool=false`: If `true`, prints a status line per current.
+
+# Returns
+`OrderedDict{Int8, Vector{Vector{UInt8}}}` mapping **current index**
+`Int8(1:length(Ix))` → vector over `(F, mF)` levels → `Vector{UInt8}` of length `No`
+(containing the code for each particle).
+
+# Performance notes
+- Work is `Threads.@threads` over currents; per-current work is independent.
+- Time ~ `length(Ix) * nlevels * No * y_length`.
+- Result memory ~ `ncurrents * nlevels * No` bytes (one `UInt8` per particle).
+- Best performance when:
+  - `Ix::Vector{Float64}` and `pairs::Matrix{Float64}` (avoids per-element casts).
+  - Geometry globals are set **before** running and not mutated during execution.
+  - The inner kernel `QM_cavity_crash` is called positionally (no kwargs).
+
+# Example
+```julia
+Ix    = collect(range(-20.0, 20.0; length=5))
+pairs = randn(10_000, 6) .* [1e-3, 0.10, 1e-3, 1e-3, 100.0, 1e-3]'
+out   = alternative_QM_find_discarded_particles_multithreading(Ix, pairs, K39_params;
+                                                               y_length=1024, verbose=true)
+
+# Codes for current index 1, level 3:
+codes  = out[Int8(1)][3]               # Vector{UInt8} of length size(pairs,1)
+n_top  = count(==(0x01), codes)
+n_bot  = count(==(0x02), codes)
+n_scr  = count(==(0x03), codes)
+n_pass = count(==(0x00), codes)
 """
 function alternative_QM_find_discarded_particles_multithreading(Ix, pairs, p::AtomParams;
                                                     y_length::Int=1000,
@@ -403,5 +449,66 @@ function alternative_QM_find_discarded_particles_multithreading(Ix, pairs, p::At
     @inbounds for idx in 1:ncurrents
         out[Int8(idx)] = results[idx]
     end
+    return out
+end
+
+function QM_build_screen_with_flags(
+    Ix::Vector{Float64},
+    pairs::Matrix{Float64},
+    codes::OrderedDict{Int8, Vector{Vector{UInt8}}},
+    p::AtomParams
+)
+    No      = size(pairs, 1)
+    fmf     = fmf_levels(p)
+    nlevels = length(fmf)
+
+    # Bind geometry once (typed)
+    y_in = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
+    Lsg  = default_y_SG::Float64
+    Ld   = default_y_SGToScreen::Float64
+    Ltot = (y_in + Lsg + Ld)::Float64
+    Δ    = (Lsg*Lsg + 2.0*Lsg*Ld)::Float64  # (Lsg+Ld)^2 - Ld^2
+
+    out = OrderedDict{Int8, Vector{Matrix{Float64}}}()
+
+    for (kcurr, codes_per_level) in codes
+        idx = Int(kcurr)
+        I0  = Ix[idx]
+        gI  = GvsI(I0)  # once per current
+
+        mats = Vector{Matrix{Float64}}(undef, nlevels)
+
+        @inbounds for k in 1:nlevels
+            F, mF = fmf[k]
+            μ     = μF_effective(I0, F, mF, p)    # once per (current, level)
+            a_z  = (μ * gI) / p.M                # a_z
+
+            flags_k = codes_per_level[k]          # Vector{UInt8} length = No
+
+            M = Matrix{Float64}(undef, No, 10)
+
+            # copy the 6 initial columns (column-wise is cheap, no views created)
+            @simd for j in 1:No; M[j,1] = pairs[j,1]; end
+            @simd for j in 1:No; M[j,2] = pairs[j,2]; end
+            @simd for j in 1:No; M[j,3] = pairs[j,3]; end
+            @simd for j in 1:No; M[j,4] = pairs[j,4]; end
+            @simd for j in 1:No; M[j,5] = pairs[j,5]; end
+            @simd for j in 1:No; M[j,6] = pairs[j,6]; end
+
+            # fill screen columns + flag with scalar math (no function calls, no slices)
+            for j in 1:No
+                x0  = M[j,1]; z0  = M[j,3]
+                v0x = M[j,4]; v0y = M[j,5]; v0z = M[j,6]
+                x,z,vz = screen_x_z_vz(x0,z0,v0x,v0y,v0z, Lsg, Δ, Ltot, a_z)
+                M[j,7] = x;  M[j,8] = z;  M[j,9] = vz
+                M[j,10] = Float64(flags_k[j])   # keep your layout
+            end
+
+            mats[k] = M
+        end
+
+        out[Int8(idx)] = mats
+    end
+
     return out
 end

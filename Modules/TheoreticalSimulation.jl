@@ -268,6 +268,7 @@ module TheoreticalSimulation
             CQD_EqOfMotion_z, QM_EqOfMotion_z,
             CQD_Screen_position, QM_Screen_position,
             CQD_Screen_velocity, QM_Screen_velocity,
+            screen_x_z_vz_cached,
             plot_μeff, plot_SG_geometry, plot_velocity_stats,
             QM_find_discarded_particles, QM_find_discarded_particles_multithreading,
             QM_build_filtered_pairs, QM_build_alive_screen,

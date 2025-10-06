@@ -84,6 +84,7 @@ K39_params = AtomParams(atom);
 # Math constants
 const TWOπ = 2π;
 const INV_E = exp(-1);
+quantum_numbers = fmf_levels(K39_params);
 
 # STERN--GERLACH EXPERIMENT
 # Camera and pixel geometry : intrinsic properties
@@ -165,8 +166,8 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 100
-@info "Number of MonteCarlo particles : $(Nss)"
+const Nss = 500_000
+@info "Number of MonteCarlo particles : $(Nss) \n"
 
 # Monte Carlo generation of particles traersing the filtering slit
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
@@ -180,10 +181,120 @@ if SAVE_FIG
     # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
 
-@time particles_colliding  = QM_find_discarded_particles_multithreading(Icoils,crossing_slit,K39_params; t_length=1000, verbose=true)   # heavy loop: goes in series
-@time particles_colliding2 = TheoreticalSimulation.alternative_QM_find_discarded_particles_multithreading(Icoils, crossing_slit, K39_params; y_length=1000, verbose=true)
+# @time particles_colliding  = QM_find_discarded_particles_multithreading(Icoils,crossing_slit,K39_params; t_length=1000, verbose=true)   # heavy loop: goes in series
+# particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params)   # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
+
+@time particles_colliding  = TheoreticalSimulation.alternative_QM_find_discarded_particles_multithreading(Icoils, crossing_slit, K39_params; y_length=1000, verbose=true)
+@time particles_travelling = TheoreticalSimulation.QM_build_screen_with_flags(
+        Icoils,
+        crossing_slit,
+        particles_colliding,
+        K39_params
+        )
 
 
+
+function show_particles_summary(Icoils, quantum_numbers, particles_travelling;
+                                use_rowcount::Bool=true)
+
+    nlevels = length(quantum_numbers)
+
+    # count flags in column 10; supports Float or Integer flags
+    @inline function counts_from_M(M::AbstractMatrix)
+        @views col = M[:,10]
+        if eltype(col) <: Integer
+            pass = count(==(0),  col); top = count(==(1), col)
+            bot  = count(==(2),  col); tub = count(==(3), col)
+        else
+            pass = count(==(0.0), col); top = count(==(1.0), col)
+            bot  = count(==(2.0), col); tub = count(==(3.0), col)
+        end
+        return (pass=pass, top=top, bot=bot, tub=tub)
+    end
+
+    for i in eachindex(Icoils)
+        I0   = Float64(Icoils[i])
+        mats = particles_travelling[i]  # Vector of No×10 matrices, one per level
+
+        nrows = nlevels
+        data  = Matrix{Float64}(undef, nrows, 9)
+
+        # rows per level
+        for j in 1:nlevels
+            F, mF = quantum_numbers[j]
+            M     = mats[j]
+            c     = counts_from_M(M)
+            tot   = use_rowcount ? size(M,1) : (c.pass + c.top + c.bot + c.tub)
+
+            passp = tot == 0 ? 0.0 : 100.0 * c.pass / tot
+            lossp = tot == 0 ? 0.0 : 100.0 * (c.top + c.bot + c.tub) / tot
+
+            data[j, :] = [Float64(F), Float64(mF),
+                          c.pass, c.top, c.bot, c.tub,
+                          tot, passp, lossp]
+        end
+
+
+        pretty_table(
+            data;
+            column_labels = ["F","mF","Pass","Top","Bottom","Tube","Total","Pass %","Loss %"],
+            title = @sprintf("I₀ = %.3f A", I0),
+            formatters    = [fmt__printf("%d", 3:7), fmt__printf("%5.1f", 8:9)],
+            alignment = :c,
+            table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+            style = TextTableStyle(first_line_column_label = crayon"yellow bold",
+                                    table_border  = crayon"blue bold",
+                                    title = crayon"bold red"),
+            equal_data_column_widths = true,
+            # formatters,
+            # highlighters,
+        )
+        println()
+    end
+    return nothing
+end
+
+show_particles_summary(Icoils, quantum_numbers, particles_travelling;use_rowcount=true)
+
+for i in eachindex(Icoils)
+    @printf("Analyzing I₀ = %.3f A \n ", Icoils[i])
+    for j in eachindex(quantum_numbers)
+        @printf("\tAnalyzing (F,mf) = (%.1f, %.1f)\n ", quantum_numbers[j][1], quantum_numbers[j][2])
+        M = particles_travelling[i][j]
+        c = counts(M)
+        pretty_table([c.pass,c.top,c.bot,c.tub,Nss],
+        )
+    end
+end
+
+M = particles_travelling[1][1]
+
+# Count how many of each outcome in a matrix M (flag is column 10)
+counts(M::AbstractMatrix{<:Real}) = (
+    pass  = count(==(0.0), @view M[:,10]),
+    top   = count(==(1.0), @view M[:,10]),
+    bot   = count(==(2.0), @view M[:,10]),
+    tub   = count(==(3.0), @view M[:,10]),
+)
+
+# Boolean masks for quick filtering (avoids allocations with @view and findall)
+mask_pass(M) = (@view M[:,10]) .== 0.0
+mask_top(M)  = (@view M[:,10]) .== 1.0
+mask_bot(M)  = (@view M[:,10]) .== 2.0
+mask_scr(M)  = (@view M[:,10]) .== 3.0
+
+M[mask_pass(M),:]
+
+# If you ever need the flags as UInt8 later:
+flags_u8(M) = UInt8.(round.(Int, @view M[:,10]))
+
+
+mats = M          # current index 1, level 3 -> No×10 matrix
+c = counts(mats)                # (pass=…, top=…, bot=…, scr=…)
+c.pass
+@show c
+
+alive = @view mats[mask_pass(mats), :]   # rows that passed everything
 
 particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params)   # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
 jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_reaching_screen))

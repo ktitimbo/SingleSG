@@ -620,30 +620,87 @@ keeps continuity of both position and `v_z` at the SG exit.
 - Non-relativistic; gravity/collisions/fringing fields neglected.
 - SG gradient aligned with `+z` and treated constant over `y_SG`.
 """
-function QM_Screen_position(Ix,f,mf,r0::AbstractVector{<:Real},v0::AbstractVector{<:Real}, p::AtomParams)
-    @assert length(r0) == 3 "r0 must have length 3"
-    @assert length(v0) == 3 "v0 must have length 3"
+# function QM_Screen_position(Ix,f,mf,r0::AbstractVector{<:Real},v0::AbstractVector{<:Real}, p::AtomParams)
+#     @assert length(r0) == 3 "r0 must have length 3"
+#     @assert length(v0) == 3 "v0 must have length 3"
 
-    @inbounds begin
-        x0  = r0[1];  y0  = r0[2];  z0  = r0[3]
-        v0x = v0[1];  v0y = v0[2];  v0z = v0[3]
-    end
-    @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
+#     @inbounds begin
+#         x0  = r0[1];  y0  = r0[2];  z0  = r0[3]
+#         v0x = v0[1];  v0y = v0[2];  v0z = v0[3]
+#     end
+#     @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
 
-    # Geometry
-    Lsg  = default_y_SG
-    Ld   = default_y_SGToScreen
-    Ltot = default_y_FurnaceToSlit  + default_y_SlitToSG + Lsg + Ld
+#     # Geometry
+#     Lsg  = default_y_SG::Float64
+#     Ld   = default_y_SGToScreen::Float64
+#     Ltot = (default_y_FurnaceToSlit  + default_y_SlitToSG + Lsg + Ld)::Float64
 
-    # Physics parameters
-    μG =  μF_effective(Ix,f,mf,p) * GvsI(Ix)
+#     # Physics parameters
+#     μG =  μF_effective(Ix,f,mf,p) * GvsI(Ix)
+#     inv_vy  = 1.0 / v0y
+#     inv_vy2 = inv_vy * inv_vy
+#     acc_z = μG / p.M
+
+#     x = x0 + Ltot * v0x * inv_vy
+#     y = y0 + Ltot
+#     z = z0 + Ltot * v0z * inv_vy + 0.5 * acc_z * inv_vy2 * ((Lsg+Ld)*(Lsg+Ld) - Ld*Ld)
+#     return SVector{3,Float64}(x, y, z)
+# end
+# ---------- FAST SCALAR CORE (no AbstractVector, no globals in arithmetic) ----------
+Base.@propagate_inbounds @inline function QM_Screen_position(
+    Ix::Float64, f, mf,
+    x0::Float64, y0::Float64, z0::Float64,
+    v0x::Float64, v0y::Float64, v0z::Float64,
+    p::AtomParams{Float64}
+)::SVector{3,Float64}
+    @assert v0y != 0.0 "v0y must be nonzero (beam must advance toward the screen)."
+
+    # bind geometry to concrete locals (avoid Any from non-const globals)
+    y_in  = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
+    Lsg   = default_y_SG::Float64
+    Ld    = default_y_SGToScreen::Float64
+    Ltot  = (y_in + Lsg + Ld)::Float64
+
+    # physics
+    μG    = μF_effective(Ix, f, mf, p) * GvsI(Ix)
+    inv_vy  = 1.0 / v0y
+    inv_vy2 = inv_vy * inv_vy
     acc_z = μG / p.M
 
-    x = x0 + Ltot * v0x / v0y
+    # precompute Δ = (Lsg+Ld)^2 - Ld^2 = Lsg^2 + 2 Lsg Ld
+    Δ = Lsg*Lsg + 2.0*Lsg*Ld
+
+    x = x0 + Ltot * v0x * inv_vy
     y = y0 + Ltot
-    z = z0 + Ltot * v0z / v0y + 0.5 * acc_z / v0y^2 * ((Lsg+Ld)^2 - Ld^2)
-    return SVector{3,Float64}(x, y, z)
+    z = z0 + Ltot * v0z * inv_vy + 0.5 * acc_z * inv_vy2 * Δ
+    return SVector(x, y, z)
 end
+
+# ---------- CONVENIENCE: SVector inputs (zero alloc, avoids indexing) ----------
+Base.@propagate_inbounds @inline function QM_Screen_position(
+    Ix::Float64, f, mf,
+    r0::SVector{3,Float64}, v0::SVector{3,Float64},
+    p::AtomParams{Float64}
+)::SVector{3,Float64}
+    return QM_Screen_position(Ix, f, mf, r0[1], r0[2], r0[3], v0[1], v0[2], v0[3], p)
+end
+
+# ---------- BACKWARD-COMPATIBLE API: AbstractVector inputs ----------
+# (keeps working everywhere; extracts scalars and calls the fast path)
+function QM_Screen_position(
+    Ix, f, mf,
+    r0::AbstractVector{<:Real}, v0::AbstractVector{<:Real},
+    p::AtomParams
+)
+    @assert length(r0) == 3 "r0 must have length 3"
+    @assert length(v0) == 3 "v0 must have length 3"
+    @inbounds begin
+        x0  = Float64(r0[1]);  y0  = Float64(r0[2]);  z0  = Float64(r0[3])
+        v0x = Float64(v0[1]);  v0y = Float64(v0[2]);  v0z = Float64(v0[3])
+    end
+    return QM_Screen_position(Float64(Ix), f, mf, x0, y0, z0, v0x, v0y, v0z, p)
+end
+
 
 """
     QM_Screen_velocity(Ix, f, mf, v0, p) -> SVector{3,Float64}
@@ -680,17 +737,70 @@ Then
 - The return type is `Float64` by construction; if you need to preserve higher precision
   or AD types, adjust the return container accordingly.
 """
-function QM_Screen_velocity(Ix,f,mf,v0::AbstractVector{<:Real}, p::AtomParams)
+# function QM_Screen_velocity(Ix,f,mf,v0::AbstractVector{<:Real}, p::AtomParams)
+#     @assert length(v0) == 3 "v0 must have length 3"
+#     v0x, v0y, v0z = v0
+#     @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
+
+#     # Physics parameters
+#     μ =  μF_effective(Ix,f,mf,p)
+#     acc_z = μ * GvsI(Ix) / p.M
+
+#     vx = v0x
+#     vy = v0y
+#     vz = v0z + acc_z * default_y_SG / v0y
+#     return SVector{3,Float64}(vx, vy, vz)
+# end
+# ---------- FAST SCALAR CORE ----------
+Base.@propagate_inbounds @inline function QM_Screen_velocity(
+    Ix::Float64, f, mf,
+    v0x::Float64, v0y::Float64, v0z::Float64,
+    p::AtomParams{Float64}
+)::SVector{3,Float64}
+    @assert v0y != 0.0 "v0y must be nonzero (beam must advance toward the screen)."
+
+    # bind geometry to concrete locals (avoid Any from globals)
+    Lsg = default_y_SG::Float64
+
+    # physics
+    μG     = μF_effective(Ix, f, mf, p) * GvsI(Ix)
+    inv_vy = 1.0 / v0y
+    vz     = v0z + (μG / p.M) * Lsg * inv_vy
+
+    return SVector(v0x, v0y, vz)
+end
+
+# ---------- SVECTOR CONVENIENCE ----------
+Base.@propagate_inbounds @inline function QM_Screen_velocity(
+    Ix::Float64, f, mf,
+    v0::SVector{3,Float64},
+    p::AtomParams{Float64}
+)::SVector{3,Float64}
+    return QM_Screen_velocity(Ix, f, mf, v0[1], v0[2], v0[3], p)
+end
+
+# ---------- BACKWARD-COMPATIBLE ADAPTER ----------
+function QM_Screen_velocity(
+    Ix, f, mf,
+    v0::AbstractVector{<:Real},
+    p::AtomParams
+)
     @assert length(v0) == 3 "v0 must have length 3"
-    v0x, v0y, v0z = v0
-    @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
+    @inbounds begin
+        v0x = Float64(v0[1]); v0y = Float64(v0[2]); v0z = Float64(v0[3])
+    end
+    return QM_Screen_velocity(Float64(Ix), f, mf, v0x, v0y, v0z, p)
+end
 
-    # Physics parameters
-    μ =  μF_effective(Ix,f,mf,p)
-    acc_z = μ * GvsI(Ix) / p.M
-
-    vx = v0x
-    vy = v0y
-    vz = v0z + acc_z * default_y_SG / v0y
-    return SVector{3,Float64}(vx, vy, vz)
+# Fast, cached formulas for screen outputs
+@inline function screen_x_z_vz(
+    x0::Float64, z0::Float64, v0x::Float64, v0y::Float64, v0z::Float64,
+    L_SG::Float64, ΔL::Float64, Ltot::Float64, acc_z::Float64
+)::NTuple{3,Float64}
+    inv_vy  = 1.0 / v0y
+    inv_vy2 = inv_vy * inv_vy
+    x  = muladd(Ltot, v0x*inv_vy, x0)
+    z  = muladd(Ltot, v0z*inv_vy, z0) + 0.5 * acc_z * inv_vy2 * ΔL
+    vz = muladd(acc_z*L_SG, inv_vy, v0z)
+    return (x, z, vz)
 end
