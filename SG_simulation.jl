@@ -355,13 +355,49 @@ for j in (r[end] == length(Icoils) ? r : Iterators.flatten((r, (length(Icoils),)
 
 end
 
-
-ex_profile = load(joinpath(@__DIR__,"analysis_data","20250926T164352673","profiles.jld2"))["profiles"]
-
-ex_profile[:Icoils]
-ex_profile
+joinpath(@__DIR__,"analysis_data","20251007T1003045109")
+ex_profile = load(joinpath(@__DIR__,"analysis_data","20251007T003045109","profiles.jld2"))["profiles"]
 
 
+
+collect(ex_profile[:z_mm])
+ex_profile[:F1_profile][26,:]
+
+
+fit_coeff = zeros(length(ex_profile[:Icoils]),4)
+for i_idx=1:length(ex_profile[:Icoils])
+λ0=0.01
+S = BSplineKit.fit(BSplineOrder(4), ex_profile[:z_mm] .- 8.829718, normalize_vec(ex_profile[:F1_profile][i_idx,:]), λ0; weights=compute_weights(ex_profile[:z_mm] .- 8.829718, λ0))
+plot(ex_profile[:z_mm] .- 8.829718,normalize_vec(ex_profile[:F1_profile][i_idx,:]))
+# Closed-form profile
+zd     = range(-7.5, 7.5; length=100_001) .* 1e-3  # m
+plot!(1e3*zd,S.(1e3*zd))
+dBzdz  = TheoreticalSimulation.GvsI(ex_profile[:Icoils][i_idx])
+dd1    = TheoreticalSimulation.getProbDist_v3(μF_effective(ex_profile[:Icoils][i_idx],1,-1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+dd2    = TheoreticalSimulation.getProbDist_v3(μF_effective(ex_profile[:Icoils][i_idx],1,0,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite)
+dd3    = TheoreticalSimulation.getProbDist_v3(μF_effective(ex_profile[:Icoils][i_idx],1,1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite)
+dd     = dd1 + dd2 + dd3
+ds_s   = TheoreticalSimulation.smooth_profile(zd, dd, 150e-6)
+ds_sN  = normalize_vec(ds_s)
+plot!(1e3 .* zd, ds_s; label="Closed-form", line=(:blue, 1.5))
+
+plot(1e3*zd, S.(1e3*zd) .- ds_s)
+using Polynomials  # ] add Polynomials
+p = Polynomials.fit(1e3*zd, S.(1e3*zd) .- ds_s, 3)          # cubic: y ≈ c0 + c1*x + c2*x^2 + c3*x^3
+ŷ = p.(1e3*zd,)                 # predictions
+fit_coeff[i_idx,:] = coeffs(p)           # [c0, c1, c2, c3]
+# R² = 1 - sum((y .- ŷ).^2) / sum((y .- mean(y)).^2)
+plot!(1e3*zd, ŷ)
+
+plot(1e3*zd, normalize_vec(S.(1e3*zd) .- ŷ))
+plot!(1e3 .* zd, normalize_vec(ds_s); label="Closed-form", line=(:blue, 1.5))
+end
+
+
+plot(fit_coeff[[1,23,24,25,26],1], legend=:topleft)
+plot!(fit_coeff[[1,23,24,25,26],2])
+plot!(fit_coeff[[1,23,24,25,26],3])
+plot!(fit_coeff[[1,23,24,25,26],4])
 
 
 Bn_QM  = 2π*ħ*K39_params.Ahfs*(0.5+K39_params.Ispin) / 2 / μₑ
