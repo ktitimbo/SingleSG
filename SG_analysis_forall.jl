@@ -206,6 +206,7 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     jldsave(joinpath(OUTDIR, "profiles.jld2"),
         profiles = OrderedDict(:Icoils => Icoils,
                                 :Icoils_err => ΔIcoils,
+                                :z_mm       => z_mm,
                                 :F1_profile => profiles_F1.mean,
                                 :F1_err     => profiles_F1.sem,
                                 :F2_profile => profiles_F2.mean,

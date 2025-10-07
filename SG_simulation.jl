@@ -162,7 +162,6 @@ Icoils = [0.00,
             0.010,0.020,0.030,0.040,0.050,0.060,0.070,0.080,0.090,
             0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.60,0.70,0.75,0.80,0.90,1.00
 ];
-# Icoils = reverse([0.993, 0.739, 0.549, 0.01164, 0.0])
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
@@ -176,7 +175,7 @@ crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set,
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
     plot_SG_geometry("SG_geometry")
-    plot_velocity_stats(crossing_slit, "data μ" , "velocity_pdf_up")
+    plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf_up")
     # plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
     # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
@@ -242,9 +241,9 @@ anim = @animate for i in 1:nI
     plot!(legendtitle = L"$I_{0} = %$(round(Icoils[i]; digits=5))\,\mathrm{A}$")
     display(fig)
 end
-gif_path = joinpath(OUTDIR, "z_profiles_comparison.gif")
+gif_path = joinpath(OUTDIR, "z_profiles_comparison.gif");
 gif(anim, gif_path, fps=2)  # adjust fps as you like
-@info "Saved GIF" gif_path
+@info "Saved GIF" gif_path ;
 
 
 Icoils = alive_screen[:Icoils]
@@ -334,6 +333,7 @@ for j in (r[end] == length(Icoils) ? r : Iterators.flatten((r, (length(Icoils),)
         bins = (FreedmanDiaconisBins(xs_e), FreedmanDiaconisBins(zs_e)),
         show_empty_bins = true, color = :plasma, normalize=:pdf,
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{mm})$",
+        ylims=(-1,17.5),
         # xticks = -4.0:0.50:4.0, yticks = -1250:50:1250,
         # clims = (0, 0.0003),
         # colorbar_position = :bottom,
@@ -354,6 +354,15 @@ for j in (r[end] == length(Icoils) ? r : Iterators.flatten((r, (length(Icoils),)
     display(fig)
 
 end
+
+
+ex_profile = load(joinpath(@__DIR__,"analysis_data","20250926T164352673","profiles.jld2"))["profiles"]
+
+ex_profile[:Icoils]
+ex_profile
+
+
+
 
 Bn_QM  = 2π*ħ*K39_params.Ahfs*(0.5+K39_params.Ispin) / 2 / μₑ
 Bn_CQD = 11.8e-6
