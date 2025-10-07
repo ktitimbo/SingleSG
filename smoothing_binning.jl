@@ -426,7 +426,7 @@ function average_on_grid_mc(xsets, ysets;
     return xq_vec, μ, σ
 end
 
-ROW_START = 8
+CURRENT_ROW_START = 8
 scale_mag_factor = inv(magnification_factor)   # = 1 / magnification_factor
 i_sampled_length = 300
 
@@ -439,10 +439,10 @@ col = Dict(
     :sy => :F1_z_centroid_se_mm,
 )
 
-xsets  = [t[ROW_START:end, col[:x]]                         for t in tables]
-ysets  = [scale_mag_factor .* t[ROW_START:end, col[:y]]     for t in tables]
-σxsets = [t[ROW_START:end, col[:sx]]                        for t in tables]
-σysets = [scale_mag_factor .* t[ROW_START:end, col[:sy]]    for t in tables]
+xsets  = [t[CURRENT_ROW_START:end, col[:x]]                         for t in tables]
+ysets  = [scale_mag_factor .* t[CURRENT_ROW_START:end, col[:y]]     for t in tables]
+σxsets = [t[CURRENT_ROW_START:end, col[:sx]]                        for t in tables]
+σysets = [scale_mag_factor .* t[CURRENT_ROW_START:end, col[:sy]]    for t in tables]
 
 # pick a log-spaced grid across the overall x-range (nice for decades-wide currents)
 xlo = minimum(first.(xsets))
@@ -464,8 +464,8 @@ fig = plot(
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
 )
 for i=1:length(data_directories)
-    xs = m_sets[i][runs[i]][3][ROW_START:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][ROW_START:end,"F1_z_centroid_mm"]/magnification_factor
+    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"Icoil_A"]
+    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"F1_z_centroid_mm"]/magnification_factor
     scatter!(fig,xs, ys,
         label=data_directories[i],
         marker=(:circle, :white,3),
@@ -497,8 +497,8 @@ i_xx = range(15e-3,0.999,length=i_sampled_length)
 z_final = zeros(length(data_directories),i_sampled_length)
 cols = palette(:darkrainbow, length(data_directories))
 for i=1:length(data_directories)
-    xs = m_sets[i][runs[i]][3][ROW_START:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][ROW_START:end,"F1_z_centroid_mm"]*scale_mag_factor
+    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"Icoil_A"]
+    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"F1_z_centroid_mm"]*scale_mag_factor
     spl = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
     z_final[i,:] = spl.(i_xx)
     scatter!(fig,xs, ys,
@@ -539,9 +539,9 @@ i_xx = range(15e-3,0.999,length=i_sampled_length)
 z_final_fit = zeros(length(data_directories),i_sampled_length)
 cols = palette(:darkrainbow, length(data_directories))
 for i=1:length(data_directories)
-    xs = m_sets[i][runs[i]][3][ROW_START:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][ROW_START:end,"F1_z_centroid_mm"]*scale_mag_factor
-    δys = m_sets[i][runs[i]][3][ROW_START:end,"F1_z_centroid_se_mm"]*scale_mag_factor
+    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"Icoil_A"]
+    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"F1_z_centroid_mm"]*scale_mag_factor
+    δys = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"F1_z_centroid_se_mm"]*scale_mag_factor
     spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
     z_final_fit[i,:] = spl.(i_xx)
     scatter!(fig,xs, ys,
@@ -645,7 +645,6 @@ legend=:bottomright,
 )
 display(fig)
 saveplot(fig, "g_inter_vs_mc_vs_fit")
-
 
 
 jldsave(joinpath(OUTDIR,"data_averaged.jld2"), 
