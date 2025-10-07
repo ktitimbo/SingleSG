@@ -203,14 +203,15 @@ jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedD
 alive_screen = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:screen ));
 dead_crash   = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:crash ));
 
+nx_bins , nz_bins = 32 , 2
 println("F=$(K39_params.Ispin+0.5) profiles")
 profiles_top = QM_analyze_profiles_to_dict(alive_screen, K39_params;
-    manifold=:F_top, n_bins= (32,2), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
+    manifold=:F_top, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
 println("F=$(K39_params.Ispin-0.5) profiles")
 profiles_bottom = QM_analyze_profiles_to_dict(alive_screen, K39_params;
-    manifold=:F_bottom, n_bins= (32,2), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:pdf)
+    manifold=:F_bottom, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:pdf);
 
-normalize_vec(v) = (m = maximum(v); m == 0 ? v : v ./ m)
+normalize_vec(v) = (m = maximum(v); m == 0 ? v : v ./ m);
 anim = @animate for i in 1:nI
     # Monte Carlo profile (from your data)
     zprof = @views profiles_bottom[i][:z_profile]
@@ -221,8 +222,10 @@ anim = @animate for i in 1:nI
     # Closed-form profile
     zd     = range(-12.5, 12.5; length=20_001) .* 1e-3  # m
     dBzdz  = TheoreticalSimulation.GvsI(Icoils[i])
-    dd     = TheoreticalSimulation.getProbDist_v3(μB, dBzdz, zd, K39_params, effusion_params;
-                                                  npts=2001, pdf=:finite)
+    dd1    = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[i],1,-1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+    dd2    = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[i],1,0,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite)
+    dd3    = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[i],1,1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite)
+    dd     = dd1 + dd2 + dd3
     ds_s   = TheoreticalSimulation.smooth_profile(zd, dd, 150e-6)
     ds_sN  = normalize_vec(ds_s)
 
@@ -239,7 +242,8 @@ anim = @animate for i in 1:nI
     plot!(legendtitle = L"$I_{0} = %$(round(Icoils[i]; digits=5))\,\mathrm{A}$")
     display(fig)
 end
-gif(anim, joinpath(OUTDIR, "z_profiles_comparison.gif"), fps=2)  # adjust fps as you like
+gif_path = joinpath(OUTDIR, "z_profiles_comparison.gif")
+gif(anim, gif_path, fps=2)  # adjust fps as you like
 @info "Saved GIF" gif_path
 
 
