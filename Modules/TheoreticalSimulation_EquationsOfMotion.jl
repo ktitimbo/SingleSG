@@ -792,7 +792,41 @@ function QM_Screen_velocity(
     return QM_Screen_velocity(Float64(Ix), f, mf, v0x, v0y, v0z, p)
 end
 
-# Fast, cached formulas for screen outputs
+"""
+    screen_x_z_vz(x0, z0, v0x, v0y, v0z, L_SG, ΔL, Ltot, acc_z) -> (x, z, vz)
+
+Propagate a particle from the SG entrance to the screen assuming constant
+forward speed `v0y` (no longitudinal acceleration) and a constant transverse
+acceleration `acc_z` that acts only inside the Stern–Gerlach region of length
+`L_SG`.
+
+The closed-form updates are
+- `t_tot = Ltot / v0y`
+- `x = x0 + v0x * t_tot`
+- `z = z0 + v0z * t_tot + ½ * acc_z * (ΔL / v0y^2)`
+- `vz = v0z + acc_z * (L_SG / v0y)`
+
+`ΔL` is a precomputed geometric factor that avoids repeated multiplies:
+`ΔL = L_SG^2 + 2 L_SG * L_d`, where `L_d` is the drift from the SG exit to the
+screen (equivalently `ΔL = (L_SG + L_d)^2 - L_d^2`). Pass it in as a scalar.
+
+All quantities are in SI units.
+
+Arguments
+- `x0, z0::Float64`: initial transverse positions at the SG entrance (m)
+- `v0x, v0y, v0z::Float64`: initial velocity components (m/s); **`v0y ≠ 0`**
+- `L_SG::Float64`: SG region length along the beam (m)
+- `ΔL::Float64`: geometric factor defined above (m²)
+- `Ltot::Float64`: total path length entrance→screen along the beam (m)
+- `acc_z::Float64`: constant transverse acceleration within the SG (m/s²)
+
+Returns
+- `(x, z, vz)::NTuple{3,Float64}`: screen `x`, screen `z`, and exit `z`-velocity.
+
+Notes
+- Uses `muladd` to improve numerical accuracy and throughput in tight loops.
+- No allocations; marked `@inline` for use inside hot kernels.
+"""
 @inline function screen_x_z_vz(
     x0::Float64, z0::Float64, v0x::Float64, v0y::Float64, v0z::Float64,
     L_SG::Float64, ΔL::Float64, Ltot::Float64, acc_z::Float64

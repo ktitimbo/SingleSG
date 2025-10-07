@@ -262,7 +262,7 @@ function plot_velocity_stats(alive::Matrix{Float64}, title::String, filename::St
     fig = plot(
         figa, fige, figb, figf, figc, figg, figd,
         layout = @layout([a1 a2; a3 a4; a5 a6; a7]),
-        plot_title = title*" with N=$(No) particles",
+        plot_title = title*" | N=$(No) particles",
         size = (650, 800),
         legendfontsize = 8,
         left_margin = 3mm,

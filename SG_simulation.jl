@@ -166,7 +166,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 10_000
+const Nss = 100_000
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit
@@ -184,88 +184,222 @@ end
 # @time particles_colliding  = QM_find_discarded_particles_multithreading(Icoils,crossing_slit,K39_params; t_length=1000, verbose=true)   # heavy loop: goes in series
 # particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params)   # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
 
-@time particles_colliding  = TheoreticalSimulation.alternative_QM_find_discarded_particles_multithreading(Icoils, crossing_slit, K39_params; y_length=1000, verbose=true)
-@time particles_travelling = TheoreticalSimulation.alternative_QM_build_screen_with_flags(
+@time particles_flag  = TheoreticalSimulation.QM_flag_travelling_particles(
+                            Icoils, 
+                            crossing_slit, 
+                            K39_params; 
+                            y_length=2500, 
+                            verbose=true
+);
+@time particles_trajectories = TheoreticalSimulation.QM_build_travelling_particles(
         Icoils,
         crossing_slit,
-        particles_colliding,
+        particles_flag,
         K39_params
-        )
+);
+TheoreticalSimulation.travelling_particles_summary(Icoils, quantum_numbers, particles_trajectories)
+jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_trajectories))
+
+alive_screen = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:screen ));
+dead_crash   = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:crash ));
+
+println("F=$(K39_params.Ispin+0.5) profiles")
+profiles_top = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+    manifold=:F_top, n_bins= (32,2), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
+println("F=$(K39_params.Ispin-0.5) profiles")
+profiles_bottom = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+    manifold=:F_bottom, n_bins= (32,2), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:pdf)
+
+normalize_vec(v) = (m = maximum(v); m == 0 ? v : v ./ m)
+anim = @animate for i in 1:nI
+    # Monte Carlo profile (from your data)
+    zprof = @views profiles_bottom[i][:z_profile]
+    z_mc  = @views zprof[:, 1]                # (mm)
+    s_mc  = @views zprof[:, 3]                # intensity
+    s_mcN = normalize_vec(s_mc)
+
+    # Closed-form profile
+    zd     = range(-12.5, 12.5; length=20_001) .* 1e-3  # m
+    dBzdz  = TheoreticalSimulation.GvsI(Icoils[i])
+    dd     = TheoreticalSimulation.getProbDist_v3(μB, dBzdz, zd, K39_params, effusion_params;
+                                                  npts=2001, pdf=:finite)
+    ds_s   = TheoreticalSimulation.smooth_profile(zd, dd, 150e-6)
+    ds_sN  = normalize_vec(ds_s)
+
+    # Plot (x in mm, normalized y)
+    fig = plot(z_mc, s_mcN;
+         label="QM Monte Carlo", line=(:red, 2),
+         xlabel=L"z~(\mathrm{mm})", ylabel="normalized intensity",
+         legend=:topleft, size=(800, 520),
+         left_margin=2mm,)
+
+    plot!(1e3 .* zd, ds_sN; label="Closed-form", line=(:blue, 1.5))
+
+    # Legend title with current
+    plot!(legendtitle = L"$I_{0} = %$(round(Icoils[i]; digits=5))\,\mathrm{A}$")
+    display(fig)
+end
+gif(anim, joinpath(OUTDIR, "z_profiles_comparison.gif"), fps=2)  # adjust fps as you like
+@info "Saved GIF" gif_path
 
 
-function show_particles_summary(Icoils, quantum_numbers, particles_travelling;
-                                use_rowcount::Bool=true)
+Icoils = alive_screen[:Icoils]
+r = 1:3:length(Icoils)
+for j in (r[end] == length(Icoils) ? r : Iterators.flatten((r, (length(Icoils),))))
+# j=30
+    data_set_5 = vcat((alive_screen[:data][j][k] for k in Int(2*K39_params.Ispin + 3):Int(4*K39_params.Ispin + 2))...)
 
-    nlevels = length(quantum_numbers)
+    #Furnace
+    xs_a = 1e3 .* data_set_5[:,1]; # mm
+    zs_a = 1e6 .* data_set_5[:,3]; # μm
+    figa = histogram2d(xs_a, zs_a;
+        bins = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -1.0:0.25:1.0, yticks = -50:10:50,
+        # clims = (0, 0.0003),
+        # colorbar_position = :bottom,
+    );
 
-    # count flags in column 10; supports Float or Integer flags
-    @inline function counts_from_M(M::AbstractMatrix)
-        @views col = M[:,10]
-        if eltype(col) <: Integer
-            pass = count(==(0),  col); top = count(==(1), col)
-            bot  = count(==(2),  col); tub = count(==(3), col)
-        else
-            pass = count(==(0.0), col); top = count(==(1.0), col)
-            bot  = count(==(2.0), col); tub = count(==(3.0), col)
-        end
-        return (pass=pass, top=top, bot=bot, tub=tub)
+    # Slit
+    r_at_slit = Matrix{Float64}(undef, size(data_set_5, 1), 3);
+    for i in axes(data_set_5,1)
+        r , _ = QM_EqOfMotion(y_FurnaceToSlit ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+        r_at_slit[i,:] = r
     end
+    xs_b = 1e3 .* r_at_slit[:,1]; # mm
+    zs_b = 1e6 .* r_at_slit[:,3]; # μm
+    figb = histogram2d(xs_b, zs_b;
+        bins = (FreedmanDiaconisBins(xs_b), FreedmanDiaconisBins(zs_b)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -4.0:0.50:4.0, yticks = -200:50:200,
+        xlims=(-4,4),
+        # clims = (0, 0.0003),
+        # colorbar_position = :bottom,
+    ) ;
 
-    for i in eachindex(Icoils)
-        I0   = Float64(Icoils[i])
-        mats = particles_travelling[i]  # Vector of No×10 matrices, one per level
-
-        nrows = nlevels
-        data  = Matrix{Float64}(undef, nrows, 9)
-
-        # rows per level
-        for j in 1:nlevels
-            F, mF = quantum_numbers[j]
-            M     = mats[j]
-            c     = counts_from_M(M)
-            tot   = use_rowcount ? size(M,1) : (c.pass + c.top + c.bot + c.tub)
-
-            passp = tot == 0 ? 0.0 : 100.0 * c.pass / tot
-            lossp = tot == 0 ? 0.0 : 100.0 * (c.top + c.bot + c.tub) / tot
-
-            data[j, :] = [Float64(F), Float64(mF),
-                          c.pass, c.top, c.bot, c.tub,
-                          tot, passp, lossp]
-        end
-
-
-        pretty_table(
-            data;
-            column_labels = ["F","mF","Pass","Top","Bottom","Tube","Total","Pass %","Loss %"],
-            title = @sprintf("I₀ = %.3f A", I0),
-            formatters    = [fmt__printf("%d", 3:7), fmt__printf("%5.1f", 8:9)],
-            alignment = :c,
-            table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-            style = TextTableStyle(first_line_column_label = crayon"yellow bold",
-                                    table_border  = crayon"blue bold",
-                                    title = crayon"bold red"),
-            equal_data_column_widths = true,
-            # formatters,
-            # highlighters,
-        )
-        println()
+    # SG entrance
+    r_at_SG_entrance = Matrix{Float64}(undef, size(data_set_5, 1), 3);
+    for i in axes(data_set_5,1)
+        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG) ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+        r_at_SG_entrance[i,:] = r
     end
-    return nothing
+    xs_c = 1e3 .* r_at_SG_entrance[:,1]; # mm
+    zs_c = 1e6 .* r_at_SG_entrance[:,3]; # μm
+    figc = histogram2d(xs_c, zs_c;
+        bins = (FreedmanDiaconisBins(xs_c), FreedmanDiaconisBins(zs_c)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -4.0:0.50:4.0, yticks = -1000:100:1000,
+        xlims=(-4,4),
+        # clims = (0, 0.0003),
+        # colorbar_position = :bottom,
+    );
+
+    # SG exit
+    r_at_SG_exit = Matrix{Float64}(undef, size(data_set_5, 1), 3);
+    for i in axes(data_set_5,1)
+        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG) ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+        r_at_SG_exit[i,:] = r
+    end
+    xs_d = 1e3 .* r_at_SG_exit[:,1]; # mm
+    zs_d = 1e6 .* r_at_SG_exit[:,3]; # μm
+    figd = histogram2d(xs_d, zs_d;
+        bins = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -4.0:0.50:4.0, 
+        # yticks = -1000:200:1000,
+        xlims=(-4,4),
+        # clims = (0, 0.0003),
+        # colorbar_position = :bottom,
+    )
+    x_magnet = 1e-3*range(-1.0,1.0,length=1000)
+    plot!(figd,1e3*x_magnet,1e6*TheoreticalSimulation.z_magnet_edge.(x_magnet),line=(:dash,:black,2),label=false)
+
+    # Screen
+    r_at_screen = Matrix{Float64}(undef, size(data_set_5, 1), 3);
+    for i in axes(data_set_5,1)
+        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG+y_SGToScreen) ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+        r_at_screen[i,:] = r
+    end
+    xs_e = 1e3 .* r_at_screen[:,1]; # mm
+    zs_e = 1e3 .* r_at_screen[:,3]; # μm
+    fige = histogram2d(xs_e, zs_e;
+        bins = (FreedmanDiaconisBins(xs_e), FreedmanDiaconisBins(zs_e)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{mm})$",
+        # xticks = -4.0:0.50:4.0, yticks = -1250:50:1250,
+        # clims = (0, 0.0003),
+        # colorbar_position = :bottom,
+    );
+
+
+    fig = plot(figa,figb,figc,figd,fige,
+    layout=(5,1),
+    suptitle = L"$%$(1000*Icoils[j]) \mathrm{mA}$",
+    size=(750,800),
+    right_margin=2mm,
+    bottom_margin=-2mm,
+    )
+    plot!(fig[1], xlabel="", bottom_margin=-3mm),
+    plot!(fig[2], xlabel="", bottom_margin=-3mm),
+    plot!(fig[3], xlabel="", bottom_margin=-3mm),
+    plot!(fig[4], xlabel="", bottom_margin=-3mm),
+    display(fig)
+
 end
 
-show_particles_summary(Icoils, quantum_numbers, particles_travelling;use_rowcount=true)
+Bn_QM  = 2π*ħ*K39_params.Ahfs*(0.5+K39_params.Ispin) / 2 / μₑ
+Bn_CQD = 11.8e-6
+ix = range(10e-3,1,length=1001)
+plot(ix,TheoreticalSimulation.BvsI.(ix),
+    ribbon=Bn_QM*ones(length(ix)),
+    xaxis=:log10,
+    label=L"$B_{0} \pm B_{n}^{\mathrm{QM}}$")
+plot(ix, abs.(Bn_QM ./  TheoreticalSimulation.BvsI.(ix)),
+    label ="Relative magnitude" ,
+    ylabel = L"B_{n}^{QM} / B_{0}",
+    xaxis=:log10,)
 
-zd = range(-10,10,20001)*1e-3
-dBzdz = 29.86/1.01 ;
+plot(ix,TheoreticalSimulation.BvsI.(ix),
+    ribbon=Bn_CQD*ones(length(ix)),
+    label=L"$B_{0} \pm B_{n}^{\mathrm{CQD}}$",
+    xaxis=:log10,)
+plot(ix, abs.(Bn_CQD ./  TheoreticalSimulation.BvsI.(ix)),
+    label ="Relative magnitude" ,
+    ylabel = L"B_{n}^{CQD} / B_{0}",
+    xaxis=:log10,)
 
-pp = TheoreticalSimulation.getProbDist_v3(μB, dBzdz,zd, K39_params, effusion_params; wfurnace=0.100e-3, npts=401, pdf=:point)
-dd = TheoreticalSimulation.getProbDist_v3(μB, dBzdz,zd, K39_params, effusion_params; wfurnace=0.100e-3, npts=1001, pdf=:finite)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+for i =1:nI
+fig = plot(profiles_bottom[i][:z_profile][:,1],profiles_bottom[i][:z_profile][:,3]/maximum(profiles_bottom[i][:z_profile][:,3]),
+    label="QM MonteCarlo",
+    line=(:red,2))
+zd = range(-12.5,12.5,20001)*1e-3
+dBzdz = TheoreticalSimulation.GvsI(Icoils[i])
+dd = TheoreticalSimulation.getProbDist_v3(μB, dBzdz,zd, K39_params, effusion_params; npts=2001, pdf=:finite)
 dsds = TheoreticalSimulation.smooth_profile(zd,dd,150e-6)
-
-plot(zd,pp)
-plot!(zd,dd)
-plot!(zd,dsds)
-
+plot!(1e3*zd,dsds/maximum(dsds), label="Closed-form", line=(:blue,1.5))
+plot!(legendtitle=L"$I_{0}=%$(Icoils[i])\mathrm{A}$",
+    legend=:topleft)
+display(fig)
+end
 
 
 
@@ -300,7 +434,7 @@ rows_by_flag(M, flag::Real) = M[(@view M[:,10]) .== flag, :]
 
 rows_by_flag(particles_travelling[30][5],0)
 
-jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_reaching_screen))
+
 
 
 
@@ -371,7 +505,7 @@ dir_load_string = joinpath(@__DIR__, "simulation_data", "qm_analytic_sim")
 data = load(joinpath(dir_load_string,"qm_2000000_valid_particles_data.jld2"))["data"]
 
 
-
+data[:data]
 
 for nz_iter in [1,2,4,8]
     println("\tCreates the z-profile with bin_nz = $(nz_iter)")
@@ -393,7 +527,7 @@ data[:data][28][8]
 
 
 
-|data_num = load(joinpath(dir_load_string,"data_num_20250820.jld2"))["data"]
+data_num = load(joinpath(dir_load_string,"data_num_20250820.jld2"))["data"]
 x1=load(joinpath(dir_load_string,"zmax_profiles_bottom_32x1.jld2"))["data"]
 x2=load(joinpath(dir_load_string,"zmax_profiles_bottom_32x2.jld2"))["data"]
 x4=load(joinpath(dir_load_string,"zmax_profiles_bottom_32x4.jld2"))["data"]
