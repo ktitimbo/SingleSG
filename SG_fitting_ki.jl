@@ -668,8 +668,8 @@ data_export[:runs] = OrderedDict(
 
 jldsave( joinpath(OUTDIR,"data_num_$(wanted_data_dir).jld2"), data = data_export)
 
-T_END = Dates.now()
-T_RUN = Dates.canonicalize(T_END-T_START)
+T_END = Dates.now();
+T_RUN = Dates.canonicalize(T_END-T_START);
 println("kᵢ fitting done in $(T_RUN)")
 
 
@@ -680,7 +680,7 @@ println("kᵢ fitting done in $(T_RUN)")
 #####################################################################################################
 #####################################################################################################
 
-avg_data = load(joinpath(@__DIR__, "analysis_data", "smoothing_binning","data_averaged.jld2"), "data" )
+avg_data = load(joinpath(@__DIR__, "analysis_data", "smoothing_binning","data_averaged_2.jld2"), "data" )
 
 n_bin           = 2
 lower_cut_off   = 7
@@ -777,7 +777,7 @@ display(fig)
 println("Interpolation in the induction term goes from $(ki_sim[ki_start])×10⁻⁶ to $(ki_sim[ki_stop])×10⁻⁶")
 itp_ki = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
-data_fitting = hcat(avg_data[:i_mc], ones(length(avg_data[:i_mc])), avg_data[:z_mc], avg_data[:δz_mc])[8:end,:]
+data_fitting = hcat(avg_data[:i_smooth], ones(length(avg_data[:i_smooth])), avg_data[:z_smooth], avg_data[:δz_smooth])[5:end,:]
 
 function loss(ki) # loss function
     # ni=12

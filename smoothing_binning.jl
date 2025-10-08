@@ -61,12 +61,13 @@ data_JSF = OrderedDict(
 
 
 parent_folder = joinpath(@__DIR__, "analysis_data")
-data_directories = ["20250814", "20250820", "20250825","20250919"];
+data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
 magnification_factor = 1.2697 ;
 
-n_runs = length(data_directories)
-I_all  = Vector{Vector{Float64}}(undef, n_runs)
-dI_all = Vector{Vector{Float64}}(undef, n_runs)
+n_runs = length(data_directories);
+I_all  = Vector{Vector{Float64}}(undef, n_runs);
+dI_all = Vector{Vector{Float64}}(undef, n_runs);
+cols = palette(:darkrainbow, n_runs)
 
 for (i, dir) in enumerate(data_directories)
     d   = load(joinpath(@__DIR__, dir, "data_processed.jld2"), "data")
@@ -84,7 +85,6 @@ fig_Is = plot(
         tickfontsize=11,
         guidefontsize=14,
     );
-cols = palette(:darkrainbow, n_runs)
 for (idx,data_directory) in enumerate(data_directories)
     println(I_all[idx])
     scatter!(fig_Is,
@@ -146,7 +146,7 @@ for data_directory in data_directories
     )
 
     key_labels = collect(keys(m))
-    cols = palette(:darkrainbow, length(key_labels))
+    cols_k = palette(:darkrainbow, length(key_labels))
     fig=plot(title="Experimental Data : binning & spline smoothing factor",
     titlefontsize = 12)
     for (i,key) in enumerate(key_labels)
@@ -154,10 +154,10 @@ for data_directory in data_directories
         xerror = m[key][3][2:end,"Icoil_error_A"],
         yerror = m[key][3][2:end,"F1_z_centroid_se_mm"]/magnification_factor,
         label="n=$(m[key][1]) | λ=$(m[key][2])", 
-        color=cols[i],
-        marker=(:circle,cols[i],2),
+        color=cols_k[i],
+        marker=(:circle,cols_k[i],2),
         markerstrokewidth = 1,
-        markerstrokecolor=cols[i]
+        markerstrokecolor=cols_k[i]
         )
     end
     plot!(fig,
@@ -216,9 +216,9 @@ ytick_labels = [L"10^{%$k}" for k in -6:-1]; ytick_labels = vcat(ytick_labels, L
 
 # ---------- experimental series (4 runs) ----------
 # pack your inputs to avoid repetition
-runs    = key_run
-dirs    = data_directories
-colors  = [:black, :red, :blue, :purple]
+runs = key_run
+dirs = data_directories
+cols = palette(:darkrainbow, n_runs)
 
 fig1 = plot(
     xlabel = "Current (A)",
@@ -235,7 +235,7 @@ fig1 = plot(
     left_margin = 4mm,
     bottom_margin = 3mm,
 )
-for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, colors))
+for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, cols))
     # columns and transforms
     I_A   = M[r][3][2:end, "Icoil_A"]            # mA -> A, abs
     δI_A  = M[r][3][2:end, "Icoil_error_A"]
@@ -284,7 +284,7 @@ fig2 = plot(
     left_margin = 4mm,
     bottom_margin = 3mm,
 )
-for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, colors))
+for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, cols))
     # columns and transforms
     I_A   = M[r][3][2:end, "Icoil_A"]            # mA -> A, abs
     δI_A  = M[r][3][2:end, "Icoil_error_A"]
@@ -426,9 +426,12 @@ function average_on_grid_mc(xsets, ysets;
     return xq_vec, μ, σ
 end
 
-CURRENT_ROW_START = 8
-scale_mag_factor = inv(magnification_factor)   # = 1 / magnification_factor
-i_sampled_length = 300
+# helper: first index where column > threshold (skips missings; falls back to 1)
+@inline function first_gt_idx(df::DataFrame, col::Symbol, thr::Real)
+    v = df[!, col]
+    idx = findfirst(x -> !ismissing(x) && x > thr, v)
+    return idx === nothing ? 1 : idx
+end
 
 # Grab the table once per (M, run)
 tables = [M[r][3] for (M, r) in zip(m_sets, runs)]
@@ -439,10 +442,16 @@ col = Dict(
     :sy => :F1_z_centroid_se_mm,
 )
 
-xsets  = [t[CURRENT_ROW_START:end, col[:x]]                         for t in tables]
-ysets  = [scale_mag_factor .* t[CURRENT_ROW_START:end, col[:y]]     for t in tables]
-σxsets = [t[CURRENT_ROW_START:end, col[:sx]]                        for t in tables]
-σysets = [scale_mag_factor .* t[CURRENT_ROW_START:end, col[:sy]]    for t in tables]
+scale_mag_factor = inv(magnification_factor)   # = 1 / magnification_factor
+threshold = 0.010 # lower cut-off for experimental currents
+CURRENT_ROW_START = [first_gt_idx(t, col[:x], threshold) for t in tables]
+
+xsets  = [t[i:end, col[:x]]                      for (t,i) in zip(tables, CURRENT_ROW_START)]
+ysets  = [scale_mag_factor .* t[i:end, col[:y]]  for (t,i) in zip(tables, CURRENT_ROW_START)]
+σxsets = [t[i:end, col[:sx]]                     for (t,i) in zip(tables, CURRENT_ROW_START)]
+σysets = [scale_mag_factor .* t[i:end, col[:sy]] for (t,i) in zip(tables, CURRENT_ROW_START)]
+
+i_sampled_length = 300
 
 # pick a log-spaced grid across the overall x-range (nice for decades-wide currents)
 xlo = minimum(first.(xsets))
@@ -462,10 +471,13 @@ xq, μ, σ = average_on_grid_mc(xsets, ysets; σxsets=σxsets, σysets=σysets,
 fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+    xlims = (10e-3,1.0),
+    ylims = (8e-3, 2),
+    legend=:bottomright,
 )
 for i=1:length(data_directories)
-    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"F1_z_centroid_mm"]/magnification_factor
+    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
+    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]/magnification_factor
     scatter!(fig,xs, ys,
         label=data_directories[i],
         marker=(:circle, :white,3),
@@ -492,13 +504,15 @@ using BSplineKit
 fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+    xlims = (10e-3,1.0),
+    ylims = (8e-3, 2),
 )
-i_xx = range(15e-3,0.999,length=i_sampled_length)
+i_xx = range(10e-3,0.999,length=i_sampled_length)
 z_final = zeros(length(data_directories),i_sampled_length)
 cols = palette(:darkrainbow, length(data_directories))
 for i=1:length(data_directories)
-    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"F1_z_centroid_mm"]*scale_mag_factor
+    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
+    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]*scale_mag_factor
     spl = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
     z_final[i,:] = spl.(i_xx)
     scatter!(fig,xs, ys,
@@ -535,13 +549,13 @@ fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
 )
-i_xx = range(15e-3,0.999,length=i_sampled_length)
+i_xx = range(10e-3,0.999,length=i_sampled_length)
 z_final_fit = zeros(length(data_directories),i_sampled_length)
 cols = palette(:darkrainbow, length(data_directories))
 for i=1:length(data_directories)
-    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"F1_z_centroid_mm"]*scale_mag_factor
-    δys = m_sets[i][runs[i]][3][CURRENT_ROW_START:end,"F1_z_centroid_se_mm"]*scale_mag_factor
+    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
+    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]*scale_mag_factor
+    δys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"]*scale_mag_factor
     spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
     z_final_fit[i,:] = spl.(i_xx)
     scatter!(fig,xs, ys,
@@ -647,14 +661,16 @@ display(fig)
 saveplot(fig, "g_inter_vs_mc_vs_fit")
 
 
-jldsave(joinpath(OUTDIR,"data_averaged.jld2"), 
+jldsave(joinpath(OUTDIR,"data_averaged_$(selected_bin).jld2"), 
     data=OrderedDict(
+        :nz_bin     => selected_bin,
+        :λ0_spl     => selected_spl,
         :i_interp   => i_xx,
         :z_interp   => zf1,
         :δz_interp  => δzf1,
         :i_smooth   => i_xx,
         :z_smooth   => zf1_fit,
-        :δz_smooth  => zf1_fit,
+        :δz_smooth  => δzf1_fit,
         :i_mc       => xq,
         :z_mc       => μ,
         :δz_mc      => σ

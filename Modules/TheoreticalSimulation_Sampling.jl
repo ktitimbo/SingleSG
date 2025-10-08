@@ -111,116 +111,16 @@ function generate_samples(No::Int, p::EffusionParams; v_pdf::Symbol =:v3, rng = 
     end
 end
 
-function _generate_matched_pairs(No::Integer, rng; mode::Symbol = :total) # deprecated : unused
-    @assert No > 0
-    θes_up = Float64[]; θns_up = Float64[]
-    θes_dn = Float64[]; θns_dn = Float64[]
-
-    if mode === :total
-        sizehint!(θes_up, No ÷ 2); sizehint!(θns_up, No ÷ 2)
-        sizehint!(θes_dn, No ÷ 2); sizehint!(θns_dn, No ÷ 2)
-
-        kept = 0
-        while kept < No
-            θe = 2asin(sqrt(rand(rng))); θn = 2asin(sqrt(rand(rng)))
-            if θe < θn
-                push!(θes_up, θe); push!(θns_up, θn); kept += 1
-            elseif θe > θn
-                push!(θes_dn, θe); push!(θns_dn, θn); kept += 1
-            end
-        end
-
-    elseif mode === :bucket
-        sizehint!(θes_up, No); sizehint!(θns_up, No)
-        sizehint!(θes_dn, No); sizehint!(θns_dn, No)
-
-        nup = 0; ndn = 0
-        while (nup < No) || (ndn < No)
-            θe = 2asin(sqrt(rand(rng))); θn = 2asin(sqrt(rand(rng)))
-            if (θe < θn) && (nup < No)
-                push!(θes_up, θe); push!(θns_up, θn); nup += 1
-            elseif (θe > θn) && (ndn < No)
-                push!(θes_dn, θe); push!(θns_dn, θn); ndn += 1
-            end
-        end
-
-    else
-        error("Unknown mode=$mode. Use :total or :bucket.")
-    end
-
-    return θes_up, θns_up, θes_dn, θns_dn
-end
-
-
-function _build_init_conditions(
-    alive::AbstractMatrix{T},
-    UPθe::AbstractVector{T}, UPθn::AbstractVector{T},
-    DOWNθe::AbstractVector{T}, DOWNθn::AbstractVector{T};
-    mode::Symbol = :total
-) where {T<:Real} # deprecated :  unused
-
-    No = size(alive, 1)
-    @assert length(UPθe)   == length(UPθn)   "UP θe/θn lengths must match"
-    @assert length(DOWNθe) == length(DOWNθn) "DOWN θe/θn lengths must match"
-
-    if mode === :total
-        n_up = length(UPθe)
-        n_dn = length(DOWNθe)
-        @assert n_up + n_dn == No "In :total, n_up + n_dn must equal size(alive,1)"
-
-        pairsUP   = Matrix{T}(undef, n_up, 8)
-        pairsDOWN = Matrix{T}(undef, n_dn, 8)
-
-        @inbounds @views begin
-            # UP block: rows 1:n_up from `alive`
-            for i in 1:n_up
-                pairsUP[i, 1:6] = alive[i, 1:6]
-                pairsUP[i, 7]   = UPθe[i]
-                pairsUP[i, 8]   = UPθn[i]
-            end
-            # DOWN block: rows (n_up+1):No from `alive`
-            for j in 1:n_dn
-                i_alive = n_up + j
-                pairsDOWN[j, 1:6] = alive[i_alive, 1:6]
-                pairsDOWN[j, 7]   = DOWNθe[j]
-                pairsDOWN[j, 8]   = DOWNθn[j]
-            end
-        end
-
-        return pairsUP, pairsDOWN
-
-    elseif mode === :bucket
-        @assert length(UPθe) == No == length(DOWNθe) "In :bucket, each θ list must have length No"
-
-        pairsUP   = Matrix{T}(undef, No, 8)
-        pairsDOWN = Matrix{T}(undef, No, 8)
-
-        @inbounds @views for i in 1:No
-            # UP
-            pairsUP[i, 1:6] = alive[i, 1:6]
-            pairsUP[i, 7]   = UPθe[i]
-            pairsUP[i, 8]   = UPθn[i]
-            if add_label; pairsUP[i, 9] = one(T); end
-            # DOWN
-            pairsDOWN[i, 1:6] = alive[i, 1:6]
-            pairsDOWN[i, 7]   = DOWNθe[i]
-            pairsDOWN[i, 8]   = DOWNθn[i]
-            if add_label; pairsDOWN[i, 9] = zero(T); end
-        end
-
-        return pairsUP, pairsDOWN
-
-    else
-        error("Unknown mode=$mode. Use :total or :bucket.")
-    end
-end
-
-
-function build_initial_conditions(No::Integer, alive::AbstractMatrix{T}, rng::AbstractRNG; mode::Symbol = :total) where {T<:Real}
+function generate_CQDinitial_conditions(No::Integer, alive::AbstractMatrix{T}, rng::AbstractRNG;
+                                        mode::Symbol = :partition) where {T<:Real}
     @assert No > 0 "No must be > 0"
     @assert No == size(alive,1) "Total number of particles $No"
+    @assert size(alive,2) ≥ 6 "alive must have at least 6 columns (x0,y0,z0,v0x,v0y,v0z)"
 
-    if mode === :total
+    # one-liner to draw θ with your distribution, in the target element type T
+    @inline sample_theta() = T(2asin(sqrt(rand(rng))))
+
+    if mode === :partition
         # Two-pass: count UP with a cloned RNG → allocate exact sizes → fill.
         @assert hasmethod(copy, Tuple{typeof(rng)}) "RNG must support copy() for two-pass mode"
         rng1 = copy(rng)
@@ -230,56 +130,55 @@ function build_initial_conditions(No::Integer, alive::AbstractMatrix{T}, rng::Ab
             θn = T(2asin(sqrt(rand(rng1))))
             n_up += (θe < θn)
         end
-        n_dn = No - n_up
+        n_down = No - n_up
 
-        UP   = Matrix{T}(undef, n_up, 8)
-        DOWN = Matrix{T}(undef, n_dn, 8)
+        up_batch   = Matrix{T}(undef, n_up,   8)
+        down_batch = Matrix{T}(undef, n_down, 8)
 
         iu = 0; id = 0
         @inbounds @views for i in 1:No
-            θe = T(2asin(sqrt(rand(rng))))
-            θn = T(2asin(sqrt(rand(rng))))
+            θe = sample_theta()
+            θn = sample_theta()
             if θe < θn
                 iu += 1
-                UP[iu, 1:6] = alive[i, 1:6]
-                UP[iu, 7]   = θe
-                UP[iu, 8]   = θn
+                up_batch[iu, 1:6] = alive[i, 1:6]
+                up_batch[iu, 7]   = θe
+                up_batch[iu, 8]   = θn
             else
                 id += 1
-                DOWN[id, 1:6] = alive[i, 1:6]
-                DOWN[id, 7]   = θe
-                DOWN[id, 8]   = θn
+                down_batch[id, 1:6] = alive[i, 1:6]
+                down_batch[id, 7]   = θe
+                down_batch[id, 8]   = θn
             end
         end
-        return UP, DOWN
+        return up_batch, down_batch
 
-    elseif mode === :bucket
-        # --- Single pass: preallocate No×8 for both; write angles as we generate.
-        UP   = Matrix{T}(undef, No, 8)
-        DOWN = Matrix{T}(undef, No, 8)
+    elseif mode === :balanced
+        # Single pass: preallocate No×8 for both; write angles as we generate.
+        up_batch   = Matrix{T}(undef, No, 8)
+        down_batch = Matrix{T}(undef, No, 8)
         nup = 0; ndn = 0
         @inbounds while (nup < No) || (ndn < No)
-            θe = T(2asin(sqrt(rand(rng))))
-            θn = T(2asin(sqrt(rand(rng))))
+            θe = sample_theta()
+            θn = sample_theta()
             if (θe < θn) && (nup < No)
                 nup += 1
-                UP[nup, 7] = θe
-                UP[nup, 8] = θn
+                up_batch[nup, 7] = θe
+                up_batch[nup, 8] = θn
             elseif (θe > θn) && (ndn < No)
                 ndn += 1
-                DOWN[ndn, 7] = θe
-                DOWN[ndn, 8] = θn
+                down_batch[ndn, 7] = θe
+                down_batch[ndn, 8] = θn
             end
         end
-        # now copy alive rows once
-        @inbounds @views for i in 1:No
-            UP[i,   1:6] = alive[i, 1:6]
-            DOWN[i, 1:6] = alive[i, 1:6]
+        # copy kinematics once for both batches
+        @inbounds @views begin
+            up_batch[:,   1:6] .= alive[:, 1:6]
+            down_batch[:, 1:6] .= alive[:, 1:6]
         end
-        return UP, DOWN
+        return up_batch, down_batch
 
     else
-        error("Unknown mode=$mode. Use :total or :bucket.")
+        error("Unknown mode=$mode. Use :partition or :balanced.")
     end
-
 end

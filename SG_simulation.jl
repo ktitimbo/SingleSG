@@ -23,6 +23,7 @@ const T_START = Dates.now() ; # Timestamp start for execution timing
 using LinearAlgebra, DataStructures
 using Interpolations, Roots, Loess, Optim
 using BSplineKit
+using Polynomials
 using DSP
 using LambertW, PolyLog
 using StatsBase
@@ -165,12 +166,12 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 100_000
+const Nss = 500_000
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
-# pairs_UP, pairs_DOWN = build_initial_conditions(Nss, crossing_slit, rng_set; mode=:bucket);
+pairs_UP, pairs_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition)
 
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
@@ -187,14 +188,14 @@ end
                             Icoils, 
                             crossing_slit, 
                             K39_params; 
-                            y_length=2500, 
+                            y_length=5001, 
                             verbose=true
 );
 @time particles_trajectories = TheoreticalSimulation.QM_build_travelling_particles(
-        Icoils,
-        crossing_slit,
-        particles_flag,
-        K39_params
+                                Icoils,
+                                crossing_slit,
+                                particles_flag,
+                                K39_params
 );
 TheoreticalSimulation.travelling_particles_summary(Icoils, quantum_numbers, particles_trajectories)
 jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_trajectories))
@@ -364,14 +365,19 @@ collect(ex_profile[:z_mm])
 ex_profile[:F1_profile][26,:]
 
 
+plot(range(-7.5, 7.5; length=100_001) .* 1e-3, TheoreticalSimulation.getProbDist_v3(μB, TheoreticalSimulation.GvsI(ex_profile[:Icoils][25]), range(-7.5, 7.5; length=100_001) .* 1e-3 , K39_params, effusion_params; npts=2001, pdf=:finite) )
+plot(range(-7.5, 7.5; length=100_001) .* 1e-3, TheoreticalSimulation.getProbDist_v3(μB, TheoreticalSimulation.GvsI(ex_profile[:Icoils][25]), -range(-7.5, 7.5; length=100_001) .* 1e-3 , K39_params, effusion_params; npts=2001, pdf=:finite) )
+
+
+
 fit_coeff = zeros(length(ex_profile[:Icoils]),4)
-for i_idx=1:length(ex_profile[:Icoils])
+for i_idx=1:2:length(ex_profile[:Icoils])
 λ0=0.01
 S = BSplineKit.fit(BSplineOrder(4), ex_profile[:z_mm] .- 8.829718, normalize_vec(ex_profile[:F1_profile][i_idx,:]), λ0; weights=compute_weights(ex_profile[:z_mm] .- 8.829718, λ0))
-plot(ex_profile[:z_mm] .- 8.829718,normalize_vec(ex_profile[:F1_profile][i_idx,:]))
+fig = plot(ex_profile[:z_mm] .- 8.829718,normalize_vec(ex_profile[:F1_profile][i_idx,:]), label="Experiment")
 # Closed-form profile
 zd     = range(-7.5, 7.5; length=100_001) .* 1e-3  # m
-plot!(1e3*zd,S.(1e3*zd))
+plot!(1e3*zd,S.(1e3*zd), label="Experiment interpolation", title=L"$I_{c}=%$(ex_profile[:Icoils][i_idx])$")
 dBzdz  = TheoreticalSimulation.GvsI(ex_profile[:Icoils][i_idx])
 dd1    = TheoreticalSimulation.getProbDist_v3(μF_effective(ex_profile[:Icoils][i_idx],1,-1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
 dd2    = TheoreticalSimulation.getProbDist_v3(μF_effective(ex_profile[:Icoils][i_idx],1,0,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite)
@@ -380,28 +386,36 @@ dd     = dd1 + dd2 + dd3
 ds_s   = TheoreticalSimulation.smooth_profile(zd, dd, 150e-6)
 ds_sN  = normalize_vec(ds_s)
 plot!(1e3 .* zd, ds_s; label="Closed-form", line=(:blue, 1.5))
+display(fig)
 
-plot(1e3*zd, S.(1e3*zd) .- ds_s)
-using Polynomials  # ] add Polynomials
+fig = plot(1e3*zd, S.(1e3*zd) .- ds_s, label=L"Experiment $-$ Theory")
 p = Polynomials.fit(1e3*zd, S.(1e3*zd) .- ds_s, 3)          # cubic: y ≈ c0 + c1*x + c2*x^2 + c3*x^3
 ŷ = p.(1e3*zd,)                 # predictions
 fit_coeff[i_idx,:] = coeffs(p)           # [c0, c1, c2, c3]
 # R² = 1 - sum((y .- ŷ).^2) / sum((y .- mean(y)).^2)
-plot!(1e3*zd, ŷ)
+plot!(1e3*zd, ŷ, label=L"Fitting $P_{3}$")
+display(fig)
 
-plot(1e3*zd, normalize_vec(S.(1e3*zd) .- ŷ))
+fig = plot(1e3*zd, normalize_vec(S.(1e3*zd) .- ŷ),label=L"Signal $-$ Background")
 plot!(1e3 .* zd, normalize_vec(ds_s); label="Closed-form", line=(:blue, 1.5))
+display(fig)
 end
 
 
-plot(fit_coeff[[1,23,24,25,26],1], legend=:topleft)
-plot!(fit_coeff[[1,23,24,25,26],2])
-plot!(fit_coeff[[1,23,24,25,26],3])
-plot!(fit_coeff[[1,23,24,25,26],4])
+plot(ex_profile[:Icoils],fit_coeff[:,1], legend=:topleft, xlabel="Current (A)")
+plot!(ex_profile[:Icoils],fit_coeff[:,2])
+plot!(ex_profile[:Icoils],fit_coeff[:,3])
+plot!(ex_profile[:Icoils],fit_coeff[:,4])
+
+
+plot(ex_profile[:Icoils][[1,23,24,25,26]],fit_coeff[[1,23,24,25,26],1], legend=:topleft)
+plot!(ex_profile[:Icoils][[1,23,24,25,26]],fit_coeff[[1,23,24,25,26],2])
+plot!(ex_profile[:Icoils][[1,23,24,25,26]],fit_coeff[[1,23,24,25,26],3])
+plot!(ex_profile[:Icoils][[1,23,24,25,26]],fit_coeff[[1,23,24,25,26],4])
 
 
 Bn_QM  = 2π*ħ*K39_params.Ahfs*(0.5+K39_params.Ispin) / 2 / μₑ
-Bn_CQD = 11.8e-6
+Bn_CQD = 11.85e-6
 ix = range(10e-3,1,length=1001)
 plot(ix,TheoreticalSimulation.BvsI.(ix),
     ribbon=Bn_QM*ones(length(ix)),

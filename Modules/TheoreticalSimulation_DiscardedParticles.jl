@@ -396,11 +396,11 @@ n_pass = count(==(0x00), codes)
 function QM_flag_travelling_particles(Ix, init_particles, p::AtomParams;
                                                     y_length::Int=1000,
                                                     verbose::Bool=false)
-
-    No        = size(init_particles, 1)      # number of particles
-    ncurrents = length(Ix)          # number of currents
-    fmf       = fmf_levels(p)
-    nlevels   = length(fmf)         # number of (F, mF) levels
+    @info "Evaluating particle trajectories and assigning flags"
+    No        = size(init_particles, 1) # number of particles
+    ncurrents = length(Ix)              # number of currents
+    fmf       = fmf_levels(p)           # quantum numbers
+    nlevels   = length(fmf)             # number of (F, mF) levels
 
     # --- Precompute and share the y-grid for the SG span ---
     y_in  = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
@@ -486,7 +486,7 @@ from the SG entrance to the screen and return a per-level matrix of results.
 Uses global geometry (all in meters):  
 `default_y_FurnaceToSlit`, `default_y_SlitToSG`, `default_y_SG`, `default_y_SGToScreen`.  
 Defines total drift `Ltot = y_in + LSG + Ld` and uses
-`Δ = LSG^2 + 2 LSG*Ld` inside the kinematics helper `screen_x_z_vz`.
+`Δ = LSG^2 + 2 LSG*Ld` inside the kinematics helper `QM_screen_x_z_vz`.
 
 The transverse acceleration for each (current, level) is
 `a_z = μF_effective(I0, F, mF, p) * GvsI(I0) / p.M`.
@@ -509,7 +509,7 @@ Row order is preserved.
 
 # Notes
 - Expects `length(flagged_particles[idx][k]) == size(init_particles, 1)` for all `idx` and `k`.
-- `screen_x_z_vz` must be available in scope and uses SI units.
+- `QM_screen_x_z_vz` must be available in scope and uses SI units.
 """
 function QM_build_travelling_particles(
     Ix::Vector{Float64},
@@ -558,7 +558,7 @@ function QM_build_travelling_particles(
             for j in 1:No
                 x0  = M[j,1]; z0  = M[j,3]
                 v0x = M[j,4]; v0y = M[j,5]; v0z = M[j,6]
-                x,z,vz = screen_x_z_vz(x0,z0,v0x,v0y,v0z, Lsg, Δ, Ltot, a_z)
+                x,z,vz = QM_screen_x_z_vz(x0,z0,v0x,v0y,v0z, Lsg, Δ, Ltot, a_z)
                 M[j,7]  = x;  
                 M[j,8]  = z;  
                 M[j,9]  = vz
@@ -729,8 +729,8 @@ function select_flagged(initial_by_current::OrderedDict{Int8, Vector{Matrix{Floa
               which === :crash_SG   ? (1, 2)    :
               which === :crash_tube ? (3,)      :
               which === :crash      ? (1,2,3)   :
-              which === :all_in     ? (0,1,2,3) :
-          error("which must be :screen, :crash_SG, :crash_tube, or :crash")
+              which === :all        ? (0,1,2,3) :
+          error("which must be :screen, :crash_SG, :crash_tube, :crash, or :all")
 
     out = OrderedDict{Int8, Vector{Matrix{Float64}}}()
 

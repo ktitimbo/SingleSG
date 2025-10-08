@@ -1,6 +1,8 @@
 # EQUATIONS OF MOTION
 
+########################################################################################################################################
 # Co-Quantum Dynamics
+########################################################################################################################################
 
 # CQD Equations of motion
 """
@@ -416,7 +418,10 @@ function CQD_Screen_velocity(Ix,μ::Float64,v0::AbstractVector{<:Real},θe::Floa
     return SVector{3,Float64}(vx,vy,vz)
 end
 
+########################################################################################################################################
 # Quantum Mechanics : Classical Trajectories
+########################################################################################################################################
+
 
 # QM equations of motion
 """
@@ -793,7 +798,7 @@ function QM_Screen_velocity(
 end
 
 """
-    screen_x_z_vz(x0, z0, v0x, v0y, v0z, L_SG, ΔL, Ltot, acc_z) -> (x, z, vz)
+    QM_screen_x_z_vz(x0, z0, v0x, v0y, v0z, L_SG, ΔL, Ltot, acc_z) -> (x, z, vz)
 
 Propagate a particle from the SG entrance to the screen assuming constant
 forward speed `v0y` (no longitudinal acceleration) and a constant transverse
@@ -827,7 +832,7 @@ Notes
 - Uses `muladd` to improve numerical accuracy and throughput in tight loops.
 - No allocations; marked `@inline` for use inside hot kernels.
 """
-@inline function screen_x_z_vz(
+@inline function QM_screen_x_z_vz(
     x0::Float64, z0::Float64, v0x::Float64, v0y::Float64, v0z::Float64,
     L_SG::Float64, ΔL::Float64, Ltot::Float64, acc_z::Float64
 )::NTuple{3,Float64}

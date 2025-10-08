@@ -55,9 +55,72 @@ Notes
     return SVector(v*sθ*sϕ, v*cθ, v*sθ*cϕ)
 end
 
+"""
+    getProbDist_v3(μ, dBzdz, zd, p::AtomParams, q::EffusionParams;
+                   wfurnace::Float64=default_z_furnace,
+                   npts::Int=2001,
+                   pdf::Symbol=:point) -> Vector{Float64}
 
+Closed-form Stern–Gerlach screen profile for a constant field gradient.
+
+Computes the transverse probability density along the screen positions `zd`
+(optionally averaged over a finite furnace width). Uses simple kinematics in a
+piecewise-drift geometry and an effusive-beam speed scale.
+
+# Arguments
+- `μ::Float64`: effective magnetic moment (J/T). **Sign matters**; if `μ < 0`,
+  the function flips the `zd` axis internally so the returned profile is oriented
+  consistently.
+- `dBzdz::Float64`: magnetic-field gradient (T/m), assumed constant over the SG region.
+- `zd::AbstractVector`: screen coordinates (m) where the profile is evaluated.
+- `p::AtomParams`: must provide `p.M` (mass, kg).
+- `q::EffusionParams`: must provide `q.α2` so that `β² = 2α2` (with `β` the
+  effusive-beam speed scale).
+- `wfurnace`: source width (m). Used only when `pdf = :finite`.
+- `npts`: number of trapezoid samples across `[-wfurnace/2, +wfurnace/2]`
+  when `pdf = :finite` (recommend an odd value to include `z0 = 0`).
+- `pdf`: `:point` (infinitesimal source) or `:finite` (averaged over furnace width).
+
+# Geometry (read from globals)
+Uses (all in meters) `default_y_FurnaceToSlit`, `default_y_SlitToSG`,
+`default_y_SG`, `default_y_SGToScreen`, and entrance slit width `default_z_slit`.
+
+Let `LOS = y_FurnaceToSlit`, `LSG = y_SG`, `LSGD = y_SGToScreen`,
+`Ltot = LOS + y_SlitToSG + LSG + LSGD`, and `ℓ = Ltot/LOS`.
+
+# Model (per source offset `z0`)
+- Acceleration parameter: `a = (μ * dBzdz / p.M) * LSG * (LSG + 2LSGD) / 2`
+- Speed scale: `β² = 2 q.α2`, define `c = a / β²`
+- Denominators:
+  - `d1 = z − z0 − (w/2 − z0) * ℓ`
+  - `d2 = z − z0 + (w/2 + z0) * ℓ`, with `w = default_z_slit`
+- Per-point contribution (only where `d > 0`):
+    pdf(z|z0) = [ -exp(-p1)(p1+1) + exp(-p2)(p2+1) ] / ℓ
+    p1 = c / d1, p2 = c / d2
+- If `pdf = :finite`, the returned profile is the trapezoidal average of `pdf(z|z0)`
+over `z0 ∈ [-wfurnace/2, +wfurnace/2]`, divided by `wfurnace`.
+
+# Returns
+A vector with `length(zd)` giving the (unnormalized) profile at each `zd`.
+
+# Notes
+- The result is **not normalized**; normalize afterwards if required.
+- Uses an in-place kernel to avoid allocations and is suitable for large `zd`.
+- Assumes SI units throughout.
+- Asserts `pdf ∈ (:point, :finite)` and basic input sanity.
+
+# Example
+```julia
+zd = range(-12.5e-3, 12.5e-3; length=20_001)
+μ    = μB_eff           # your effective moment (J/T)
+grad = GvsI(I0)        # dB/dz for current I0 (T/m)
+
+prof_point  = getProbDist_v3(μ, grad, zd, K39_params, effusion_params; pdf=:point)
+prof_finite = getProbDist_v3(μ, grad, zd, K39_params, effusion_params;
+                           wfurnace=100e-6, npts=2001, pdf=:finite)
+"""
 function getProbDist_v3(μ::Float64, dBzdz::Float64, zd::AbstractVector, p::AtomParams, q::EffusionParams;
-                     wfurnace::Float64=default_z_furnace, npts::Int=2001, pdf::Symbol=:point)
+                     wfurnace::Float64=default_z_furnace, npts::Int=5001, pdf::Symbol=:point)
     
     @assert pdf === :point || pdf === :finite "pdf must be :point or :finite"
 
@@ -78,6 +141,8 @@ function getProbDist_v3(μ::Float64, dBzdz::Float64, zd::AbstractVector, p::Atom
     aSG = μ * dBzdz / p.M
     a   = aSG * LSG * (LSG + 2*LSGD) / 2
     c   = a / (2*q.α2)  # = a/β²
+
+    zd = μ < 0 ? -zd : zd
 
     # preallocate once
     out = similar(zd, Float64)
