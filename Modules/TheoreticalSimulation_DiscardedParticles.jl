@@ -887,4 +887,5 @@ function CQD_build_travelling_particles(
         out[idx] = M
     end
 
+    return out
 end
