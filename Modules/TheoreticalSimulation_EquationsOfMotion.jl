@@ -452,7 +452,7 @@ end
     end
   
     # --- CQD corrections ---
-    inv_kw  = 1.0 / kω
+    inv_kw  = 1.0 / kw
     inv_kw2 = inv_kw * inv_kw
     A       = acc * inv_kw * inv_vy
     B       = 0.5 * acc * inv_kw2
