@@ -418,6 +418,55 @@ function CQD_Screen_velocity(Ix,μ::Float64,v0::AbstractVector{<:Real},θe::Floa
     return SVector{3,Float64}(vx,vy,vz)
 end
 
+@inline function CQD_screen_x_z_vz(
+    x0::Float64, z0::Float64, v0x::Float64, v0y::Float64, v0z::Float64,
+    θe::Float64, acc::Float64, kw::Float64, 
+    Lsg::Float64, Ld::Float64, Ltot::Float64, ΔL::Float64)::NTuple{3,Float64}
+
+    @assert v0y != 0.0 "v0y must be nonzero"
+
+    # --- Kinematics ---
+    inv_vy  = 1.0 / v0y
+    inv_vy2 = inv_vy * inv_vy
+    τ_SG    = Lsg * inv_vy
+    α       = v0x * inv_vy
+    γ       = v0z * inv_vy
+    κ       = 0.5 * acc * inv_vy2 
+    
+    # --- Angle precompute (stable near extremes) ---
+    s, c  = sincos(0.5 * θe)
+    sin2  = s*s
+    cos2  = max(c*c, eps(Float64))
+    tan2  = sin2 / cos2
+    logcos2 = log(cos2)
+    PL_tan2 = polylogarithm(2, -tan2)
+
+    # --- Screen x is purely kinematic ---
+    x = muladd(Ltot, α, x0)
+
+    # Small-kw guard (smooth CQD→QM limit)
+    if abs(kw * τ_SG) < 1e-12
+        z  = muladd(Ltot, γ, z0) + κ * ΔL*cos(θe)
+        vz = muladd(acc*cos(θe), τ_SG, v0z)
+        return (x, z, vz)
+    end
+  
+    # --- CQD corrections ---
+    inv_kw  = 1.0 / kω
+    inv_kw2 = inv_kw * inv_kw
+    A       = acc * inv_kw * inv_vy
+    B       = 0.5 * acc * inv_kw2
+    Esg    = exp(-2.0 * kw * τ_SG)
+
+    # --- Screen z with time dependent projection ---
+    z =  muladd(Ltot, γ, z0) + κ * ΔL + A*Lsg*(logcos2+Ld/Lsg*log(cos2+Esg*sin2)) + B*(polylogarithm(2, -Esg * tan2) - PL_tan2)
+
+    # CQD exit velocity (stable; dimensions m/s)
+    vz = muladd(acc,τ_SG,v0z) + acc*inv_kw*log(cos2 + Esg * sin2)
+
+    return (x, z, vz)
+end
+
 ########################################################################################################################################
 # Quantum Mechanics : Classical Trajectories
 ########################################################################################################################################

@@ -166,12 +166,25 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 500_000
+const Nss = 5_000
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
-pairs_UP, pairs_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition)
+pairs_UP, pairs_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:balanced)
+
+aa = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, pairs_UP, 1.0, K39_params;
+                                                    y_length=1000,
+                                                    verbose=true)
+
+
+aa[1]
+particles_flag[1][1]
+
+for j=1:34
+    println("$(sum(map(v -> count(==(0), v), aa[j]))) - $(sum(map(v -> count(==(0), v), particles_flag[j][5])))")
+end
+
 
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
@@ -202,6 +215,15 @@ jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedD
 
 alive_screen = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:screen ));
 dead_crash   = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:crash ));
+
+nx_bins , nz_bins = 32 , 2
+ss = QM_analyze_profiles_to_dict(alive_screen, K39_params; manifold=1, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
+rr = QM_analyze_profiles_to_dict(alive_screen, K39_params; manifold=5, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
+
+
+plot(ss[34][:z_profile][:,1] , ss[34][:z_profile][:,3])
+plot!(rr[34][:z_profile][:,1] , rr[34][:z_profile][:,3])
+
 
 nx_bins , nz_bins = 32 , 2
 println("F=$(K39_params.Ispin+0.5) profiles")

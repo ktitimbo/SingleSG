@@ -334,6 +334,9 @@
 #######################################################################################################
 #######################################################################################################
 
+########################################################################################################################################
+# Quantum Mechanics : Classical Trajectories
+########################################################################################################################################
 
 """
     QM_flag_travelling_particles(
@@ -756,4 +759,132 @@ function select_flagged(initial_by_current::OrderedDict{Int8, Vector{Matrix{Floa
     end
 
     return out
+end
+
+########################################################################################################################################
+# Co-Quantum Dynamics
+########################################################################################################################################
+
+function CQD_flag_travelling_particles(Ix, init_particles, kx::Float64, p::AtomParams;
+                                                    y_length::Int=1000,
+                                                    verbose::Bool=false)
+    @info "Evaluating particle trajectories and assigning flags"
+    @assert size(init_particles, 2) ≥ 8 "init_particles must have at least 8 columns"
+    No        = size(init_particles, 1) # number of particles
+    ncurrents = length(Ix)              # number of currents
+
+    # --- Precompute and share the y-grid for the SG span ---
+    y_in  = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
+    y_out = (y_in + default_y_SG)::Float64
+    ygrid = range(y_in, y_out; length=y_length)
+
+    # Thread-local results bucket: one Vector{UInt8} per current
+    results = Vector{Vector{UInt8}}(undef, ncurrents)
+
+    # Optional: serialize prints to avoid interleaving
+    print_lock = ReentrantLock()
+    progress = Threads.Atomic{Int}(0)
+
+    Threads.@threads for idx in eachindex(Ix)
+        I0 = Ix[idx]
+
+        if verbose
+            # increment progress *before* doing the work
+            c = Threads.atomic_add!(progress, 1) + 1
+            lock(print_lock); 
+            try
+                @printf "[%02d/%d]\tAnalyzing I₀ = %.3f A \n" c ncurrents I0
+            finally
+                unlock(print_lock)
+            end
+        end
+
+        # Hoist field/gradient for this current (adjust BvsI/GvsI names to your codebase)
+        μG = μₑ * GvsI(I0)
+        B0 = BvsI(I0)
+
+        # Codes for all particles at this current
+        codes = Vector{UInt8}(undef, No)
+
+        @inbounds for j in 1:No
+            # zero-alloc scalar loads
+            x0  = init_particles[j, 1]::Float64
+            y0  = init_particles[j, 2]::Float64
+            z0  = init_particles[j, 3]::Float64
+            v0x = init_particles[j, 4]::Float64
+            v0y = init_particles[j, 5]::Float64
+            v0z = init_particles[j, 6]::Float64
+            θe  = init_particles[j, 7]::Float64
+            θn  = init_particles[j, 8]::Float64
+
+            codes[j] = CQD_cavity_crash(μG,B0,x0,y0,z0,v0x,v0y,v0z,θe,θn,kx,p,ygrid,0.0)
+        end
+
+        results[idx] = codes
+    end
+
+    return results
+end
+
+function CQD_build_travelling_particles(
+    Ix::Vector{Float64}, kx::Float64,
+    init_particles::Matrix{Float64},
+    flagged_trajec::Vector{Vector{UInt8}},
+    p::AtomParams)::OrderedDict{Int, Matrix{Float64}}
+
+    @assert size(init_particles,2) ≥ 8 "init_particles needs at least 6 columns"
+    No        = size(init_particles, 1)
+    ncurrents = length(Ix)
+    @assert length(flagged_trajec) == ncurrents "flags length must match Ix"
+    
+    # Bind geometry once (typed)
+    y_in = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
+    Lsg  = default_y_SG::Float64
+    Ld   = default_y_SGToScreen::Float64
+    Ltot = (y_in + Lsg + Ld)::Float64
+    ΔL   = (Lsg*Lsg + 2.0*Lsg*Ld)::Float64  # (Lsg+Ld)^2 - Ld^2
+
+    out = OrderedDict{Int8, Matrix{Float64}}()
+
+    @inbounds for idx in eachindex(Ix)
+        I0      = Ix[idx]
+        flags_i = flagged_trajec[idx]
+        @assert length(flags_i) == No "flags[idx] length must equal number of particles"
+
+        # a_z for this current
+        μG   = μₑ * GvsI(I0)
+        a_z  = μG / p.M
+        ωL    = abs(γₑ * BvsI(I0))
+        
+        # No×12 matrix: 1–8 init, 9 x_scr, 10 z_scr, 11 vz_scr, 12 flag
+        M = Matrix{Float64}(undef, No, 12)
+
+        # Copy initial state columns (allocation-free, column-wise)
+        @simd for j in 1:No; M[j,1] = init_particles[j,1]; end
+        @simd for j in 1:No; M[j,2] = init_particles[j,2]; end
+        @simd for j in 1:No; M[j,3] = init_particles[j,3]; end
+        @simd for j in 1:No; M[j,4] = init_particles[j,4]; end
+        @simd for j in 1:No; M[j,5] = init_particles[j,5]; end
+        @simd for j in 1:No; M[j,6] = init_particles[j,6]; end
+        @simd for j in 1:No; M[j,7] = init_particles[j,7]; end
+        @simd for j in 1:No; M[j,8] = init_particles[j,8]; end
+
+        for j in 1:No
+            x0  = M[j,1];  z0  = M[j,3]
+            v0x = M[j,4];  v0y = M[j,5];  v0z = M[j,6]
+            θe0 = M[j,7];  θn0 = M[j,8]
+
+            kω  = sign(θn0 - θe0) * kx * ωL
+
+
+            x, z, vz = CQD_screen_x_z_vz(x0, z0, v0x, v0y, v0z, θe0, a_z, kω, Lsg, Ld, Ltot, ΔL)
+            M[j,9]  = x
+            M[j,10] = z
+            M[j,11] = vz
+            M[j,12] = Float64(flags_i[j])   # keep matrix eltype Float64
+        end
+
+        out[idx] = M
+    end
+
 end

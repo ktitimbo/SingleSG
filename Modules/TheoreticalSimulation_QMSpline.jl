@@ -193,7 +193,7 @@ res = analyze_screen_profile(0.125, hits_mm;
 
 """
 function analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
-    manifold::Symbol = :F_top, nx_bins::Integer = 2, nz_bins::Integer = 2, 
+    manifold::Union{Symbol,Integer} = :F_top, nx_bins::Integer = 2, nz_bins::Integer = 2, 
     add_plot::Bool = false, plot_xrange::Symbol = :all,
     width_mm::Float64 = 0.150, λ_raw::Float64=0.01, λ_smooth::Float64 = 1e-3, 
     mode::Symbol=:probability)
@@ -325,7 +325,7 @@ end
     QM_analyze_profiles_to_dict(
         data::OrderedDict{Symbol,Any},
         p::AtomParams;
-        manifold::Symbol = :F_bottom,
+        manifold::Union{Symbol,Integer} = :F_bottom,
         n_bins::Tuple = (1, 4),
         width_mm::Float64 = 0.150,
         add_plot::Bool = false,
@@ -351,7 +351,7 @@ stores the peak summaries in a nested dictionary keyed by the dataset index `i`.
   Used to determine level grouping via `p.Ispin` when selecting manifolds.
 
 # Keyword Arguments
-- `manifold::Symbol = :F_bottom`:
+- `manifold::Union{Symbol,Integer} = :F_bottom`:
   Which manifold(s) to aggregate:
   - `:F_top`    → vertically concatenate levels `1 : (2I + 2)`
   - `:F_bottom` → vertically concatenate levels `(2I + 3) : (4I + 2)`
@@ -400,7 +400,7 @@ z_first = out[1][:z_max_smooth_spline_mm]
 
 """
 function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParams;
-    manifold::Symbol =:F_bottom, n_bins::Tuple = (1,4), width_mm::Float64 = 0.150, 
+    manifold::Union{Symbol, Integer} =:F_bottom, n_bins::Tuple = (1,4), width_mm::Float64 = 0.150, 
     add_plot::Bool = false, plot_xrange::Symbol = :all,
     λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, mode::Symbol = :probability)
 
@@ -418,9 +418,13 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
         elseif manifold===:F_bottom
             img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][Int(2*p.Ispin+3):Int(4*p.Ispin+2)])...) # 7:8 is [x,z] in mm from 2I+3:4I+2
         else
-            lvl = tryparse(Int, string(manifold))
-            @assert lvl !== nothing "Non-numeric manifold '$manifold' (expected e.g. :1, :2, ...)"
-            img_F = 1e3 .* data[:data][i][lvl][:, 7:8]   # convert to mm to match other branches
+            lvl = manifold isa Integer ? Int(manifold) :
+                  begin
+                      v = tryparse(Int, string(manifold))
+                      @assert v !== nothing "Non-numeric manifold '$manifold' (expected e.g. :1, :2, ...)"
+                      v
+                  end
+            img_F = 1e3 .* data[:data][i][lvl][:, 7:8]  # mm
         end
     
         result = analyze_screen_profile(Ix[i], img_F;
