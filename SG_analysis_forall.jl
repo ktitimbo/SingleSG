@@ -46,7 +46,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20250820" ;
+data_directory      = "20251006" ;
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
 
@@ -203,17 +203,6 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     profiles_F1 = extract_profiles(data_processed, :F1ProcessedImages, nI, z_pixels; n_bin=n_bins, with_error=true);
     profiles_F2 = extract_profiles(data_processed, :F2ProcessedImages, nI, z_pixels; n_bin=n_bins, with_error=true);
 
-    jldsave(joinpath(OUTDIR, "profiles.jld2"),
-        profiles = OrderedDict(:Icoils => Icoils,
-                                :Icoils_err => ΔIcoils,
-                                :z_mm       => z_mm,
-                                :F1_profile => profiles_F1.mean,
-                                :F1_err     => profiles_F1.sem,
-                                :F2_profile => profiles_F2.mean,
-                                :F2_err     => profiles_F2.sem,
-                    )
-    )
-
     # --- Plot ------------------------------------------------------------------
     fig1 = plot_profiles(z_mm, profiles_F1, Icoils; title="F1 processed data")
     display(fig1)
@@ -261,6 +250,18 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     hline!([centroid_mean.mean], label=L"Centroid $z=%$(round(centroid_mean.mean,digits=3))$mm")
     hspan!( [centroid_mean.mean - centroid_mean.sem,centroid_mean.mean + centroid_mean.sem], color=:orangered, alpha=0.30, label=L"Error = $\pm%$(round(centroid_mean.sem,digits=3))$mm")
     saveplot(fig,"mean_centroid")
+
+    jldsave(joinpath(OUTDIR, "profiles_mean.jld2"),
+        profiles = OrderedDict(:Icoils      => Icoils,
+                               :Icoils_err  => ΔIcoils,
+                               :Centroid_mm => (centroid_mean.mean, centroid_mean.sem), 
+                               :z_mm        => z_mm,
+                               :F1_profile  => profiles_F1.mean,
+                               :F1_err      => profiles_F1.sem,
+                               :F2_profile  => profiles_F2.mean,
+                               :F2_err      => profiles_F2.sem,
+                    )
+    )
 
     df_mean = DataFrame(
         Icoil_A                 =  Icoils,
