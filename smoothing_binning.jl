@@ -60,19 +60,19 @@ data_JSF = OrderedDict(
 );
 
 
-parent_folder = joinpath(@__DIR__, "analysis_data")
+parent_folder = joinpath(@__DIR__, "analysis_data");
 data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
 magnification_factor = 1.2697 ;
 
 n_runs = length(data_directories);
 I_all  = Vector{Vector{Float64}}(undef, n_runs);
 dI_all = Vector{Vector{Float64}}(undef, n_runs);
-cols = palette(:darkrainbow, n_runs)
+cols = palette(:darkrainbow, n_runs);
 
 for (i, dir) in enumerate(data_directories)
-    d   = load(joinpath(@__DIR__, dir, "data_processed.jld2"), "data")
-    I_all[i]  = Vector{Float64}(d[:Currents])
-    dI_all[i] = Vector{Float64}(d[:CurrentsError])
+    d   = load(joinpath(@__DIR__, dir, "data_processed.jld2"), "data");
+    I_all[i]  = Vector{Float64}(d[:Currents]);
+    dI_all[i] = Vector{Float64}(d[:CurrentsError]);
 end
 
 fig_Is = plot(
@@ -86,7 +86,6 @@ fig_Is = plot(
         guidefontsize=14,
     );
 for (idx,data_directory) in enumerate(data_directories)
-    println(I_all[idx])
     scatter!(fig_Is,
         idx .* ones(length(I_all[idx])), 
         I_all[idx],
@@ -183,10 +182,11 @@ for data_directory in data_directories
 
 end
 
-println("Experiment analysis finished!")
-alert("Experiment analysis finished!")
+println("Experiment analysis finished!\n\n")
 
-
+#########################################################################################
+# Choose a particular configuration for comparison purposes 
+#########################################################################################
 m_sets = map(d -> DataReading.collect_fw_map(
                  parent_folder;
                  select=sel,
@@ -255,10 +255,6 @@ for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, cols))
         markerstrokecolor = c,
         line = (:solid,c,1) # pure markers; change to :solid if you want lines
     )
-
-    # If you later want y-error bars, uncomment and make sure the column exists:
-    # yerr = sqrt(30) .* M[r][3][3:end, "F1_z_centroid_se_mm"] ./ magnification_factor
-    # plot!(fig1, I_A, z_mm; yerror = yerr, label = "", color = c, lw = 0)
 end
 # ---------- Alexander's data ----------
 plot!(fig1,
@@ -317,13 +313,13 @@ plot!(fig2,
 display(fig2)
 saveplot(fig2, "bin_vs_smoothing_lin")   # use explicit extension; pdf/png/svg as you like
 
-#######################################################################################################################
-#######################################################################################################################
+println("\nComparison of differente experiments finished!\n\n")
+
+
 #######################################################################################################################
 ######################################### AVERAGING ###################################################################
 #######################################################################################################################
-#######################################################################################################################
-#######################################################################################################################
+
 
 """
 Monte-Carlo average of multiple (x,y) sets onto a common grid, propagating x- and y-uncertainties.
@@ -337,13 +333,13 @@ Keywords:
   xq     :: Union{Symbol,AbstractVector} = :union  # :union or provide custom grid vector
   B      :: Int = 400                      # MC replicates
   outside::Symbol = :mask                  # :mask | :linear | :flat handling outside each set’s range
-  relx   :: Bool = false                   # if true, σx interpreted as relative (fractional) error
+  rel_x   :: Bool = false                  # if true, σx interpreted as relative (fractional) error
 
 Returns: (xq, μ, σ) where μ is the MC mean and σ the pointwise std (≈ 1σ band).
 """
 function average_on_grid_mc(xsets, ysets;
                             σxsets=nothing, σysets=nothing,
-                            xq=:union, B=400, outside=:mask, relx=false,
+                            xq=:union, B=400, outside=:mask, rel_x=false,
                             rng = Random.default_rng())
 
     @assert length(xsets) == length(ysets)
@@ -384,7 +380,7 @@ function average_on_grid_mc(xsets, ysets;
                 xb = x
             else
                 σx = σxsets[i]
-                dx = relx ? (σx .* x) : σx                      # abs σ from relative if requested
+                dx = rel_x ? (σx .* x) : σx                      # abs σ from relative if requested
                 xb = x .+ randn(rng, length(x)) .* dx
             end
 
@@ -459,7 +455,7 @@ xhi = maximum(last.(xsets))
 xq  = exp10.(range(log10(xlo), log10(xhi), length=i_sampled_length))
 
 xq, μ, σ = average_on_grid_mc(xsets, ysets; σxsets=σxsets, σysets=σysets,
-                              xq=:union, B=500, outside=:mask, relx=false)
+                              xq=:union, B=500, outside=:mask, rel_x=false)
 
 # xq, μ, σ_xy = average_on_grid_mc(xsets, ysets; σxsets=σxsets, σysets=σysets)
 # _,  _, σ_y  = average_on_grid_mc(xsets, ysets; σxsets=nothing,   σysets=σysets)
@@ -625,8 +621,6 @@ saveplot(fig, "inter_vs_mc_vs_fit")
 
 
 include("./Modules/TheoreticalSimulation.jl");
-
-
 fig = plot(
     xlabel="Magnetic field gradient  (T/m)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
@@ -665,14 +659,20 @@ jldsave(joinpath(OUTDIR,"data_averaged_$(selected_bin).jld2"),
     data=OrderedDict(
         :nz_bin     => selected_bin,
         :λ0_spl     => selected_spl,
+        # Interpolated data => Mean
         :i_interp   => i_xx,
         :z_interp   => zf1,
         :δz_interp  => δzf1,
+        # Fitting data => Mean
         :i_smooth   => i_xx,
         :z_smooth   => zf1_fit,
         :δz_smooth  => δzf1_fit,
+        # MonteCarlo sampling => Mean
         :i_mc       => xq,
         :z_mc       => μ,
         :δz_mc      => σ
     )
 )
+
+println("\nEXPERIMENTS ANALYSIS FINISHED!")
+alert("EXPERIMENTS ANALYSIS FINISHED!")
