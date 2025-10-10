@@ -166,25 +166,12 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 5_000
+const Nss = 5_000_000
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
-pairs_UP, pairs_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:balanced)
-
-aa = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, pairs_UP, 1.0, K39_params;
-                                                    y_length=1000,
-                                                    verbose=true)
-
-
-aa[1]
-particles_flag[1][1]
-
-for j=1:34
-    println("$(sum(map(v -> count(==(0), v), aa[j]))) - $(sum(map(v -> count(==(0), v), particles_flag[j][5])))")
-end
-
+# pairs_UP, pairs_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:balanced)
 
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
@@ -193,9 +180,6 @@ if SAVE_FIG
     # plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
     # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
-
-# @time particles_colliding  = QM_find_discarded_particles_multithreading(Icoils,crossing_slit,K39_params; t_length=1000, verbose=true)   # heavy loop: goes in series
-# particles_reaching_screen = QM_build_alive_screen(Icoils,crossing_slit,particles_colliding,K39_params)   # [current_idx][μ_idx][x0 y0 z0 v0x v0y v0z x z vz]
 
 @time particles_flag  = TheoreticalSimulation.QM_flag_travelling_particles(
                             Icoils, 
@@ -217,21 +201,37 @@ alive_screen = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :
 dead_crash   = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:crash ));
 
 nx_bins , nz_bins = 32 , 2
-ss = QM_analyze_profiles_to_dict(alive_screen, K39_params; manifold=1, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
-rr = QM_analyze_profiles_to_dict(alive_screen, K39_params; manifold=5, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
-
-
-plot(ss[34][:z_profile][:,1] , ss[34][:z_profile][:,3])
-plot!(rr[34][:z_profile][:,1] , rr[34][:z_profile][:,3])
-
-
-nx_bins , nz_bins = 32 , 2
 println("F=$(K39_params.Ispin+0.5) profiles")
 profiles_top = QM_analyze_profiles_to_dict(alive_screen, K39_params;
     manifold=:F_top, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
 println("F=$(K39_params.Ispin-0.5) profiles")
 profiles_bottom = QM_analyze_profiles_to_dict(alive_screen, K39_params;
     manifold=:F_bottom, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:pdf);
+
+Icoils[1]
+    μF_effective(Icoils[2],1,-1,K39_params)
+
+j=2
+zd     = range(-12.5, 12.5; length=20_001) .* 1e-3  # m
+(μF_effective(Icoils[j],1,-1,K39_params),μF_effective(Icoils[j],1,0,K39_params),μF_effective(Icoils[j],1,1,K39_params))
+dBzdz  = TheoreticalSimulation.GvsI(Icoils[j])
+dd1 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 2,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+dd2 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+dd3 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 0,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+dd4 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2,-1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+dd5 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2,-2,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+dd6 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],1,-1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+dd7 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],1, 0,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+dd8 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],1, 1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+plot(zd,dd1)
+plot(zd,dd2)
+plot(zd,dd3)
+plot(zd,dd4)
+plot(zd,dd5)
+plot(zd,dd6)
+plot(zd,dd7)
+plot(zd,dd8)
+
 
 normalize_vec(v) = (m = maximum(v); m == 0 ? v : v ./ m);
 anim = @animate for i in 1:nI
@@ -268,6 +268,9 @@ gif_path = joinpath(OUTDIR, "z_profiles_comparison.gif");
 gif(anim, gif_path, fps=2)  # adjust fps as you like
 @info "Saved GIF" gif_path ;
 
+
+QM_analyze_profiles_to_dict(alive_screen, K39_params;
+    manifold=5, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
 
 Icoils = alive_screen[:Icoils]
 r = 1:3:length(Icoils)

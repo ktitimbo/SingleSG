@@ -192,3 +192,5 @@ function getProbDist_v3(μ::Float64, dBzdz::Float64, zd::AbstractVector, p::Atom
         return out
     end
 end
+
+ProbDist_convolved(z::AbstractVector{<:Real},z_pdf::AbstractVector{<:Real}, w_width::Real) = smooth_profile(z, z_pdf, w_width)
