@@ -233,7 +233,7 @@ module TheoreticalSimulation
         return kernel
     end
 
-    function smooth_profile(z_vals, pdf_vals, wd)
+    function smooth_profile(z_vals::AbstractVector{<:Real}, pdf_vals::AbstractVector{<:Real}, wd::Real)
         kernel = gaussian_kernel(z_vals,wd)
         # Convolve pdf values with kernel, pad=true means full convolution
         smoothed = DSP.conv(pdf_vals, kernel)
