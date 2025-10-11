@@ -299,7 +299,7 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
         formatters    = [fmt__printf("%8.3f", [1]), fmt__printf("%8.5f", 3:9)],
         alignment     = :c,
         column_labels  = [
-            ["Current", "Currrent Error", "F1 z", "F2 z", "Δz", "Centroid F1 z","Centroid F1 z Error","Centroid F2 z", "Centroid F1 z Error"], 
+            ["Current", "Current Error", "F1 z", "F2 z", "Δz", "Centroid F1 z","Centroid F1 z Error","Centroid F2 z", "Centroid F1 z Error"], 
             ["[A]", "[A]" ,"[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
         ],
         table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
