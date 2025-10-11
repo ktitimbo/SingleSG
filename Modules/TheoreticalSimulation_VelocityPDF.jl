@@ -194,3 +194,31 @@ function getProbDist_v3(μ::Float64, dBzdz::Float64, zd::AbstractVector, p::Atom
 end
 
 ProbDist_convolved(z::AbstractVector{<:Real},z_pdf::AbstractVector{<:Real}, w_width::Real) = smooth_profile(z, z_pdf, w_width)
+
+
+
+"""
+    ProbDist_convolved(z::AbstractVector{<:Real},
+                       z_pdf::AbstractVector{<:Real},
+                       w_width::Real)
+
+Convolve/smooth `z_pdf` sampled at locations `z` with kernel width `w_width`.
+Delegates to `smooth_profile`. Throws if lengths mismatch.
+"""
+@inline function ProbDist_convolved(z::AbstractVector{T},
+                                    z_pdf::AbstractVector{T},
+                                    w_width::T) where {T<:Real}
+    @boundscheck length(z) == length(z_pdf) || throw(ArgumentError("z and z_pdf must have same length"))
+    return smooth_profile(z, z_pdf, w_width)
+end
+
+@inline function ProbDist_convolved!(out::AbstractVector,
+                                     z::AbstractVector,
+                                     z_pdf::AbstractVector,
+                                     w_width::Number)
+    @boundscheck length(out) == length(z) == length(z_pdf) ||
+        throw(ArgumentError("lengths must match"))
+    tmp = smooth_profile(z, z_pdf, w_width)   # may be Dual eltype
+    copyto!(out, tmp)                         # out must accept that eltype
+    return out
+end
