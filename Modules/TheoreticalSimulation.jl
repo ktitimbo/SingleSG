@@ -226,14 +226,14 @@ module TheoreticalSimulation
     end
 
 
-    function gaussian_kernel(x,wd)
+    function gaussian_kernel(x,wd::Number)
         # Create Gaussian kernel around zero
         kernel = (1 / (sqrt(2π) * wd)) .* exp.(-x .^ 2 ./ (2 * wd^2))
         kernel ./= sum(kernel)  # normalize to sum to 1
         return kernel
     end
 
-    function smooth_profile(z_vals::AbstractVector{<:Real}, pdf_vals::AbstractVector{<:Real}, wd::Real)
+    function smooth_profile(z_vals::AbstractVector{<:Real}, pdf_vals::AbstractVector{<:Real}, wd::Number)
         kernel = gaussian_kernel(z_vals,wd)
         # Convolve pdf values with kernel, pad=true means full convolution
         smoothed = DSP.conv(pdf_vals, kernel)
