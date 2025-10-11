@@ -588,10 +588,13 @@ Qthin = X / R11           # n×4 thin Q via solve (no full Q)
 
 tpoly = Polynomial([0, 1/σz]) ;       # t = (-μ/σ) + (1/σ) z
 
-fitting_params = zeros(3,length(chosen_currents_idx),6);
+
+rl = length(chosen_currents_idx) 
+nl = length(norm_modes)
+fitting_params = zeros(nl,rl,6);
 
 @time for (n_idx, norm_mode) in enumerate(norm_modes)
-    println("Normalization mode = $(string(norm_mode))")
+    println("\n\n\t\t\tNORMALIZATION MODE = $(string(norm_mode))")
     for (j,i_idx) in enumerate(chosen_currents_idx)
 
         I0 = Ic_sampled[i_idx]
@@ -708,10 +711,12 @@ fitting_params = zeros(3,length(chosen_currents_idx),6);
     end
 end
 
-chosen_currents_idx
+
+starts      = collect(range(1; step=rl, length=nl)) 
+rg_labels   = Pair{Int,String}.(starts, string.(norm_modes))
 
 pretty_table(
-    vcat(fitting_params[1,:,:],fitting_params[2,:,:],fitting_params[3,:,:]);
+    reduce(vcat, (@view fitting_params[i, :, :] for i in 1:nl));
     column_label_alignment      = :c,
     column_labels               = [[MultiColumn(2, "Theoretical PDF"), MultiColumn(4, "Background P₃(z)") ],
                                     ["A", "w [mm]", "c₀", "c₁", "c₂", "c₃"]],
@@ -721,10 +726,7 @@ pretty_table(
     equal_data_column_widths    = true,
     stubhead_label              = "I₀ [mA]",
     row_label_column_alignment  = :c,
-    row_group_labels            = [
-                                    1  => "no normalization",
-                                    7  => "by area",
-                                    13 => "by maximum"],
+    row_group_labels            = rg_labels,
     row_group_label_alignment   = :c,
     title                       = "FITTING ANALYSIS",
     table_format                = TextTableFormat(borders = text_table_borders__unicode_rounded),
@@ -737,19 +739,36 @@ pretty_table(
                                     )
 )
 
-cols = palette(:darkrainbow, length(chosen_currents_idx))
-plot(xlabel=L"$z$ (mm)", ylabel="Intensity (au)")
-    for (i,idx) in enumerate(chosen_currents_idx)
-    val_mA = 1000 * Ic_sampled[idx]
+cols = palette(:darkrainbow, rl)
+plot_list = Vector{Plots.Plot}(undef, nl)
 
-    plot!(z_theory,background_poly(z_theory, @view fitting_params[1, i, 3:6]),
-        line=(cols[i],2),
-        label= L"$I_{0}=" * @sprintf("%.1f", val_mA) * L"\,\mathrm{mA}$",
-        )
+for (i,val) in enumerate(norm_modes)
+
+    plot_list[i] = plot(xlabel=L"$z$ (mm)", ylabel="Intensity (au)")
+    for (j,idx) in enumerate(chosen_currents_idx)
+        val_mA = 1000 * Ic_sampled[idx]
+
+        plot!(z_theory,background_poly(z_theory, @view fitting_params[i,j,3:6]),
+            line=(cols[j],2),
+            label= L"$I_{0}=" * @sprintf("%.1f", val_mA) * L"\,\mathrm{mA}$",
+            )
+    end
+    plot!(legend=:bottom,
+        legendtitle=string(val),
+        legendtitlefontsize=8,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        legend_columns = 2,
+    )
+
 end
-plot!(legend=:best,
-    legendtitle=":none",
-    legendtitlefontsize=8,)
+
+plot(plot_list..., 
+layout=(nl,1), 
+suptitle="Background",
+size=(500,700))
+
+
 
 fig=plot(xlabel=L"$z$ (mm)",
     ylabel="Intensity (au)")
@@ -757,14 +776,14 @@ for (j,i_idx) in enumerate(chosen_currents_idx)
     amp_exp = exp_data[:F1_profile][i_idx,:]
     Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp; weights=TheoreticalSimulation.compute_weights(z_exp, λ0_exp));
     pdf_exp = Spl_exp.(z_theory)
-    pdf_exp = normalize_vec(pdf_exp; by=norm_mode)
+    pdf_exp = normalize_vec(pdf_exp; by=:none)
     val_mA = 1000 * Ic_sampled[i_idx]
     plot!(z_theory, pdf_exp,
         line=(:solid,cols[j],2),
         label= L"$I_{0}=" * @sprintf("%.1f", val_mA) * L"\,\mathrm{mA}$",)
     
 
-    plot!(z_theory,background_poly(z_theory, @view fitting_params[j, 3:6]),
+    plot!(z_theory,background_poly(z_theory, @view fitting_params[1,j, 3:6]),
         line=(:dash,cols[j],1.5),
         label= false,
         )
