@@ -549,12 +549,12 @@ end
 exp_data = load(joinpath(read_exp_info.directory,"profiles_mean.jld2"))["profiles"]
 Ic_sampled = exp_data[:Icoils];
 
-STEP        = 10
+STEP        = 5
 THRESH_A    = 0.020
 
 chosen_currents_idx = sort(unique([firstindex(Ic_sampled);
         @view(findall(>(THRESH_A), Ic_sampled)[1:STEP:end]);
-        @view(findall(>(THRESH_A), Ic_sampled)[end-2:end]);
+        @view(findall(>(THRESH_A), Ic_sampled)[end-3:end]);
         lastindex(Ic_sampled)
         ]
 ));
@@ -566,11 +566,12 @@ println("Target currents in A: (",
 
 # ---- Axes / normalization ----
 norm_modes = (:none,:sum,:max) ;
-range_z    = 6.1;
-nrange_z   = 20001;
+magnification_factor = read_exp_info.magnification
 λ0_exp     = 0.001;
 
-z_exp   = (exp_data[:z_mm] .- exp_data[:Centroid_mm][1]) ./ read_exp_info.magnification
+z_exp   = (exp_data[:z_mm] .- exp_data[:Centroid_mm][1]) ./ magnification_factor
+range_z    = 6.1;
+nrange_z   = 20001;
 z_theory  = collect(range(-range_z,range_z,length=nrange_z));
 
 μz, σz = mean(z_theory) , std(z_theory);
@@ -587,7 +588,6 @@ Qthin = X / R11           # n×4 thin Q via solve (no full Q)
 # -------------------------------------------------------------------
 
 tpoly = Polynomial([0, 1/σz]) ;       # t = (-μ/σ) + (1/σ) z
-
 
 rl = length(chosen_currents_idx) 
 nl = length(norm_modes)
@@ -659,7 +659,7 @@ fitting_params = zeros(nl,rl,6);
         bg_poly = params.c0 + params.c1*tpoly + params.c2*tpoly^2 + params.c3*tpoly^3
 
         fig=plot(z_theory , pdf_exp, 
-            label="Experiment", 
+            label="Experiment $(wanted_data_dir)", 
             xlabel=L"$z$ (mm)",
             ylabel="Intensity (au)",
             seriestype=:scatter, 
@@ -711,7 +711,6 @@ fitting_params = zeros(nl,rl,6);
     end
 end
 
-
 starts      = collect(range(1; step=rl, length=nl)) 
 rg_labels   = Pair{Int,String}.(starts, string.(norm_modes))
 
@@ -728,7 +727,7 @@ pretty_table(
     row_label_column_alignment  = :c,
     row_group_labels            = rg_labels,
     row_group_label_alignment   = :c,
-    title                       = "FITTING ANALYSIS",
+    title                       = "FITTING ANALYSIS : $(wanted_data_dir)",
     table_format                = TextTableFormat(borders = text_table_borders__unicode_rounded),
     style                       = TextTableStyle(
                                         first_line_merged_column_label = crayon"light_red bold",
@@ -739,7 +738,7 @@ pretty_table(
                                     )
 )
 
-cols = palette(:darkrainbow, rl)
+cols = palette(:darkrainbow, rl);
 plot_list = Vector{Plots.Plot}(undef, nl)
 
 for (i,val) in enumerate(norm_modes)
@@ -762,12 +761,12 @@ for (i,val) in enumerate(norm_modes)
     )
 
 end
-
-plot(plot_list..., 
-layout=(nl,1), 
-suptitle="Background",
-size=(500,700))
-
+fig=plot(plot_list..., 
+    layout=(nl,1), 
+    suptitle="Background",
+    left_margin=4mm,
+    size=(500,700))
+savefig(fig,joinpath(OUTDIR,"$(wanted_data_dir)_background.$(FIG_EXT)"))
 
 
 fig=plot(xlabel=L"$z$ (mm)",
@@ -781,7 +780,8 @@ for (j,i_idx) in enumerate(chosen_currents_idx)
     plot!(z_theory, pdf_exp,
         line=(:solid,cols[j],2),
         label= L"$I_{0}=" * @sprintf("%.1f", val_mA) * L"\,\mathrm{mA}$",)
-    
+    f_fit = fitting_params[1,j,1] .* TheoreticalSimulation.ProbDist_convolved(zz, pdf_theory, fitting_params[1,j,1])
+    plot!(z_theory,background_poly(z_theory, @view fitting_params[1,j,3:6]))
 
     plot!(z_theory,background_poly(z_theory, @view fitting_params[1,j, 3:6]),
         line=(:dash,cols[j],1.5),
@@ -791,10 +791,17 @@ end
 plot!(legend=:best,)
 savefig(fig,joinpath(OUTDIR,"summary_$(wanted_data_dir)_$(string(norm_mode)).$(FIG_EXT)"))
 
+jldsave( joinpath(OUTDIR,"fitting_params_$(wanted_data_dir).jld2"), 
+        data = OrderedDict(
+                :data_dir       => wanted_data_dir,
+                :nz_bin         => wanted_binning,
+                :smooth_spline  => wanted_smooth,
+                :magn_factor    => magnification_factor,
+                :Icoil_A        => Ic_sampled[chosen_currents_idx],
+                :normalization  => norm_modes,
+                :fit_params     => fitting_params))
 
-jldsave( joinpath(OUTDIR,"fitting_params_$(wanted_data_dir)_$(string(norm_mode)).jld2"), data = fitting_params)
-
-aa = load(joinpath(OUTDIR,"fitting_params_20250919_max.jld2"))["data"]
+aa = load(joinpath(OUTDIR,"fitting_params_20250919.jld2"))["data"]
 
 
 plot(Ic_sampled[chosen_currents_idx], fitting_params[:,1])
@@ -806,3 +813,61 @@ plot(Ic_sampled[chosen_currents_idx], fitting_params[:,6])
 
 
 # [TheoreticalSimulation.μF_effective(I0,v[1],v[2],K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params,Fsel=2)][end]
+
+
+   report = """
+    ***************************************************
+    EXPERIMENT
+        Single Stern–Gerlach Experiment
+        Data directory          : $(data_directory)
+        Output directory        : $(OUTDIR)
+        Run label               : $(RUN_STAMP)
+
+    CAMERA FEATURES
+        Number of pixels        : $(nx_pixels) × $(nz_pixels)
+        Pixel size              : $(1e6*cam_pixelsize) μm
+
+    IMAGES INFORMATION
+        Magnification factor    : $magnification_factor
+        Camera Binning          : $(exp_bin_x) × $(exp_bin_z)
+        Effective pixels        : $(x_pixels) × $(z_pixels)
+        Pixel size              : $(1e6*exp_pixelsize_x)μm × $(1e6*exp_pixelsize_z)μm
+        xlims                   : ($(round(minimum(1e6*x_position), digits=6)) μm, $(round(maximum(1e3*x_position), digits=4)) mm)
+        zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
+
+    EXPERIMENT CONDITIONS
+        Currents (A)            : $(Icoils)
+        Currents Error (A)      : $(ΔIcoils)
+        No. of currents         : $(nI)
+        Temperature (K)         : $(Temperature)
+
+    ANALYSIS PROPERTIES
+        Binning                 : $(n_bins)
+        Smoothing parameter     : $(λ0)
+        Error px size (mm)      : $(z_mm_error)
+        Centroid Mean (mm)      : $(round.(centroid_mean.mean, digits=6)) ± $(round.(centroid_mean.sem, digits=6))
+        Centroid FW (mm)        : $(round.(centroid_fw.mean, digits=6)) ± $(round.(centroid_fw.sem, digits=6))
+        Mean F1 peak (mm)       : $(round.(df_mean[!,:F1_z_centroid_mm],digits=9))
+        Framewise F1 peak (mm)  : $(round.(df_fw[!,:F1_z_centroid_mm], digits=9))
+        Framewise F1 STDE (mm)  : $(round.(df_fw[!,:F1_z_centroid_se_mm], digits=9))
+
+    CODE
+        Code name               : $(PROGRAM_FILE),
+        Start date              : $(T_START)
+        End data                : $(T_END)
+        Run time                : $(T_RUN)
+        Hostname                : $(hostname)
+
+    ***************************************************
+    """
+
+    # Print to terminal
+    println(report)
+
+    # Save to file
+    open(joinpath(OUTDIR,"experiment_report.txt"), "w") do io
+        write(io, report)
+    end
+
+    println("Experiment analysis finished!")
+    alert("Experiment analysis finished!")
