@@ -539,7 +539,7 @@ function fit_pdf_joint(
         else
             c  = R_list[i] \ d
             t  = @. (zz - μ_list[i]) / σ_list[i]
-            horner(t, c)                               # your Dual-safe Horner
+            horner(t, c) 
         end
 
         @. A * conv + poly
@@ -551,11 +551,11 @@ function fit_pdf_joint(
         @inbounds for i in 1:M
             totalN += length(z_list[i])
         end
-        T = typeof(p[I.i_logw])                        # Float64 or Dual
+        T = typeof(p[I.i_logw])
         res = Vector{T}(undef, totalN)
         pos = 1
         @inbounds for i in 1:M
-            yi = model_i(i, z_list[i], p)              # expect Vector{T}
+            yi = model_i(i, z_list[i], p)
             n  = length(yi)
             copyto!(res, pos, yi, 1, n)
             pos += n
@@ -680,7 +680,7 @@ Ic_sampled = exp_data[:Icoils];
 
 STEP        = 26 ;
 THRESH_A    = 0.020 ;
-P_DEGREE    = 5 ;
+P_DEGREE    = 3 ;
 ncols_bg    = P_DEGREE + 1 ;
 
 chosen_currents_idx = sort(unique([firstindex(Ic_sampled);
@@ -1124,3 +1124,310 @@ end
 
 println("Experiment analysis finished!")
 alert("Experiment analysis finished!")
+
+
+using LsqFit
+using LinearAlgebra
+function fit_pdf_joint_g(
+    z_list::Vector{<:AbstractVector},
+    y_list::Vector{<:AbstractVector},
+    pdf_th_list::Vector{<:AbstractVector};
+    n::Integer,
+    Q_list::Vector{<:AbstractMatrix},
+    R_list::Vector{<:AbstractMatrix},
+    μ_list::Vector{<:Real},
+    σ_list::Vector{<:Real},
+    # inits / fixed
+    w0::Real, A0::Real=1.0, d0=nothing,
+    w_mode::Symbol = :global,            # :per_profile, :global, :fixed
+    A_mode::Symbol = :per_profile,       # :per_profile, :global, :fixed
+    w_fixed::Real = w0,                  # used if w_mode == :fixed
+    A_fixed::Real = A0,                  # used if A_mode == :fixed
+    progress_every::Int=25,
+    rcond::Real=1e-12, ridge::Real=0.0,
+)
+    M = length(z_list)
+    @assert length(y_list) == M == length(pdf_th_list) == length(Q_list) ==
+            length(R_list) == length(μ_list) == length(σ_list)
+    @assert n ≥ 0
+    @assert w_mode in (:per_profile, :global, :fixed)
+    @assert A_mode in (:per_profile, :global, :fixed)
+
+    # -------- ensure basis matches current n and grids --------
+    ncoef = n + 1
+    QL = Vector{Matrix{Float64}}(undef, M)
+    RL = Vector{Matrix{Float64}}(undef, M)
+    μL = Vector{Float64}(undef, M)
+    σL = Vector{Float64}(undef, M)
+    for i in 1:M
+        needs_rebuild = size(Q_list[i],1) != length(z_list[i]) ||
+                        size(Q_list[i],2) != ncoef ||
+                        size(R_list[i],1) != ncoef ||
+                        size(R_list[i],2) != ncoef
+        if needs_rebuild
+            μi, σi, _t, Qi, Ri = orthonormal_basis_on(z_list[i]; n=n)
+            μL[i], σL[i], QL[i], RL[i] = μi, σi, Qi, Ri
+        else
+            μL[i], σL[i], QL[i], RL[i] = μ_list[i], σ_list[i], Q_list[i], R_list[i]
+        end
+    end
+
+    # -------- init per-profile d --------
+    d0vec = d0 === nothing ? zeros(ncoef) : d0
+    @assert length(d0vec) == ncoef
+
+    # -------- dynamic parameter packing --------
+    # order: [ maybe logw(_i), maybe A(_i), then all d_i blocks ]
+    idx_logw_global = nothing::Union{Int,Nothing}
+    idx_logw_vec    = nothing::Union{Vector{Int},Nothing}
+    idx_A_global    = nothing::Union{Int,Nothing}
+    idx_A_vec       = nothing::Union{Vector{Int},Nothing}
+
+    k = 1
+    if w_mode == :global
+        idx_logw_global = k; k += 1
+    elseif w_mode == :per_profile
+        idx_logw_vec = collect(k:(k+M-1)); k += M
+    end
+
+    if A_mode == :global
+        idx_A_global = k; k += 1
+    elseif A_mode == :per_profile
+        idx_A_vec = collect(k:(k+M-1)); k += M
+    end
+
+    d_start  = k
+    d_ranges = [ (d_start + (i-1)*ncoef) : (d_start + i*ncoef - 1) for i in 1:M ]
+    total_len = d_start + M*ncoef - 1
+
+    # initial parameter vector
+    p0 = Vector{Float64}(undef, total_len)
+    if w_mode == :global
+        p0[idx_logw_global] = log(float(w0))
+    elseif w_mode == :per_profile
+        @inbounds for i in 1:M
+            p0[idx_logw_vec[i]] = log(float(w0))
+        end
+    end
+    if A_mode == :global
+        p0[idx_A_global] = float(A0)
+    elseif A_mode == :per_profile
+        @inbounds for i in 1:M
+            p0[idx_A_vec[i]] = float(A0)
+        end
+    end
+    @inbounds for i in 1:M
+        p0[d_ranges[i]] .= float.(d0vec)
+    end
+
+    # -------- utilities --------
+    calls    = Ref(0)
+    best_rss = Ref{Float64}(Inf)
+    best_p   = Ref{Vector{Float64}}(copy(p0))
+
+    @inline function toflt(x)
+        if Base.hasproperty(x, :value)     # ForwardDiff.Dual
+            return Float64(getfield(x, :value))
+        elseif x isa Real
+            return Float64(x)
+        else
+            return Float64(float(x))
+        end
+    end
+    @inline promote_to_p(val, p) = one(p[1]) * val  # lift Float->Dual if needed
+
+    # accessors
+    get_logw = function (i::Int, p)
+        if w_mode == :global
+            return p[idx_logw_global]
+        elseif w_mode == :per_profile
+            return p[idx_logw_vec[i]]
+        else
+            return promote_to_p(log(w_fixed), p)
+        end
+    end
+    get_A = function (i::Int, p)
+        if A_mode == :global
+            return p[idx_A_global]
+        elseif A_mode == :per_profile
+            return p[idx_A_vec[i]]
+        else
+            return promote_to_p(A_fixed, p)
+        end
+    end
+
+    # -------- model pieces --------
+    function model_i(i::Int, zz, p)
+        logw = get_logw(i, p)
+        w    = exp(logw)
+        A    = get_A(i, p)
+        d    = @view p[d_ranges[i]]
+
+        conv = TheoreticalSimulation.ProbDist_convolved(zz, pdf_th_list[i], w)
+
+        poly = if zz === z_list[i]
+            QL[i] * d
+        else
+            c  = RL[i] \ d
+            t  = @. (zz - μL[i]) / σL[i]
+            horner(t, c)
+        end
+        @. A * conv + poly
+    end
+
+    function joint_model(dummy_x, p)
+        totalN = 0
+        @inbounds for i in 1:M
+            totalN += length(z_list[i])
+        end
+        T = eltype(p)
+        res = Vector{T}(undef, totalN)
+        pos = 1
+        @inbounds for i in 1:M
+            yi = model_i(i, z_list[i], p)
+            ni = length(yi)
+            copyto!(res, pos, yi, 1, ni)
+            pos += ni
+        end
+        res
+    end
+
+    # concatenated observations
+    y_concat = reduce(vcat, y_list)
+
+    # -------- bounds (only for present params) --------
+    lower = fill(-Inf, length(p0))
+    upper = fill( Inf, length(p0))
+    if w_mode == :global
+        lower[idx_logw_global] = log(1e-9); upper[idx_logw_global] = log(1.0)
+    elseif w_mode == :per_profile
+        @inbounds for i in 1:M
+            lower[idx_logw_vec[i]] = log(1e-9)
+            upper[idx_logw_vec[i]] = log(1.0)
+        end
+    end
+    if A_mode == :global
+        lower[idx_A_global] = 0.0
+    elseif A_mode == :per_profile
+        @inbounds for i in 1:M
+            lower[idx_A_vec[i]] = 0.0
+        end
+    end
+
+    # -------- progress wrapper --------
+    function joint_model_for_fit(x, p)
+        yhat = joint_model(x, p)
+        if progress_every > 0
+            calls[] += 1
+            if calls[] % progress_every == 0
+                rss_val = sum(abs2, yhat .- y_concat)
+                rss_f   = toflt(rss_val)
+                if rss_f < best_rss[]
+                    best_rss[] = rss_f
+                    best_p[]   = map(toflt, p)
+                end
+                # display a representative w
+                w_show = begin
+                    if w_mode == :fixed
+                        w_fixed
+                    elseif w_mode == :global
+                        exp(toflt(p[idx_logw_global]))
+                    else
+                        exp(toflt(p[idx_logw_vec[1]]))
+                    end
+                end
+                @printf(stderr, "eval %6d | joint rss≈%.6g | w≈%.6g\n", calls[], rss_f, w_show)
+            end
+        end
+        yhat
+    end
+
+    # -------- fit --------
+    fit_data = LsqFit.curve_fit(joint_model_for_fit, similar(y_concat, 0), y_concat, p0;
+                                autodiff=:forward, lower=lower, upper=upper)
+
+    # -------- unpack solution --------
+    p̂ = coef(fit_data)
+
+    ŵ = if w_mode == :global
+        exp(p̂[idx_logw_global])
+    elseif w_mode == :per_profile
+        [exp(p̂[idx_logw_vec[i]]) for i in 1:M]
+    else
+        w_fixed
+    end
+
+    Â = if A_mode == :global
+        p̂[idx_A_global]
+    elseif A_mode == :per_profile
+        [p̂[idx_A_vec[i]] for i in 1:M]
+    else
+        A_fixed
+    end
+
+    d̂ = [collect(p̂[d_ranges[i]]) for i in 1:M]
+    ĉ = [RL[i] \ d̂[i] for i in 1:M]
+
+    # covariance / SEs
+    se_all, cov_all = robust_se_and_cov(fit_data; rcond=rcond, ridge=ridge)
+
+    δw = if w_mode == :global
+        ŵ * se_all[idx_logw_global]
+    elseif w_mode == :per_profile
+        [exp(p̂[idx_logw_vec[i]]) * se_all[idx_logw_vec[i]] for i in 1:M]
+    else
+        0.0
+    end
+
+    δA = if A_mode == :global
+        se_all[idx_A_global]
+    elseif A_mode == :per_profile
+        [se_all[idx_A_vec[i]] for i in 1:M]
+    else
+        0.0
+    end
+
+    # per-profile covariance blocks for dᵢ → cᵢ
+    cov_d = Vector{Union{Nothing,Matrix{Float64}}}(undef, M)
+    cov_c = Vector{Union{Nothing,Matrix{Float64}}}(undef, M)
+    se_c  = Vector{Vector{Float64}}(undef, M)
+    for i in 1:M
+        if cov_all === nothing || isempty(cov_all)
+            cov_d[i] = nothing
+            cov_c[i] = nothing
+            se_c[i]  = fill(NaN, ncoef)
+        else
+            Id = d_ranges[i]
+            cov_d[i] = Matrix(cov_all[Id, Id])
+            C        = RL[i] \ (cov_d[i] / RL[i]')
+            cov_c[i] = C
+            se_c[i]  = sqrt.(diag(C))
+        end
+    end
+
+    model_on_z = [model_i(i, z_list[i], p̂) for i in 1:M]
+    modelfun   = (i, zz) -> model_i(i, zz, p̂)
+
+    params   = (w = ŵ, A = Â, c = ĉ)
+    param_se = (δw = δw, δA = δA, δc = se_c)
+
+    meta   = (evals=calls[], best_probe=(rss=best_rss[], p=best_p[]), n=n, M=M,
+              w_mode=w_mode, A_mode=A_mode)
+    extras = (d = d̂, cov_all = cov_all, cov_d = cov_d, cov_c = cov_c,
+              d_ranges = d_ranges,
+              idx_logw_global = idx_logw_global, idx_logw_vec = idx_logw_vec,
+              idx_A_global = idx_A_global, idx_A_vec = idx_A_vec)
+
+    return fit_data, params, param_se, modelfun, model_on_z, meta, extras
+end
+
+
+
+
+fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint_g(z_list, y_list, pdf_th_list;
+              n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
+              w_mode=:global, A_mode=:global,
+              w0=0.25, A0=1.0)
+
+
+              params
