@@ -506,7 +506,7 @@ rl = length(chosen_currents_idx) ;
 nl = length(norm_modes) ;
 fitting_params = zeros(nl,rl,1+2+ncols_bg); # (norm_modes x currents x [res, params])
 
-# --- Column headers (two header rows) ---
+# --- Column headers ---
 # map ASCII digits to Unicode subscripts
 const _sub = Dict(
     '0'=>'₀','1'=>'₁','2'=>'₂','3'=>'₃','4'=>'₄',
