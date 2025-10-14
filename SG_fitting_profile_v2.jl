@@ -260,21 +260,38 @@ function horner(z::Union{Real,AbstractArray}, c::AbstractVector)
 end
 
 """
-    background_poly_any(z, c)
+    anypoly_eval(z, c)
 
 Convenience wrapper around `horner`. `c` is `[c0, c1, …, c_n]`.
 """
-background_poly_any(z, c) = horner(z, c)
+anypoly_eval(z, c) = horner(z, c)
 
 """
     t_affine_poly(μ, σ)
 
 Return a `Polynomial` p(z) such that `p(z) = (z - μ)/σ`.
-(Requires Polynomials.jl)
+
 """
 function t_affine_poly(μ::Real, σ::Real)
     @assert σ > 0
     return Polynomial([-μ/σ, 1/σ])
+end
+
+function bg_function(z::AbstractVector,c::AbstractVector)
+    @assert isapprox(mean(z), 0.0; atol= 10 * eps() ) "μz not ~ 0 within atol=$(10 * eps())"
+    μ   = mean(z)
+    σ   = std(z)
+    n   = length(c)
+    t   = Polynomial([μ/σ, 1/σ]) # t=(z-μ)/σ
+    bg  = sum(c[k] * t^(k-1) for k in 1:n)
+    return bg
+end
+
+function predict_profile(z::AbstractVector,profile_theory::AbstractVector,A::Float64,w::Float64,c::AbstractVector)
+    @assert length(z) == length(profile_theory) "z and pdf must have the same length"
+    bg = anypoly_eval(z,c)
+    first_term = A * TheoreticalSimulation.ProbDist_convolved(z, profile_theory, w)
+    return first_term + bg
 end
 
 ###########################################
@@ -323,7 +340,6 @@ function fit_pdf_ortho_n(
     progress_every::Int=10,
     rcond::Real=1e-12,
     ridge::Real=0.0,
-    model_name::AbstractString="A*f(Ic,w;z)+Pₙ(z)",
     )
     @assert length(z) == length(pdf_exp) == length(pdf_th)
     @assert n ≥ 0
@@ -472,7 +488,7 @@ Ic_sampled = exp_data[:Icoils];
 
 STEP        = 10 ;
 THRESH_A    = 0.020 ;
-P_DEGREE    = 5 ;
+P_DEGREE    = 3 ;
 ncols_bg    = P_DEGREE + 1 ;
 
 chosen_currents_idx = sort(unique([firstindex(Ic_sampled);
@@ -491,17 +507,16 @@ norm_modes = (:none,:sum,:max) ;
 magnification_factor = read_exp_info.magnification ;
 λ0_exp     = 0.001 ;
 
-z_exp   = (exp_data[:z_mm] .- exp_data[:Centroid_mm][1]) ./ magnification_factor
-range_z    = floor(minimum([maximum(z_exp),abs(minimum(z_exp))]),digits=1);
-nrange_z   = 20001;
-z_theory  = collect(range(-range_z,range_z,length=nrange_z));
+z_exp    = (exp_data[:z_mm] .- exp_data[:Centroid_mm][1]) ./ magnification_factor ;
+range_z  = floor(minimum([maximum(z_exp),abs(minimum(z_exp))]),digits=1);
+nrange_z = 20001;
+z_theory = collect(range(-range_z,range_z,length=nrange_z));
 
 @assert isapprox(mean(z_theory), 0.0; atol= 10 * eps(float(range_z)) ) "μz=$(μz) not ~ 0 within atol=$(10 * eps(float(range_z)) )"
 @assert isapprox(std(z_theory), std_sample(range_z, nrange_z); atol= eps(float(range_z))) "σz=$(σz) is not defined for a symmetric range"
 
 μz, σz, t, Qthin, R = orthonormal_basis_on(z_theory; n=P_DEGREE);
 
-tpoly = t_affine_poly(μz, σz) ;            # p(z) = (z-μ)/σ
 rl = length(chosen_currents_idx) ;
 nl = length(norm_modes) ;
 fitting_params = zeros(nl,rl,1+2+ncols_bg); # (norm_modes x currents x [res, params])
@@ -511,8 +526,8 @@ fitting_params = zeros(nl,rl,1+2+ncols_bg); # (norm_modes x currents x [res, par
 const _sub = Dict(
     '0'=>'₀','1'=>'₁','2'=>'₂','3'=>'₃','4'=>'₄',
     '5'=>'₅','6'=>'₆','7'=>'₇','8'=>'₈','9'=>'₉','-'=>'₋'
-)
-sub(k::Integer) = join((_sub[c] for c in string(k)))  # "12" -> "₁₂"
+);
+sub(k::Integer) = join((_sub[c] for c in string(k)));  # "12" -> "₁₂"
 
 hdr_top = Any[
     "Residuals",
@@ -530,7 +545,6 @@ hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGR
         println("\n\t\tANALYZING BACKGROUND FOR I₀=$(round(1000*I0,digits=3))mA")
 
         𝒢  = TheoreticalSimulation.GvsI(I0)
-        _ℬ = abs.(TheoreticalSimulation.BvsI(I0))
         
         μ_eff = [TheoreticalSimulation.μF_effective(I0,v[1],v[2],K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params,Fsel=1)]
         println("Effective magnetic moments (μF/μ₀) : ", μ_eff/μB)
@@ -555,13 +569,15 @@ hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGR
             xlabel=L"$z$ (mm)",
             ylabel="Intensity (au)",
             xlims=(-8,8),
+            legend=:topleft,
         );
         fig2 = plot(z_theory, pdf_exp, 
             label="Experiment (spl. fit | $(norm_mode))", 
             line=(:black,2),
             xlabel=L"$z$ (mm)",
             ylabel="Intensity (au)",
-            xlims=(-8,8),);
+            xlims=(-8,8),
+            legend=:topleft,);
         plot!(z_theory , pdf_theory, label="Closed-form | $(norm_mode)", line=(:red,1.5));
         plot!(z_theory, TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, 150e-3), 
             label="Closed-form + Conv | $(norm_mode)", 
@@ -580,17 +596,14 @@ hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGR
             d0 = p_prev[3:end]
         end
 
-        # @time fit_data, params, δparams, modelfun, model_on_z , progress =
-        #     fit_pdf(z_theory, pdf_exp, pdf_theory; w0=w0, A0=A0, c0=c0);
-
         # do the fit:
         @time fit_data, params, δparams, modelfun, model_on_z, meta, extras =
             fit_pdf_ortho_n(z_theory, pdf_exp, pdf_theory;
                             n=P_DEGREE, Qthin=Qthin, R=R, A0=A0, w0=w0, d0=d0,
                             progress_every=10)
 
-        bg_poly = sum(params.c[k] * tpoly^(k-1) for k in 1:length(params.c))
-
+        bg_poly_func = bg_function(z_theory,params.c)
+        
         fig=plot(z_theory , pdf_exp, 
             label="Experiment $(wanted_data_dir)", 
             xlabel=L"$z$ (mm)",
@@ -611,13 +624,13 @@ hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGR
         plot!(z_theory,modelfun(z_theory), 
             label=L"Fit: $A f(I_{c},w;z) + P_{%$(P_DEGREE)}(z)$", 
             line=(:red,:dash,2),);
-        plot!(z_theory,bg_poly.(z_theory),
+        plot!(z_theory,bg_poly_func.(z_theory),
             label="Background",
             line=(:green4,:dash,1.5));
         display(fig)
         savefig(fig,joinpath(OUTDIR,"$(wanted_data_dir)_$(@sprintf("%02d", i_idx))_$(string(norm_mode))_$(P_DEGREE).$(FIG_EXT)"))
 
-        fitting_params[n_idx,j,:]  = vcat(meta.best_probe.rss,params.A,params.w,[bg_poly[dg] for dg in 0:P_DEGREE])
+        fitting_params[n_idx,j,:]  = vcat(meta.best_probe.rss,params.A,params.w,[bg_poly_func[dg] for dg in 0:P_DEGREE])
 
         pretty_table(
             fitting_params[n_idx,:,:];
@@ -646,7 +659,6 @@ end
 
 starts      = collect(range(1; step=rl, length=nl)) ;
 rg_labels   = Pair{Int,String}.(starts, string.(norm_modes)) ;
-
 pretty_table(
     reduce(vcat, (@view fitting_params[i, :, :] for i in 1:nl));
     column_label_alignment      = :c,
@@ -678,7 +690,7 @@ for (i,val) in enumerate(norm_modes)
     for (j,idx) in enumerate(chosen_currents_idx)
         val_mA = 1000 * Ic_sampled[idx]
 
-        plot!(z_theory,background_poly_any(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)]),
+        plot!(z_theory,anypoly_eval(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)]),
             line=(cols[j],2),
             label= L"$I_{0}=" * @sprintf("%.1f", val_mA) * L"\,\mathrm{mA}$",
             )
@@ -699,7 +711,6 @@ fig=plot(plot_list_bg...,
     size=(500,700))
 savefig(fig,joinpath(OUTDIR,"$(wanted_data_dir)_background_$(P_DEGREE).$(FIG_EXT)"))
 
-
 plot_list_fit = Vector{Plots.Plot}(undef, nl)
 for (i,val) in enumerate(norm_modes)
     fig=plot(xlabel=L"$z$ (mm)",
@@ -718,20 +729,16 @@ for (i,val) in enumerate(norm_modes)
             
         μ_eff = [TheoreticalSimulation.μF_effective(Ic_sampled[i_idx],v[1],v[2],K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params,Fsel=1)]
 
-
-
         pdf_theory = mapreduce(μ -> TheoreticalSimulation.getProbDist_v3(μ, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
                                 +, μ_eff)    
         pdf_theory = normalize_vec(pdf_theory;by=val)
-        f_fit = fitting_params[i,j,2] .* TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, fitting_params[i,j,3])+background_poly_any(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)])
+
+        f_fit = predict_profile(z_theory, pdf_theory,  fitting_params[i,j,2],  fitting_params[i,j,3],  @view fitting_params[i,j,4:(1+2+ncols_bg)] )
+
         plot!(z_theory,f_fit,
             line=(:dash,cols[j],1.5),
             label= false,)
 
-        # plot!(z_theory,background_poly_any(z_theory, @view fitting_params[1,j, 3:(ncols_bg)]),
-        #     line=(:dot,cols[j],1.5),
-        #     label= false,
-        #     )
     end
     plot!(legend=:topleft,
         legendfontsize=6,)
@@ -753,7 +760,7 @@ for (i,val) in enumerate(norm_modes)
         amp_exp = exp_data[:F1_profile][i_idx,:]
         Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp; weights=TheoreticalSimulation.compute_weights(z_exp, λ0_exp));
         pdf_exp = Spl_exp.(z_theory)
-        pdf_exp = normalize_vec(pdf_exp; by=val) - background_poly_any(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)])
+        pdf_exp = normalize_vec(pdf_exp; by=val) - anypoly_eval(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)])
         val_mA = 1000 * Ic_sampled[i_idx]
         plot!(z_theory, pdf_exp,
             line=(:solid,cols[j],2),
@@ -771,10 +778,6 @@ for (i,val) in enumerate(norm_modes)
             line=(:dash,cols[j],1.5),
             label= false,)
 
-        # plot!(z_theory,background_poly_any(z_theory, @view fitting_params[1,j, 3:(ncols_bg)]),
-        #     line=(:dot,cols[j],1.5),
-        #     label= false,
-        #     )
     end
     plot!(legend=:topleft,
         legendfontsize=6,)
@@ -798,7 +801,7 @@ jldsave( joinpath(OUTDIR,"fitting_params_$(wanted_data_dir)_$(P_DEGREE).jld2"),
                 :normalization  => norm_modes,
                 :fit_params     => fitting_params))
 
-aa = load(joinpath(OUTDIR,"fitting_params_20250919_3.jld2"))["data"]
+aa = load(joinpath(OUTDIR,"fitting_params_20250919_$(P_DEGREE).jld2"))["data"]
 
 
 plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,1])
@@ -863,4 +866,4 @@ open(joinpath(OUTDIR,"analysis_report.txt"), "w") do io
 end
 
 println("Experiment analysis finished!")
-alert("Experiment analysis finished!")
+# alert("Experiment analysis finished!")
