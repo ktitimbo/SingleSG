@@ -480,11 +480,11 @@ function fit_pdf_ortho(
     se, cov_p = robust_se_and_cov(fit_data; rcond=1e-12, ridge=0.0)  # set ridge>0 if needed
 
     # Transform covariance from d to c = R11 \ d
-    @views begin                              # CHANGED: @views to avoid copies
+    @views begin 
         if cov_p !== nothing && !isempty(cov_p)
             cov_d = cov_p[3:6, 3:6]
             # Stable transforms (triangular solves under the hood)
-            cov_c = R11 \ (cov_d / R11')      # CHANGED: explicit solve form (no inv)
+            cov_c = R11 \ (cov_d / R11') 
             se_c  = sqrt.(diag(cov_c))
         else
             cov_c = nothing
@@ -549,7 +549,7 @@ end
 exp_data = load(joinpath(read_exp_info.directory,"profiles_mean.jld2"))["profiles"]
 Ic_sampled = exp_data[:Icoils];
 
-STEP        = 5
+STEP        = 12
 THRESH_A    = 0.020
 
 chosen_currents_idx = sort(unique([firstindex(Ic_sampled);
