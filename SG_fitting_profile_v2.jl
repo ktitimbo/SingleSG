@@ -25,7 +25,7 @@ using BSplineKit
 using Polynomials
 using StatsBase
 using Statistics, Distributions, StaticArrays
-using Alert
+# using Alert
 # Data manipulation
 using OrderedCollections
 using JLD2
