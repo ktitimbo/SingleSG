@@ -281,7 +281,6 @@ end
 # GENERALIZED ORTHONORMAL FITTER (ORDER n)
 ###########################################
 
-
 function fit_pdf_joint(
     z_list::Vector{<:AbstractVector},
     y_list::Vector{<:AbstractVector},
@@ -380,7 +379,7 @@ function fit_pdf_joint(
     best_p   = Ref{Vector{Float64}}(copy(p0))
 
     @inline function toflt(x)
-        if Base.hasproperty(x, :value)     # ForwardDiff.Dual
+        if Base.hasproperty(x, :value)
             return Float64(getfield(x, :value))
         elseif x isa Real
             return Float64(x)
@@ -388,9 +387,8 @@ function fit_pdf_joint(
             return Float64(float(x))
         end
     end
-    @inline promote_to_p(val, p) = one(p[1]) * val  # lift Float->Dual if needed
+    @inline promote_to_p(val, p) = one(p[1]) * val
 
-    # accessors
     get_logw = function (i::Int, p)
         if w_mode == :global
             return p[idx_logw_global]
@@ -449,7 +447,7 @@ function fit_pdf_joint(
     # concatenated observations
     y_concat = reduce(vcat, y_list)
 
-    # -------- bounds (only for present params) --------
+    # -------- bounds --------
     lower = fill(-Inf, length(p0))
     upper = fill( Inf, length(p0))
     if w_mode == :global
@@ -565,8 +563,7 @@ function fit_pdf_joint(
     params   = (w = ŵ, A = Â, c = ĉ)
     param_se = (δw = δw, δA = δA, δc = se_c)
 
-    meta   = (evals=calls[], best_probe=(rss=best_rss[], p=best_p[]), n=n, M=M,
-              w_mode=w_mode, A_mode=A_mode)
+    meta   = (evals=calls[], best_probe=(rss=best_rss[], p=best_p[]), w_mode=w_mode, A_mode=A_mode)
     extras = (d = d̂, cov_all = cov_all, cov_d = cov_d, cov_c = cov_c,
               d_ranges = d_ranges,
               idx_logw_global = idx_logw_global, idx_logw_vec = idx_logw_vec,
@@ -574,7 +571,6 @@ function fit_pdf_joint(
 
     return fit_data, params, param_se, modelfun, model_on_z, meta, extras
 end
-
 
 
 # Select experimental data
@@ -611,11 +607,11 @@ Ic_sampled = exp_data[:Icoils];
 
 STEP        = 26 ;
 THRESH_A    = 0.020 ;
-P_DEGREE    = 3 ;
+P_DEGREE    = 5 ;
 ncols_bg    = P_DEGREE + 1 ;
 
 chosen_currents_idx = sort(unique([firstindex(Ic_sampled);
-        @view(findall(>(THRESH_A), Ic_sampled)[1:STEP:end]);
+        # @view(findall(>(THRESH_A), Ic_sampled)[1:STEP:end]);
         @view(findall(>(THRESH_A), Ic_sampled)[end-1:end]);
         lastindex(Ic_sampled)
         ]
@@ -650,8 +646,8 @@ fitting_params = zeros(nl,rl,1+2+ncols_bg); # (norm_modes x currents x [res, par
 const _sub = Dict(
     '0'=>'₀','1'=>'₁','2'=>'₂','3'=>'₃','4'=>'₄',
     '5'=>'₅','6'=>'₆','7'=>'₇','8'=>'₈','9'=>'₉','-'=>'₋'
-)
-sub(k::Integer) = join((_sub[c] for c in string(k)))  # "12" -> "₁₂"
+);
+sub(k::Integer) = join((_sub[c] for c in string(k)));  # "12" -> "₁₂"
 
 hdr_top = Any[
     "Residuals",
@@ -661,15 +657,14 @@ hdr_top = Any[
 hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGREE]);
 
 # Preallocate containers
-y_list       = Vector{Vector{Float64}}(undef, rl)   # splined/normalized experiment on z_theory
-pdf_th_list  = Vector{Vector{Float64}}(undef, rl)   # closed-form theory on z_theory
-z_list       = fill(z_theory, rl)                   # same grid for all (read-only is fine)
-
+exp_list     = Vector{Vector{Float64}}(undef, rl);   # splined/normalized experiment on z_theory
+pdf_th_list  = Vector{Vector{Float64}}(undef, rl) ;  # closed-form theory on z_theory
+z_list       = fill(z_theory, rl) ;                  # same grid for all (read-only is fine)
 
 # If you’ll use the joint fitter with an orthonormal basis, precompute once for this grid:
-μ, σ, _t, Q, R = orthonormal_basis_on(z_theory; n=P_DEGREE)
-μ_list = fill(μ, rl);  σ_list = fill(σ, rl)
-Q_list = fill(Q, rl);  R_list = fill(R, rl)          # safe to reuse if you never mutate Q/R
+μ, σ, _t, Q, R = orthonormal_basis_on(z_theory; n=P_DEGREE);
+μ_list = fill(μ, rl);  σ_list = fill(σ, rl);
+Q_list = fill(Q, rl);  R_list = fill(R, rl);
 
 norm_mode = :none
 for (j,i_idx) in enumerate(chosen_currents_idx)
@@ -688,7 +683,7 @@ for (j,i_idx) in enumerate(chosen_currents_idx)
 
     # Experimental profile on z_theory (normalized as you already do)
     pdf_exp = Spl_exp.(z_theory)
-    y_list[j] = normalize_vec(pdf_exp; by = norm_mode)
+    exp_list[j] = normalize_vec(pdf_exp; by = norm_mode)
 
     # Closed-form theory on z_theory (sum over μ_eff), then normalize the same way
     pdf_theory = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
@@ -697,19 +692,36 @@ for (j,i_idx) in enumerate(chosen_currents_idx)
     pdf_th_list[j] = normalize_vec(pdf_theory; by = norm_mode)
 end
 
-fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint_g(z_list, y_list, pdf_th_list;
+@time fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
               n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
               w_mode=:global, A_mode=:global,
               w0=0.25, A0=1.0)
 
 
+fig = plot(xlabel=L"$z$ (mm)",
+    ylabel="Intensity (au)")
+for j = 1:3
+plot!(z_theory, exp_list[j])
+bg_poly = sum(params.c[j][k] * tpoly^(k-1) for k in 1:length(params.c[j]))
+plot!(z_theory, bg_poly.(z_theory))
+
+plot!(z_theory,params.A*TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_th_list[j], params.w)+bg_poly.(z_theory))
+end
+display(fig)
+
+bg_poly = sum(params.c[3][k] * tpoly^(k-1) for k in 1:length(params.c[3]))
+bg_poly.(z_theory)
+background_poly_any(z_theory, params.c[3])
+
 params.w
 params.A
 params.c
 
-bg_poly = sum(params.c[1][k] * tpoly^(k-1) for k in 1:length(params.c[1]))
 
-plot(z_theory,params.A*TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_th_list[1], params.w)+bg_poly.(z_theory))
+
+function (z::AbstractVector,profile::AbstractVector,w::Float64,A::Float64,c::AbstractVector)
+    bg_pol = background_poly_any(z, c)
+
 
 keys(meta)
 coef(fit_data)
