@@ -260,11 +260,11 @@ function horner(z::Union{Real,AbstractArray}, c::AbstractVector)
 end
 
 """
-    background_poly_any(z, c)
+    anypoly_eval(z, c)
 
 Convenience wrapper around `horner`. `c` is `[c0, c1, …, c_n]`.
 """
-background_poly_any(z, c) = horner(z, c)
+anypoly_eval(z, c) = horner(z, c)
 
 """
     t_affine_poly(μ, σ)
@@ -275,6 +275,23 @@ Return a `Polynomial` p(z) such that `p(z) = (z - μ)/σ`.
 function t_affine_poly(μ::Real, σ::Real)
     @assert σ > 0
     return Polynomial([-μ/σ, 1/σ])
+end
+
+function bg_function(z::AbstractVector,c::AbstractVector)
+    @assert isapprox(mean(z), 0.0; atol= 10 * eps() ) "μz not ~ 0 within atol=$(10 * eps())"
+    μ   = mean(z)
+    σ   = std(z)
+    n   = length(c)
+    t   = Polynomial([μ/σ, 1/σ]) # t=(z-μ)/σ
+    bg  = sum(c[k] * t^(k-1) for k in 1:n)
+    return bg
+end
+
+function predict_profile(z::AbstractVector,profile_theory::AbstractVector,A::Float64,w::Float64,c::AbstractVector)
+    @assert length(z) == length(profile_theory) "z and pdf must have the same length"
+    bg = anypoly_eval(z,c)
+    first_term = A * TheoreticalSimulation.ProbDist_convolved(z, profile_theory, w)
+    return first_term + bg
 end
 
 ###########################################
@@ -294,6 +311,7 @@ function fit_pdf_joint(
     w0::Real, A0::Real=1.0, d0=nothing,
     w_mode::Symbol = :global,            # :per_profile, :global, :fixed
     A_mode::Symbol = :per_profile,       # :per_profile, :global, :fixed
+    d_mode::Symbol = :per_profile,       # NEW: :per_profile, :global
     w_fixed::Real = w0,                  # used if w_mode == :fixed
     A_fixed::Real = A0,                  # used if A_mode == :fixed
     progress_every::Int=25,
@@ -305,6 +323,7 @@ function fit_pdf_joint(
     @assert n ≥ 0
     @assert w_mode in (:per_profile, :global, :fixed)
     @assert A_mode in (:per_profile, :global, :fixed)
+    @assert d_mode in (:per_profile, :global)
 
     # -------- ensure basis matches current n and grids --------
     ncoef = n + 1
@@ -325,12 +344,16 @@ function fit_pdf_joint(
         end
     end
 
-    # -------- init per-profile d --------
-    d0vec = d0 === nothing ? zeros(ncoef) : d0
+    # -------- init d / c --------
+    # For :per_profile we store dᵢ (orthonormal-basis coeffs). For :global we store a single c (monomial in t).
+    d0vec = d0 === nothing ? zeros(ncoef) : collect(float.(d0))
     @assert length(d0vec) == ncoef
 
+    # If global, prefer initializing c0 from the first profile's R: c0 = R⁻¹ d0
+    c0vec = RL[1] \ d0vec
+
     # -------- dynamic parameter packing --------
-    # order: [ maybe logw(_i), maybe A(_i), then all d_i blocks ]
+    # order: [ maybe logw(_i), maybe A(_i), then d/c block(s) ]
     idx_logw_global = nothing::Union{Int,Nothing}
     idx_logw_vec    = nothing::Union{Vector{Int},Nothing}
     idx_A_global    = nothing::Union{Int,Nothing}
@@ -349,9 +372,19 @@ function fit_pdf_joint(
         idx_A_vec = collect(k:(k+M-1)); k += M
     end
 
-    d_start  = k
-    d_ranges = [ (d_start + (i-1)*ncoef) : (d_start + i*ncoef - 1) for i in 1:M ]
-    total_len = d_start + M*ncoef - 1
+    # d/c indices
+    idx_c_global = nothing::Union{UnitRange{Int},Nothing}
+    d_ranges     = nothing::Union{Vector{UnitRange{Int}},Nothing}
+
+    if d_mode == :global
+        idx_c_global = k:(k+ncoef-1)
+        k += ncoef
+    else
+        d_start  = k
+        d_ranges = [ (d_start + (i-1)*ncoef) : (d_start + i*ncoef - 1) for i in 1:M ]
+        k += M*ncoef
+    end
+    total_len = k - 1
 
     # initial parameter vector
     p0 = Vector{Float64}(undef, total_len)
@@ -369,8 +402,12 @@ function fit_pdf_joint(
             p0[idx_A_vec[i]] = float(A0)
         end
     end
-    @inbounds for i in 1:M
-        p0[d_ranges[i]] .= float.(d0vec)
+    if d_mode == :global
+        p0[idx_c_global] .= c0vec
+    else
+        @inbounds for i in 1:M
+            p0[d_ranges[i]] .= d0vec
+        end
     end
 
     # -------- utilities --------
@@ -408,19 +445,41 @@ function fit_pdf_joint(
         end
     end
 
+    # Accessors for d/c
+    get_c = function (i::Int, p)
+        if d_mode == :global
+            return view(p, idx_c_global)  # same for all i
+        else
+            # cᵢ = Rᵢ⁻¹ dᵢ
+            dview = view(p, d_ranges[i])
+            return RL[i] \ dview
+        end
+    end
+    get_d = function (i::Int, p)
+        if d_mode == :global
+            # dᵢ = Rᵢ c (when Q basis on grid is needed)
+            cview = view(p, idx_c_global)
+            return RL[i] * cview
+        else
+            return view(p, d_ranges[i])
+        end
+    end
+
     # -------- model pieces --------
     function model_i(i::Int, zz, p)
         logw = get_logw(i, p)
         w    = exp(logw)
         A    = get_A(i, p)
-        d    = @view p[d_ranges[i]]
 
         conv = TheoreticalSimulation.ProbDist_convolved(zz, pdf_th_list[i], w)
 
         poly = if zz === z_list[i]
+            # Evaluate via grid Q * dᵢ for numerical stability on provided grid
+            d = get_d(i, p)
             QL[i] * d
         else
-            c  = RL[i] \ d
+            # Off-grid: use Horner in standardized t with c
+            c  = get_c(i, p)
             t  = @. (zz - μL[i]) / σL[i]
             horner(t, c)
         end
@@ -465,6 +524,7 @@ function fit_pdf_joint(
             lower[idx_A_vec[i]] = 0.0
         end
     end
+    # (No bounds on d/c)
 
     # -------- progress wrapper --------
     function joint_model_for_fit(x, p)
@@ -517,14 +577,21 @@ function fit_pdf_joint(
         A_fixed
     end
 
-    d̂ = [collect(p̂[d_ranges[i]]) for i in 1:M]
-    ĉ = [RL[i] \ d̂[i] for i in 1:M]
+    # d̂ and ĉ lists (always return per-profile lists for convenience)
+    if d_mode == :global
+        c_global = collect(p̂[idx_c_global])
+        d̂ = [RL[i] * c_global for i in 1:M]
+        ĉ = [c_global for _ in 1:M]
+    else
+        d̂ = [collect(p̂[d_ranges[i]]) for i in 1:M]
+        ĉ = [RL[i] \ d̂[i] for i in 1:M]
+    end
 
-    # covariance / SEs
+    # covariance / SEs (robust)
     se_all, cov_all = robust_se_and_cov(fit_data; rcond=rcond, ridge=ridge)
 
     δw = if w_mode == :global
-        ŵ * se_all[idx_logw_global]
+        (ŵ isa Number ? ŵ : error("logic")) * se_all[idx_logw_global]
     elseif w_mode == :per_profile
         [exp(p̂[idx_logw_vec[i]]) * se_all[idx_logw_vec[i]] for i in 1:M]
     else
@@ -543,17 +610,29 @@ function fit_pdf_joint(
     cov_d = Vector{Union{Nothing,Matrix{Float64}}}(undef, M)
     cov_c = Vector{Union{Nothing,Matrix{Float64}}}(undef, M)
     se_c  = Vector{Vector{Float64}}(undef, M)
-    for i in 1:M
-        if cov_all === nothing || isempty(cov_all)
-            cov_d[i] = nothing
-            cov_c[i] = nothing
-            se_c[i]  = fill(NaN, ncoef)
+
+    if cov_all === nothing || isempty(cov_all)
+        fill!(cov_d, nothing); fill!(cov_c, nothing)
+        se_c .= [fill(NaN, ncoef) for _ in 1:M]
+    else
+        if d_mode == :global
+            # one global c-block
+            Ic = idx_c_global
+            cov_c_global = Matrix(cov_all[Ic, Ic])
+            for i in 1:M
+                cov_c[i] = cov_c_global
+                cov_d[i] = RL[i] * cov_c_global * RL[i]'
+                se_c[i]  = sqrt.(diag(cov_c_global))
+            end
         else
-            Id = d_ranges[i]
-            cov_d[i] = Matrix(cov_all[Id, Id])
-            C        = RL[i] \ (cov_d[i] / RL[i]')
-            cov_c[i] = C
-            se_c[i]  = sqrt.(diag(C))
+            # independent d-blocks
+            for i in 1:M
+                Id       = d_ranges[i]
+                cov_d[i] = Matrix(cov_all[Id, Id])
+                C        = RL[i] \ (cov_d[i] / RL[i]')  # cov in c-space
+                cov_c[i] = C
+                se_c[i]  = sqrt.(diag(C))
+            end
         end
     end
 
@@ -563,14 +642,20 @@ function fit_pdf_joint(
     params   = (w = ŵ, A = Â, c = ĉ)
     param_se = (δw = δw, δA = δA, δc = se_c)
 
-    meta   = (evals=calls[], best_probe=(rss=best_rss[], p=best_p[]), w_mode=w_mode, A_mode=A_mode)
-    extras = (d = d̂, cov_all = cov_all, cov_d = cov_d, cov_c = cov_c,
-              d_ranges = d_ranges,
-              idx_logw_global = idx_logw_global, idx_logw_vec = idx_logw_vec,
-              idx_A_global = idx_A_global, idx_A_vec = idx_A_vec)
+    meta   = (evals=calls[], best_probe=(rss=best_rss[], p=best_p[]),
+              w_mode=w_mode, A_mode=A_mode, d_mode=d_mode)
+    extras = (
+        d = d̂, cov_all = cov_all, cov_d = cov_d, cov_c = cov_c,
+        d_mode = d_mode,
+        d_ranges = d_mode == :per_profile ? d_ranges : nothing,
+        idx_logw_global = idx_logw_global, idx_logw_vec = idx_logw_vec,
+        idx_A_global = idx_A_global, idx_A_vec = idx_A_vec,
+        idx_c_global = idx_c_global
+    )
 
     return fit_data, params, param_se, modelfun, model_on_z, meta, extras
 end
+
 
 
 # Select experimental data
@@ -607,7 +692,7 @@ Ic_sampled = exp_data[:Icoils];
 
 STEP        = 26 ;
 THRESH_A    = 0.020 ;
-P_DEGREE    = 5 ;
+P_DEGREE    = 3 ;
 ncols_bg    = P_DEGREE + 1 ;
 
 chosen_currents_idx = sort(unique([firstindex(Ic_sampled);
@@ -622,11 +707,11 @@ println("Target currents in A: (",
         ")"
 )
 
-norm_modes = (:none,:sum,:max) ;
+norm_mode = :none ;
 magnification_factor = read_exp_info.magnification ;
-λ0_exp     = 0.001 ;
+λ0_exp     = 0.0001 ;
 
-z_exp   = (exp_data[:z_mm] .- exp_data[:Centroid_mm][1]) ./ magnification_factor
+z_exp   = (exp_data[:z_mm] .- exp_data[:Centroid_mm][1]) ./ magnification_factor ;
 range_z    = floor(minimum([maximum(z_exp),abs(minimum(z_exp))]),digits=1);
 nrange_z   = 20001;
 z_theory  = collect(range(-range_z,range_z,length=nrange_z));
@@ -634,16 +719,10 @@ z_theory  = collect(range(-range_z,range_z,length=nrange_z));
 @assert isapprox(mean(z_theory), 0.0; atol= 10 * eps(float(range_z)) ) "μz=$(μz) not ~ 0 within atol=$(10 * eps(float(range_z)) )"
 @assert isapprox(std(z_theory), std_sample(range_z, nrange_z); atol= eps(float(range_z))) "σz=$(σz) is not defined for a symmetric range"
 
-μz, σz, t, Qthin, R = orthonormal_basis_on(z_theory; n=P_DEGREE);
-
-tpoly = t_affine_poly(μz, σz) ;            # p(z) = (z-μ)/σ
-rl = length(chosen_currents_idx) ;
-nl = length(norm_modes) ;
-fitting_params = zeros(nl,rl,1+2+ncols_bg); # (norm_modes x currents x [res, params])
-
+rl   = length(chosen_currents_idx) ;
+cols = palette(:darkrainbow, rl);
 # --- Column headers ---
-# map ASCII digits to Unicode subscripts
-const _sub = Dict(
+const _sub = Dict( # map ASCII digits to Unicode subscripts
     '0'=>'₀','1'=>'₁','2'=>'₂','3'=>'₃','4'=>'₄',
     '5'=>'₅','6'=>'₆','7'=>'₇','8'=>'₈','9'=>'₉','-'=>'₋'
 );
@@ -661,70 +740,219 @@ exp_list     = Vector{Vector{Float64}}(undef, rl);   # splined/normalized experi
 pdf_th_list  = Vector{Vector{Float64}}(undef, rl) ;  # closed-form theory on z_theory
 z_list       = fill(z_theory, rl) ;                  # same grid for all (read-only is fine)
 
-# If you’ll use the joint fitter with an orthonormal basis, precompute once for this grid:
+# precompute for this grid:
 μ, σ, _t, Q, R = orthonormal_basis_on(z_theory; n=P_DEGREE);
 μ_list = fill(μ, rl);  σ_list = fill(σ, rl);
 Q_list = fill(Q, rl);  R_list = fill(R, rl);
 
-norm_mode = :none
+
 for (j,i_idx) in enumerate(chosen_currents_idx)
     
     I0 = Ic_sampled[i_idx]
-    𝒢  = TheoreticalSimulation.GvsI(I0)
-    _ℬ = abs.(TheoreticalSimulation.BvsI(I0))
 
-    μ_eff = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
-             for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
-
+    # EXPERIMENT
     amp_exp = @view exp_data[:F1_profile][i_idx, :]
-
     Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp;
                              weights = TheoreticalSimulation.compute_weights(z_exp, λ0_exp))
-
-    # Experimental profile on z_theory (normalized as you already do)
     pdf_exp = Spl_exp.(z_theory)
     exp_list[j] = normalize_vec(pdf_exp; by = norm_mode)
 
-    # Closed-form theory on z_theory (sum over μ_eff), then normalize the same way
+    # THEORY
+    𝒢  = TheoreticalSimulation.GvsI(I0)
+    μ_eff = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
+             for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
     pdf_theory = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
                                μF, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
                            +, μ_eff)
     pdf_th_list[j] = normalize_vec(pdf_theory; by = norm_mode)
 end
 
-@time fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
+
+#########################################################################################################
+# w = :global & A = :global
+#########################################################################################################
+fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
               n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
               w_mode=:global, A_mode=:global,
               w0=0.25, A0=1.0)
 
+c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl]
+@time for i=1:rl
+    fit_poly = bg_function(z_theory,params.c[i])
+    c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
+end
+c_poly_coeffs
 
-fig = plot(xlabel=L"$z$ (mm)",
-    ylabel="Intensity (au)")
-for j = 1:3
-plot!(z_theory, exp_list[j])
-bg_poly = sum(params.c[j][k] * tpoly^(k-1) for k in 1:length(params.c[j]))
-plot!(z_theory, bg_poly.(z_theory))
+w_fit = params.w
+A_fit = params.A
 
-plot!(z_theory,params.A*TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_th_list[j], params.w)+bg_poly.(z_theory))
+fig = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode) | $P_{%$(P_DEGREE)}$",
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)",
+        legend=:topleft,
+        legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$ | $A=%$(round(A_fit,sigdigits=5))$",
+        legendtitlefontsize = 8
+        )
+for (i,val) in enumerate(chosen_currents_idx)
+plot!(fig,z_theory,exp_list[i], 
+    label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+    line=(cols[i],:solid,1.50))
+plot!(fig,z_theory, predict_profile(z_theory,pdf_th_list[i],A_fit,w_fit,c_poly_coeffs[i]),
+    label="Fitting function",
+    line=(:dash,cols[i],1.2))
 end
 display(fig)
 
-bg_poly = sum(params.c[3][k] * tpoly^(k-1) for k in 1:length(params.c[3]))
-bg_poly.(z_theory)
-background_poly_any(z_theory, params.c[3])
+fig = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode) | $P_{%$(P_DEGREE)}$",
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)",
+        legend=:topleft,
+        legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$ | $A=%$(round(A_fit,sigdigits=5))$",
+        legendtitlefontsize = 8
+        )
+for (i,val) in enumerate(chosen_currents_idx)
+plot!(fig,z_theory,exp_list[i], 
+    label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+    line=(cols[i],:solid,1.50))
+plot!(fig,z_theory, anypoly_eval(z_theory, c_poly_coeffs[i]),
+    label="Background",
+    line=(:dash,cols[i],1.2))
+end
+display(fig)
 
-params.w
-params.A
-params.c
+
+#########################################################################################################
+# w = :global & A = :per_profile
+#########################################################################################################
+
+
+fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
+              n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
+              w_mode=:global, A_mode=:per_profile,
+              w0=0.25, A0=1.0)
+
+c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl]
+@time for i=1:rl
+    fit_poly = bg_function(z_theory,params.c[i])
+    c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
+end
+
+w_fit = params.w
+A_fit = params.A
+
+fig = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A$  | $P_{%$(P_DEGREE)}$",
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)",
+        legend=:topleft,
+        legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$",
+        legendtitlefontsize = 8
+        )
+for (i,val) in enumerate(chosen_currents_idx)
+plot!(fig,z_theory,exp_list[i], 
+    label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+    line=(cols[i],:solid,1.50))
+plot!(fig,z_theory, predict_profile(z_theory,pdf_th_list[i],A_fit[i],w_fit,c_poly_coeffs[i]),
+    label="Fitting function",
+    line=(:dash,cols[i],1.2))
+end
+display(fig)
+
+
+fig = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A$ | $P_{%$(P_DEGREE)}$",
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)",
+        legend=:topleft,
+        legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$",
+        legendtitlefontsize = 8
+        )
+for (i,val) in enumerate(chosen_currents_idx)
+plot!(fig,z_theory,exp_list[i], 
+    label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+    line=(cols[i],:solid,1.50))
+plot!(fig,z_theory, anypoly_eval(z_theory, c_poly_coeffs[i]),
+    label="Background",
+    line=(:dash,cols[i],1.2))
+end
+display(fig)
+
+
+2+2
 
 
 
-function (z::AbstractVector,profile::AbstractVector,w::Float64,A::Float64,c::AbstractVector)
-    bg_pol = background_poly_any(z, c)
 
 
-keys(meta)
-coef(fit_data)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -885,7 +1113,7 @@ for (i,val) in enumerate(norm_modes)
     for (j,idx) in enumerate(chosen_currents_idx)
         val_mA = 1000 * Ic_sampled[idx]
 
-        plot!(z_theory,background_poly_any(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)]),
+        plot!(z_theory,anypoly_eval(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)]),
             line=(cols[j],2),
             label= L"$I_{0}=" * @sprintf("%.1f", val_mA) * L"\,\mathrm{mA}$",
             )
@@ -930,12 +1158,12 @@ for (i,val) in enumerate(norm_modes)
         pdf_theory = mapreduce(μ -> TheoreticalSimulation.getProbDist_v3(μ, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
                                 +, μ_eff)    
         pdf_theory = normalize_vec(pdf_theory;by=val)
-        f_fit = fitting_params[i,j,2] .* TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, fitting_params[i,j,3])+background_poly_any(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)])
+        f_fit = fitting_params[i,j,2] .* TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, fitting_params[i,j,3])+anypoly_eval(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)])
         plot!(z_theory,f_fit,
             line=(:dash,cols[j],1.5),
             label= false,)
 
-        # plot!(z_theory,background_poly_any(z_theory, @view fitting_params[1,j, 3:(ncols_bg)]),
+        # plot!(z_theory,anypoly_eval(z_theory, @view fitting_params[1,j, 3:(ncols_bg)]),
         #     line=(:dot,cols[j],1.5),
         #     label= false,
         #     )
@@ -960,7 +1188,7 @@ for (i,val) in enumerate(norm_modes)
         amp_exp = exp_data[:F1_profile][i_idx,:]
         Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp; weights=TheoreticalSimulation.compute_weights(z_exp, λ0_exp));
         pdf_exp = Spl_exp.(z_theory)
-        pdf_exp = normalize_vec(pdf_exp; by=val) - background_poly_any(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)])
+        pdf_exp = normalize_vec(pdf_exp; by=val) - anypoly_eval(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)])
         val_mA = 1000 * Ic_sampled[i_idx]
         plot!(z_theory, pdf_exp,
             line=(:solid,cols[j],2),
@@ -978,7 +1206,7 @@ for (i,val) in enumerate(norm_modes)
             line=(:dash,cols[j],1.5),
             label= false,)
 
-        # plot!(z_theory,background_poly_any(z_theory, @view fitting_params[1,j, 3:(ncols_bg)]),
+        # plot!(z_theory,anypoly_eval(z_theory, @view fitting_params[1,j, 3:(ncols_bg)]),
         #     line=(:dot,cols[j],1.5),
         #     label= false,
         #     )
