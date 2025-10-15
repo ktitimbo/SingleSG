@@ -519,7 +519,7 @@ z_theory = collect(range(-range_z,range_z,length=nrange_z));
 
 rl = length(chosen_currents_idx) ;
 nl = length(norm_modes) ;
-fitting_params = zeros(nl,rl,1+2+ncols_bg); # (norm_modes x currents x [res, params])
+fitting_params = zeros(nl,rl,1+2+2+ncols_bg); # (norm_modes x currents x [res, R², NRMSE, params])
 
 # --- Column headers ---
 # map ASCII digits to Unicode subscripts
@@ -530,11 +530,11 @@ const _sub = Dict(
 sub(k::Integer) = join((_sub[c] for c in string(k)));  # "12" -> "₁₂"
 
 hdr_top = Any[
-    "Residuals",
+    MultiColumn(3, "Metrics"),
     MultiColumn(2, "Theoretical PDF"),
     MultiColumn(ncols_bg, "Background P$(sub(P_DEGREE))(z)")
 ];
-hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGREE]);
+hdr_bot = vcat(["(exp-model)²", "R²", "NRMSE", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGREE]);
 
 @time for (n_idx, norm_mode) in enumerate(norm_modes)
     println("\n\n\t\t\tNORMALIZATION MODE = $(string(norm_mode))")
@@ -544,19 +544,17 @@ hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGR
         I0 = Ic_sampled[i_idx]
         println("\n\t\tANALYZING BACKGROUND FOR I₀=$(round(1000*I0,digits=3))mA")
 
-        𝒢  = TheoreticalSimulation.GvsI(I0)
-        
-        μ_eff = [TheoreticalSimulation.μF_effective(I0,v[1],v[2],K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params,Fsel=1)]
-        println("Effective magnetic moments (μF/μ₀) : ", μ_eff/μB)
-
+        # EXPERIMENT
         amp_exp = @view exp_data[:F1_profile][i_idx,:]
-
         Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp; 
                     weights=TheoreticalSimulation.compute_weights(z_exp, λ0_exp));
-
         pdf_exp = Spl_exp.(z_theory)
         pdf_exp = normalize_vec(pdf_exp; by=norm_mode)
 
+        # THEORY
+        𝒢  = TheoreticalSimulation.GvsI(I0)    
+        μ_eff = [TheoreticalSimulation.μF_effective(I0,v[1],v[2],K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params,Fsel=1)]
+        println("Effective magnetic moments (μF/μ₀) : ", μ_eff/μB)
         pdf_theory = mapreduce(μ -> TheoreticalSimulation.getProbDist_v3(μ, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
                             +, μ_eff)    
         pdf_theory = normalize_vec(pdf_theory;by=norm_mode)
@@ -583,8 +581,8 @@ hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGR
             label="Closed-form + Conv | $(norm_mode)", 
             line=(:dodgerblue2,1.2));
 
-        fig=plot(fig1,fig2, layout=(2,1))
-        display(fig)
+        fig3=plot(fig1,fig2, layout=(2,1))
+        display(fig3)
 
         if j == 1
             A0 = 0.63
@@ -602,9 +600,15 @@ hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGR
                             n=P_DEGREE, Qthin=Qthin, R=R, A0=A0, w0=w0, d0=d0,
                             progress_every=10)
 
-        bg_poly_func = bg_function(z_theory,params.c)
+        bg_poly_func    = bg_function(z_theory,params.c)
+
+        # FITTING
+        A_fit = params.A
+        w_fit = params.w
+        c_fit = [bg_poly_func[dg] for dg in 0:P_DEGREE]
+        pdf_fit = predict_profile(z_theory,pdf_theory,A_fit,w_fit,c_fit)
         
-        fig=plot(z_theory , pdf_exp, 
+        fig4=plot(z_theory , pdf_exp, 
             label="Experiment $(wanted_data_dir)", 
             xlabel=L"$z$ (mm)",
             ylabel="Intensity (au)",
@@ -618,7 +622,7 @@ hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGR
         plot!(z_theory, pdf_theory, 
             label="ClosedForm",
             line=(:purple3,1) );
-        plot!(z_theory, TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, params.w), 
+        plot!(z_theory, TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, w_fit), 
             label="ClosedForm+Conv",
             line=(:dodgerblue2,1.2));
         plot!(z_theory,modelfun(z_theory), 
@@ -627,17 +631,26 @@ hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * sub(k) for k in 0:P_DEGR
         plot!(z_theory,bg_poly_func.(z_theory),
             label="Background",
             line=(:green4,:dash,1.5));
-        display(fig)
-        savefig(fig,joinpath(OUTDIR,"$(wanted_data_dir)_$(@sprintf("%02d", i_idx))_$(string(norm_mode))_$(P_DEGREE).$(FIG_EXT)"))
+        display(fig4)
+        savefig(fig4,joinpath(OUTDIR,"$(wanted_data_dir)_$(@sprintf("%02d", i_idx))_$(string(norm_mode))_$(P_DEGREE).$(FIG_EXT)"))
 
-        fitting_params[n_idx,j,:]  = vcat(meta.best_probe.rss,params.A,params.w,[bg_poly_func[dg] for dg in 0:P_DEGREE])
+        # coefficient of determination
+        ss_res = sum((pdf_exp .- pdf_fit).^2)
+        ss_tot = sum((pdf_exp .- mean(pdf_exp)).^2)
+        R2 = 1 - ss_res / ss_tot
+
+        # root mean square error
+        rmse  = sqrt(mean((pdf_exp .- pdf_fit).^2))
+        nrmse = rmse / mean(pdf_exp)          # or / maximum(y_exp)
+        
+        fitting_params[n_idx,j,:]  = vcat(meta.best_probe.rss, R2, nrmse, A_fit, w_fit, c_fit)
 
         pretty_table(
             fitting_params[n_idx,:,:];
             column_label_alignment      = :c,
             column_labels               = [hdr_top, hdr_bot],
             row_labels                  = round.(1000*Ic_sampled[chosen_currents_idx], sigdigits=4),
-            formatters                  = [fmt__printf("%8.5e", [1]), fmt__printf("%8.5f", 2:3), fmt__printf("%8.5e", 4:(1+2+ncols_bg))],
+            formatters                  = [fmt__printf("%2.4f", 1:3), fmt__printf("%4.6f", 4:5), fmt__printf("%4.6e", 6:(1+2+2+ncols_bg))],
             alignment                   = :c,
             equal_data_column_widths    = true,
             stubhead_label              = "I₀ [mA]",
@@ -664,7 +677,12 @@ pretty_table(
     column_label_alignment      = :c,
     column_labels               = [hdr_top, hdr_bot],
     row_labels                  = repeat(round.(1000*Ic_sampled[chosen_currents_idx], sigdigits=4),3),
-    formatters                  = [fmt__printf("%8.5e", [1]), fmt__printf("%8.5e", [2]), fmt__printf("%5.6f", [3]), fmt__printf("%8.5e", 4:(1+2+ncols_bg))],
+    formatters                  = [ fmt__printf("%2.4e", [1]), 
+                                    fmt__printf("%2.4f", 2:3), 
+                                    fmt__printf("%2.6e", [4]),
+                                    fmt__printf("%2.6f", [5]), 
+                                    fmt__printf("%2.6e", 6:(1+2+2+ncols_bg))
+                                    ],
     alignment                   = :c,
     equal_data_column_widths    = true,
     stubhead_label              = "I₀ [mA]",
@@ -679,7 +697,13 @@ pretty_table(
                                         column_label                    = crayon"yellow",
                                         table_border                    = crayon"blue bold",
                                         title                           = crayon"red bold"
-                                    )
+                                    ),
+    highlighters                = [
+                                TextHighlighter((data,i,j) -> j == 2 && data[i,j] > 0.995; foreground=:green,  bold=true),
+                                # TextHighlighter((data,i,j) -> j == 2 && data[i,j] < 0.990; foreground=:yellow, bold=true),
+                                TextHighlighter((data,i,j) -> j == 3 && data[i,j] < 0.02;  foreground=:green),
+                                # TextHighlighter((data,i,j) -> j == 3 && data[i,j] > 0.035; foreground=:yellow),
+                                ],
 )
 
 cols = palette(:darkrainbow, rl);
@@ -690,7 +714,7 @@ for (i,val) in enumerate(norm_modes)
     for (j,idx) in enumerate(chosen_currents_idx)
         val_mA = 1000 * Ic_sampled[idx]
 
-        plot!(z_theory,anypoly_eval(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)]),
+        plot!(z_theory,anypoly_eval(z_theory, @view fitting_params[i,j,6:(5+ncols_bg)]),
             line=(cols[j],2),
             label= L"$I_{0}=" * @sprintf("%.1f", val_mA) * L"\,\mathrm{mA}$",
             )
@@ -704,16 +728,16 @@ for (i,val) in enumerate(norm_modes)
     )
 
 end
-fig=plot(plot_list_bg..., 
+fig5=plot(plot_list_bg..., 
     layout=(nl,1), 
     suptitle=L"Background $P_{%$(P_DEGREE)}$",
     left_margin=4mm,
     size=(500,700))
-savefig(fig,joinpath(OUTDIR,"$(wanted_data_dir)_background_$(P_DEGREE).$(FIG_EXT)"))
+savefig(fig5,joinpath(OUTDIR,"$(wanted_data_dir)_background_$(P_DEGREE).$(FIG_EXT)"))
 
 plot_list_fit = Vector{Plots.Plot}(undef, nl)
 for (i,val) in enumerate(norm_modes)
-    fig=plot(xlabel=L"$z$ (mm)",
+    fig6=plot(xlabel=L"$z$ (mm)",
         ylabel="Intensity (au)")
     for (j,i_idx) in enumerate(chosen_currents_idx)
         amp_exp = exp_data[:F1_profile][i_idx,:]
@@ -733,7 +757,7 @@ for (i,val) in enumerate(norm_modes)
                                 +, μ_eff)    
         pdf_theory = normalize_vec(pdf_theory;by=val)
 
-        f_fit = predict_profile(z_theory, pdf_theory,  fitting_params[i,j,2],  fitting_params[i,j,3],  @view fitting_params[i,j,4:(1+2+ncols_bg)] )
+        f_fit = predict_profile(z_theory, pdf_theory,  fitting_params[i,j,4],  fitting_params[i,j,5],  @view fitting_params[i,j,6:(5+ncols_bg)] )
 
         plot!(z_theory,f_fit,
             line=(:dash,cols[j],1.5),
@@ -743,24 +767,24 @@ for (i,val) in enumerate(norm_modes)
     plot!(legend=:topleft,
         legendfontsize=6,)
 
-    plot_list_fit[i] = fig
+    plot_list_fit[i] = fig6
 end
-fig=plot(plot_list_fit..., 
+fig7=plot(plot_list_fit..., 
     layout=(nl,1), 
     suptitle=L"Fitting $P_{%$(P_DEGREE)}$",
     left_margin=4mm,
     size=(500,700))
-savefig(fig,joinpath(OUTDIR,"$(wanted_data_dir)_fitting_$(P_DEGREE).$(FIG_EXT)"))
+savefig(fig7,joinpath(OUTDIR,"$(wanted_data_dir)_fitting_$(P_DEGREE).$(FIG_EXT)"))
 
 plot_list_exp = Vector{Plots.Plot}(undef, nl)
 for (i,val) in enumerate(norm_modes)
-    fig=plot(xlabel=L"$z$ (mm)",
+    fig8=plot(xlabel=L"$z$ (mm)",
         ylabel="Intensity (au)")
     for (j,i_idx) in enumerate(chosen_currents_idx)
         amp_exp = exp_data[:F1_profile][i_idx,:]
         Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp; weights=TheoreticalSimulation.compute_weights(z_exp, λ0_exp));
         pdf_exp = Spl_exp.(z_theory)
-        pdf_exp = normalize_vec(pdf_exp; by=val) - anypoly_eval(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)])
+        pdf_exp = normalize_vec(pdf_exp; by=val) - anypoly_eval(z_theory, @view fitting_params[i,j,6:(5+ncols_bg)])
         val_mA = 1000 * Ic_sampled[i_idx]
         plot!(z_theory, pdf_exp,
             line=(:solid,cols[j],2),
@@ -773,7 +797,7 @@ for (i,val) in enumerate(norm_modes)
         pdf_theory = mapreduce(μ -> TheoreticalSimulation.getProbDist_v3(μ, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
                                 +, μ_eff)    
         pdf_theory = normalize_vec(pdf_theory;by=val)
-        f_fit = fitting_params[i,j,2] .* TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, fitting_params[i,j,3])
+        f_fit = fitting_params[i,j,4] .* TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, fitting_params[i,j,5])
         plot!(z_theory,f_fit,
             line=(:dash,cols[j],1.5),
             label= false,)
@@ -782,13 +806,14 @@ for (i,val) in enumerate(norm_modes)
     plot!(legend=:topleft,
         legendfontsize=6,)
 
-    plot_list_exp[i] = fig
+    plot_list_exp[i] = fig8
 end
-fig=plot(plot_list_exp..., 
+fig9=plot(plot_list_exp..., 
     layout=(nl,1), 
     suptitle=L"Experiment $-$ Background $P_{%$(P_DEGREE)}$",
     left_margin=4mm,
     size=(500,700))
+savefig(fig9,joinpath(OUTDIR,"$(wanted_data_dir)_exp_$(P_DEGREE).$(FIG_EXT)"))
 
 jldsave( joinpath(OUTDIR,"fitting_params_$(wanted_data_dir)_$(P_DEGREE).jld2"), 
         data = OrderedDict(
@@ -799,7 +824,9 @@ jldsave( joinpath(OUTDIR,"fitting_params_$(wanted_data_dir)_$(P_DEGREE).jld2"),
                 :magn_factor    => magnification_factor,
                 :Icoil_A        => Ic_sampled[chosen_currents_idx],
                 :normalization  => norm_modes,
-                :fit_params     => fitting_params))
+                :fit_params     => fitting_params,
+                :info_fit       => hdr_bot
+))
 
 aa = load(joinpath(OUTDIR,"fitting_params_20250919_$(P_DEGREE).jld2"))["data"]
 
@@ -810,8 +837,6 @@ plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,3])
 plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,4])
 plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,5])
 plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,6])
-
-
 
 
 #########################################################################################
@@ -846,6 +871,7 @@ FITTING INFORMATION
     No z-divisions              : $(nrange_z)
     Coordinate z range (mm)     : ($(-range_z), $(range_z))
     Polynomial degree           : $(P_DEGREE)
+    Metrics                     : (Residuals, R², NRMSE)
 
 CODE
     Code name                   : $(PROGRAM_FILE),
