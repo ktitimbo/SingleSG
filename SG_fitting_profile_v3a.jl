@@ -693,7 +693,7 @@ nI = length(Ic_sampled);
 
 STEP        = 26 ;
 THRESH_A    = 0.020 ;
-P_DEGREE    = 6 ;
+P_DEGREE    = 4 ;
 ncols_bg    = P_DEGREE + 1 ;
 
 chosen_currents_idx = sort(unique([
