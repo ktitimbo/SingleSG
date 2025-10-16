@@ -25,7 +25,7 @@ using BSplineKit
 using Polynomials
 using StatsBase
 using Statistics, Distributions, StaticArrays
-using Alert
+# using Alert
 # Data manipulation
 using OrderedCollections
 using JLD2
@@ -689,15 +689,17 @@ end
 
 exp_data = load(joinpath(read_exp_info.directory,"profiles_mean.jld2"))["profiles"]
 Ic_sampled = exp_data[:Icoils];
+nI = length(Ic_sampled);
 
 STEP        = 26 ;
 THRESH_A    = 0.020 ;
-P_DEGREE    = 3 ;
+P_DEGREE    = 6 ;
 ncols_bg    = P_DEGREE + 1 ;
 
-chosen_currents_idx = sort(unique([firstindex(Ic_sampled);
+chosen_currents_idx = sort(unique([
+        # firstindex(Ic_sampled);
         # @view(findall(>(THRESH_A), Ic_sampled)[1:STEP:end]);
-        @view(findall(>(THRESH_A), Ic_sampled)[end-1:end]);
+        @view(findall(>(THRESH_A), Ic_sampled)[end-2:end]);
         lastindex(Ic_sampled)
         ]
 ));
@@ -709,7 +711,7 @@ println("Target currents in A: (",
 
 norm_mode = :none ;
 magnification_factor = read_exp_info.magnification ;
-λ0_exp     = 0.0001 ;
+λ0_exp     = 0.001 ;
 
 z_exp   = (exp_data[:z_mm] .- exp_data[:Centroid_mm][1]) ./ magnification_factor ;
 range_z    = floor(minimum([maximum(z_exp),abs(minimum(z_exp))]),digits=1);
@@ -745,16 +747,16 @@ z_list       = fill(z_theory, rl) ;                  # same grid for all (read-o
 μ_list = fill(μ, rl);  σ_list = fill(σ, rl);
 Q_list = fill(Q, rl);  R_list = fill(R, rl);
 
-
 for (j,i_idx) in enumerate(chosen_currents_idx)
     
     I0 = Ic_sampled[i_idx]
 
     # EXPERIMENT
+    z_raw  = exp_data[:z_mm]/magnification_factor
     amp_exp = @view exp_data[:F1_profile][i_idx, :]
-    Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp;
+    Spl_exp = BSplineKit.fit(BSplineOrder(4), z_raw, amp_exp, λ0_exp;
                              weights = TheoreticalSimulation.compute_weights(z_exp, λ0_exp))
-    pdf_exp = Spl_exp.(z_theory)
+    pdf_exp = Spl_exp.(z_theory .+ exp_data[:Centroid_mm][1]./magnification_factor)
     exp_list[j] = normalize_vec(pdf_exp; by = norm_mode)
 
     # THEORY
@@ -765,18 +767,71 @@ for (j,i_idx) in enumerate(chosen_currents_idx)
                                μF, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
                            +, μ_eff)
     pdf_th_list[j] = normalize_vec(pdf_theory; by = norm_mode)
+
 end
 
+exp_list_all    = Vector{Vector{Float64}}(undef, nI);  # splined/normalized experiment on z_theory
+pdf_th_list_all = Vector{Vector{Float64}}(undef, nI);  # closed-form theory on z_theory
+for (j,I0) in enumerate(Ic_sampled)
+    # EXPERIMENT
+    z_raw  = exp_data[:z_mm]/magnification_factor
+    amp_exp = @view exp_data[:F1_profile][j, :]
+    Spl_exp = BSplineKit.fit(BSplineOrder(4), z_raw, amp_exp, λ0_exp;
+                             weights = TheoreticalSimulation.compute_weights(z_exp, λ0_exp))
+    pdf_exp = Spl_exp.(z_theory .+ exp_data[:Centroid_mm][1]./magnification_factor)
+    exp_list_all[j] = normalize_vec(pdf_exp; by = norm_mode)
+
+    # THEORY
+    𝒢  = TheoreticalSimulation.GvsI(I0)
+    μ_eff = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
+             for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
+    pdf_theory = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
+                               μF, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
+                           +, μ_eff)
+    pdf_theory = TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, 150e-3)
+    pdf_th_list_all[j] = normalize_vec(pdf_theory; by = norm_mode)
+end
+z_max_mm_exp = zeros(nI);
+z_max_mm_thr = zeros(nI);
+for i=1:nI
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, exp_list_all[i], λ0=wanted_smooth)
+    z_max_mm_exp[i] = z[1] 
+
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, pdf_th_list_all[i], λ0=wanted_smooth)
+    z_max_mm_thr[i] = z[1] 
+end
+
+n_start = findall(>(THRESH_A), Ic_sampled)[1]
+fig=plot(Ic_sampled[n_start:end],read_exp_info.framewise_mm[n_start:end]/magnification_factor,
+    label="Original",
+    xaxis=:log10,
+    yaxis=:log10,
+    xlabel="Current (A)",
+    ylabel=L"$z$ (mm)",
+    xlim=(10e-3,3),
+    ylim=(1e-2,3),
+    legend=:bottomright,
+    legend_foreground_color = nothing,
+    legend_background_color = nothing,
+)
+plot!(Ic_sampled[n_start:end],z_max_mm_exp[n_start:end],
+    label="Current spline")
+plot!(Ic_sampled[n_start:end],z_max_mm_thr[n_start:end],
+    label=L"QM closed formula ($w=150\mathrm{\mu m}$)",
+    size=(400,400),
+    )
+display(fig)
+savefig(fig,joinpath(OUTDIR,"fig_00.$(FIG_EXT)"))
 
 #########################################################################################################
-# w = :global & A = :global
+# (1) w = :global & A = :global & Pn = :per_profile
 #########################################################################################################
-fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
+@time fit_data, params, δparams, modelfun, model_on_z, meta, _ = fit_pdf_joint(z_list, exp_list, pdf_th_list;
               n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
-              w_mode=:global, A_mode=:global,
+              w_mode=:global, A_mode=:global, d_mode=:per_profile,
               w0=0.25, A0=1.0);
 
-c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl]
+c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl];
 for i=1:rl
     fit_poly = bg_function(z_theory,params.c[i])
     c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
@@ -786,54 +841,136 @@ c_poly_coeffs
 w_fit = params.w
 A_fit = params.A
 
-fig = plot(
-        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode) | $P_{%$(P_DEGREE)}$",
+c_fit_mean = vec(mean(hcat(c_poly_coeffs...); dims=2))
+
+fig_a = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode) | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
         xlabel=L"$z$ (mm)",
         ylabel="Intensity (au)",
         legend=:topleft,
         legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$ | $A=%$(round(A_fit,sigdigits=5))$",
         legendtitlefontsize = 8
-        )
+        );
 for (i,val) in enumerate(chosen_currents_idx)
-plot!(fig,z_theory,exp_list[i], 
+plot!(fig_a,z_theory,exp_list[i], 
     label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
     line=(cols[i],:solid,1.50))
-plot!(fig,z_theory, predict_profile(z_theory,pdf_th_list[i],A_fit,w_fit,c_poly_coeffs[i]),
+plot!(fig_a,z_theory, predict_profile(z_theory,pdf_th_list[i],A_fit,w_fit,c_poly_coeffs[i]),
     label="Fitting function",
     line=(:dash,cols[i],1.2))
 end
-display(fig)
+display(fig_a)
 
-fig = plot(
-        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode) | $P_{%$(P_DEGREE)}$",
+
+fig_b = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode) | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
         xlabel=L"$z$ (mm)",
         ylabel="Intensity (au)",
         legend=:topleft,
         legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$ | $A=%$(round(A_fit,sigdigits=5))$",
         legendtitlefontsize = 8
-        )
+        );
+plot!(fig_b, z_theory, anypoly_eval(z_theory, c_fit_mean),
+    label=L"\langle P_{%$(P_DEGREE)} \rangle",
+    line=(:dot,:black,3));
 for (i,val) in enumerate(chosen_currents_idx)
-plot!(fig,z_theory,exp_list[i], 
-    label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
-    line=(cols[i],:solid,1.50))
-plot!(fig,z_theory, anypoly_eval(z_theory, c_poly_coeffs[i]),
-    label="Background",
-    line=(:dash,cols[i],1.2))
+    plot!(fig_b,z_theory,exp_list[i], 
+        label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+        line=(cols[i],:solid,1.50))
+    plot!(fig_b,z_theory, anypoly_eval(z_theory, c_poly_coeffs[i]),
+        label="Background",
+        line=(:dash,cols[i],1.2))
 end
-display(fig)
+display(fig_b)
+
+exp_list_all    = Vector{Vector{Float64}}(undef, nI);
+pdf_th_list_all = Vector{Vector{Float64}}(undef, nI);
+for (j,I0) in enumerate(Ic_sampled)
+    # EXPERIMENT
+    z_raw  = exp_data[:z_mm]/magnification_factor
+    amp_exp = @view exp_data[:F1_profile][j, :]
+    Spl_exp = BSplineKit.fit(BSplineOrder(4), z_raw, amp_exp, λ0_exp;
+                             weights = TheoreticalSimulation.compute_weights(z_exp, λ0_exp))
+    pdf_exp = Spl_exp.(z_theory .+ exp_data[:Centroid_mm][1]./magnification_factor)
+    exp_list_all[j] = normalize_vec(pdf_exp; by = norm_mode) - anypoly_eval(z_theory,c_fit_mean)
+
+    # THEORY
+    𝒢  = TheoreticalSimulation.GvsI(I0)
+    μ_eff = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
+             for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
+    pdf_theory = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
+                               μF, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
+                           +, μ_eff)
+    pdf_theory = TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, w_fit)
+    pdf_th_list_all[j] = normalize_vec(pdf_theory; by = norm_mode)
+
+end
+
+z_max_mm = zeros(nI,2);
+for i=1:nI
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, exp_list_all[i], λ0=wanted_smooth)
+    z_max_mm[i,1] = z[1] 
+
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, pdf_th_list_all[i], λ0=wanted_smooth)
+    z_max_mm[i,2] = z[1] 
+end
+
+fig_d = plot(       
+    title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode) | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
+    xlabel=L"$z$ (mm)",
+    ylabel="Intensity (au)",
+    legend=:topleft,
+    legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$ | $A=%$(round(A_fit,sigdigits=5))$",
+    legendtitlefontsize = 8
+)
+cols_ni = palette(:rainbow, nI);
+for i in n_start:2:nI
+    plot!(fig_d,z_theory,exp_list_all[i], label=L"%$(round(1000*Ic_sampled[i], sigdigits=3))", line=(:solid, cols_ni[i]))
+    plot!(fig_d,z_theory,A_fit*pdf_th_list_all[i], label=false, line=(:dash, cols_ni[i]))
+end
+display(fig_d)
+
+fig_c=plot(Ic_sampled[n_start:end],read_exp_info.framewise_mm[n_start:end]/magnification_factor,
+    label="Original",
+    line=(:red,2),
+    xaxis=:log10,
+    yaxis=:log10,
+    xlabel="Current (A)",
+    ylabel=L"$z$ (mm)",
+    xlim=(10e-3,2),
+    ylim=(1e-2,2),
+    legend=:bottomright,
+    legend_foreground_color = nothing,
+    legend_background_color = nothing,
+)
+plot!(fig_c,Ic_sampled[n_start:end],z_max_mm[n_start:end,1],
+    label="Current spline",
+    line=(:blue,1.8))
+plot!(fig_c,Ic_sampled[n_start:end],z_max_mm[n_start:end,2],
+    label=L"QM closed formula ($w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$)",
+    line=(:green,1.5),
+    # size=(400,400),
+    )
+display(fig_c)
+
+fig = plot(fig_a,fig_b,fig_d, fig_c,
+    layout=@layout([a1 a2; a3 a4]),
+    size=(1200,800),
+    left_margin=4mm,
+    bottom_margin=2mm,)
+savefig(fig,joinpath(OUTDIR,"fig_01.$(FIG_EXT)"))
 
 
 #########################################################################################################
-# w = :global & A = :per_profile
+# (2) w = :global & A = :per_profile & Pn = :per_profile
 #########################################################################################################
-
 
 @time fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
               n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
-              w_mode=:global, A_mode=:per_profile,
-              w0=0.25, A0=1.0)
+              w_mode=:global, A_mode=:per_profile, d_mode=:per_profile,
+              w0=0.25, A0=1.0);
 
-c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl]
+c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl];
 for i=1:rl
     fit_poly = bg_function(z_theory,params.c[i])
     c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
@@ -841,49 +978,115 @@ end
 
 w_fit = params.w
 A_fit = params.A
+c_fit_mean = vec(mean(hcat(c_poly_coeffs...); dims=2))
 
-fig = plot(
-        title=L"$w\rightarrow$ %$(meta.w_mode) | $A$  | $P_{%$(P_DEGREE)}$",
+fig_a = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode) | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
         xlabel=L"$z$ (mm)",
         ylabel="Intensity (au)",
         legend=:topleft,
         legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$",
         legendtitlefontsize = 8
-        )
+        );
 for (i,val) in enumerate(chosen_currents_idx)
-plot!(fig,z_theory,exp_list[i], 
-    label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
-    line=(cols[i],:solid,1.50))
-plot!(fig,z_theory, predict_profile(z_theory,pdf_th_list[i],A_fit[i],w_fit,c_poly_coeffs[i]),
-    label="Fitting function",
-    line=(:dash,cols[i],1.2))
+    plot!(fig_a,z_theory,exp_list[i], 
+        label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+        line=(cols[i],:solid,1.50))
+    plot!(fig_a,z_theory, predict_profile(z_theory,pdf_th_list[i],A_fit[i],w_fit,c_poly_coeffs[i]),
+        label="Fitting function",
+        line=(:dash,cols[i],1.2))
 end
-display(fig)
+display(fig_a)
 
 
-fig = plot(
-        title=L"$w\rightarrow$ %$(meta.w_mode) | $A$ | $P_{%$(P_DEGREE)}$",
+fig_b = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode) | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
         xlabel=L"$z$ (mm)",
         ylabel="Intensity (au)",
         legend=:topleft,
         legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$",
         legendtitlefontsize = 8
-        )
+        );
+plot!(fig_b, z_theory, anypoly_eval(z_theory, c_fit_mean),
+    label=L"\langle P_{%$(P_DEGREE)} \rangle",
+    line=(:dot,:black,3));
 for (i,val) in enumerate(chosen_currents_idx)
-plot!(fig,z_theory,exp_list[i], 
-    label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
-    line=(cols[i],:solid,1.50))
-plot!(fig,z_theory, anypoly_eval(z_theory, c_poly_coeffs[i]),
-    label="Background",
-    line=(:dash,cols[i],1.2))
+    plot!(fig_b,z_theory,exp_list[i], 
+        label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+        line=(cols[i],:solid,1.50))
+    plot!(fig_b,z_theory, anypoly_eval(z_theory, c_poly_coeffs[i]),
+        label="Background",
+        line=(:dash,cols[i],1.2))
 end
-display(fig)
+display(fig_b)
+
+
+exp_list_all    = Vector{Vector{Float64}}(undef, nI);
+pdf_th_list_all = Vector{Vector{Float64}}(undef, nI);
+for (j,I0) in enumerate(Ic_sampled)
+    # EXPERIMENT
+    z_raw  = exp_data[:z_mm]/magnification_factor
+    amp_exp = @view exp_data[:F1_profile][j, :]
+    Spl_exp = BSplineKit.fit(BSplineOrder(4), z_raw, amp_exp, λ0_exp;
+                             weights = TheoreticalSimulation.compute_weights(z_exp, λ0_exp))
+    pdf_exp = Spl_exp.(z_theory .+ exp_data[:Centroid_mm][1]./magnification_factor)
+    exp_list_all[j] = normalize_vec(pdf_exp; by = norm_mode) - anypoly_eval(z_theory,c_fit_mean)
+
+    # THEORY
+    𝒢  = TheoreticalSimulation.GvsI(I0)
+    μ_eff = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
+             for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
+    pdf_theory = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
+                               μF, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
+                           +, μ_eff)
+    pdf_theory = TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, w_fit)
+    pdf_th_list_all[j] = normalize_vec(pdf_theory; by = norm_mode)
+
+end
+
+z_max_mm = zeros(nI,2);
+for i=1:nI
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, exp_list_all[i], λ0=wanted_smooth)
+    z_max_mm[i,1] = z[1] 
+
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, pdf_th_list_all[i], λ0=wanted_smooth)
+    z_max_mm[i,2] = z[1] 
+end
+
+fig_c=plot(Ic_sampled[n_start:end],read_exp_info.framewise_mm[n_start:end]/magnification_factor,
+    label="Original",
+    line=(:red,2),
+    xaxis=:log10,
+    yaxis=:log10,
+    xlabel="Current (A)",
+    ylabel=L"$z$ (mm)",
+    xlim=(10e-3,2),
+    ylim=(1e-2,2),
+    legend=:bottomright,
+    legend_foreground_color = nothing,
+    legend_background_color = nothing,
+)
+plot!(fig_c,Ic_sampled[n_start:end],z_max_mm[n_start:end,1],
+    label="Current spline",
+    line=(:blue,1.8))
+plot!(fig_c,Ic_sampled[n_start:end],z_max_mm[n_start:end,2],
+    label=L"QM closed formula ($w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$)",
+    line=(:green,1.5),
+    # size=(400,400),
+    )
+display(fig_c)
+
+
+fig = plot(fig_a,fig_b,fig_c,
+    layout=@layout([a1 a2; a3]),
+    size=(1200,800),
+    left_margin=3mm,)
+savefig(fig,joinpath(OUTDIR,"fig_02.$(FIG_EXT)"))
 
 
 #########################################################################################################
-# w = :global & A = :per_profile
+# (3) w = :global & A = :global & Pn := global
 #########################################################################################################
-
 
 @time fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
               n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
@@ -900,430 +1103,363 @@ for i=1:rl
 end
 c_fit = c_poly_coeffs[1]
 
-fig = plot(
+fig_a = plot(
         title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode)  | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
         xlabel=L"$z$ (mm)",
         ylabel="Intensity (au)",
         legend=:topleft,
         legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$ |  $A=%$(round(A_fit,sigdigits=5))$",
         legendtitlefontsize = 8
-        )
+        );
 for (i,val) in enumerate(chosen_currents_idx)
-plot!(fig,z_theory,exp_list[i], 
+plot!(fig_a,z_theory,exp_list[i], 
     label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
     line=(cols[i],:solid,1.50))
-plot!(fig,z_theory, predict_profile(z_theory,pdf_th_list[i],A_fit,w_fit,c_fit),
+plot!(fig_a,z_theory, predict_profile(z_theory,pdf_th_list[i],A_fit,w_fit,c_fit),
     label="Fitting function",
     line=(:dash,cols[i],1.2))
 end
-display(fig)
+display(fig_a)
 
-
-fig = plot(
+fig_b = plot(
         title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode)  | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
         xlabel=L"$z$ (mm)",
         ylabel="Intensity (au)",
         legend=:topleft,
         legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$",
         legendtitlefontsize = 8
-        )
-for (i,val) in enumerate(chosen_currents_idx)
-plot!(fig,z_theory,exp_list[i], 
-    label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
-    line=(cols[i],:solid,1.50))
-plot!(fig,z_theory, anypoly_eval(z_theory, c_fit),
-    label="Background",
-    line=(:dash,cols[i],1.2))
-end
-display(fig)
-
-
-
-exp_list     = Vector{Vector{Float64}}(undef, length(Ic_sampled));  # splined/normalized experiment on z_theory
-pdf_th_list  = Vector{Vector{Float64}}(undef, length(Ic_sampled));  # closed-form theory on z_theory
-for (i,I0) in enumerate(Ic_sampled)
-    
-    # EXPERIMENT
-    amp_exp = @view exp_data[:F1_profile][i, :]
-    Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp;
-                             weights = TheoreticalSimulation.compute_weights(z_exp, λ0_exp))
-    pdf_exp = Spl_exp.(z_theory)
-    exp_list[i] = normalize_vec(pdf_exp; by = norm_mode) - anypoly_eval(z_theory,c_fit)
-
-    # # THEORY
-    # 𝒢  = TheoreticalSimulation.GvsI(I0)
-    # μ_eff = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
-    #          for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
-    # pdf_theory = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
-    #                            μF, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
-    #                        +, μ_eff)
-    # pdf_th_list[i] = normalize_vec(pdf_theory; by = norm_mode)
-end
-
-exp_list
-
-z_new = zeros(length(Ic_sampled))
-for i=1:length(Ic_sampled)
-    z_mm_max, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory,exp_list[i], λ0=0.0001)
-    z_new[i] = z_mm_max[1] 
-end
-z_new
-    
-plot(Ic_sampled[2:end],read_exp_info.framewise_mm[2:end], label="Original data")
-plot!(Ic_sampled[2:end], z_new[2:end], label="After background subtraction")
-plot!(yaxis=:log10,xaxis=:log10)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-2+2
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-@time for (n_idx, norm_mode) in enumerate(norm_modes)
-    println("\n\n\t\t\tNORMALIZATION MODE = $(string(norm_mode))")
-    p_prev = zeros(2+ncols_bg)
-    for (j,i_idx) in enumerate(chosen_currents_idx)
-
-        I0 = Ic_sampled[i_idx]
-        println("\n\t\tANALYZING BACKGROUND FOR I₀=$(round(1000*I0,digits=3))mA")
-
-        𝒢  = TheoreticalSimulation.GvsI(I0)
-        
-        μ_eff = [TheoreticalSimulation.μF_effective(I0,v[1],v[2],K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params,Fsel=1)]
-        println("Effective magnetic moments (μF/μ₀) : ", μ_eff/μB)
-
-        amp_exp = @view exp_data[:F1_profile][i_idx,:]
-
-        Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp; 
-                    weights=TheoreticalSimulation.compute_weights(z_exp, λ0_exp));
-
-        pdf_exp = Spl_exp.(z_theory)
-        pdf_exp = normalize_vec(pdf_exp; by=norm_mode)
-
-        pdf_theory = mapreduce(μ -> TheoreticalSimulation.getProbDist_v3(μ, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
-                            +, μ_eff)    
-        pdf_theory = normalize_vec(pdf_theory;by=norm_mode)
-
-        # --- Quick diagnostic plots (raw vs spline vs closed-form) ---
-        fig1= plot(z_exp , amp_exp, 
-            label="Experiment (raw)", 
-            seriestype=:scatter, 
-            marker=(:hexagon,:white,2),
-            xlabel=L"$z$ (mm)",
-            ylabel="Intensity (au)",
-            xlims=(-8,8),
         );
-        fig2 = plot(z_theory, pdf_exp, 
-            label="Experiment (spl. fit | $(norm_mode))", 
-            line=(:black,2),
-            xlabel=L"$z$ (mm)",
-            ylabel="Intensity (au)",
-            xlims=(-8,8),);
-        plot!(z_theory , pdf_theory, label="Closed-form | $(norm_mode)", line=(:red,1.5));
-        plot!(z_theory, TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, 150e-3), 
-            label="Closed-form + Conv | $(norm_mode)", 
-            line=(:dodgerblue2,1.2));
+plot!(fig_b, z_theory, anypoly_eval(z_theory, c_fit),
+    label=L"\langle P_{%$(P_DEGREE)} \rangle",
+    line=(:dot,:black,3));
+for (i,val) in enumerate(chosen_currents_idx)
+    plot!(fig_b,z_theory,exp_list[i], 
+        label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+        line=(cols[i],:solid,1.50))
+    plot!(fig_b,z_theory, anypoly_eval(z_theory, c_fit),
+        label="Background",
+        line=(:dash,cols[i],1.2))
+end
+display(fig_b)
 
-        fig=plot(fig1,fig2, layout=(2,1))
-        display(fig)
+exp_list_all    = Vector{Vector{Float64}}(undef, nI);
+pdf_th_list_all = Vector{Vector{Float64}}(undef, nI);
+for (j,I0) in enumerate(Ic_sampled)
+    # EXPERIMENT
+    z_raw  = exp_data[:z_mm]/magnification_factor
+    amp_exp = @view exp_data[:F1_profile][j, :]
+    Spl_exp = BSplineKit.fit(BSplineOrder(4), z_raw, amp_exp, λ0_exp;
+                             weights = TheoreticalSimulation.compute_weights(z_exp, λ0_exp))
+    pdf_exp = Spl_exp.(z_theory .+ exp_data[:Centroid_mm][1]./magnification_factor)
+    exp_list_all[j] = normalize_vec(pdf_exp; by = norm_mode) - anypoly_eval(z_theory,c_fit)
 
-        if j == 1
-            A0 = 0.63
-            w0 = 0.409
-            d0 = zeros(ncols_bg)
-        else
-            A0 = exp(p_prev[2])
-            w0 = exp(p_prev[1])
-            d0 = p_prev[3:end]
-        end
+    # THEORY
+    𝒢  = TheoreticalSimulation.GvsI(I0)
+    μ_eff = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
+             for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
+    pdf_theory = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
+                               μF, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
+                           +, μ_eff)
+    pdf_theory = TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, w_fit)
+    pdf_th_list_all[j] = normalize_vec(pdf_theory; by = norm_mode)
 
-        # @time fit_data, params, δparams, modelfun, model_on_z , progress =
-        #     fit_pdf(z_theory, pdf_exp, pdf_theory; w0=w0, A0=A0, c0=c0);
-
-        # do the fit:
-        @time fit_data, params, δparams, modelfun, model_on_z, meta, extras =
-            fit_pdf_ortho_n(z_theory, pdf_exp, pdf_theory;
-                            n=P_DEGREE, Qthin=Qthin, R=R, A0=A0, w0=w0, d0=d0,
-                            progress_every=10)
-
-        bg_poly = sum(params.c[k] * tpoly^(k-1) for k in 1:length(params.c))
-
-        fig=plot(z_theory , pdf_exp, 
-            label="Experiment $(wanted_data_dir)", 
-            xlabel=L"$z$ (mm)",
-            ylabel="Intensity (au)",
-            seriestype=:scatter, 
-            marker=(:hexagon,:white,1),
-            markerstrokewidth=0.5,
-            legend=:topleft,
-            legendtitle=L"$I_{0}=%$(round(1000*I0,digits=3))\mathrm{mA}$",
-            legendtitlefontsize=8,
-            legendfontsize=8,);
-        plot!(z_theory, pdf_theory, 
-            label="ClosedForm",
-            line=(:purple3,1) );
-        plot!(z_theory, TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, params.w), 
-            label="ClosedForm+Conv",
-            line=(:dodgerblue2,1.2));
-        plot!(z_theory,modelfun(z_theory), 
-            label=L"Fit: $A f(I_{c},w;z) + P_{%$(P_DEGREE)}(z)$", 
-            line=(:red,:dash,2),);
-        plot!(z_theory,bg_poly.(z_theory),
-            label="Background",
-            line=(:green4,:dash,1.5));
-        display(fig)
-        savefig(fig,joinpath(OUTDIR,"$(wanted_data_dir)_$(@sprintf("%02d", i_idx))_$(string(norm_mode))_$(P_DEGREE).$(FIG_EXT)"))
-
-        fitting_params[n_idx,j,:]  = vcat(meta.best_probe.rss,params.A,params.w,[bg_poly[dg] for dg in 0:P_DEGREE])
-
-        pretty_table(
-            fitting_params[n_idx,:,:];
-            column_label_alignment      = :c,
-            column_labels               = [hdr_top, hdr_bot],
-            row_labels                  = round.(1000*Ic_sampled[chosen_currents_idx], sigdigits=4),
-            formatters                  = [fmt__printf("%8.5e", [1]), fmt__printf("%8.5f", 2:3), fmt__printf("%8.5e", 4:(1+2+ncols_bg))],
-            alignment                   = :c,
-            equal_data_column_widths    = true,
-            stubhead_label              = "I₀ [mA]",
-            row_label_column_alignment  = :c,
-            title                       = "FITTING ANALYSIS : $(wanted_data_dir)",
-            table_format                = TextTableFormat(borders = text_table_borders__unicode_rounded),
-            style                       = TextTableStyle(
-                                                first_line_merged_column_label  = crayon"light_red bold",
-                                                first_line_column_label         = crayon"yellow bold",
-                                                column_label                    = crayon"yellow",
-                                                table_border                    = crayon"blue bold",
-                                                title                           = crayon"red bold"
-                                            )
-        )
-        # update the carry for the next iteration
-        p_prev = meta.best_probe.p
-    end
 end
 
-starts      = collect(range(1; step=rl, length=nl)) ;
-rg_labels   = Pair{Int,String}.(starts, string.(norm_modes)) ;
+z_max_mm = zeros(nI,2);
+for i=1:nI
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, exp_list_all[i], λ0=wanted_smooth)
+    z_max_mm[i,1] = z[1] 
 
-pretty_table(
-    reduce(vcat, (@view fitting_params[i, :, :] for i in 1:nl));
-    column_label_alignment      = :c,
-    column_labels               = [hdr_top, hdr_bot],
-    row_labels                  = repeat(round.(1000*Ic_sampled[chosen_currents_idx], sigdigits=4),3),
-    formatters                  = [fmt__printf("%8.5e", [1]), fmt__printf("%8.5e", [2]), fmt__printf("%5.6f", [3]), fmt__printf("%8.5e", 4:(1+2+ncols_bg))],
-    alignment                   = :c,
-    equal_data_column_widths    = true,
-    stubhead_label              = "I₀ [mA]",
-    row_label_column_alignment  = :c,
-    row_group_labels            = rg_labels,
-    row_group_label_alignment   = :c,
-    title                       = "FITTING ANALYSIS : $(wanted_data_dir)",
-    table_format                = TextTableFormat(borders = text_table_borders__unicode_rounded),
-    style                       = TextTableStyle(
-                                        first_line_merged_column_label  = crayon"light_red bold",
-                                        first_line_column_label         = crayon"yellow bold",
-                                        column_label                    = crayon"yellow",
-                                        table_border                    = crayon"blue bold",
-                                        title                           = crayon"red bold"
-                                    )
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, pdf_th_list_all[i], λ0=wanted_smooth)
+    z_max_mm[i,2] = z[1] 
+end
+
+fig_c=plot(Ic_sampled[n_start:end],read_exp_info.framewise_mm[n_start:end]/magnification_factor,
+    label="Original",
+    line=(:red,2),
+    xaxis=:log10,
+    yaxis=:log10,
+    xlabel="Current (A)",
+    ylabel=L"$z$ (mm)",
+    xlim=(10e-3,2),
+    ylim=(1e-2,2),
+    legend=:bottomright,
+    legend_foreground_color = nothing,
+    legend_background_color = nothing,
 )
-
-cols = palette(:darkrainbow, rl);
-plot_list_bg = Vector{Plots.Plot}(undef, nl);
-
-for (i,val) in enumerate(norm_modes)
-    plot_list_bg[i] = plot(xlabel=L"$z$ (mm)", ylabel="Intensity (au)")
-    for (j,idx) in enumerate(chosen_currents_idx)
-        val_mA = 1000 * Ic_sampled[idx]
-
-        plot!(z_theory,anypoly_eval(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)]),
-            line=(cols[j],2),
-            label= L"$I_{0}=" * @sprintf("%.1f", val_mA) * L"\,\mathrm{mA}$",
-            )
-    end
-    plot!(legend=:bottom,
-        legendtitle=string(val),
-        legendtitlefontsize=8,
-        foreground_color_legend = nothing,
-        background_color_legend = nothing,
-        legend_columns = 2,
+plot!(fig_c,Ic_sampled[n_start:end],z_max_mm[n_start:end,1],
+    label="Current spline",
+    line=(:blue,1.8))
+plot!(fig_c,Ic_sampled[n_start:end],z_max_mm[n_start:end,2],
+    label=L"QM closed formula ($w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$)",
+    line=(:green,1.5),
+    # size=(400,400),
     )
+display(fig_c)
+
+fig_d = plot(       
+    title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode) | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
+    xlabel=L"$z$ (mm)",
+    ylabel="Intensity (au)",
+    legend=:topleft,
+    legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$ | $A=%$(round(A_fit,sigdigits=5))$",
+    legendtitlefontsize = 8
+)
+cols_ni = palette(:rainbow, nI);
+for i in n_start:2:nI
+    plot!(fig_d,z_theory,exp_list_all[i], label=L"$%$(round(1000*Ic_sampled[i], sigdigits=3))\mathrm{A}$", line=(:solid, cols_ni[i]))
+    plot!(fig_d,z_theory,A_fit*pdf_th_list_all[i], label=false, line=(:dash, cols_ni[i]))
+end
+display(fig_d)
+
+fig = plot(fig_a,fig_b,fig_d,fig_c,
+    layout=@layout([a1 a2; a3 a4]),
+    size=(1200,800),
+    left_margin=4mm,)
+savefig(fig,joinpath(OUTDIR,"fig_03.$(FIG_EXT)"))
+
+#########################################################################################################
+# (4) w = :global & A = :per_profile & Pn := global
+#########################################################################################################
+
+@time fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
+              n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
+              w_mode=:global, A_mode=:per_profile, d_mode =:global,
+              w0=0.25, A0=1.0);
+
+w_fit = params.w
+A_fit = params.A
+
+c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl]
+for i=1:rl
+    fit_poly = bg_function(z_theory,params.c[i])
+    c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
+end
+c_poly_coeffs
+c_fit = c_poly_coeffs[1]
+
+fig_a = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode)  | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)",
+        legend=:topleft,
+        legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$",
+        legendtitlefontsize = 8
+        );
+for (i,val) in enumerate(chosen_currents_idx)
+    plot!(fig_a,z_theory,exp_list[i], 
+        label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+        line=(cols[i],:solid,1.50))
+    plot!(fig_a,z_theory, predict_profile(z_theory,pdf_th_list[i],A_fit[i],w_fit,c_fit),
+        label="Fitting function",
+        line=(:dash,cols[i],1.2))
+end
+display(fig_a)
+
+
+fig_b = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode)  | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)",
+        legend=:topleft,
+        legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$",
+        legendtitlefontsize = 8
+        );
+plot!(fig_b, z_theory, anypoly_eval(z_theory, c_fit),
+    label=L"\langle P_{%$(P_DEGREE)} \rangle",
+    line=(:dot,:black,3));
+for (i,val) in enumerate(chosen_currents_idx)
+    plot!(fig_b,z_theory,exp_list[i], 
+        label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+        line=(cols[i],:solid,1.50))
+    plot!(fig_b,z_theory, anypoly_eval(z_theory, c_fit),
+        label="Background",
+        line=(:dash,cols[i],1.2))
+end
+display(fig_b)
+
+exp_list_all    = Vector{Vector{Float64}}(undef, nI);
+pdf_th_list_all = Vector{Vector{Float64}}(undef, nI);
+for (j,I0) in enumerate(Ic_sampled)
+    # EXPERIMENT
+    z_raw  = exp_data[:z_mm]/magnification_factor
+    amp_exp = @view exp_data[:F1_profile][j, :]
+    Spl_exp = BSplineKit.fit(BSplineOrder(4), z_raw, amp_exp, λ0_exp;
+                             weights = TheoreticalSimulation.compute_weights(z_exp, λ0_exp))
+    pdf_exp = Spl_exp.(z_theory .+ exp_data[:Centroid_mm][1]./magnification_factor)
+    exp_list_all[j] = normalize_vec(pdf_exp; by = norm_mode) - anypoly_eval(z_theory,c_fit)
+
+    # THEORY
+    𝒢  = TheoreticalSimulation.GvsI(I0)
+    μ_eff = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
+             for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
+    pdf_theory = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
+                               μF, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
+                           +, μ_eff)
+    pdf_theory = TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, w_fit)
+    pdf_th_list_all[j] = normalize_vec(pdf_theory; by = norm_mode)
 
 end
-fig=plot(plot_list_bg..., 
-    layout=(nl,1), 
-    suptitle=L"Background $P_{%$(P_DEGREE)}$",
-    left_margin=4mm,
-    size=(500,700))
-savefig(fig,joinpath(OUTDIR,"$(wanted_data_dir)_background_$(P_DEGREE).$(FIG_EXT)"))
 
+z_max_mm = zeros(nI,2);
+for i=1:nI
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, exp_list_all[i], λ0=wanted_smooth)
+    z_max_mm[i,1] = z[1] 
 
-plot_list_fit = Vector{Plots.Plot}(undef, nl)
-for (i,val) in enumerate(norm_modes)
-    fig=plot(xlabel=L"$z$ (mm)",
-        ylabel="Intensity (au)")
-    for (j,i_idx) in enumerate(chosen_currents_idx)
-        amp_exp = exp_data[:F1_profile][i_idx,:]
-        Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp; weights=TheoreticalSimulation.compute_weights(z_exp, λ0_exp));
-        pdf_exp = Spl_exp.(z_theory)
-        pdf_exp = normalize_vec(pdf_exp; by=val)
-        val_mA = 1000 * Ic_sampled[i_idx]
-        plot!(z_theory, pdf_exp,
-            line=(:solid,cols[j],2),
-            label= L"%$(val) | $I_{0}=" * @sprintf("%.1f", val_mA) * L"\,\mathrm{mA}$",)
-
-        𝒢  = TheoreticalSimulation.GvsI(Ic_sampled[i_idx])
-            
-        μ_eff = [TheoreticalSimulation.μF_effective(Ic_sampled[i_idx],v[1],v[2],K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params,Fsel=1)]
-
-
-
-        pdf_theory = mapreduce(μ -> TheoreticalSimulation.getProbDist_v3(μ, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
-                                +, μ_eff)    
-        pdf_theory = normalize_vec(pdf_theory;by=val)
-        f_fit = fitting_params[i,j,2] .* TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, fitting_params[i,j,3])+anypoly_eval(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)])
-        plot!(z_theory,f_fit,
-            line=(:dash,cols[j],1.5),
-            label= false,)
-
-        # plot!(z_theory,anypoly_eval(z_theory, @view fitting_params[1,j, 3:(ncols_bg)]),
-        #     line=(:dot,cols[j],1.5),
-        #     label= false,
-        #     )
-    end
-    plot!(legend=:topleft,
-        legendfontsize=6,)
-
-    plot_list_fit[i] = fig
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, pdf_th_list_all[i], λ0=wanted_smooth)
+    z_max_mm[i,2] = z[1] 
 end
-fig=plot(plot_list_fit..., 
-    layout=(nl,1), 
-    suptitle=L"Fitting $P_{%$(P_DEGREE)}$",
-    left_margin=4mm,
-    size=(500,700))
-savefig(fig,joinpath(OUTDIR,"$(wanted_data_dir)_fitting_$(P_DEGREE).$(FIG_EXT)"))
 
-plot_list_exp = Vector{Plots.Plot}(undef, nl)
-for (i,val) in enumerate(norm_modes)
-    fig=plot(xlabel=L"$z$ (mm)",
-        ylabel="Intensity (au)")
-    for (j,i_idx) in enumerate(chosen_currents_idx)
-        amp_exp = exp_data[:F1_profile][i_idx,:]
-        Spl_exp = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_exp; weights=TheoreticalSimulation.compute_weights(z_exp, λ0_exp));
-        pdf_exp = Spl_exp.(z_theory)
-        pdf_exp = normalize_vec(pdf_exp; by=val) - anypoly_eval(z_theory, @view fitting_params[i,j,4:(1+2+ncols_bg)])
-        val_mA = 1000 * Ic_sampled[i_idx]
-        plot!(z_theory, pdf_exp,
-            line=(:solid,cols[j],2),
-            label= L"%$(val) | $I_{0}=" * @sprintf("%.1f", val_mA) * L"\,\mathrm{mA}$",)
+fig_c=plot(Ic_sampled[n_start:end],read_exp_info.framewise_mm[n_start:end]/magnification_factor,
+    label="Original",
+    line=(:red,2),
+    xaxis=:log10,
+    yaxis=:log10,
+    xlabel="Current (A)",
+    ylabel=L"$z$ (mm)",
+    xlim=(10e-3,2),
+    ylim=(1e-2,2),
+    legend=:bottomright,
+    legend_foreground_color = nothing,
+    legend_background_color = nothing,
+)
+plot!(fig_c,Ic_sampled[n_start:end],z_max_mm[n_start:end,1],
+    label="Current spline",
+    line=(:blue,1.8))
+plot!(fig_c,Ic_sampled[n_start:end],z_max_mm[n_start:end,2],
+    label=L"QM closed formula ($w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$)",
+    line=(:green,1.5),
+    # size=(400,400),
+    )
+display(fig_c)
 
-        𝒢  = TheoreticalSimulation.GvsI(Ic_sampled[i_idx])
-            
-        μ_eff = [TheoreticalSimulation.μF_effective(Ic_sampled[i_idx],v[1],v[2],K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params,Fsel=1)]
+fig = plot(fig_a,fig_b,fig_c,
+    layout=@layout([a1 a2; a3]),
+    size=(1200,800),
+    left_margin=4mm,)
+savefig(fig,joinpath(OUTDIR,"fig_04.$(FIG_EXT)"))
 
-        pdf_theory = mapreduce(μ -> TheoreticalSimulation.getProbDist_v3(μ, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
-                                +, μ_eff)    
-        pdf_theory = normalize_vec(pdf_theory;by=val)
-        f_fit = fitting_params[i,j,2] .* TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, fitting_params[i,j,3])
-        plot!(z_theory,f_fit,
-            line=(:dash,cols[j],1.5),
-            label= false,)
 
-        # plot!(z_theory,anypoly_eval(z_theory, @view fitting_params[1,j, 3:(ncols_bg)]),
-        #     line=(:dot,cols[j],1.5),
-        #     label= false,
-        #     )
-    end
-    plot!(legend=:topleft,
-        legendfontsize=6,)
+#########################################################################################################
+# (5) w = :per_profile & A = :per_profile & Pn := global
+#########################################################################################################
 
-    plot_list_exp[i] = fig
+@time fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
+              n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
+              w_mode=:per_profile, A_mode=:per_profile, d_mode =:global,
+              w0=0.25, A0=1.0);
+
+w_fit = params.w
+A_fit = params.A
+
+c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl]
+for i=1:rl
+    fit_poly = bg_function(z_theory,params.c[i])
+    c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
 end
-fig=plot(plot_list_exp..., 
-    layout=(nl,1), 
-    suptitle=L"Experiment $-$ Background $P_{%$(P_DEGREE)}$",
-    left_margin=4mm,
-    size=(500,700))
+c_poly_coeffs
+c_fit = c_poly_coeffs[1]
 
-jldsave( joinpath(OUTDIR,"fitting_params_$(wanted_data_dir)_$(P_DEGREE).jld2"), 
-        data = OrderedDict(
-                :data_dir       => wanted_data_dir,
-                :data_name      => read_exp_info.name,
-                :nz_bin         => wanted_binning,
-                :smooth_spline  => wanted_smooth,
-                :magn_factor    => magnification_factor,
-                :Icoil_A        => Ic_sampled[chosen_currents_idx],
-                :normalization  => norm_modes,
-                :fit_params     => fitting_params))
+fig_a = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode)  | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)",
+        legend=:topleft,
+        # legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$",
+        legendtitlefontsize = 8
+        );
+for (i,val) in enumerate(chosen_currents_idx)
+    plot!(fig_a,z_theory,exp_list[i], 
+        label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+        line=(cols[i],:solid,1.50))
+    plot!(fig_a,z_theory, predict_profile(z_theory,pdf_th_list[i],A_fit[i],w_fit[i],c_fit),
+        label=L"Fitting function: $w=%$(round(1000*w_fit[i],sigdigits=5))\mathrm{\mu m}$",
+        line=(:dash,cols[i],1.2))
+end
+display(fig_a)
 
-aa = load(joinpath(OUTDIR,"fitting_params_20250919_3.jld2"))["data"]
 
+fig_b = plot(
+        title=L"$w\rightarrow$ %$(meta.w_mode) | $A\rightarrow$ %$(meta.A_mode)  | $P_{%$(P_DEGREE)}\rightarrow$ %$(meta.d_mode)",
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)",
+        legend=:topleft,
+        # legendtitle = L"$w=%$(round(1000*w_fit,sigdigits=5))\mathrm{\mu m}$",
+        legendtitlefontsize = 8
+        );
+plot!(fig_b, z_theory, anypoly_eval(z_theory, c_fit),
+    label=L"\langle P_{%$(P_DEGREE)} \rangle",
+    line=(:dot,:black,3));
+for (i,val) in enumerate(chosen_currents_idx)
+    plot!(fig_b,z_theory,exp_list[i], 
+        label=L"Experiment ($I_{0}=%$(round(1000*Ic_sampled[val], sigdigits=3))\mathrm{mA}$)",
+        line=(cols[i],:solid,1.50))
+    plot!(fig_b,z_theory, anypoly_eval(z_theory, c_fit),
+        label="Background",
+        line=(:dash,cols[i],1.2))
+end
+display(fig_b)
 
-plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,1])
-plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,2])
-plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,3])
-plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,4])
-plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,5])
-plot(Ic_sampled[chosen_currents_idx], fitting_params[1,:,6])
+exp_list_all    = Vector{Vector{Float64}}(undef, nI);
+pdf_th_list_all = Vector{Vector{Float64}}(undef, nI);
+for (j,I0) in enumerate(Ic_sampled)
+    # EXPERIMENT
+    z_raw  = exp_data[:z_mm]/magnification_factor
+    amp_exp = @view exp_data[:F1_profile][j, :]
+    Spl_exp = BSplineKit.fit(BSplineOrder(4), z_raw, amp_exp, λ0_exp;
+                             weights = TheoreticalSimulation.compute_weights(z_exp, λ0_exp))
+    pdf_exp = Spl_exp.(z_theory .+ exp_data[:Centroid_mm][1]./magnification_factor)
+    exp_list_all[j] = normalize_vec(pdf_exp; by = norm_mode) - anypoly_eval(z_theory,c_fit)
+
+    # THEORY
+    𝒢  = TheoreticalSimulation.GvsI(I0)
+    μ_eff = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
+             for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
+    pdf_theory = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
+                               μF, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params),
+                           +, μ_eff)
+    pdf_theory = TheoreticalSimulation.ProbDist_convolved(z_theory, pdf_theory, mean(w_fit))
+    pdf_th_list_all[j] = normalize_vec(pdf_theory; by = norm_mode)
+
+end
+
+z_max_mm = zeros(nI,2);
+for i=1:nI
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, exp_list_all[i], λ0=wanted_smooth)
+    z_max_mm[i,1] = z[1] 
+
+    z, S  = TheoreticalSimulation.max_of_bspline_positions(z_theory, pdf_th_list_all[i], λ0=wanted_smooth)
+    z_max_mm[i,2] = z[1] 
+end
+
+fig_c=plot(Ic_sampled[n_start:end],read_exp_info.framewise_mm[n_start:end]/magnification_factor,
+    label="Original",
+    line=(:red,2),
+    xaxis=:log10,
+    yaxis=:log10,
+    xlabel="Current (A)",
+    ylabel=L"$z$ (mm)",
+    xlim=(10e-3,2),
+    ylim=(1e-2,2),
+    legend=:bottomright,
+    legend_foreground_color = nothing,
+    legend_background_color = nothing,
+)
+plot!(fig_c,Ic_sampled[n_start:end],z_max_mm[n_start:end,1],
+    label="Current spline",
+    line=(:blue,1.8))
+plot!(fig_c,Ic_sampled[n_start:end],z_max_mm[n_start:end,2],
+    label=L"QM closed formula ($w=%$(round(1000*mean(w_fit),sigdigits=5))\mathrm{\mu m}$)",
+    line=(:green,1.5),
+    # size=(400,400),
+    )
+display(fig_c)
+
+fig = plot(fig_a,fig_b,fig_c,
+    layout=@layout([a1 a2; a3]),
+    size=(1200,800),
+    left_margin=4mm,)
+savefig(fig,joinpath(OUTDIR,"fig_05.$(FIG_EXT)"))
 
 
 
@@ -1356,7 +1492,7 @@ CAMERA FEATURES
 
 FITTING INFORMATION
     Currents                    : $(round.(Ic_sampled[chosen_currents_idx],sigdigits=4))
-    Normalization mode          : $(norm_modes)
+    Normalization mode          : $(norm_mode)
     No z-divisions              : $(nrange_z)
     Coordinate z range (mm)     : ($(-range_z), $(range_z))
     Polynomial degree           : $(P_DEGREE)
@@ -1380,7 +1516,7 @@ open(joinpath(OUTDIR,"analysis_report.txt"), "w") do io
 end
 
 println("Experiment analysis finished!")
-alert("Experiment analysis finished!")
+# alert("Experiment analysis finished!")
 
 
 
