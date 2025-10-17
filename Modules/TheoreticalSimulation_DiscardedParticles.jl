@@ -355,41 +355,50 @@ end
 
 """
     select_flagged(initial_by_current, which::Symbol; flagcol::Int=10)
-        -> OrderedDict{Int8, Vector{Matrix{T}}}
+        -> OrderedDict{Int8, Vector{Matrix{Float64}}}
 
-Filter particle matrices by the flag in column `flagcol` (default 10),
-returning a **new** dictionary with the same structure but **only** the rows
-matching the requested category. Rows are **copied** (no views).
+Filter particle matrices by the flag stored in column `flagcol` (default `10`),
+returning a **new** dictionary with the same keys and number of levels but with
+**only the rows** whose flag matches the requested category. Rows are **copied**
+(dense matrices), not views.
 
-Categories:
-- `:screen`     → keep rows with flag == 0
-- `:crash_SG`   → keep rows with flag == 1 or 2
-- `:crash_tube` → keep rows with flag == 3
+!!! note
+    The returned matrices **exclude** the flag column and any columns to its
+    right: only columns `1:flagcol-1` are kept.
 
-# Arguments
-- `initial_by_current::OrderedDict{Int8, Vector{<:AbstractMatrix{T}}}`:
-  For each current index, a vector of per-level `N×10` matrices.
-- `which::Symbol`: one of `:screen`, `:crash_SG`, `:crash_tube`.
-- `flagcol::Int=10`: 1-based column index holding the flag.
+## Categories
+- `:screen`      → keep rows with flag == 0
+- `:crash_SG`    → keep rows with flag ∈ {1, 2}
+- `:crash_tube`  → keep rows with flag == 3
+- `:crash`       → keep rows with flag ∈ {1, 2, 3}
+- `:all`         → keep rows with flag ∈ {0, 1, 2, 3}
 
-# Returns
-`OrderedDict{Int8, Vector{Matrix{T}}}` with the same keys and number of
-levels, where each matrix contains **only** the kept rows. If no rows match,
-the matrix will be `0×D`.
+## Arguments
+- `initial_by_current::OrderedDict{Int8, Vector{Matrix{Float64}}}`:
+  For each current (key `Int8`), a vector of per-level `N×D` matrices (typically `D ≥ flagcol`).
+- `which::Symbol`: one of `:screen`, `:crash_SG`, `:crash_tube`, `:crash`, `:all`.
+- `flagcol::Int=10`: 1-based column index holding the flag (must satisfy `1 ≤ flagcol ≤ D`).
 
-# Notes
-- Works whether the flag column is `Int`, `UInt8`, or `Float64`
-  (`0 == 0.0` is true in Julia).
-- Copies are made (dense `Matrix{T}`), so subsequent mutations won’t affect the
-  originals.
+## Returns
+`OrderedDict{Int8, Vector{Matrix{Float64}}}` with the same keys and number of
+levels. Each matrix contains only the **kept rows** and columns `1:flagcol-1`.
+If no rows match for a given level, its matrix will be `0×(flagcol-1)`.
 
-# Example
+## Notes
+- Works even if flags are stored as floating-point values (e.g., `0.0`, `1.0`),
+  since equality like `0 == 0.0` holds in Julia.
+- All outputs are fresh copies (dense `Matrix{Float64}`), so later mutations
+  won’t affect the input matrices.
+
+## Example
 ```julia
-only_screen = select_flagged(particles_trajectories, :screen)      # flag 0
-only_crash  = select_flagged(particles_trajectories, :crash_SG)    # flags 1 or 2
-only_tube   = select_flagged(particles_trajectories, :crash_tube)  # flag 3
+only_screen = select_flagged(particles_trajectories, :screen)      # flag == 0
+only_crash  = select_flagged(particles_trajectories, :crash)       # flags 1,2,3
+all_flags   = select_flagged(particles_trajectories, :all)         # flags 0–3
 
-only_screen[1][3]  # rows for current 1, level 3 with flag == 0
+# Access rows for current key 1, level 3 (columns 1:flagcol-1 are kept)
+only_screen[1][3]
+
 """
 function select_flagged(initial_by_current::OrderedDict{Int8, Vector{Matrix{Float64}}},which::Symbol; flagcol::Int=10) 
     flagset = which === :screen     ? (0,)      :

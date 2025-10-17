@@ -39,7 +39,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 @info "Julia threads" count = Threads.nthreads()
 # Set the working directory to the current location
 cd(@__DIR__) ;
-const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSS");
+const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const OUTDIR    = joinpath(@__DIR__, "data_studies", RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
@@ -253,18 +253,29 @@ function simulation_paths(n_bin::Integer)
             "./simulation_data/nbin4/results_CQD_20250909T095645.csv",
         ],
         2 => [
-            "./simulation_data/nbin2/results_CQD_20250926T163642PDT.csv",
-            "./simulation_data/nbin2/results_CQD_20250926T163725PDT.csv",
-            "./simulation_data/nbin2/results_CQD_20250926T162134PDT.csv",
-            "./simulation_data/nbin2/results_CQD_20250926T162714PDT.csv",
-            "./simulation_data/nbin2/results_CQD_20250926T162801PDT.csv",
-            "./simulation_data/nbin2/results_CQD_20250926T162912PDT.csv",
-            "./simulation_data/nbin2/results_CQD_20250926T163017PDT.csv",
-            "./simulation_data/nbin2/results_CQD_20250926T163123PDT.csv",
+            #################### B0
+            # "./simulation_data/nbin2/round3/results_CQD_20250926T163642PDT.csv",
+            # "./simulation_data/nbin2/round3/results_CQD_20250926T163725PDT.csv",
+            # "./simulation_data/nbin2/round3/results_CQD_20250926T162134PDT.csv",
+            # "./simulation_data/nbin2/round3/results_CQD_20250926T162714PDT.csv",
+            # "./simulation_data/nbin2/round3/results_CQD_20250926T162801PDT.csv",
+            # "./simulation_data/nbin2/round3/results_CQD_20250926T162912PDT.csv",
+            # "./simulation_data/nbin2/round3/results_CQD_20250926T163017PDT.csv",
+            # "./simulation_data/nbin2/round3/results_CQD_20250926T163123PDT.csv",
+            ####################
             # "./simulation_data/nbin2/results_CQD_20250905T150919.csv",
             # "./simulation_data/nbin2/results_CQD_20250905T110806.csv",
             # "./simulation_data/nbin2/results_CQD_20250905T110819.csv",
             # "./simulation_data/nbin2/results_CQD_20250905T110834.csv",
+            #################### B0+Bn_QM
+            "./simulation_data/nbin2/round4/results_CQD_20251014T104843PDT.csv",
+            "./simulation_data/nbin2/round4/results_CQD_20251014T104859PDT.csv",
+            "./simulation_data/nbin2/round4/results_CQD_20251014T105004PDT.csv",
+            "./simulation_data/nbin2/round4/results_CQD_20251014T105054PDT.csv",
+            "./simulation_data/nbin2/round4/results_CQD_20251014T105127PDT.csv",
+            "./simulation_data/nbin2/round4/results_CQD_20251014T105158PDT.csv",
+            "./simulation_data/nbin2/round4/results_CQD_20251014T105218PDT.csv",
+            "./simulation_data/nbin2/round4/results_CQD_20251014T105248PDT.csv",
         ],
         1 => [
             "./simulation_data/nbin1/results_CQD_20250905T190626.csv",
@@ -288,18 +299,27 @@ function simulation_paths(n_bin::Integer)
             "./simulation_data/nbin4/results_QM_20250909T095645.csv",
         ],
         2 => [
-            "./simulation_data/nbin2/results_QM_20250926T163642PDT.csv",
-            "./simulation_data/nbin2/results_QM_20250926T163725PDT.csv",
-            "./simulation_data/nbin2/results_QM_20250926T162134PDT.csv",
-            "./simulation_data/nbin2/results_QM_20250926T162714PDT.csv",
-            "./simulation_data/nbin2/results_QM_20250926T162801PDT.csv",
-            "./simulation_data/nbin2/results_QM_20250926T162912PDT.csv",
-            "./simulation_data/nbin2/results_QM_20250926T163017PDT.csv",
-            "./simulation_data/nbin2/results_QM_20250926T163123PDT.csv",
+            # "./simulation_data/nbin2/results_QM_20250926T163642PDT.csv",
+            # "./simulation_data/nbin2/results_QM_20250926T163725PDT.csv",
+            # "./simulation_data/nbin2/results_QM_20250926T162134PDT.csv",
+            # "./simulation_data/nbin2/results_QM_20250926T162714PDT.csv",
+            # "./simulation_data/nbin2/results_QM_20250926T162801PDT.csv",
+            # "./simulation_data/nbin2/results_QM_20250926T162912PDT.csv",
+            # "./simulation_data/nbin2/results_QM_20250926T163017PDT.csv",
+            # "./simulation_data/nbin2/results_QM_20250926T163123PDT.csv",
             # "./simulation_data/nbin2/results_QM_20250905T150919.csv",
             # "./simulation_data/nbin2/results_QM_20250905T110806.csv",
             # "./simulation_data/nbin2/results_QM_20250905T110819.csv",
             # "./simulation_data/nbin2/results_QM_20250905T110834.csv",
+            #################### B0+Bn_QM
+            "./simulation_data/nbin2/round4/results_QM_20251014T104843PDT.csv",
+            "./simulation_data/nbin2/round4/results_QM_20251014T104859PDT.csv",
+            "./simulation_data/nbin2/round4/results_QM_20251014T105004PDT.csv",
+            "./simulation_data/nbin2/round4/results_QM_20251014T105054PDT.csv",
+            "./simulation_data/nbin2/round4/results_QM_20251014T105127PDT.csv",
+            "./simulation_data/nbin2/round4/results_QM_20251014T105158PDT.csv",
+            "./simulation_data/nbin2/round4/results_QM_20251014T105218PDT.csv",
+            "./simulation_data/nbin2/round4/results_QM_20251014T105248PDT.csv",
         ],
         1 => [
             "./simulation_data/nbin1/results_QM_20250905T190626.csv",
@@ -456,7 +476,7 @@ for n_bin in nz_vals
     savefig(fig,joinpath(OUTDIR,"montecarlo_cqd_$(n_bin).$(FIG_EXT)"))
 
     # Interpolated surface
-    ki_start , ki_stop = 20 , 50 #length(ki_sim)
+    ki_start , ki_stop = 20 , 60 #length(ki_sim)
     println("Interpolation in the induction term goes from $(ki_sim[ki_start])×10⁻⁶ to $(ki_sim[ki_stop])×10⁻⁶")
     itp = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
@@ -684,7 +704,7 @@ avg_data = load(joinpath(@__DIR__, "analysis_data", "smoothing_binning","data_av
 
 n_bin           = 2
 lower_cut_off   = 7
-ki_start , ki_stop = 25 , 50 
+ki_start , ki_stop = 20 , 50 
 
 qm_export  = OrderedDict{Int,Matrix{Float64}}();
 

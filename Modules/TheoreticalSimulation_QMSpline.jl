@@ -414,9 +414,13 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
     out = OrderedDict{Int, OrderedDict{Symbol, Any}}()
     for i in eachindex(Ix)
         if manifold===:F_top
-            img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][1:Int(2*p.Ispin+2)])...) # 7:8 is [x,z] in mm from 1:2I+2
+            img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][1:Int(2*p.Ispin+2)])...)                 # 7:8 is [x,z] in mm from 1:2I+2
         elseif manifold===:F_bottom
-            img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][Int(2*p.Ispin+3):Int(4*p.Ispin+2)])...) # 7:8 is [x,z] in mm from 2I+3:4I+2
+            img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][Int(2*p.Ispin+3):Int(4*p.Ispin+2)])...)  # 7:8 is [x,z] in mm from 2I+3:4I+2
+        elseif manifold===:S_up
+            img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][1:Int(2*p.Ispin+1)])...)                 # 7:8 is [x,z] in mm from 1:2I+1
+        elseif manifold===:S_down
+            img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][Int(2*p.Ispin+2):Int(4*p.Ispin+2)])...)  # 7:8 is [x,z] in mm from 2I+2:4I+2
         else
             lvl = manifold isa Integer ? Int(manifold) :
                   begin

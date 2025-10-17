@@ -45,8 +45,8 @@ const OUTDIR    = joinpath(@__DIR__, "simulation_data", RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 # General setup
-hostname = gethostname();
-@info "Running on host" hostname=hostname
+HOSTNAME = gethostname();
+@info "Running on host" HOSTNAME=HOSTNAME
 # Random seeds
 base_seed_set = 145;
 # rng_set = MersenneTwister(base_seed_set)
@@ -134,8 +134,8 @@ println("""
 ***************************************************
 SETUP FEATURES
     Temperature             : $(T_K)
-    Furnace aperture (x,z)  : ($(1e3*x_furnace)μm , $(1e6*z_furnace)μm)
-    Slit (x,z)              : ($(1e3*x_slit)μm , $(1e6*z_slit)μm)
+    Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
+    Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
     Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
     Slit → SG magnet        : $(1e3*y_SlitToSG)mm
     SG magnet               : $(1e3*y_SG)mm
@@ -157,6 +157,13 @@ TheoreticalSimulation.default_y_SG              = y_SG;
 TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
 TheoreticalSimulation.default_R_tube            = R_tube;
 
+##################################################################################################
+avg_data = load(joinpath(@__DIR__, "analysis_data", "smoothing_binning","data_averaged_2.jld2"), "data" )
+I_exp  = avg_data[:i_smooth];
+z_exp  = avg_data[:z_smooth];
+δz_exp = avg_data[:δz_smooth];
+##################################################################################################
+
 # Coil currents
 Icoils = [0.00,
             0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
@@ -166,7 +173,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 5_000_000
+const Nss = 100_000
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit
@@ -201,36 +208,126 @@ alive_screen = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :
 dead_crash   = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:crash ));
 
 nx_bins , nz_bins = 32 , 2
-println("F=$(K39_params.Ispin+0.5) profiles")
+println("Profiles F=$(K39_params.Ispin+0.5)")
 profiles_top = QM_analyze_profiles_to_dict(alive_screen, K39_params;
-    manifold=:F_top, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
-println("F=$(K39_params.Ispin-0.5) profiles")
+                    manifold=:F_top,    n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
+println("Profiles F=$(K39_params.Ispin-0.5)")
 profiles_bottom = QM_analyze_profiles_to_dict(alive_screen, K39_params;
-    manifold=:F_bottom, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:pdf);
+                    manifold=:F_bottom, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
+println("Profiles F=$(K39_params.Ispin+0.5), mf=$(-(K39_params.Ispin+0.5))")
+profiles_5      = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+                    manifold=5,         n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
+println("Profiles ms=$((K39_params.Ispin))")
+profiles_Sup  = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+                    manifold=:S_up,     n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
+println("Profiles ms=$(-(K39_params.Ispin))")
+profiles_Sdown  = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+                    manifold=:S_down,   n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
 
-Icoils[1]
-    μF_effective(Icoils[2],1,-1,K39_params)
+for j in eachindex(Icoils)
+    fig = plot(title=L"$I_{0}=%$(Icoils[j])\mathrm{A}$")
+    plot!(profiles_top[j][:z_profile][:,1],profiles_top[j][:z_profile][:,3],
+        label=L"$F=2$",
+        line=(:solid,:grey66,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:grey66,
+        markerstrokewidth=1)
+    vline!([profiles_top[j][:z_max_smooth_spline_mm]], 
+        line=(:grey66,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_top[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(profiles_Sup[j][:z_profile][:,1],profiles_Sup[j][:z_profile][:,3],
+        label=L"$m_{s}=+1/2$",
+        line=(:solid,:seagreen3,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:seagreen3,
+        markerstrokewidth=1)
+    vline!([profiles_Sup[j][:z_max_smooth_spline_mm]],
+        line=(:seagreen3,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_Sup[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(profiles_bottom[j][:z_profile][:,1],profiles_bottom[j][:z_profile][:,3],
+        label=L"$F=1$",
+        line=(:solid,:blueviolet,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:blueviolet,
+        markerstrokewidth=1)
+    vline!([profiles_bottom[j][:z_max_smooth_spline_mm]], 
+        line=(:blueviolet,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_bottom[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(profiles_Sdown[j][:z_profile][:,1],profiles_Sdown[j][:z_profile][:,3],
+        label=L"$m_{s}=-1/2$",
+        line=(:solid,:orangered2,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:orangered2,
+        markerstrokewidth=1)
+    vline!([profiles_Sdown[j][:z_max_smooth_spline_mm]],
+        line=(:orangered2,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_Sdown[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(profiles_5[j][:z_profile][:,1],profiles_5[j][:z_profile][:,3],
+        label=L"$F=2$, $m_{F}=-2$",
+        line=(:solid,:dodgerblue3,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:dodgerblue3,
+        markerstrokewidth=1)
+    vline!([profiles_5[j][:z_max_smooth_spline_mm]],
+        line=(:dodgerblue3,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_5[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    display(fig)
+end
 
-j=2
-zd     = range(-12.5, 12.5; length=20_001) .* 1e-3  # m
-(μF_effective(Icoils[j],1,-1,K39_params),μF_effective(Icoils[j],1,0,K39_params),μF_effective(Icoils[j],1,1,K39_params))
-dBzdz  = TheoreticalSimulation.GvsI(Icoils[j])
-dd1 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 2,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
-dd2 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
-dd3 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 0,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
-dd4 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2,-1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
-dd5 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2,-2,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
-dd6 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],1,-1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
-dd7 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],1, 0,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
-dd8 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],1, 1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
-plot(zd,dd1)
-plot(zd,dd2)
-plot(zd,dd3)
-plot(zd,dd4)
-plot(zd,dd5)
-plot(zd,dd6)
-plot(zd,dd7)
-plot(zd,dd8)
+fig=plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
+plot!(fig,Icoils[2:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
+    label=L"Trajectory $\vert 2,-2\rangle$",
+    line=(:solid,:red,2))
+plot!(fig,Icoils[2:end], [profiles_bottom[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
+    label=L"Trajectory $F=1$",
+    line=(:solid,:blue,2))
+plot!(fig,Icoils[2:end], [profiles_Sdown[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
+    label=L"Trajectory $m_{s}=-1/2$",
+    line=(:solid,:purple,2))
+plot!(fig,I_exp[2:end],z_exp[2:end],
+    ribbon=δz_exp[5:end],
+    label="Mean experimental data",
+    line=(:black,:dash,2),
+    fillalpha=0.23, 
+    fillcolor=:black, 
+    )
+plot!(fig,xaxis=:log10,
+    yaxis=:log10,
+    xlims=(0.8e-3,2),
+    ylims=(0.8e-3,2),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+            [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+            [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:topleft,
+    left_margin =2mm,
+)
+display(fig)
+savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
+
+
+
+
+# j=2
+# zd     = range(-12.5, 12.5; length=20_001) .* 1e-3  # m
+# (μF_effective(Icoils[j],1,-1,K39_params),μF_effective(Icoils[j],1,0,K39_params),μF_effective(Icoils[j],1,1,K39_params))
+# dBzdz  = TheoreticalSimulation.GvsI(Icoils[j])
+# dd1 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 2,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+# dd2 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+# dd3 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 0,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+# dd4 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2,-1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+# dd5 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2,-2,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+# dd6 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],1,-1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+# dd7 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],1, 0,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+# dd8 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],1, 1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+# plot(1e3*zd,dd1)
+# plot(1e3*zd,dd2)
+# plot(1e3*zd,dd3)
+# plot(1e3*zd,dd4)
+# plot(1e3*zd,dd5)
+# plot(1e3*zd,dd6)
+# plot(1e3*zd,dd7)
+# plot(1e3*zd,dd8)
 
 
 normalize_vec(v) = (m = maximum(v); m == 0 ? v : v ./ m);
@@ -269,31 +366,30 @@ gif(anim, gif_path, fps=2)  # adjust fps as you like
 @info "Saved GIF" gif_path ;
 
 
-QM_analyze_profiles_to_dict(alive_screen, K39_params;
-    manifold=5, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability)
-
-Icoils = alive_screen[:Icoils]
-r = 1:3:length(Icoils)
-for j in (r[end] == length(Icoils) ? r : Iterators.flatten((r, (length(Icoils),))))
-# j=30
-    data_set_5 = vcat((alive_screen[:data][j][k] for k in Int(2*K39_params.Ispin + 3):Int(4*K39_params.Ispin + 2))...)
+r = 1:2:nI;
+iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)))
+lvl = Int(4*K39_params.Ispin+2)
+anim = @animate for j in iter
+    f,mf=quantum_numbers[8]
+    # data_set = vcat((alive_screen[:data][j][k] for k in Int(2*K39_params.Ispin + 3):Int(4*K39_params.Ispin + 2))...)
+    data_set = alive_screen[:data][j][lvl] 
+    
 
     #Furnace
-    xs_a = 1e3 .* data_set_5[:,1]; # mm
-    zs_a = 1e6 .* data_set_5[:,3]; # μm
+    xs_a = 1e3 .* data_set[:,1]; # mm
+    zs_a = 1e6 .* data_set[:,3]; # μm
     figa = histogram2d(xs_a, zs_a;
         bins = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a)),
         show_empty_bins = true, color = :plasma, normalize=:pdf,
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
-        xticks = -1.0:0.25:1.0, yticks = -50:10:50,
-        # clims = (0, 0.0003),
-        # colorbar_position = :bottom,
+        xticks = -1.0:0.25:1.0, yticks = -50:25:50,
     );
 
     # Slit
-    r_at_slit = Matrix{Float64}(undef, size(data_set_5, 1), 3);
-    for i in axes(data_set_5,1)
-        r , _ = QM_EqOfMotion(y_FurnaceToSlit ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+    r_at_slit = Matrix{Float64}(undef, size(data_set, 1), 3);
+    for i in axes(data_set,1)
+        v0y = data_set[i,5]
+        r , _ = QM_EqOfMotion(y_FurnaceToSlit ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
         r_at_slit[i,:] = r
     end
     xs_b = 1e3 .* r_at_slit[:,1]; # mm
@@ -304,14 +400,14 @@ for j in (r[end] == length(Icoils) ? r : Iterators.flatten((r, (length(Icoils),)
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
         xticks = -4.0:0.50:4.0, yticks = -200:50:200,
         xlims=(-4,4),
-        # clims = (0, 0.0003),
-        # colorbar_position = :bottom,
+        ylims=(-200,200),
     ) ;
 
     # SG entrance
-    r_at_SG_entrance = Matrix{Float64}(undef, size(data_set_5, 1), 3);
-    for i in axes(data_set_5,1)
-        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG) ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+    r_at_SG_entrance = Matrix{Float64}(undef, size(data_set, 1), 3);
+    for i in axes(data_set,1)
+        v0y = data_set[i,5]
+        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG) ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
         r_at_SG_entrance[i,:] = r
     end
     xs_c = 1e3 .* r_at_SG_entrance[:,1]; # mm
@@ -321,15 +417,14 @@ for j in (r[end] == length(Icoils) ? r : Iterators.flatten((r, (length(Icoils),)
         show_empty_bins = true, color = :plasma, normalize=:pdf,
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
         xticks = -4.0:0.50:4.0, yticks = -1000:100:1000,
-        xlims=(-4,4),
-        # clims = (0, 0.0003),
-        # colorbar_position = :bottom,
+        xlims=(-4,4), ylims=(-250,250),
     );
 
     # SG exit
-    r_at_SG_exit = Matrix{Float64}(undef, size(data_set_5, 1), 3);
-    for i in axes(data_set_5,1)
-        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG) ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+    r_at_SG_exit = Matrix{Float64}(undef, size(data_set, 1), 3);
+    for i in axes(data_set,1)
+        v0y = data_set[i,5]
+        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG) ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
         r_at_SG_exit[i,:] = r
     end
     xs_d = 1e3 .* r_at_SG_exit[:,1]; # mm
@@ -338,19 +433,17 @@ for j in (r[end] == length(Icoils) ? r : Iterators.flatten((r, (length(Icoils),)
         bins = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d)),
         show_empty_bins = true, color = :plasma, normalize=:pdf,
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
-        xticks = -4.0:0.50:4.0, 
-        # yticks = -1000:200:1000,
-        xlims=(-4,4),
-        # clims = (0, 0.0003),
-        # colorbar_position = :bottom,
+        xticks = -4.0:0.50:4.0, yticks = -1000:200:1000,
+        xlims=(-4,4), ylims=(-300,1000),
     )
     x_magnet = 1e-3*range(-1.0,1.0,length=1000)
     plot!(figd,1e3*x_magnet,1e6*TheoreticalSimulation.z_magnet_edge.(x_magnet),line=(:dash,:black,2),label=false)
 
     # Screen
-    r_at_screen = Matrix{Float64}(undef, size(data_set_5, 1), 3);
-    for i in axes(data_set_5,1)
-        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG+y_SGToScreen) ./ data_set_5[i,5],Icoils[j],2,-2,data_set_5[i,1:3],data_set_5[i,4:6], K39_params)
+    r_at_screen = Matrix{Float64}(undef, size(data_set, 1), 3);
+    for i in axes(data_set,1)
+        v0y = data_set[i,5]
+        r , _ = QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG+y_SGToScreen) ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
         r_at_screen[i,:] = r
     end
     xs_e = 1e3 .* r_at_screen[:,1]; # mm
@@ -361,10 +454,7 @@ for j in (r[end] == length(Icoils) ? r : Iterators.flatten((r, (length(Icoils),)
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{mm})$",
         ylims=(-1,17.5),
         # xticks = -4.0:0.50:4.0, yticks = -1250:50:1250,
-        # clims = (0, 0.0003),
-        # colorbar_position = :bottom,
     );
-
 
     fig = plot(figa,figb,figc,figd,fige,
     layout=(5,1),
@@ -378,11 +468,15 @@ for j in (r[end] == length(Icoils) ? r : Iterators.flatten((r, (length(Icoils),)
     plot!(fig[3], xlabel="", bottom_margin=-3mm),
     plot!(fig[4], xlabel="", bottom_margin=-3mm),
     display(fig)
-
 end
+gif_path = joinpath(OUTDIR, "time_evolution.gif");
+gif(anim, gif_path, fps=2)  # adjust fps as you like
+@info "Saved GIF" gif_path ;
 
-joinpath(@__DIR__,"analysis_data","20251007T1003045109")
-ex_profile = load(joinpath(@__DIR__,"analysis_data","20251007T003045109","profiles.jld2"))["profiles"]
+
+
+
+ex_profile = load(joinpath(@__DIR__,"analysis_data","20251009T130343081","profiles_mean.jld2"))["profiles"]
 
 
 
@@ -573,7 +667,7 @@ CODE
     Start date              : $(T_START)
     End data                : $(T_END)
     Run time                : $(T_RUN)
-    Hostname                : $(hostname)
+    Hostname                : $(HOSTNAME)
 
 ***************************************************
 """
@@ -2255,7 +2349,7 @@ params = OrderedDict(
     "Start date" => Dates.format(t_start, "yyyy-mm-ddTHH-MM-SS"),
     "End date" => Dates.format(Dates.now(), "yyyy-mm-ddTHH-MM-SS"),
     "Run time" => "$t_run",
-    "Hostname" => hostname,
+    "Hostname" => HOSTNAME,
     "Code name" => PROGRAM_FILE,
     "Iwire" => "$Iwire",
     "Prob(μₑ:↓)" => "$PSF_FS_global",
