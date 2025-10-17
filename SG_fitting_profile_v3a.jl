@@ -1,5 +1,6 @@
 # Fitting experimental profile
 # Kelvin Titimbo — California Institute of Technology — October 2025
+# Fitting for common profiles: shift z-axis after interpolation
 
 #  Plotting Setup
 # ENV["GKS_WSTYPE"] = "101"
@@ -1517,14 +1518,3 @@ end
 
 println("Experiment analysis finished!")
 # alert("Experiment analysis finished!")
-
-
-
-
-
-
-
-
-
-
-              params
