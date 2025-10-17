@@ -25,7 +25,7 @@ using LsqFit
 using BSplineKit
 using Polynomials
 using StatsBase
-using Statistics, Distributions, StaticArrays
+using Statistics, StaticArrays, Distributions
 # using Alert
 # Data manipulation
 using OrderedCollections
@@ -640,7 +640,7 @@ function fit_pdf_joint(
     model_on_z = [model_i(i, z_list[i], p̂) for i in 1:M]
     modelfun   = (i, zz) -> model_i(i, zz, p̂)
 
-    params   = (w = ŵ, A = Â, c = ĉ)
+    fit_params   = (w = ŵ, A = Â, c = ĉ)
     param_se = (δw = δw, δA = δA, δc = se_c)
 
     meta   = (evals=calls[], best_probe=(rss=best_rss[], p=best_p[]),
@@ -654,7 +654,7 @@ function fit_pdf_joint(
         idx_c_global = idx_c_global
     )
 
-    return fit_data, params, param_se, modelfun, model_on_z, meta, extras
+    return fit_data, fit_params, param_se, modelfun, model_on_z, meta, extras
 end
 
 
@@ -827,20 +827,20 @@ savefig(fig,joinpath(OUTDIR,"fig_00.$(FIG_EXT)"))
 #########################################################################################################
 # (1) w = :global & A = :global & Pn = :per_profile
 #########################################################################################################
-@time fit_data, params, δparams, modelfun, model_on_z, meta, _ = fit_pdf_joint(z_list, exp_list, pdf_th_list;
+@time fit_data, fitparams, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
               n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
               w_mode=:global, A_mode=:global, d_mode=:per_profile,
               w0=0.25, A0=1.0);
 
 c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl];
 for i=1:rl
-    fit_poly = bg_function(z_theory,params.c[i])
+    fit_poly = bg_function(z_theory,fitparams.c[i])
     c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
 end
 c_poly_coeffs
 
-w_fit = params.w
-A_fit = params.A
+w_fit = fitparams.w
+A_fit = fitparams.A
 
 c_fit_mean = vec(mean(hcat(c_poly_coeffs...); dims=2))
 
@@ -966,19 +966,19 @@ savefig(fig,joinpath(OUTDIR,"fig_01.$(FIG_EXT)"))
 # (2) w = :global & A = :per_profile & Pn = :per_profile
 #########################################################################################################
 
-@time fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
+@time fit_data, fitparams, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
               n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
               w_mode=:global, A_mode=:per_profile, d_mode=:per_profile,
               w0=0.25, A0=1.0);
 
 c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl];
 for i=1:rl
-    fit_poly = bg_function(z_theory,params.c[i])
+    fit_poly = bg_function(z_theory,fitparams.c[i])
     c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
 end
 
-w_fit = params.w
-A_fit = params.A
+w_fit = fitparams.w
+A_fit = fitparams.A
 c_fit_mean = vec(mean(hcat(c_poly_coeffs...); dims=2))
 
 fig_a = plot(
@@ -1089,17 +1089,17 @@ savefig(fig,joinpath(OUTDIR,"fig_02.$(FIG_EXT)"))
 # (3) w = :global & A = :global & Pn := global
 #########################################################################################################
 
-@time fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
+@time fit_data, fitparams, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
               n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
               w_mode=:global, A_mode=:global, d_mode =:global,
               w0=0.25, A0=1.0);
 
-w_fit = params.w
-A_fit = params.A
+w_fit = fitparams.w
+A_fit = fitparams.A
 
 c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl]
 for i=1:rl
-    fit_poly = bg_function(z_theory,params.c[i])
+    fit_poly = bg_function(z_theory,fitparams.c[i])
     c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
 end
 c_fit = c_poly_coeffs[1]
@@ -1223,17 +1223,17 @@ savefig(fig,joinpath(OUTDIR,"fig_03.$(FIG_EXT)"))
 # (4) w = :global & A = :per_profile & Pn := global
 #########################################################################################################
 
-@time fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
+@time fit_data, fitparams, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
               n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
               w_mode=:global, A_mode=:per_profile, d_mode =:global,
               w0=0.25, A0=1.0);
 
-w_fit = params.w
-A_fit = params.A
+w_fit = fitparams.w
+A_fit = fitparams.A
 
 c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl]
 for i=1:rl
-    fit_poly = bg_function(z_theory,params.c[i])
+    fit_poly = bg_function(z_theory,fitparams.c[i])
     c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
 end
 c_poly_coeffs
@@ -1344,18 +1344,17 @@ savefig(fig,joinpath(OUTDIR,"fig_04.$(FIG_EXT)"))
 #########################################################################################################
 # (5) w = :per_profile & A = :per_profile & Pn := global
 #########################################################################################################
-
-@time fit_data, params, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
+@time fit_data, fitparams, δparams, modelfun, model_on_z, meta, extras = fit_pdf_joint(z_list, exp_list, pdf_th_list;
               n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
               w_mode=:per_profile, A_mode=:per_profile, d_mode =:global,
               w0=0.25, A0=1.0);
 
-w_fit = params.w
-A_fit = params.A
+w_fit = fitparams.w
+A_fit = fitparams.A
 
 c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl]
 for i=1:rl
-    fit_poly = bg_function(z_theory,params.c[i])
+    fit_poly = bg_function(z_theory,fitparams.c[i])
     c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
 end
 c_poly_coeffs
