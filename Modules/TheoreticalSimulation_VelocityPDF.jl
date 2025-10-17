@@ -129,6 +129,9 @@ function getProbDist_v3(μ::Float64, dBzdz::Float64, zd::AbstractVector, p::Atom
     LSSG  = default_y_SlitToSG
     LSG   = default_y_SG
     LSGD  = default_y_SGToScreen
+    @assert LOS >= 0          "Furnace-to-slit distance (LOS) must be ≥ 0."
+    @assert LSSG ≥ 0 && LSG ≥ 0 && LSGD ≥ 0  "Segment lengths must be ≥ 0."
+
     Ltot  = LOS + LSSG + LSG + LSGD
     lfrac = Ltot / LOS
     inv_lfrac  = inv(lfrac)
@@ -142,6 +145,7 @@ function getProbDist_v3(μ::Float64, dBzdz::Float64, zd::AbstractVector, p::Atom
     a   = aSG * LSG * (LSG + 2*LSGD) / 2
     c   = a / (2*q.α2)  # = a/β²
 
+    # Mirror if μ < 0 (preserves shape)
     zd = μ < 0 ? -zd : zd
 
     # preallocate once
