@@ -518,7 +518,7 @@ function background_poly(z::Union{Real,AbstractArray}, c::AbstractVector{<:Real}
 end
 
 # Select experimental data
-wanted_data_dir = "20250919" ;
+wanted_data_dir = "20250820" ;
 wanted_binning  = 2 ; 
 wanted_smooth   = 0.01 ;
 
