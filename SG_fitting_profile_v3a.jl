@@ -660,7 +660,7 @@ end
 
 
 # Select experimental data
-wanted_data_dir = "20250820" ;
+wanted_data_dir = "20250825" ;
 wanted_binning  = 2 ; 
 wanted_smooth   = 0.01 ;
 
@@ -1460,8 +1460,6 @@ fig = plot(fig_a,fig_b,fig_c,
     size=(1200,800),
     left_margin=4mm,)
 savefig(fig,joinpath(OUTDIR,"fig_05.$(FIG_EXT)"))
-
-
 
 
 #########################################################################################
