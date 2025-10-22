@@ -59,6 +59,15 @@ data_JSF = OrderedDict(
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
 
+# To be generalized
+Ic_qm =  [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+zm_qm = [ 0.07000392151832582, 0.12103624215126021,
+ 0.1637624935340883, 0.19920462520122545, 0.23292316199064259, 0.25916178963661196,
+ 0.2878604881906509, 0.31263042984724054, 0.3374424611139296, 0.4497195784807205,
+ 0.5458749029445646, 0.641772232809067, 0.7316863846147059, 0.830490922909975,
+ 0.9258644851398463, 1.0140804073005922, 1.0981745467764124, 1.2656789418584087,
+ 1.4240360171699535, 1.5814155127000782, 1.6859927244621518, 1.8169193762660025]
+#
 
 parent_folder = joinpath(@__DIR__, "analysis_data");
 data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
@@ -159,6 +168,7 @@ for data_directory in data_directories
         markerstrokecolor=cols_k[i]
         )
     end
+    plot!(fig,Ic_qm,zm_qm, label="QM", line=(:solid,:black,2), marker=(:square,:grey66,2))
     plot!(fig,
         xlabel="Current (A)",
         ylabel=L"$z_{F_{1}}$ (mm)",
@@ -177,7 +187,7 @@ for data_directory in data_directories
         legend_title = data_directory,
     )
     saveplot(fig,"bin_vs_smoothing_$(data_directory)")
-
+    display(fig)
     println("\n")
 
 end
@@ -263,6 +273,7 @@ plot!(fig1,
     label = "Alexander's data",
     line = (:dash, :green, 2),
 )
+plot!(fig1, Ic_qm, zm_qm, label="QM", line=(:black,2))
 display(fig1)
 saveplot(fig1, "bin_vs_smoothing_log")   # use explicit extension; pdf/png/svg as you like
 
@@ -310,6 +321,7 @@ plot!(fig2,
     label = "Alexander's data",
     line = (:dash, :green, 2),
 )
+plot!(fig2, Ic_qm, zm_qm, label="QM", line=(:black,2))
 display(fig2)
 saveplot(fig2, "bin_vs_smoothing_lin")   # use explicit extension; pdf/png/svg as you like
 
@@ -481,6 +493,7 @@ for i=1:length(data_directories)
         markerstrokewidth=1,
         )
 end
+plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
 plot!(fig, xq, μ; 
     ribbon=σ, 
     xscale=:log10,
@@ -489,6 +502,7 @@ plot!(fig, xq, μ;
     label=false,
     color=:black,
 )
+display(fig)
 saveplot(fig, "MC_interpolation")
 
 
@@ -521,6 +535,7 @@ for i=1:length(data_directories)
         label=false,
         line=(cols[i],1))
 end
+plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
 display(fig)
 plot!(fig,
 title="Interpolation: cubic splines",
@@ -529,7 +544,6 @@ yaxis=:log10,
 xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
 yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
 )
-display(fig)
 zf1 = vec(mean(z_final, dims=1))
 δzf1 = vec(std(z_final; dims=1, corrected=true)/sqrt(length(data_directories)))
 plot!(fig, i_xx, zf1,
@@ -564,6 +578,7 @@ for i=1:length(data_directories)
         label=false,
         line=(cols[i],1))
 end
+plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
 display(fig)
 plot!(fig,
 title = "Smoothing cubic spline",
@@ -607,6 +622,7 @@ plot!(fig, xq, μ;
     label="Interpolation MC",
     color=:orangered2
 )
+plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
 plot!(fig,
 xaxis=:log10, 
 yaxis=:log10,
@@ -642,6 +658,7 @@ plot!(fig, TheoreticalSimulation.GvsI(xq), μ;
     label="Interpolation MC",
     color=:orangered2
 )
+plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
 plot!(fig,
 xaxis=:log10, 
 yaxis=:log10,
