@@ -400,7 +400,7 @@ all_flags   = select_flagged(particles_trajectories, :all)         # flags 0–3
 only_screen[1][3]
 
 """
-function select_flagged(initial_by_current::OrderedDict{Int8, Vector{Matrix{Float64}}},which::Symbol; flagcol::Int=10) 
+function select_flagged(initial_by_current::OrderedDict{K, Vector{Matrix{Float64}}},which::Symbol; flagcol::Integer=10) where {K<:Integer}
     flagset = which === :screen     ? (0,)      :
               which === :crash_SG   ? (1, 2)    :
               which === :crash_tube ? (3,)      :
@@ -561,4 +561,108 @@ function CQD_build_travelling_particles(
     end
 
     return out
+end
+
+"""
+    CQD_select_flagged(initial_by_current, which; flagcol=12)
+
+Filter each matrix in an `OrderedDict{K, Matrix{Float64}}` by a flag column,
+keeping only rows where the flag value matches the set implied by `which`.
+Returns an `OrderedDict{K, Matrix{Float64}}` containing only columns `1:(flagcol-1)`.
+
+`which` → kept flags:
+- `:screen`     → {0}
+- `:crash_SG`   → {1, 2}
+- `:crash_tube` → {3}
+- `:crash`      → {1, 2, 3}
+- `:all`        → {0, 1, 2, 3}
+
+# Arguments
+- `initial_by_current::OrderedDict{K, Matrix{Float64}}` where `K<:Integer`
+- `which::Symbol`: one of the above
+- `flagcol::Integer=12`: 1-based index of the flag column
+
+# Returns
+- `OrderedDict{K, Matrix{Float64}}` with filtered rows and columns before `flagcol`.
+"""
+function CQD_select_flagged(initial_by_current::OrderedDict{K, Matrix{Float64}},which::Symbol; flagcol::Integer=12)  where {K<:Integer}
+    flagset = which === :screen     ? (0,)      :
+              which === :crash_SG   ? (1, 2)    :
+              which === :crash_tube ? (3,)      :
+              which === :crash      ? (1,2,3)   :
+              which === :all        ? (0,1,2,3) :
+          error("which must be :screen, :crash_SG, :crash_tube, :crash, or :all")
+
+    out = OrderedDict{K, Matrix{Float64}}()
+    s = Set(flagset)
+
+    @inbounds for (idx, M) in initial_by_current
+        @assert 1 ≤ flagcol ≤ size(M, 2) "flagcol out of bounds (got $flagcol, size=$(size(M)))"
+        
+        @views col = M[:, flagcol]
+
+        # keep rows where flag ∈ flagset (works for 1, 2, or 3 values)
+        keep = findall(in.(col, Ref(s)))
+
+        out[idx] = M[keep, 1:flagcol-1]   # copy rows into a dense Matrix
+    end
+
+    return out
+end
+
+function CQD_travelling_particles_summary(Ixs, particles, branch::Symbol)
+    # Normalize branch label for display
+    branch_str = String(Symbol(branch))
+
+    # Small helper: count flags in last column (robust to Int/Float)
+    @inline function counts_from_M(M::AbstractMatrix)
+        @views col = M[:, end]
+        if eltype(col) <: Integer
+            pass = count(==(0),  col); top = count(==(1), col)
+            bot  = count(==(2),  col); tub = count(==(3), col)
+        else
+            pass = count(==(0.0), col); top = count(==(1.0), col)
+            bot  = count(==(2.0), col); tub = count(==(3.0), col)
+        end
+        return (pass=pass, top=top, bot=bot, tub=tub)
+    end
+
+    data = Matrix{Any}(undef, length(Ixs), 7)
+
+    for i in eachindex(Ixs)
+        I0 = Float64(Ixs[i])
+
+        # Accept Matrix or Vector{Matrix}; use the first matrix if a vector is given
+        mat = particles[i]
+        M   = mat isa AbstractMatrix ? mat : mat[1]
+
+        c   = counts_from_M(M)
+        tot = c.pass + c.top + c.bot + c.tub
+        passp = tot == 0 ? 0.0 : 100.0 * c.pass / tot
+        lossp = tot == 0 ? 0.0 : 100.0 * (c.top + c.bot + c.tub) / tot
+
+        # First column is a string label → use Matrix{Any}
+        
+        data[i, :] = [c.pass, c.top, c.bot, c.tub, tot, passp, lossp]
+
+
+    end
+
+        pretty_table(
+        data;
+        column_labels               = ["Pass","Top","Bottom","Tube","Total","Pass %","Loss %"],
+        title                       = "CQD PARTICLE TRAJECTORIES STATISTICS ($(uppercase(string(branch))))",
+        formatters                  = [fmt__printf("%d", 1:5), fmt__printf("%5.1f", 6:7)],
+        alignment                   = :c,
+        table_format                = TextTableFormat(borders = text_table_borders__unicode_rounded),
+        style                       = TextTableStyle(first_line_column_label = crayon"yellow bold",
+                                                    table_border = crayon"blue bold",
+                                                    title = crayon"bold red"),
+        equal_data_column_widths    = true,
+        row_labels                  = round.(1000*Ixs, sigdigits=3),
+        stubhead_label              = "I₀ [mA]",
+        row_label_column_alignment  = :c,
+    )
+    println()
+    return nothing
 end
