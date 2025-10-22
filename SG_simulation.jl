@@ -173,12 +173,11 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 100_000
+const Nss = 5_000
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
-# pairs_UP, pairs_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:balanced)
 
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
@@ -188,6 +187,9 @@ if SAVE_FIG
     # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
 
+##################################################################################################
+#   QUANTUM MECHANICS
+##################################################################################################
 @time particles_flag  = TheoreticalSimulation.QM_flag_travelling_particles(
                             Icoils, 
                             crossing_slit, 
@@ -224,6 +226,7 @@ println("Profiles ms=$(-(K39_params.Ispin))")
 profiles_Sdown  = QM_analyze_profiles_to_dict(alive_screen, K39_params;
                     manifold=:S_down,   n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=true, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
 
+# Profiles : different contributions
 for j in eachindex(Icoils)
     fig = plot(title=L"$I_{0}=%$(Icoils[j])\mathrm{A}$")
     plot!(profiles_top[j][:z_profile][:,1],profiles_top[j][:z_profile][:,3],
@@ -274,6 +277,7 @@ for j in eachindex(Icoils)
     display(fig)
 end
 
+# Peak position (mm) : lower branch
 fig=plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
 plot!(fig,Icoils[2:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
     label=L"Trajectory $\vert 2,-2\rangle$",
@@ -472,6 +476,29 @@ end
 gif_path = joinpath(OUTDIR, "time_evolution.gif");
 gif(anim, gif_path, fps=2)  # adjust fps as you like
 @info "Saved GIF" gif_path ;
+
+
+
+##################################################################################################
+#   COQUANTUM DYNAMICS
+##################################################################################################
+ki = 3.5e-6;
+# Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
+data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
+
+@time CQDparticles_flag = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
+@time CQDparticles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQDparticles_flag, K39_params)
+TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQDparticles_trajectories, :up)
+CQD_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQDparticles_trajectories,:screen ));
+
+TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_screen;
+    n_bins = (32,2), width_mm = 0.150, 
+    add_plot = false, plot_xrange= :all,
+    λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
+
+
+
+
 
 
 
