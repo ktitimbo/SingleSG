@@ -452,3 +452,172 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
     end
     return out
 end
+
+
+
+
+function CQD_analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
+    nx_bins::Integer = 2, nz_bins::Integer = 2, 
+    add_plot::Bool = false, plot_xrange::Symbol = :all,
+    width_mm::Float64 = 0.150, λ_raw::Float64=0.01, λ_smooth::Float64 = 1e-3, 
+    mode::Symbol=:probability)
+
+    @assert size(data_mm,2) == 2 "data_mm must be N×2 (columns: x,z in mm)"
+    @assert nx_bins > 0 "nx_bins must be > 0"
+    @assert nz_bins > 0 "nz_bins must be > 0"
+    @assert width_mm > 0 "width_mm must be positive"
+    @assert @isdefined(default_camera_pixel_size) "define `default_camera_pixel_size` (meters)"
+
+    # Fixed analysis limits
+    xlim = (-8.0, 8.0)
+    zlim = (-12.5, 12.5)
+    xmin, xmax = xlim
+    zmin, zmax = zlim
+
+    # Bin size in mm (default_camera_pixel_size is assumed global in meters)
+    x_bin_size = 1e3 * nx_bins * default_camera_pixel_size
+    z_bin_size = 1e3 * nz_bins * default_camera_pixel_size
+
+    # --------------------------------------------------------
+    # X edges: force symmetric centers around 0
+    # --------------------------------------------------------
+    x_half_range = max(abs(xmin), abs(xmax))
+    kx = max(1, ceil(Int, x_half_range / x_bin_size))
+    centers_x = collect((-kx:kx) .* x_bin_size)
+    edges_x = collect((-(kx + 0.5)) * x_bin_size : x_bin_size : ((kx + 0.5) * x_bin_size))
+
+    # --------------------------------------------------------
+    # Z edges: force symmetric centers around 0
+    # --------------------------------------------------------
+    z_half_range = max(abs(zmin), abs(zmax))
+    kz = max(1, ceil(Int, z_half_range / z_bin_size))
+    centers_z = collect((-kz:kz) .* z_bin_size)
+    edges_z = collect((-(kz + 0.5)) * z_bin_size : z_bin_size : ((kz + 0.5) * z_bin_size))
+
+    # 2D histogram
+    x = @view data_mm[:, 1]
+    z = @view data_mm[:, 2]
+
+    if mode === :none
+        h = fit(Histogram, (x, z), (edges_x, edges_z))                    # raw counts (no normalization)
+    elseif mode in (:probability, :pdf, :density)
+        h = normalize(fit(Histogram, (x, z), (edges_x, edges_z)); mode=mode)
+    else
+        throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $mode"))
+    end
+
+    counts = h.weights  # size: (length(centers_x), length(centers_z))
+
+    # z-profile = mean over x bins
+    z_profile_raw = vec(mean(counts, dims = 1))
+    z_max_raw_mm = centers_z[argmax(z_profile_raw)]
+    z_max_raw_spline_mm, Sfit_raw = max_of_bspline_positions(centers_z,z_profile_raw;λ0=λ_raw)
+
+    # Smoothing
+    z_profile_smooth = smooth_profile(centers_z, z_profile_raw, width_mm)
+    z_max_smooth_mm = centers_z[argmax(z_profile_smooth)]
+    z_max_smooth_spline_mm, Sfit_smooth = max_of_bspline_positions(centers_z,z_profile_smooth;λ0=λ_smooth)
+
+    # Combine into one matrix for convenience: [z raw smooth]
+    z_profile = hcat(
+        centers_z,
+        z_profile_raw,
+        z_profile_smooth,
+    )
+
+    if add_plot
+        # Uncomment to visualize full 2D histogram:
+        # heatmap(centers_x, centers_z, counts', xlabel="x (mm)", ylabel="z (mm)", title="2D Histogram")
+
+        # Profiles
+        z = range(zmin,zmax,length=max(2000,length(centers_z)))
+        xlims_plot = plot_xrange== :right ? (zmin/4, zmax) : plot_xrange == :left ? (zmin, zmax/4) : (zmin, zmax)
+        fig=plot(       
+            title =L"$I_{c}=%$(Ix)\mathrm{A}$",
+            xlabel = L"$z$ (mm)", 
+            ylabel = "mean counts (au)",
+            xlims = xlims_plot,
+        );
+        plot!(z_profile[:, 1], z_profile[:, 2], 
+            label = L"Raw $z=%$(round(z_max_raw_mm,digits=4))\mathrm{mm}$",
+            line=(:solid,:gray90,2),
+            marker=(:circle,:white,1),
+            markerstrokecolor=:gray70
+        );
+        vline!([z_max_raw_mm], 
+            label=false,
+            line=(:solid,:black,1),
+        );
+        plot!(z,Sfit_raw.(z), 
+            label=L"Spline Raw $z=%$(round(z_max_raw_spline_mm[1],digits=4))\mathrm{mm}$",
+            line=(:forestgreen,:dot,2),
+        );
+        vline!(z_max_raw_spline_mm, 
+            label=false,
+            line=(:green,:solid,1))
+        # Convolution
+        plot!(z_profile[:, 1], z_profile[:, 3], 
+            label = L"Smoothed $z=%$(round(z_max_smooth_mm,digits=4))\mathrm{mm}$",
+            line=(:coral3,:dash,2),
+        );
+        vline!([z_max_smooth_mm], 
+            label=false,
+            line=(:red,:solid,1)
+        );
+        plot!(z,Sfit_smooth.(z), 
+            label=L"Spline Smoothed $z=%$(round(z_max_smooth_spline_mm[1],digits=4))\mathrm{mm}$",
+            line=(:royalblue3,:dot,2),
+        );
+        vline!(z_max_smooth_spline_mm, 
+            label=false,
+            line=(:blue,:solid,1)
+        );
+        savefig(fig, joinpath(OUTDIR, "profiles__"*replace(@sprintf("%d", 1e3*Ix), "." => "_")*"mA.png"))
+    end
+
+    return (
+        z_profile = z_profile,
+        z_max_raw_mm = z_max_raw_mm,
+        z_max_raw_spline_mm = z_max_raw_spline_mm[1],
+        z_max_smooth_mm = z_max_smooth_mm,
+        z_max_smooth_spline_mm = z_max_smooth_spline_mm[1]
+    )
+end
+
+
+function CQD_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any};
+    n_bins::Tuple = (1,4), width_mm::Float64 = 0.150, 
+    add_plot::Bool = false, plot_xrange::Symbol = :all,
+    λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, mode::Symbol = :probability)
+
+    @assert haskey(data, :Icoils) "missing :Icoils"
+    @assert haskey(data, :data)   "missing :data"
+
+    nx_bins = n_bins[1]
+    nz_bins = n_bins[2]
+
+    Ix = data[:Icoils]
+    out = OrderedDict{Int, OrderedDict{Symbol, Any}}()
+    for i in eachindex(Ix)
+        img = 1e3 .* data[:data][i][:,9:10] # mm
+
+        result = CQD_analyze_screen_profile(Ix[i], img;
+                nx_bins=nx_bins, nz_bins=nz_bins, 
+                width_mm=width_mm, 
+                add_plot=add_plot, 
+                plot_xrange=plot_xrange,
+                λ_raw=λ_raw, λ_smooth=λ_smooth,mode=mode)
+    
+        inner = OrderedDict{Symbol, Any}(
+        :Icoil                  => Ix[i],
+        :z_max_raw_mm           => result.z_max_raw_mm,
+        :z_max_raw_spline_mm    => result.z_max_raw_spline_mm,
+        :z_max_smooth_mm        => result.z_max_smooth_mm,
+        :z_max_smooth_spline_mm => result.z_max_smooth_spline_mm,
+        :z_profile              => result.z_profile,
+        )
+        
+        out[i] = inner 
+    end
+    return out
+end
