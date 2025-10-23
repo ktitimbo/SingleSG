@@ -52,6 +52,12 @@ Expected CSV columns (no header row override): `dI, Bz`.
 const B_TABLE_PATH = joinpath(@__DIR__, "SG_BvsI.csv")
 @info "Importing file from $(B_TABLE_PATH)"
 
+# Strictly-positive floor for B (tesla). Adjust if you want a different minimum.
+const B_FLOOR = 5.0e-17
+
+# Small helper to clamp to a strictly-positive lower bound
+@inline _posfloor(x::Real) = ifelse(x > B_FLOOR, x, 0.0)
+
 """
 Internal: holds the B(I) interpolant once initialized.
 Use `BvsI(I)` to evaluate; do not access directly.
@@ -68,7 +74,9 @@ a linear interpolant `B(I)` with extrapolation by line. Expects columns named
 function __init__()
     if isfile(B_TABLE_PATH)
         df = CSV.read(B_TABLE_PATH, DataFrame; header=["dI","Bz"])
-        _BvsI[] = linear_interpolation(df.dI, df.Bz; extrapolation_bc=Line())
+        # Enforce positivity in source data (handles any zero/negative entries)
+        bz_pos = map(_posfloor, df.Bz)
+        _BvsI[] = linear_interpolation(df.dI, bz_pos; extrapolation_bc=Line())
     else
         @warn "B table not found at $B_TABLE_PATH; call set_B_table! first."
     end
@@ -84,7 +92,7 @@ Throws an error if the table was not initialized.
 @inline function BvsI(I::Real)
     itp = _BvsI[]
     itp === nothing && error("BvsI not initialized. Load the table first.")
-    return itp(float(I))
+    return _posfloor(itp(float(I)))
 end
 
 
