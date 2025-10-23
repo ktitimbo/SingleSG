@@ -478,6 +478,12 @@ gif(anim, gif_path, fps=2)  # adjust fps as you like
 @info "Saved GIF" gif_path ;
 
 
+μₑ
+
+TheoreticalSimulation.QM_Screen_position(600e-3,1,-1, [-0.000422076272499603,0.0,-0.0000406444286907927], [-2.08992563350773,651.031465899489,-0.273932386217133], K39_params)
+TheoreticalSimulation.QM_Screen_position(600e-3,1, 0, [-0.000422076272499603,0.0,-0.0000406444286907927], [-2.08992563350773,651.031465899489,-0.273932386217133], K39_params)
+TheoreticalSimulation.QM_Screen_position(600e-3,1, 1, [-0.000422076272499603,0.0,-0.0000406444286907927], [-2.08992563350773,651.031465899489,-0.273932386217133], K39_params)
+TheoreticalSimulation.CQD_Screen_position(600e-3,μₑ,  [-0.000422076272499603,0.0,-0.0000406444286907927], [-2.08992563350773,651.031465899489,-0.273932386217133],2.24906153551977, 3.11, 4.3e-6, K39_params)
 
 ##################################################################################################
 #   COQUANTUM DYNAMICS
@@ -486,6 +492,17 @@ gif(anim, gif_path, fps=2)  # adjust fps as you like
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
 
+ki = 0.25e-6;
+@time CQDparticles_flag = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
+@time CQDparticles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQDparticles_flag, K39_params)
+TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQDparticles_trajectories, :up)
+CQD_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQDparticles_trajectories,:screen ));
+
+mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_screen;
+    n_bins = (32,1), width_mm = 0.150, 
+    add_plot = false, plot_xrange= :all,
+    λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
+
 fig = plot(I_exp[2:end],z_exp[2:end],
     ribbon=δz_exp[5:end],
     label="Mean experimental data",
@@ -493,28 +510,13 @@ fig = plot(I_exp[2:end],z_exp[2:end],
     fillalpha=0.23, 
     fillcolor=:black, 
     )
-for k0 in [3.8,4.0]
-    ki = k0*1e-6;
-    @time CQDparticles_flag = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
-    @time CQDparticles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQDparticles_flag, K39_params)
-    TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQDparticles_trajectories, :up)
-    CQD_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQDparticles_trajectories,:screen ));
-
-    mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_screen;
-        n_bins = (32,2), width_mm = 0.150, 
-        add_plot = false, plot_xrange= :all,
-        λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
-
-
-    plot!(fig,Icoils[2:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][2:end],
-        label=L"CQD: $k_{i}=%$(k0)\times 10^{-6}$")
-        display(fig)
-
-end
+plot!(fig,Icoils[10:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][10:end],
+    label=L"CQD: $k_{i}=%$(round(1e6*ki,sigdigits=3))\times 10^{-6}$")
+display(fig)
 plot!(fig,xaxis=:log10,
     yaxis=:log10,
-    xlims=(0.8e-3,2),
-    ylims=(0.8e-3,2),
+    xlims=(8e-3,2),
+    ylims=(8e-3,2),
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
             [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
