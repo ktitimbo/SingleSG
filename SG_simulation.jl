@@ -173,7 +173,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 100_000
+const Nss = 500_000
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit
@@ -478,6 +478,7 @@ gif(anim, gif_path, fps=2)  # adjust fps as you like
 @info "Saved GIF" gif_path ;
 
 
+TheoreticalSimulation.BvsI(0.0)
 
 ##################################################################################################
 #   COQUANTUM DYNAMICS
@@ -486,35 +487,44 @@ gif(anim, gif_path, fps=2)  # adjust fps as you like
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
 
-fig = plot(I_exp[2:end],z_exp[2:end],
+ki = 0.75e-6;
+@time CQDparticles_flag = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
+@time CQDparticles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQDparticles_flag, K39_params)
+TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQDparticles_trajectories, :up)
+CQD_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQDparticles_trajectories,:screen));
+
+mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_screen;
+    n_bins = (32,2), width_mm = 0.150, 
+    add_plot = false, plot_xrange= :all,
+    λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
+
+
+# Peak position (mm) : lower branch
+fig=plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
+plot!(fig,Icoils[2:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
+    label=L"Trajectory $\vert 2,-2\rangle$",
+    line=(:solid,:red,2))
+plot!(fig,Icoils[2:end], [profiles_bottom[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
+    label=L"Trajectory $F=1$",
+    line=(:solid,:blue,2))
+plot!(fig,Icoils[2:end], [profiles_Sdown[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
+    label=L"Trajectory $m_{s}=-1/2$",
+    line=(:solid,:purple,2))
+plot!(fig,Icoils[2:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][2:end],
+    label=L"CQD: $k_{i}=%$(round(1e6*ki,sigdigits=3))\times 10^{-6}$",
+    line=(:solid,:green,2))
+display(fig)
+plot!(fig,I_exp[2:end],z_exp[2:end],
     ribbon=δz_exp[5:end],
     label="Mean experimental data",
     line=(:black,:dash,2),
     fillalpha=0.23, 
     fillcolor=:black, 
     )
-for k0 in [3.8,4.0]
-    ki = k0*1e-6;
-    @time CQDparticles_flag = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
-    @time CQDparticles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQDparticles_flag, K39_params)
-    TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQDparticles_trajectories, :up)
-    CQD_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQDparticles_trajectories,:screen ));
-
-    mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_screen;
-        n_bins = (32,2), width_mm = 0.150, 
-        add_plot = false, plot_xrange= :all,
-        λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
-
-
-    plot!(fig,Icoils[2:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][2:end],
-        label=L"CQD: $k_{i}=%$(k0)\times 10^{-6}$")
-        display(fig)
-
-end
 plot!(fig,xaxis=:log10,
     yaxis=:log10,
-    xlims=(0.8e-3,2),
-    ylims=(0.8e-3,2),
+    xlims=(8e-3,2),
+    ylims=(8e-3,2),
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
             [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
@@ -523,6 +533,93 @@ plot!(fig,xaxis=:log10,
     left_margin =2mm,
 )
 display(fig)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Profiles : different contributions
+for j in eachindex(Icoils)
+    fig = plot(title=L"$I_{0}=%$(Icoils[j])\mathrm{A}$")
+    plot!(profiles_top[j][:z_profile][:,1],profiles_top[j][:z_profile][:,3],
+        label=L"$F=2$",
+        line=(:solid,:grey66,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:grey66,
+        markerstrokewidth=1)
+    vline!([profiles_top[j][:z_max_smooth_spline_mm]], 
+        line=(:grey66,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_top[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(profiles_Sup[j][:z_profile][:,1],profiles_Sup[j][:z_profile][:,3],
+        label=L"$m_{s}=+1/2$",
+        line=(:solid,:seagreen3,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:seagreen3,
+        markerstrokewidth=1)
+    vline!([profiles_Sup[j][:z_max_smooth_spline_mm]],
+        line=(:seagreen3,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_Sup[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(profiles_bottom[j][:z_profile][:,1],profiles_bottom[j][:z_profile][:,3],
+        label=L"$F=1$",
+        line=(:solid,:blueviolet,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:blueviolet,
+        markerstrokewidth=1)
+    vline!([profiles_bottom[j][:z_max_smooth_spline_mm]], 
+        line=(:blueviolet,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_bottom[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(profiles_Sdown[j][:z_profile][:,1],profiles_Sdown[j][:z_profile][:,3],
+        label=L"$m_{s}=-1/2$",
+        line=(:solid,:orangered2,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:orangered2,
+        markerstrokewidth=1)
+    vline!([profiles_Sdown[j][:z_max_smooth_spline_mm]],
+        line=(:orangered2,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_Sdown[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(profiles_5[j][:z_profile][:,1],profiles_5[j][:z_profile][:,3],
+        label=L"$F=2$, $m_{F}=-2$",
+        line=(:solid,:dodgerblue3,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:dodgerblue3,
+        markerstrokewidth=1)
+    vline!([profiles_5[j][:z_max_smooth_spline_mm]],
+        line=(:dodgerblue3,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_5[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(mm_up[j][:z_profile][:,1],mm_up[j][:z_profile][:,3],
+        label=L"CQD $k_{i}$",
+        line=(:solid,:maroon3,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:maroon3,
+        markerstrokewidth=1)
+    vline!([mm_up[j][:z_max_smooth_spline_mm]],
+        line=(:maroon3,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(mm_up[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    display(fig)
+end
+
+
+
+
+
+
+
+
+
+
 
 
 
