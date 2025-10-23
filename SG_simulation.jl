@@ -478,7 +478,6 @@ gif(anim, gif_path, fps=2)  # adjust fps as you like
 @info "Saved GIF" gif_path ;
 
 
-TheoreticalSimulation.BvsI(0.0)
 
 ##################################################################################################
 #   COQUANTUM DYNAMICS
@@ -487,40 +486,31 @@ TheoreticalSimulation.BvsI(0.0)
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
 
-ki = 0.75e-6;
-@time CQDparticles_flag = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
-@time CQDparticles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQDparticles_flag, K39_params)
-TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQDparticles_trajectories, :up)
-CQD_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQDparticles_trajectories,:screen));
-
-mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_screen;
-    n_bins = (32,2), width_mm = 0.150, 
-    add_plot = false, plot_xrange= :all,
-    λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
-
-
-# Peak position (mm) : lower branch
-fig=plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
-plot!(fig,Icoils[2:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
-    label=L"Trajectory $\vert 2,-2\rangle$",
-    line=(:solid,:red,2))
-plot!(fig,Icoils[2:end], [profiles_bottom[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
-    label=L"Trajectory $F=1$",
-    line=(:solid,:blue,2))
-plot!(fig,Icoils[2:end], [profiles_Sdown[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
-    label=L"Trajectory $m_{s}=-1/2$",
-    line=(:solid,:purple,2))
-plot!(fig,Icoils[2:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][2:end],
-    label=L"CQD: $k_{i}=%$(round(1e6*ki,sigdigits=3))\times 10^{-6}$",
-    line=(:solid,:green,2))
-display(fig)
-plot!(fig,I_exp[2:end],z_exp[2:end],
+fig = plot(I_exp[2:end],z_exp[2:end],
     ribbon=δz_exp[5:end],
     label="Mean experimental data",
     line=(:black,:dash,2),
     fillalpha=0.23, 
     fillcolor=:black, 
     )
+for k0 in [3.8,4.0]
+    ki = k0*1e-6;
+    @time CQDparticles_flag = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
+    @time CQDparticles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQDparticles_flag, K39_params)
+    TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQDparticles_trajectories, :up)
+    CQD_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQDparticles_trajectories,:screen ));
+
+    mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_screen;
+        n_bins = (32,2), width_mm = 0.150, 
+        add_plot = false, plot_xrange= :all,
+        λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
+
+
+    plot!(fig,Icoils[2:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][2:end],
+        label=L"CQD: $k_{i}=%$(k0)\times 10^{-6}$")
+        display(fig)
+
+end
 plot!(fig,xaxis=:log10,
     yaxis=:log10,
     xlims=(8e-3,2),
