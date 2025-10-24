@@ -333,9 +333,8 @@ function CQD_Screen_position(Ix,μ::Float64,r0::AbstractVector{<:Real},v0::Abstr
 
     x = x0 + Ltot * v0x / v0y
     y = y0 + Ltot
-    z = z0 + Ltot * v0z / v0y + 0.5*acc_z/v0y^2*((Lsg+Ld)^2-Ld^2) + 
-        acc_z/kω*Lsg/v0y*( log(cos2) + Ld/Lsg * log( cos2 + exp_term*sin2 ) ) + 
-        0.5*acc_z/kω^2 * ( polylogarithm(2, -exp_term*tan2) - polylogarithm(2, -tan2) )
+    z = z0 + Ltot * v0z / v0y + 0.5*acc_z/v0y^2*((Lsg+Ld)^2-Ld^2) + acc_z/kω*Lsg/v0y*( log(cos2) + Ld/Lsg * log( cos2 + exp_term*sin2 ) ) + 0.5*acc_z/kω^2 * ( polylogarithm(2, -exp_term*tan2) - polylogarithm(2, -tan2) )
+
     return SVector{3,Float64}(x,y,z)
 end
 
