@@ -54,20 +54,20 @@ module TheoreticalSimulation
     const INV_E = exp(-1);
 
     # STERN--GERLACH EXPERIMENT
-    default_camera_pixel_size = 6.5e-6 ; # (mm)
-    default_x_pixels = 2160;
-    default_z_pixels = 2560;
+    default_camera_pixel_size   = 6.5e-6 ;
+    default_x_pixels            = 2160;
+    default_z_pixels            = 2560;
     # Furnace aperture
-    default_x_furnace = 2.0e-3 ;
-    default_z_furnace = 100e-6 ;
+    default_x_furnace           = 2.0e-3 ;
+    default_z_furnace           = 100e-6 ;
     # Slit
-    default_x_slit  = 4.0e-3 ;
-    default_z_slit  = 300e-6 ;
+    default_x_slit              = 4.0e-3 ;
+    default_z_slit              = 300e-6 ;
     # Propagation distances
-    default_y_FurnaceToSlit = 224.0e-3 ;
-    default_y_SlitToSG      = 44.0e-3 ;
-    default_y_SG            = 7.0e-2 ;
-    default_y_SGToScreen    = 32.0e-2 ;
+    default_y_FurnaceToSlit     = 224.0e-3 ;
+    default_y_SlitToSG          = 44.0e-3 ;
+    default_y_SG                = 7.0e-2 ;
+    default_y_SGToScreen        = 32.0e-2 ;
     # Connecting pipes
     default_R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
 
