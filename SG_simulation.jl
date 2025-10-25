@@ -164,61 +164,6 @@ z_exp  = avg_data[:z_smooth];
 δz_exp = avg_data[:δz_smooth];
 ##################################################################################################
 
-
-data_sk = CSV.read(joinpath(dirname(OUTDIR),"20251023T163207351_num","initialstates_zqm_zcqd_ki3.5em6_I20mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"])
-I_sk = 20e-3
-ki_sk = 3.5e-6
-sk_row = rand(1:size(data_sk,1))
-
-for sk_row = 1:size(data_sk,1)
-    x0  = data_sk[sk_row,"x0"]
-    y0  = 0.0
-    z0  = data_sk[sk_row,"z0"]
-    v0x = data_sk[sk_row,"v0x"]
-    v0y = data_sk[sk_row,"v0y"]
-    v0z = data_sk[sk_row,"v0z"]
-
-
-pretty_table(hcat(
-[1e3*TheoreticalSimulation.QM_Screen_position(I_sk,1,mf,[x0,y0,z0],[v0x,v0y,v0z], K39_params)[3] for mf=1:-1:-1] ,
-1e3*[data_sk[sk_row,"zQM1"], data_sk[sk_row,"zQM2"], data_sk[sk_row,"zQM3"]]
-)
-)
-end
-
-for sk_row = 1:size(data_sk,1)
-    x0  = data_sk[sk_row,"x0"]
-    y0  = 0.0
-    z0  = data_sk[sk_row,"z0"]
-    v0x = data_sk[sk_row,"v0x"]
-    v0y = data_sk[sk_row,"v0y"]
-    v0z = data_sk[sk_row,"v0z"]
-
-    screen_kt = 1e3*TheoreticalSimulation.CQD_Screen_position(I_sk, μₑ, 
-                                            [x0, y0, z0], [v0x,v0y,v0z],
-                                            data_sk[sk_row,"θe"], 3.2,
-                                            ki_sk, K39_params)
-    screen_sk = 1e3*[data_sk[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk[sk_row,"zCQD"]]
-
-    println(norm(screen_kt.-screen_sk))
-
-
-    pretty_table(hcat(1e3*[data_sk[sk_row,"x0"], 0.0, data_sk[sk_row,"z0"]], screen_kt, screen_sk),
-        column_labels               = ["Initial", "Analytical", "Numerical"],
-        alignment                   = :c,
-        table_format                = TextTableFormat(borders = text_table_borders__unicode_rounded),
-        style                       = TextTableStyle(
-                                            first_line_merged_column_label  = crayon"light_red bold",
-                                            first_line_column_label         = crayon"yellow bold",
-                                            column_label                    = crayon"yellow",
-                                            table_border                    = crayon"blue bold",
-                                            title                           = crayon"red bold"
-                                        ),)
-
-end
-
-
-
 # Coil currents
 Icoils = [0.00,
             0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
@@ -228,11 +173,12 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 20_000
+const Nss = 100_000
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
-# Monte Carlo generation of particles traersing the filtering slit
+# Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
+jldsave( joinpath(OUTDIR,"cross_slit_particles_$(Nss).jld2"), data = crossing_slit)
 
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
@@ -561,7 +507,7 @@ anim = @animate for j in iter
     display(fig)
 end
 gif_path = joinpath(OUTDIR, "QM_time_evolution.gif");
-gif(anim, gif_path, fps=2)  # adjust fps as you like
+gif(anim, gif_path, fps=2)  # adjust fps
 @info "Saved GIF" gif_path ;
 
 
@@ -571,36 +517,84 @@ gif(anim, gif_path, fps=2)  # adjust fps as you like
 
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
-ki = 3.5e-6;
-@time CQDparticles_flag = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
-@time CQDparticles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQDparticles_flag, K39_params)
-TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQDparticles_trajectories, :up)
-CQD_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQDparticles_trajectories,:screen ))
+ki = 0.35e-6;
+@time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
+@time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQD_up_particles_flag, K39_params)      # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+@time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_DOWN, ki, K39_params; y_length=5001,verbose=true);
+@time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_DOWN, CQD_dw_particles_flag, K39_params);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
 
-mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_screen;
+TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
+TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_dw_particles_trajectories, :down)
+
+CQD_up_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_up_particles_trajectories,:screen ))
+CQD_dw_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_dw_particles_trajectories,:screen ))
+
+mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_up_screen;
     n_bins = (32,2), width_mm = 0.150, 
-    add_plot = false, plot_xrange= :all,
+    add_plot = true, plot_xrange= :all, branch=:up,
+    λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
+
+mm_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_dw_screen;
+    n_bins = (32,2), width_mm = 0.150, 
+    add_plot = true, plot_xrange= :all, branch=:dw,
     λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
 
 
 
+# Profiles : up and down
+anim = @animate for j in eachindex(Icoils)
+    fig = plot(
+        title=L"CQD profiles : $k_i = %$(round(1e6*ki, sigdigits=2))\times 10^{-6}$",
+        legend=:topleft,
+        legendtitle=L"$I_{0}=%$(Icoils[j])\mathrm{A}$",
+        legendtitlefontsize=8,
+        yformatter = val -> string(round(val * 1e4, digits = 2)),
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)",)
+    plot!(mm_up[j][:z_profile][:,1],mm_up[j][:z_profile][:,3],
+        label=L"$\vec{\mu}\upuparrows \hat{z}$",
+        line=(:solid,:orangered2,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:orangered2,
+        markerstrokewidth=1)
+    vline!([mm_up[j][:z_max_smooth_spline_mm]], 
+        line=(:orangered2,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(mm_up[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(mm_dw[j][:z_profile][:,1],mm_dw[j][:z_profile][:,3],
+        label=L"$\vec{\mu}\updownarrows \hat{z}$",
+        line=(:solid,:dodgerblue3,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:dodgerblue3,
+        markerstrokewidth=1)
+    vline!([mm_dw[j][:z_max_smooth_spline_mm]],
+        line=(:dodgerblue3,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(mm_dw[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    display(fig)
+end
+gif_path = joinpath(OUTDIR, "CQD_profiles.gif");
+gif(anim, gif_path, fps=2)  # adjust fps 
+@info "Saved GIF" gif_path ;
 
 
 
-
-
-
-
-fig = plot(I_exp[2:end],z_exp[2:end],
+fig = plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)") 
+plot!(I_exp[2:end],z_exp[2:end],
     ribbon=δz_exp[5:end],
     label="Mean experimental data",
     line=(:black,:dash,2),
     fillalpha=0.23, 
     fillcolor=:black, 
     )
-plot!(fig,Icoils[2:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][2:end],
-    label=L"CQD: $k_{i}=%$(k0)\times 10^{-6}$")
-    display(fig)
+Isim_start_idx = findall(>=(0.010), Icoils)[1]
+plot!(fig,Icoils[Isim_start_idx:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][Isim_start_idx:end],
+    label=L"CQD: $k_{i}=%$(1e6*ki)\times 10^{-6}$",
+    line=(:solid,:red,2))
+plot!(fig,Icoils[Isim_start_idx:end], [profiles_bottom[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][Isim_start_idx:end],
+    label=L"QM : $\mu_{\mathrm{eff}}$ for $F=1$",
+    line=(:solid,:blue,2))
+plot!(fig,Icoils[Isim_start_idx:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][Isim_start_idx:end],
+    label=L"QM : $\mu_{e}$",
+    line=(:solid,:purple,2))
 plot!(fig,xaxis=:log10,
     yaxis=:log10,
     xlims=(8e-3,2),
@@ -617,6 +611,13 @@ display(fig)
 
 
 
+
+[mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][2:end]
+
+
+mm_up
+
+Icoils
 
 
 

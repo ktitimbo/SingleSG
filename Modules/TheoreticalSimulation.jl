@@ -25,7 +25,7 @@ module TheoreticalSimulation
 
     # Defaults only if not already present in this module
     if !isdefined(@__MODULE__, :OUTDIR)
-        RUN_STAMP = Dates.format(Dates.now(), "yyyy-mm-dd_HHMMSS")
+        RUN_STAMP = Dates.format(Dates.now(), "yyyy-mm-dd_HHMMSSsss")
         OUTDIR    = joinpath(pwd(), "artifacts", RUN_STAMP)
         isdir(OUTDIR) || mkpath(OUTDIR)
     end

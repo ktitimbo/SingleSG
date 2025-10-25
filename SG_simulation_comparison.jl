@@ -159,7 +159,7 @@ TheoreticalSimulation.default_R_tube            = R_tube;
 
 ##################################################################################################
 ##################################################################################################
-
+using DifferentialEquations
 """
 Simulate 1D motion with three phases:
   Phase 1: 0 ≤ t < t1      → a(t) = 0
@@ -168,11 +168,12 @@ Simulate 1D motion with three phases:
 
 All angles in **radians**. Returns DifferentialEquations.jl solution.
 """
-function simulate_1d_piecewise_accel(x0::Real, v0::Real,
+function simulate_1d_piecewise_accel(x0::Real, v0::Real, θ::Real,
                                      tspan::Tuple{Real,Real},
                                      v0y::Real,
                                      Ix::Real,
-                                     μ::Real, G::Real, m::Real, θ::Real, kx::Real, p::AtomParams;
+                                     kx::Real,
+                                     pk::AtomParams;
                                      saveat=nothing, reltol=1e-9, abstol=1e-9)
 
     t1 = (y_FurnaceToSlit + y_SlitToSG) / v0y
@@ -182,13 +183,13 @@ function simulate_1d_piecewise_accel(x0::Real, v0::Real,
 
     # Fast/stable form of your a(t): cos(2atan x) = (1 - x^2)/(1 + x^2)
     ωL          = abs(γₑ*TheoreticalSimulation.BvsI(Ix))
-    a_scale     = (μ*TheoreticalSimulation.GvsI(Ix))/p.M
+    a_scale     = (μₑ*TheoreticalSimulation.GvsI(Ix))/pk.M
     kω          = kx * ωL
     tan_halfθ   = tan(θ/2)
     
     a_mid(t) = begin
         τ = t - t1
-        x = tan_halfθ * exp(-kω*τ)
+        x = tan_halfθ * exp(kω*τ )
         a_scale * ((1 - x^2) / (1 + x^2))
     end
 
@@ -216,47 +217,31 @@ I_sk = 20e-3
 ki_sk = 3.5e-6
 sk_row = rand(1:size(data_sk,1))
 
-for sk_row = 1:size(data_sk,1)
-    x0  = data_sk[sk_row,"x0"]
-    y0  = 0.0
-    z0  = data_sk[sk_row,"z0"]
-    v0x = data_sk[sk_row,"v0x"]
-    v0y = data_sk[sk_row,"v0y"]
-    v0z = data_sk[sk_row,"v0z"]
+x0  = data_sk[sk_row,"x0"]
+y0  = 0.0
+z0  = data_sk[sk_row,"z0"]
+v0x = data_sk[sk_row,"v0x"]
+v0y = data_sk[sk_row,"v0y"]
+v0z = data_sk[sk_row,"v0z"]
+θe0 = data_sk[sk_row,"θe"]
 
 # -----------------
 # Example usage:
 # -----------------
-# Initial state:
-x0, v0 = 0.0, 10.0           # meters, m/s
 # Timing:
 T  = (y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) / v0y
-t1 = 2.0
-t2 = 6.0
-# Parameters:
-μ  = 1.0
-G  = 0.8
-m  = 0.5
-θ  = 0.6          # radians
-kw = 3.0
 
-sol = simulate_1d_piecewise_accel(x0, v0; tspan=(0.0, T), t1, t2, μ, G, m, θ, kw, saveat=0:0.01:T)
+sol = simulate_1d_piecewise_accel(z0, v0z, θe0, (0.0, T), v0y, I_sk, ki_sk, K39_params; saveat=0:0.000001:T)
 
 # Query state at arbitrary time:
-x_at_7 = sol(7.0)[1]
-v_at_7 = sol(7.0)[2]
+x_at_7 = 1e3*sol(T)[1]
+v_at_7 = sol(T)[2]
 
-# --- Example usage ---
-x0, v0   = 0.0, 10.0
-t1, t2   = 2.0, 6.0
-T        = 10.0
-a_mid(t) = 2.0*cos(5.0*t)              # any time-dependent acceleration
-sol = simulate_piecewise_1d(x0, v0; tspan=(0.0,T), t1, t2, a_mid)
-
-# Query position/velocity at specific times:
-xs = sol.(0:0.1:10.0)                  # vector of states at sampled times
-x_at_7s = sol(7.0)[1]
-v_at_7s = sol(7.0)[2]
+screen_kt = 1e3*TheoreticalSimulation.CQD_Screen_position(I_sk, μₑ, 
+                                        [x0, y0, z0], [v0x,v0y,v0z],
+                                        data_sk[sk_row,"θe"], 3.2,
+                                        ki_sk, K39_params)
+screen_sk = 1e3*[data_sk[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk[sk_row,"zCQD"]]
 
 
 

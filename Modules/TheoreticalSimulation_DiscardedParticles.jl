@@ -505,7 +505,7 @@ function CQD_build_travelling_particles(
     flagged_trajec::Vector{Vector{UInt8}},
     p::AtomParams)::OrderedDict{Int, Matrix{Float64}}
 
-    @assert size(init_particles,2) ≥ 8 "init_particles needs at least 6 columns"
+    @assert size(init_particles,2) ≥ 8 "init_particles needs at least 8 columns"
     No        = size(init_particles, 1)
     ncurrents = length(Ix)
     @assert length(flagged_trajec) == ncurrents "flags length must match Ix"

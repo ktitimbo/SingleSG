@@ -454,11 +454,9 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
 end
 
 
-
-
 function CQD_analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
     nx_bins::Integer = 2, nz_bins::Integer = 2, 
-    add_plot::Bool = false, plot_xrange::Symbol = :all,
+    branch::Symbol = :up, add_plot::Bool = false, plot_xrange::Symbol = :all,
     width_mm::Float64 = 0.150, λ_raw::Float64=0.01, λ_smooth::Float64 = 1e-3, 
     mode::Symbol=:probability)
 
@@ -572,7 +570,7 @@ function CQD_analyze_screen_profile(Ix, data_mm::AbstractMatrix;
             label=false,
             line=(:blue,:solid,1)
         );
-        savefig(fig, joinpath(OUTDIR, "profiles__"*replace(@sprintf("%d", 1e3*Ix), "." => "_")*"mA.png"))
+        savefig(fig, joinpath(OUTDIR, "profiles_cqd_$(string(branch))_"*replace(@sprintf("%d", 1e3*Ix), "." => "_")*"mA.png"))
     end
 
     return (
@@ -587,7 +585,7 @@ end
 
 function CQD_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any};
     n_bins::Tuple = (1,4), width_mm::Float64 = 0.150, 
-    add_plot::Bool = false, plot_xrange::Symbol = :all,
+    branch::Symbol = :up, add_plot::Bool = false, plot_xrange::Symbol = :all,
     λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, mode::Symbol = :probability)
 
     @assert haskey(data, :Icoils) "missing :Icoils"
@@ -605,6 +603,7 @@ function CQD_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any};
                 nx_bins=nx_bins, nz_bins=nz_bins, 
                 width_mm=width_mm, 
                 add_plot=add_plot, 
+                branch=branch,
                 plot_xrange=plot_xrange,
                 λ_raw=λ_raw, λ_smooth=λ_smooth,mode=mode)
     
