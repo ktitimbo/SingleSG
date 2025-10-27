@@ -727,30 +727,30 @@ dta_ki_dw = zeros(length(kis),length(Icoils))
 for (i,ki) in enumerate(kis)
     @info "Running for kᵢ = $(1e6*ki)×10⁻⁶"
 
-@time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
-@time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQD_up_particles_flag, K39_params)      # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
-@time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_DOWN, ki, K39_params; y_length=5001,verbose=true);
-@time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_DOWN, CQD_dw_particles_flag, K39_params);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+    @time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
+    @time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQD_up_particles_flag, K39_params)      # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+    @time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_DOWN, ki, K39_params; y_length=5001,verbose=true);
+    @time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_DOWN, CQD_dw_particles_flag, K39_params);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
 
-TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
-TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_dw_particles_trajectories, :down)
+    TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
+    TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_dw_particles_trajectories, :down)
 
-CQD_up_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_up_particles_trajectories,:screen ))
-CQD_dw_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_dw_particles_trajectories,:screen ))
+    CQD_up_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_up_particles_trajectories,:screen ))
+    CQD_dw_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_dw_particles_trajectories,:screen ))
 
-mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_up_screen;
-    n_bins = (32,2), width_mm = 0.150, 
-    add_plot = true, plot_xrange= :all, branch=:up,
-    λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
+    mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_up_screen;
+        n_bins = (32,2), width_mm = 0.150, 
+        add_plot = false, plot_xrange= :all, branch=:up,
+        λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
 
-mm_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_dw_screen;
-    n_bins = (32,2), width_mm = 0.150, 
-    add_plot = true, plot_xrange= :all, branch=:dw,
-    λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
+    mm_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_dw_screen;
+        n_bins = (32,2), width_mm = 0.150, 
+        add_plot = false, plot_xrange= :all, branch=:dw,
+        λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
 
 
-dta_ki_up[i,:] = [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][1:end]
-dta_ki_dw[i,:] = [mm_dw[v][:z_max_smooth_spline_mm] for v in 1:nI][1:end]
+    dta_ki_up[i,:] = [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][1:end]
+    dta_ki_dw[i,:] = [mm_dw[v][:z_max_smooth_spline_mm] for v in 1:nI][1:end]
 end
 
 jldsave( joinpath(dir_load_string, "cqd_up.jld2"), data=dta_ki_up)
