@@ -124,9 +124,7 @@ Numerical notes
     else # t > tf3 # Travel to the Screen
         τ_SG = default_y_SG / v0y
         Eτ = exp(-2*kω*τ_SG)
-        z = z0 + v0z*t + 0.5*acc_0*( (t-tf2)^2 - (t-tf3)^2) + 
-            acc_0/kω*τ_SG * ( log(cosθ2) + v0y/default_y_SG*log(cosθ2+Eτ*sinθ2)*(t-tf3) ) + 
-            0.5*acc_0/kω^2*( polylogarithm(2,-Eτ*tanθ2) - polylogarithm(2,-tanθ2) )
+        z = z0 + v0z*t + 0.5*acc_0*( (t-tf2)^2 - (t-tf3)^2) + acc_0/kω*τ_SG * ( log(cosθ2) + v0y/default_y_SG*log(cosθ2+Eτ*sinθ2)*(t-tf3) ) + 0.5*acc_0/kω^2*( polylogarithm(2,-Eτ*tanθ2) - polylogarithm(2,-tanθ2) )
         vz = v0z + acc_0*τ_SG + acc_0/kω*log(cosθ2 + Eτ*sinθ2)
     end
 

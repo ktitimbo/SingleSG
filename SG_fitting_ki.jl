@@ -366,8 +366,8 @@ end
 load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
 I_exp       = load_data[!,"Icoil_A"]
 I_exp_error = load_data[!,"Icoil_error_A"]
-z_exp       = load_data[!,"F1_z_centroid_mm"]/res.magnification
-z_exp_error = load_data[!,"F1_z_centroid_se_mm"]/res.magnification
+z_exp       = load_data[!,"F1_z_centroid_mm"]/(1.05*res.magnification)
+z_exp_error = load_data[!,"F1_z_centroid_se_mm"]/(1.05*res.magnification)
 data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[8:end,:]
 
 # pre allocation of vectors

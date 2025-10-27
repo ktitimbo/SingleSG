@@ -262,18 +262,7 @@ module TheoreticalSimulation
             pixel_coordinates,
             fmf_levels, μF_effective, 
             generate_samples, generate_CQDinitial_conditions,
-            z_magnet_edge, z_magnet_trench,
-            z_magnet_edge_time, z_magnet_trench_time,
-            CQD_EqOfMotion, QM_EqOfMotion,
-            CQD_EqOfMotion_z, QM_EqOfMotion_z,
-            CQD_Screen_position, QM_Screen_position,
-            CQD_Screen_velocity, QM_Screen_velocity,
-            QM_screen_x_z_vz,
             plot_μeff, plot_SG_geometry, plot_velocity_stats,
-            QM_find_discarded_particles, QM_find_discarded_particles_multithreading,
-            alternative_QM_find_discarded_particles_multithreading, alternative_QM_build_screen_with_flags,
-            QM_build_filtered_pairs, QM_build_alive_screen,
-	        analyze_screen_profile,
             QM_analyze_profiles_to_dict
 
 end

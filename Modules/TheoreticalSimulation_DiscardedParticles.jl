@@ -659,7 +659,7 @@ function CQD_travelling_particles_summary(Ixs, particles, branch::Symbol)
                                                     table_border = crayon"blue bold",
                                                     title = crayon"bold red"),
         equal_data_column_widths    = true,
-        row_labels                  = round.(1000*Ixs, sigdigits=3),
+        row_labels                  = Int.(round.(1000*Ixs, sigdigits=3)),
         stubhead_label              = "I₀ [mA]",
         row_label_column_alignment  = :c,
     )

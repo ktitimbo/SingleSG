@@ -56,7 +56,7 @@ const B_TABLE_PATH = joinpath(@__DIR__, "SG_BvsI.csv")
 const B_FLOOR = 5.0e-17
 
 # Small helper to clamp to a strictly-positive lower bound
-@inline _posfloor(x::Real) = ifelse(x > B_FLOOR, x, 0.0)
+@inline _posfloor(x::Real) = ifelse(x > B_FLOOR, x, 1.0e-21)
 
 """
 Internal: holds the B(I) interpolant once initialized.
