@@ -175,7 +175,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 2_000
+const Nss = 2_000_000
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
@@ -714,10 +714,13 @@ plot!(fig,xaxis=:log10,
 display(fig)
 savefig(fig, joinpath(OUTDIR,"CQD_results_comparison.$FIG_EXT"))
 
-collect(1e-6*range(1.6,3.0, length=15))
 
 
-kis = collect(1e-6*range(0.1,1.5, length=15))
+# kis = collect(1e-6*range(0.1,1.5, length=15))
+kis = collect(1e-6*range(1.6,3.0, length=15))
+# kis = collect(1e-6*range(3.1,4.5, length=15))
+
+
 dta_ki_up = zeros(length(kis),length(Icoils))
 dta_ki_dw = zeros(length(kis),length(Icoils))
 for (i,ki) in enumerate(kis)
