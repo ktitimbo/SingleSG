@@ -175,8 +175,11 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 2_000_000
+const Nss = 2_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
+
+nx_bins , nz_bins = 32 , 2
+gaussian_width_mm = 0.150
 
 # Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
@@ -211,23 +214,30 @@ jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedD
 
 alive_screen = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:screen ));
 dead_crash   = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:crash ));
+jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), alive = alive_screen)
 
-nx_bins , nz_bins = 32 , 2
 println("Profiles F=$(K39_params.Ispin+0.5)")
 profiles_top = QM_analyze_profiles_to_dict(alive_screen, K39_params;
-                    manifold=:F_top,    n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=false, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
+                    manifold=:F_top,    n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
 println("Profiles F=$(K39_params.Ispin-0.5)")
 profiles_bottom = QM_analyze_profiles_to_dict(alive_screen, K39_params;
-                    manifold=:F_bottom, n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=false, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
+                    manifold=:F_bottom, n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
 println("Profiles F=$(K39_params.Ispin+0.5), mf=$(-(K39_params.Ispin+0.5))")
 profiles_5      = QM_analyze_profiles_to_dict(alive_screen, K39_params;
-                    manifold=5,         n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=false, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
+                    manifold=5,         n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
 println("Profiles ms=$((K39_params.Ispin))")
 profiles_Sup  = QM_analyze_profiles_to_dict(alive_screen, K39_params;
-                    manifold=:S_up,     n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=false, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
+                    manifold=:S_up,     n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
 println("Profiles ms=$(-(K39_params.Ispin))")
 profiles_Sdown  = QM_analyze_profiles_to_dict(alive_screen, K39_params;
-                    manifold=:S_down,   n_bins= (nx_bins , nz_bins), width_mm=0.150, add_plot=false, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
+                    manifold=:S_down,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=0.01, λ_smooth = 0.001, mode=:probability);
+jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_profiles.jld2"), profiles = OrderedDict( 
+                                                                    :upper => profiles_top, 
+                                                                    :lower => profiles_bottom, 
+                                                                    :Sup => profiles_Sup, 
+                                                                    :Sdown => profiles_Sdown, 
+                                                                    :lvl5 => profiles_5) 
+                                                                    )
 
 # Profiles : different contributions
 anim = @animate for j in eachindex(Icoils)
@@ -342,7 +352,6 @@ plot!(fig,xaxis=:log10,
 )
 display(fig)
 savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
-
 
 
 
@@ -530,17 +539,28 @@ TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_dw_particles_t
 
 CQD_up_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_up_particles_trajectories,:screen ))
 CQD_dw_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_dw_particles_trajectories,:screen ))
+jldsave(joinpath(OUTDIR,"cqd_$(Nss)_up_screen.jld2"), screen = CQD_up_screen )
+jldsave(joinpath(OUTDIR,"cqd_$(Nss)_dw_screen.jld2"), screen = CQD_dw_screen )
 
 mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_up_screen;
-    n_bins = (32,2), width_mm = 0.150, 
+    n_bins = (nx_bins , nz_bins), width_mm = gaussian_width_mm, 
     add_plot = false, plot_xrange= :all, branch=:up,
     λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
 
 mm_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_dw_screen;
-    n_bins = (32,2), width_mm = 0.150, 
+    n_bins = (nx_bins , nz_bins), width_mm = gaussian_width_mm, 
     add_plot = false, plot_xrange= :all, branch=:dw,
     λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
 
+jldsave(
+    joinpath(OUTDIR,"cqd_$(Nss)_screen_profiles.jld2"), 
+    profile = OrderedDict(
+    :ki   => ki,
+    :mmup => mm_up,
+    :mmdw => mm_dw
+    ) 
+)
+                                                                 
 # Profiles : up and down
 anim = @animate for j in eachindex(Icoils)
     fig = plot(
@@ -577,7 +597,7 @@ gif(anim, gif_path, fps=2)  # adjust fps
 anim = nothing
 
 # ATOMS PROPAGATION
-r = 1:4:nI;
+r = 1:3:nI;
 iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
 anim = @animate for j in iter
     data_set = CQD_up_screen[:data][j]
@@ -714,11 +734,10 @@ plot!(fig,xaxis=:log10,
 display(fig)
 savefig(fig, joinpath(OUTDIR,"CQD_results_comparison.$FIG_EXT"))
 
-
-
-# kis = collect(1e-6*range(0.1,1.5, length=15))
-kis = collect(1e-6*range(1.6,3.0, length=15))
+kis = collect(1e-6*range(0.1,1.5, length=15))
+# kis = collect(1e-6*range(1.6,3.0, length=15))
 # kis = collect(1e-6*range(3.1,4.5, length=15))
+# kis = collect(1e-6*range(4.6,6.0, length=15))
 
 
 dta_ki_up = zeros(length(kis),length(Icoils))
@@ -738,12 +757,12 @@ for (i,ki) in enumerate(kis)
     CQD_dw_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_dw_particles_trajectories,:screen ))
 
     mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_up_screen;
-        n_bins = (32,2), width_mm = 0.150, 
+        n_bins = (32,2), width_mm = gaussian_width_mm, 
         add_plot = false, plot_xrange= :all, branch=:up,
         λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
 
     mm_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_dw_screen;
-        n_bins = (32,2), width_mm = 0.150, 
+        n_bins = (32,2), width_mm = gaussian_width_mm, 
         add_plot = false, plot_xrange= :all, branch=:dw,
         λ_raw = 0.01, λ_smooth = 1e-3, mode = :probability)
 
