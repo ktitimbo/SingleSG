@@ -605,8 +605,7 @@ gif(anim, gif_path, fps=2)  # adjust fps
 anim = nothing
 
 # Profiles COMPARISON : different contributions 
-anim = @animate 
-for j in 1:4:length(Icoils)
+anim = @animate for j in 1:4:length(Icoils)
     isodd(j) || continue        # keep only every other
     fig = plot(title=L"$I_{0}=%$(Int(1e3*Icoils[j]))\mathrm{mA}$",
         xlabel=L"$z$ (mm)",
