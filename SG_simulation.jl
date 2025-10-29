@@ -339,7 +339,7 @@ plot!(fig,Icoils[2:end], [profiles_Sdown[i][:z_max_smooth_spline_mm] for i in ea
     line=(:solid,:purple,2))
 plot!(fig,I_exp[2:end],z_exp[2:end],
     ribbon=δz_exp[5:end],
-    label="Mean experimental data",
+    label="Experiment (combined)",
     line=(:black,:dash,2),
     fillalpha=0.23, 
     fillcolor=:black, 
@@ -798,7 +798,7 @@ anim = nothing
 fig = plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)") 
 plot!(I_exp[2:end],z_exp[2:end],
     ribbon=δz_exp[5:end],
-    label="Mean experimental data",
+    label="Experiment (combined)",
     line=(:black,:dash,2),
     fillalpha=0.23, 
     fillcolor=:black, 
@@ -829,10 +829,14 @@ savefig(fig, joinpath(OUTDIR,"CQD_results_comparison.$FIG_EXT"))
 
 
 
-kis = collect(1e-6*range(0.1,1.5, length=15))
-# kis = collect(1e-6*range(1.6,3.0, length=15))
-# kis = collect(1e-6*range(3.1,4.5, length=15))
-# kis = collect(1e-6*range(4.6,6.0, length=15))
+kis = collect(1e-7*range(0.1,1.0, length=10))
+kis = collect(1e-6*range(0.1,1.0, length=10))
+kis = collect(1e-6*range(1.1,2.0, length=10))
+kis = collect(1e-6*range(2.1,3.0, length=10))
+kis = collect(1e-6*range(3.1,4.0, length=10))
+kis = collect(1e-6*range(4.1,5.0, length=10))
+kis = collect(1e-6*range(5.1,6.0, length=10))
+
 dta_ki_up = zeros(length(kis),length(Icoils))
 dta_ki_dw = zeros(length(kis),length(Icoils))
 for (i,ki) in enumerate(kis)
@@ -880,7 +884,7 @@ cls = palette(:darkrainbow, length(kis))
 fig = plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
 plot!(I_exp[2:end],z_exp[2:end],
     ribbon=δz_exp[5:end],
-    label="Mean experimental data",
+    label="Experiment (combined)",
     line=(:black,:dash,2),
     fillalpha=0.23, 
     fillcolor=:black, 
