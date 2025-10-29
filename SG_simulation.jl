@@ -175,7 +175,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 20_000 ; 
+const Nss = 1_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -969,7 +969,7 @@ SIMULATION INFORMATION
     Induction term (×10⁻⁶)  : $(round.(1e6*kis, sigdigits=2))
 
 CODE
-    Code name               : $(PROGRAM_FILE),
+    Code name               : $(PROGRAM_FILE)
     Start date              : $(T_START)
     End data                : $(T_END)
     Run time                : $(T_RUN)
@@ -986,6 +986,6 @@ open(joinpath(OUTDIR,"simulation_report.txt"), "w") do io
 end
 
 
-println("script has finished!")
-alert("script has finished!")
+println("script $RUN_STAMP has finished!")
+alert("script $RUN_STAMP has finished!")
 
