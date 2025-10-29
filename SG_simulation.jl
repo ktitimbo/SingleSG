@@ -533,7 +533,7 @@ anim = nothing
 
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
-ki = 0.35e-6;
+ki = 3.5e-6;
 @time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
 @time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQD_up_particles_flag, K39_params)      # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
 @time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_DOWN, ki, K39_params; y_length=5001,verbose=true);
@@ -836,7 +836,7 @@ kis = collect(1e-6*range(0.1,1.5, length=15))
 dta_ki_up = zeros(length(kis),length(Icoils))
 dta_ki_dw = zeros(length(kis),length(Icoils))
 for (i,ki) in enumerate(kis)
-    @info "Running for kᵢ = $(1e6*ki)×10⁻⁶"
+    @info "Running for kᵢ = $(round(1e6*ki,sigdigits=2))×10⁻⁶"
 
     @time temp_CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
     @time temp_CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, temp_CQD_up_particles_flag, K39_params)      # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
@@ -908,9 +908,6 @@ plot!(fig,
     foreground_color_legend=nothing)
 display(fig)
 savefig(fig, joinpath(OUTDIR,"cqd_$(Nss)_kis_comparison.$(FIG_EXT)"))
-
-
-
 
 
 
