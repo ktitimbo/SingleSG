@@ -4,7 +4,7 @@
 # August 2025
 
 #  Plotting Setup
-# ENV["GKS_WSTYPE"] = "101"
+# ENV["GKS_WSTYPE"] = "100"
 using Plots; gr()
 Plots.default(
     show=true, dpi=800, fontfamily="Computer Modern", 
@@ -44,6 +44,12 @@ const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const OUTDIR    = joinpath(@__DIR__, "simulation_data", RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
+const TEMP_DIR = joinpath(@__DIR__,"artifacts", "JuliaTemp")
+isdir(TEMP_DIR) || mkpath(TEMP_DIR);
+ENV["TMPDIR"] = TEMP_DIR
+ENV["TEMP"]   = TEMP_DIR
+ENV["TMP"]    = TEMP_DIR
+@info "Temporary directory configured" TEMP_DIR
 # General setup
 HOSTNAME = gethostname();
 @info "Running on host" HOSTNAME=HOSTNAME
@@ -75,13 +81,7 @@ const Sspin = 1/2 ;                # Electron spin
 const gₑ    = -2.00231930436092 ;  # Electron g-factor
 ## ATOM INFORMATION: 
 # atom_info       = AtomicSpecies.atoms(atom);
-K39_params = AtomParams(atom);
-# const R         = atom_info[1];
-# const μₙ        = atom_info[2];
-# const γₙ        = atom_info[3];
-# const Ispin    = atom_info[4];
-# const Ahfs     = atom_info[6];
-# const M        = atom_info[7];
+K39_params = AtomParams(atom); # [R μn γn Ispin Ahfs M ] 
 # Math constants
 const TWOπ = 2π;
 const INV_E = exp(-1);
