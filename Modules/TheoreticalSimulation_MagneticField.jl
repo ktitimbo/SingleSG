@@ -18,13 +18,15 @@ const GRAD_GRADIENT = [0, 25.6, 58.4, 92.9, 132.2, 164.2, 196.3, 226, 240, 253.7
 Internal: prebuilt linear interpolant mapping current → gradient.
 Call via `GvsI(I)` instead of using this object directly.
 """
-const _GvsI = Interpolations.LinearInterpolation(GRAD_CURRENTS, GRAD_GRADIENT; extrapolation_bc=Line())
+# const _GvsI = Interpolations.LinearInterpolation(GRAD_CURRENTS, GRAD_GRADIENT; extrapolation_bc=Line())
+const _GvsI = DataInterpolations.AkimaInterpolation(GRAD_GRADIENT, GRAD_CURRENTS; extrapolation = ExtrapolationType.Linear)
 
 """
 Internal: prebuilt linear interpolant mapping gradient → current.
 Call via `IvsG(G)` instead of using this object directly.
 """
-const _IvsG = Interpolations.LinearInterpolation(GRAD_GRADIENT, GRAD_CURRENTS; extrapolation_bc=Line())
+# const _IvsG = Interpolations.LinearInterpolation(GRAD_GRADIENT, GRAD_CURRENTS; extrapolation_bc=Line())
+const _IvsG = DataInterpolations.AkimaInterpolation(GRAD_CURRENTS, GRAD_GRADIENT; extrapolation = ExtrapolationType.Linear)
 
 """
     GvsI(I::Real) -> Real
@@ -76,7 +78,8 @@ function __init__()
         df = CSV.read(B_TABLE_PATH, DataFrame; header=["dI","Bz"])
         # Enforce positivity in source data (handles any zero/negative entries)
         bz_pos = map(_posfloor, df.Bz)
-        _BvsI[] = linear_interpolation(df.dI, bz_pos; extrapolation_bc=Line())
+        # _BvsI[] = linear_interpolation(df.dI, bz_pos; extrapolation_bc=Line())
+        _BvsI[] = DataInterpolations.AkimaInterpolation(bz_pos, df.dI; extrapolation = ExtrapolationType.Linear)
     else
         @warn "B table not found at $B_TABLE_PATH; call set_B_table! first."
     end

@@ -8,7 +8,7 @@ module TheoreticalSimulation
     using Dates
     # Numerical tools
     using LinearAlgebra, DataStructures
-    using Interpolations, Roots, Loess, Optim
+    using Interpolations, Roots, Loess, Optim, DataInterpolations
     using BSplineKit
     using DSP
     using LambertW, PolyLog
