@@ -365,6 +365,7 @@ savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
 # (μF_effective(Icoils[j],1,-1,K39_params),μF_effective(Icoils[j],1,0,K39_params),μF_effective(Icoils[j],1,1,K39_params))
 # dBzdz  = TheoreticalSimulation.GvsI(Icoils[j])
 # dd1 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 2,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
+# plot(1e3*zd,dd1)
 # dd2 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
 # dd3 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2, 0,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
 # dd4 = TheoreticalSimulation.getProbDist_v3(μF_effective(Icoils[j],2,-1,K39_params), dBzdz, zd, K39_params, effusion_params; npts=2001, pdf=:finite) 
@@ -964,7 +965,7 @@ SETUP FEATURES
 
 SIMULATION INFORMATION
     Number of atoms         : $(Nss)
-    Binning                 : $(nx_bins) × $(nz_bins)
+    Binning (nx,nz)         : ($(nx_bins),$(nz_bins))
     Gaussian width (mm)     : $(gaussian_width_mm)
     Smoothing raw           : $(λ0_raw)
     Smoothing spline        : $(λ0_spline)
