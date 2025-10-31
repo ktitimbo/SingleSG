@@ -1096,3 +1096,313 @@ function QM_cavity_crash(μG_ix::Float64,
     return (x_screen*x_screen + z_screen*z_screen >= R2tube) ? UInt8(0x03) : UInt8(0x00) # 3 tubes
 end
 
+
+
+########################################################################################################################################
+# Co-Quantum Dynamics : B = B₀ + Bₙ cos(θₙ)
+########################################################################################################################################
+# for potassium
+Bn = 0.016475308514918384
+
+# CQD Equations of motion
+@inline function CQD_Bn_EqOfMotion(t,Ix,μ,r0::AbstractVector{<:Real},v0::AbstractVector{<:Real},θe::Float64, θn::Float64, kx::Float64, p::AtomParams)
+    @assert length(r0) == 3 "r0 must have length 3"
+    @assert length(v0) == 3 "v0 must have length 3"
+    @assert t >= 0 "time t must be ≥ 0"
+    x0, y0, z0 = r0
+    v0x, v0y, v0z = v0
+    @assert !iszero(v0y) "y-velocity must be nonzero."
+
+
+    # Key times
+    tf1 =  default_y_FurnaceToSlit / v0y
+    tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG) / v0y
+    tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG) / v0y
+    # tF  = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToScreen) / v0y  # (unused here)
+
+    cqd_sign = sign(θn-θe) 
+    ωL       = abs(γₑ * (BvsI(Ix) + Bn*cos(θn)) )
+    acc_0    = μ*GvsI(Ix)/p.M
+    kω       = cqd_sign*kx*ωL
+
+    θe_half = θe / 2
+    cosθ2 = cos(θe_half)^2
+    sinθ2 = sin(θe_half)^2
+    tanθ2 = tan(θe_half)^2
+
+    x = x0 + v0x*t 
+    y = y0 + v0y*t 
+    vx = v0x
+    vy = v0y
+
+    if t <= tf1     # Furnace to Slit
+        z = z0 + v0z*t
+        vz = v0z
+    elseif t <= tf2    # Slit to SG apparatus
+        z = z0 + v0z*t
+        vz = v0z
+    elseif t <= tf3   # Crossing the SG apparatus
+        Δt = t-tf2
+        EΔ = exp(-2*kω*Δt)
+        vz = v0z + acc_0*Δt + acc_0/kω * log( cosθ2 + EΔ*sinθ2 )
+        z = z0 + v0z*t + 0.5*acc_0*Δt^2 + acc_0/kω*log(cosθ2)*Δt + 
+            0.5/(kω)^2 * acc_0 * ( polylogarithm(2,-EΔ*tanθ2) - polylogarithm(2,-tanθ2) )
+    else # t > tf3 # Travel to the Screen
+        τ_SG = default_y_SG / v0y
+        Eτ = exp(-2*kω*τ_SG)
+        z = z0 + v0z*t + 0.5*acc_0*( (t-tf2)^2 - (t-tf3)^2) + acc_0/kω*τ_SG * ( log(cosθ2) + v0y/default_y_SG*log(cosθ2+Eτ*sinθ2)*(t-tf3) ) + 0.5*acc_0/kω^2*( polylogarithm(2,-Eτ*tanθ2) - polylogarithm(2,-tanθ2) )
+        vz = v0z + acc_0*τ_SG + acc_0/kω*log(cosθ2 + Eτ*sinθ2)
+    end
+
+    r = SVector{3,Float64}(x, y, z)
+    v = SVector{3,Float64}(vx, vy, vz)
+    return r, v
+end
+
+
+# CQD equations of motion only along the z-coordinate
+@inline function CQD_Bn_EqOfMotion_z(t,Ix::Float64,μ::Float64,r0::AbstractVector{<:Real},v0::AbstractVector{<:Real},θe::Float64, θn::Float64, kx::Float64, p::AtomParams)
+    @assert length(r0) == 3 "r0 must have length 3"
+    @assert length(v0) == 3 "v0 must have length 3"
+    @assert t >= 0 "time t must be ≥ 0"
+
+    v0y = v0[2]
+    v0z = v0[3]
+    z0  = r0[3]
+
+    @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
+    
+    
+    tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG ) / v0y
+    tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG ) / v0y
+
+    cqd_sign = sign(θn-θe) 
+    ωL       = abs( γₑ * (BvsI(Ix) + Bn*cos(θn)) )
+    acc_z    = μ*GvsI(Ix)/p.M
+    kω       = cqd_sign*kx*ωL
+
+    # Precompute angles
+    θe_half = θe / 2
+    tanθ2 = tan(θe_half)^2
+    cosθ2 = cos(θe_half)^2
+    sinθ2 = sin(θe_half)^2
+    log_cos2 = log(cosθ2)
+    polylog_0 = polylogarithm(2, -tanθ2)
+
+    if t <= tf2
+        return z0 + v0z*t
+    elseif t <= tf3   # Crossing the SG apparatus
+        Δt = t - tf2
+        exp_term = exp(-2 * kω * Δt)
+        polylog_t = polylogarithm(2, -exp_term * tanθ2)
+
+        return z0 + v0z*t + 0.5 * acc_z * Δt^2 + acc_z / kω * log_cos2 * Δt + 0.5 * acc_z / kω^2 * ( polylog_t - polylog_0 )
+    
+    else # t > tf3 # Travel to the Screen
+        Δt2 = t - tf2
+        Δt3 = t - tf3
+        τ_SG = default_y_SG / v0y
+        exp_SG = exp(-2 * kω * τ_SG)
+        polylog_SG = polylogarithm(2, -exp_SG * tanθ2)
+        log_term = log(cosθ2 + exp_SG * sinθ2)
+
+        return z0 + v0z*t + 0.5*acc_z*( Δt2^2 - Δt3^2 ) + acc_z / kω * τ_SG * (log_cos2 + log_term * Δt3 / τ_SG) + 0.5 * acc_z / kω^2 * (polylog_SG - polylog_0)
+    end
+end
+
+# CQD Screen position
+function CQD_Bn_Screen_position(Ix,μ::Float64,r0::AbstractVector{<:Real},v0::AbstractVector{<:Real},θe::Float64, θn::Float64, kx::Float64, p::AtomParams)
+    @assert length(r0) == 3 "r0 must have length 3"
+    @assert length(v0) == 3 "v0 must have length 3"
+    x0, y0, z0 = r0
+    v0x, v0y, v0z = v0
+
+    L1   = default_y_FurnaceToSlit 
+    L2   = default_y_SlitToSG
+    Lsg  = default_y_SG
+    Ld   = default_y_SGToScreen
+    Ltot = L1 + L2 + Lsg + Ld
+
+    # Physics parameters
+    cqd_sign = sign(θn-θe) 
+    acc_z = μ * GvsI(Ix) / p.M
+    ωL = abs(γₑ * (BvsI(Ix)+Bn*cos(θn)))
+    kω = cqd_sign * kx * ωL
+
+    # Common trig values
+    θe_half = θe / 2
+    cos2 = cos(θe_half)^2
+    sin2 = sin(θe_half)^2
+    tan2 = tan(θe_half)^2
+    exp_term = exp(-2 * kω * Lsg / v0y)
+
+    x = x0 + Ltot * v0x / v0y
+    y = y0 + Ltot
+    z = z0 + Ltot * v0z / v0y + 0.5*acc_z/v0y^2*((Lsg+Ld)^2-Ld^2) + acc_z/kω*Lsg/v0y*( log(cos2) + Ld/Lsg * log( cos2 + exp_term*sin2 ) ) + 0.5*acc_z/kω^2 * ( polylogarithm(2, -exp_term*tan2) - polylogarithm(2, -tan2) )
+
+    return SVector{3,Float64}(x,y,z)
+end
+
+function CQD_Bn_Screen_velocity(Ix,μ::Float64,v0::AbstractVector{<:Real},θe::Float64, θn::Float64, kx::Float64, p::AtomParams)
+
+    @assert length(v0) == 3 "v0 must have length 3"
+    v0x, v0y, v0z = v0
+    @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
+
+    Lsg = default_y_SG
+
+    # Physics parameters
+    cqd_sign = sign(θn-θe) 
+    acc_z = μ * GvsI(Ix) / p.M
+    ωL = abs(γₑ *  (BvsI(Ix)+Bn*cos(θn)) )
+    kω = cqd_sign * kx * ωL
+
+    # Common trig values
+    θe_half = θe / 2
+    cos2 = cos(θe_half)^2
+    sin2 = sin(θe_half)^2
+    τ_SG = Lsg / v0y
+
+    vx = v0x
+    vy = v0y
+    vz = if iszero(kω) || abs(kω * τ_SG) < 1e-18
+        # Continuous kω→0 limit: avoids 0/0 in the log term
+        v0z + acc_z * τ_SG * cos(θe)
+    else
+        exp_term = exp(-2 * kω * τ_SG)
+        v0z + acc_z * τ_SG + acc_z / kω * log( cos2 + exp_term*sin2) 
+    end
+
+    return SVector{3,Float64}(vx,vy,vz)
+end
+
+@inline function CQD_Bn_screen_x_z_vz(
+    x0::Float64, z0::Float64, v0x::Float64, v0y::Float64, v0z::Float64,
+    θe::Float64, acc::Float64, kw::Float64, 
+    Lsg::Float64, Ld::Float64, Ltot::Float64, ΔL::Float64)::NTuple{3,Float64}
+
+    @assert v0y != 0.0 "v0y must be nonzero"
+
+    # --- Kinematics ---
+    inv_vy  = 1.0 / v0y
+    inv_vy2 = inv_vy * inv_vy
+    τ_SG    = Lsg * inv_vy
+    α       = v0x * inv_vy
+    γ       = v0z * inv_vy
+    κ       = 0.5 * acc * inv_vy2 
+    
+    # --- Angle precompute (stable near extremes) ---
+    s, c  = sincos(0.5 * θe)
+    sin2  = s*s
+    cos2  = max(c*c, eps(Float64))
+    tan2  = sin2 / cos2
+    logcos2 = log(cos2)
+    PL_tan2 = polylogarithm(2, -tan2)
+
+    # --- Screen x is purely kinematic ---
+    x = muladd(Ltot, α, x0)
+
+    # Small-kw guard (smooth CQD→QM limit)
+    if abs(kw * τ_SG) < 1e-12
+        z  = muladd(Ltot, γ, z0) + κ * ΔL*cos(θe)
+        vz = muladd(acc*cos(θe), τ_SG, v0z)
+        return (x, z, vz)
+    end
+  
+    # --- CQD corrections ---
+    inv_kw  = 1.0 / kw
+    inv_kw2 = inv_kw * inv_kw
+    A       = acc * inv_kw * inv_vy
+    B       = 0.5 * acc * inv_kw2
+    Esg    = exp(-2.0 * kw * τ_SG)
+
+    # --- Screen z with time dependent projection ---
+    z =  muladd(Ltot, γ, z0) + κ * ΔL + A*Lsg*(logcos2+Ld/Lsg*log(cos2+Esg*sin2)) + B*(polylogarithm(2, -Esg * tan2) - PL_tan2)
+
+    # CQD exit velocity (stable; dimensions m/s)
+    vz = muladd(acc,τ_SG,v0z) + acc*inv_kw*log(cos2 + Esg * sin2)
+
+    return (x, z, vz)
+end
+
+function CQD_Bn_cavity_crash(μG_ix::Float64, B0_ix::Float64,
+                         x0::Float64, y0::Float64, z0::Float64,
+                         v0x::Float64, v0y::Float64, v0z::Float64,
+                         θe::Float64, θn::Float64,
+                         kx::Float64,
+                         p::AtomParams,
+                         ygrid::AbstractVector{Float64},
+                         eps::Float64
+                         )::UInt8
+
+    @assert v0y != 0 "v0y must be nonzero"
+
+    # Cavity y-span
+    y_in   = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
+    Lsg    = (default_y_SG)::Float64
+    Ld     = (default_y_SGToScreen)::Float64
+    Ltot   = (y_in + Lsg + Ld)::Float64
+    R2tube = (default_R_tube * default_R_tube)::Float64
+
+    # Kinematics
+    cqd_sign = sign(θn-θe) 
+    ωL       = abs(γₑ * (B0_ix+Bn*cos(θn)))
+    acc_0    = μG_ix/p.M
+    kω       = cqd_sign*kx*ωL
+
+    inv_v0y  = 1.0 / v0y
+    inv_v0y2 = inv_v0y * inv_v0y
+
+    # precompute θe-terms robustly
+    s, c     = sincos(0.5 * θe)        # θe_half
+    sinθ2    = s * s
+    cosθ2    = c * c
+    tanθ2    = sinθ2 / cosθ2
+    logcosθ2 = log(cosθ2)
+    PL_tanθ2 = polylogarithm(2, -tanθ2)  # loop-invariant
+    
+    # hoist constants
+    α        = v0x * inv_v0y
+    γ        = v0z * inv_v0y
+    κ        = 0.5 * acc_0 * inv_v0y2      
+    scale_a  = -2.0 * kω * inv_v0y         # exponent scale for exp()
+
+    # Guard the kω = 0 case
+    if kω == 0.0
+        @inbounds for i in eachindex(ygrid)
+            y  = ygrid[i] - y0
+            Δy = y - y_in
+            x  = muladd(α, y,  x0)           # or α*dy + x0
+            z  = muladd(γ, y,  z0) + κ*(Δy*Δy)*cos(θe)
+            (z - z_magnet_edge(x))   >=  eps && return 0x01
+            (z - z_magnet_trench(x)) <= -eps && return 0x02
+        end
+        x_screen = muladd(Ltot, α, x0)
+        z_screen = muladd(Ltot, γ, z0) + κ*(Lsg*(Lsg + 2.0*Ld))*cos(θe)
+        return (muladd(x_screen, x_screen, z_screen*z_screen) >= R2tube) ? 0x03 : 0x00
+    end
+
+    # ---- kω ≠ 0 path ----
+    inv_kω   = 1.0/kω
+    inv_kω2  = inv_kω * inv_kω
+    A        = acc_0 * inv_kω * inv_v0y    # multiplies first CQD term
+    B        = 0.5 * acc_0 * inv_kω2       # multiplies dilog difference
+    @inbounds for i in eachindex(ygrid)
+        y  = ygrid[i] - y0
+        Δy = y - y_in
+        EΔ = exp(scale_a * Δy)
+
+        x  = muladd(α,y,x0)
+        z  = muladd(γ,y,z0) + κ*Δy*Δy + A*logcosθ2*Δy + B*(polylogarithm(2,-EΔ*tanθ2) - PL_tanθ2 )
+
+        # Crash if above ceiling or below trench (with tolerance)
+        (z - z_magnet_edge(x))   >=  eps && return 0x01 # 1 top
+        (z - z_magnet_trench(x)) <= -eps && return 0x02 # 2 bottom
+    end
+
+    # --- Screen check (only if cavity was clear) ---
+    Esg      = exp(scale_a*Lsg)
+    x_screen = muladd(Ltot,α,x0) 
+    z_screen = muladd(Ltot,γ,z0) + κ*(Lsg*Lsg + 2*Lsg*Ld) + A*Lsg*(logcosθ2+(Ld/Lsg)*log(cosθ2+Esg*sinθ2)) + B*(polylogarithm(2, -Esg*tanθ2) - PL_tanθ2)
+    return (muladd(x_screen, x_screen, z_screen*z_screen) >= R2tube) ? UInt8(0x03) : UInt8(0x00) # 3 tubes
+end
