@@ -80,17 +80,14 @@ const Sspin = 1/2 ;                # Electron spin
 const gₑ    = -2.00231930436092 ;  # Electron g-factor
 ## ATOM INFORMATION: 
 # atom_info       = AtomicSpecies.atoms(atom);
-K39_params = AtomParams(atom);
-# const R         = atom_info[1];
-# const μₙ        = atom_info[2];
-# const γₙ        = atom_info[3];
-# const Ispin    = atom_info[4];
-# const Ahfs     = atom_info[6];
-# const M        = atom_info[7];
+K39_params = AtomParams(atom); # [R μn γn Ispin Ahfs M ] 
 # Math constants
 const TWOπ = 2π;
 const INV_E = exp(-1);
 quantum_numbers = fmf_levels(K39_params);
+
+TWOπ*ħ*K39_params.Ahfs*(0.5+K39_params.Ispin) / (2*μₑ)
+
 
 # STERN--GERLACH EXPERIMENT
 # Camera and pixel geometry : intrinsic properties
@@ -169,6 +166,98 @@ I_matlab = [0.0, 0.002, 0.004, 0.006, 0.008, 0.010,
      0.020, 0.030, 0.040, 0.050, 0.060, 0.070, 0.080, 0.090, 0.100,
      0.150, 0.200, 0.250, 0.300, 0.350, 0.400, 0.450, 0.500, 0.600, 0.700,
      0.800, 0.900, 1.00]
+I_coils = [0.000, 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.010,
+           0.015, 0.020, 0.025,	0.030, 0.035, 0.040, 0.045,	0.050, 0.055, 0.060, 0.065,	
+           0.070, 0.075, 0.080,	0.085, 0.090, 0.095, 0.100,	0.150, 0.200, 0.250, 0.300,
+           0.350, 0.400, 0.450,	0.500, 0.550, 0.600, 0.650, 0.700, 0.750, 0.800, 0.850,
+           0.900, 0.950, 1.000]
+B0_matlab = [0.000000000000000, 0.000757240744579, 0.001511867743341, 0.002263756661471, 0.003012783164159, 0.003758822916592, 
+             0.004501751583957,	0.005241444831444, 0.005977778324238, 0.006710627727529, 0.007439868706503, 0.011027595518207,
+             0.014506461500176,	0.017860924800881, 0.021061203998997, 0.024104602602527, 0.027063556732162, 0.030012805215533, 
+             0.033027086880274, 0.036137912163646, 0.039282554480295, 0.042463063647200, 0.045685090013413, 0.048956665511292,
+             0.052297113702953,	0.055684689137129, 0.059088511309483, 0.062477084029270, 0.065826142622610, 0.101979590539433,
+             0.139806136141056,	0.179560711908128, 0.222746532428795, 0.267955372898295, 0.315406692585403, 0.364520457067929,
+             0.413871329177959,	0.460046065231226, 0.503368911318113, 0.541754419774573, 0.576165476654194, 0.611168191353271,
+             0.643646574722572,	0.675004967851836, 0.702907241211002, 0.726826056270392, 0.748734155551346]         
+df = CSV.read(joinpath(@__DIR__,"SG_BvsI.csv"), DataFrame; header=["dI","Bz"])
+G_matlab = [0, 0.245169023227448, 0.490961855002948, 0.737375053774835, 0.984405177991444, 1.232048786101112, 1.480302436552172,
+            1.729162687792962, 1.978626098271814, 2.228689226437067, 2.479348630737054, 3.741469339949749, 5.017980719781120,
+            6.308452576273089, 7.612454715467577, 8.929556943406510, 10.259329066131809, 11.601340889685392, 12.955162220109184,
+            14.320362863445112, 15.696512625735096, 17.083181313021058, 18.479938731344916, 19.886354686748600, 21.301998985274025,
+            22.726441432963117,	24.159251835857805, 25.600000000000001, 27.052826575207895, 42.327637639949899, 58.399999999999999,
+            74.875021553278344, 92.184071488699999, 1.111355628242844e2, 1.303766442545645e2, 1.480779363146106e2, 1.648550253159278e2,
+            1.808530748581974e2, 1.963000000000000e2, 2.113651411281627e2, 226,	240, 2.537000000000000e2, 2.657170746928492e2, 
+            2.767759421141869e2, 2.871316062931601e2, 2.967826216759129e2]
+GRAD_CURRENTS = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01]
+GRAD_GRADIENT = [0, 25.6, 58.4, 92.9, 132.2, 164.2, 196.3, 226, 240, 253.7, 277.2, 298.6]
+
+fig1=plot(df.dI[2:end], df.Bz[2:end], 
+    seriestype=:scatter, 
+    marker=(:white, :circle,3),
+    label="Manual")
+plot!(fig1,I_coils[2:end], TheoreticalSimulation.BvsI.(I_coils)[2:end],
+    label="Julia (Akima)",
+    line=(:red,2))
+plot!(fig1, I_coils[2:end], B0_matlab[2:end],
+    label="Matlab (makima)",
+    line=(:darkgreen,2))
+plot!(fig1,
+    xlabel="Current (A)",
+    ylabel="Magnetic Field (T)",
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"])
+    )
+display(fig1)
+
+ΔB_inter = TheoreticalSimulation.BvsI.(I_coils) .- B0_matlab
+fig2=plot(I_coils[2:end], 1e6*ΔB_inter[2:end], 
+    line=(:red,1),
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    label="Residuals",
+    xlabel="Currents (A)",
+    ylabel="Residuals (μT)",
+    xaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:topleft)
+display(fig2)
+
+fig3=plot(GRAD_CURRENTS[2:end], GRAD_GRADIENT[2:end], 
+    seriestype=:scatter, 
+    marker=(:white, :circle,3),
+    label="Manual")
+plot!(fig3,I_coils[2:end], TheoreticalSimulation.GvsI.(I_coils)[2:end],
+    label="Julia (Akima)",
+    line=(:red,2))
+plot!(fig3, I_coils[2:end], G_matlab[2:end],
+    label="Matlab (makima)",
+    line=(:darkgreen,2))
+plot!(fig3,
+    xlabel="Current (A)",
+    ylabel="Gradient (T/m)",
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    )
+display(fig3)
+
+ΔG_inter = TheoreticalSimulation.GvsI.(I_coils) .- G_matlab
+fig4=plot(I_coils[2:end], ΔG_inter[2:end], 
+    line=(:red,1),
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    label="Residuals",
+    xlabel="Currents (A)",
+    ylabel="Residuals (T/m)",
+    xaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:topleft)
+display(fig4)
+
+plot(fig1,fig2,fig3,fig4,
+    layout = (2,2),
+    size=(800,600))
 
 """
 Simulate 1D motion with three phases:
