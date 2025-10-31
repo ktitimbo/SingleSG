@@ -140,13 +140,14 @@ function getProbDist_v3(μ::Float64, dBzdz::Float64, zd::AbstractVector, p::Atom
     w     = default_z_slit
     halfw = w/2
 
+    # Mirror if μ < 0 (preserves shape)
+    zd    = μ < 0 ? -zd : zd
+    dBzdz = μ < 0 ? -dBzdz : dBzdz
+
     # --- Derived quantities (scalar path) ---
     aSG = μ * dBzdz / p.M
     a   = aSG * LSG * (LSG + 2*LSGD) / 2
     c   = a / (2*q.α2)  # = a/β²
-
-    # Mirror if μ < 0 (preserves shape)
-    zd = μ < 0 ? -zd : zd
 
     # preallocate once
     out = similar(zd, Float64)
