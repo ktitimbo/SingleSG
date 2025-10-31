@@ -4,7 +4,7 @@
 # August 2025
 
 #  Plotting Setup
-# ENV["GKS_WSTYPE"] = "101"
+# ENV["GKS_WSTYPE"] = "100"
 using Plots; gr()
 Plots.default(
     show=true, dpi=800, fontfamily="Computer Modern", 
@@ -45,6 +45,10 @@ const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const OUTDIR    = joinpath(@__DIR__, "simulation_data", RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
+const TEMP_DIR = joinpath(@__DIR__,"artifacts", "temp")
+isdir(TEMP_DIR) || mkpath(TEMP_DIR);
+ENV["TMPDIR"] = TEMP_DIR
+@info "Created temporary directory" TEMP_DIR
 # General setup
 HOSTNAME = gethostname();
 @info "Running on host" HOSTNAME=HOSTNAME
@@ -161,6 +165,11 @@ TheoreticalSimulation.default_R_tube            = R_tube;
 ##################################################################################################
 ##################################################################################################
 
+I_matlab = [0.0, 0.002, 0.004, 0.006, 0.008, 0.010,
+     0.020, 0.030, 0.040, 0.050, 0.060, 0.070, 0.080, 0.090, 0.100,
+     0.150, 0.200, 0.250, 0.300, 0.350, 0.400, 0.450, 0.500, 0.600, 0.700,
+     0.800, 0.900, 1.00]
+
 """
 Simulate 1D motion with three phases:
   Phase 1: 0 ≤ t < t1      → a(t) = 0
@@ -169,13 +178,13 @@ Simulate 1D motion with three phases:
 
 All angles in **radians**. Returns DifferentialEquations.jl solution.
 """
-function simulate_1d_piecewise_accel(x0::Real, v0::Real, θ::Real,
-                                     tspan::Tuple{Real,Real},
-                                     v0y::Real,
-                                     Ix::Real,
-                                     kx::Real,
-                                     pk::AtomParams;
-                                     saveat=nothing, reltol=1e-9, abstol=1e-9)
+function CQD_mynum(x0::Real, v0::Real, θ::Real,
+                    tspan::Tuple{Real,Real},
+                    v0y::Real,
+                    Ix::Real,
+                    kx::Real,
+                    pk::AtomParams;
+                    saveat=nothing, reltol=1e-9, abstol=1e-9)
 
     t1 = (y_FurnaceToSlit + y_SlitToSG) / v0y
     t2 = (y_FurnaceToSlit + y_SlitToSG + y_SG) / v0y
@@ -213,9 +222,48 @@ function simulate_1d_piecewise_accel(x0::Real, v0::Real, θ::Real,
     return sol
 end
 
+function QM_mynum(x0::Real, v0::Real, 
+                    tspan::Tuple{Real,Real},
+                    v0y::Real,
+                    Ix::Real,
+                    pk::AtomParams;
+                    saveat=nothing, reltol=1e-9, abstol=1e-9)
+
+    # --- Time markers ---
+    t1 = (y_FurnaceToSlit + y_SlitToSG) / v0y
+    t2 = (y_FurnaceToSlit + y_SlitToSG + y_SG) / v0y
+    @assert tspan[1] ≤ t1 ≤ t2 ≤ tspan[2] "Require tspan[1] ≤ t1 ≤ t2 ≤ tspan[2]"
+    
+    # --- Magnetic moments for all sublevels ---
+    μ_list = [μF_effective(Ix,f, mf,K39_params) for (f,mf) in fmf_levels(pk)]
+
+    G = TheoreticalSimulation.GvsI(Ix)
+    results = Vector{ODESolution}(undef, length(μ_list))
+
+    # --- Integrate for each spin sublevel ---
+    for (i, μ) in enumerate(μ_list)
+        a_scale = (μ * G) / pk.M
+
+        function f!(du, u, p, t)
+            x, v = u
+            du[1] = v
+            du[2] = (t < t1 || t > t2) ? 0.0 : a_scale
+        end
+
+        u0 = (float(x0), float(v0))
+        prob = ODEProblem(f!, collect(u0), (float(tspan[1]), float(tspan[2])))
+        results[i] = solve(prob, Tsit5();
+                           tstops=(t1, t2),
+                           saveat=saveat,
+                           reltol=reltol,
+                           abstol=abstol)
+    end
+
+    return results
+end
 
 ki_init = 3.2
-i_init  = 50
+i_init  = 800
 data_sk_pos = CSV.read(joinpath(dirname(OUTDIR),"20251029T171708070_corrected","initialstates_zqm_zcqd_ki$(ki_init)em6_I$(i_init)mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"]);
 data_sk_pre = CSV.read(joinpath(dirname(OUTDIR),"20251029T120147579_original", "initialstates_zqm_zcqd_ki$(ki_init)em6_I$(i_init)mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"]);
 
@@ -226,7 +274,7 @@ TheoreticalSimulation.BvsI(I_sk)
 TheoreticalSimulation.GvsI(I_sk)
 
 
-sk_row = 984#rand(1:minimum([size(data_sk_pre,1),size(data_sk_pos,1)]))
+sk_row = rand(1:minimum([size(data_sk_pre,1),size(data_sk_pos,1)]))
 
 x0  = data_sk_pre[sk_row,"x0"];
 y0  = 0.0;
@@ -237,7 +285,9 @@ v0z = data_sk_pre[sk_row,"v0z"];
 θe0 = data_sk_pre[sk_row,"θe"];
 T  = (y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) / v0y ;
 
-sol = simulate_1d_piecewise_accel(z0, v0z, θe0, (0.0, T), v0y, I_sk, ki_sk, K39_params; saveat=0:0.000001:T) ; 
+CQD_num_sol = CQD_mynum(z0, v0z, θe0, (0.0, T), v0y, I_sk, ki_sk, K39_params; saveat=0:0.000001:T) ; 
+QM_num_sol  = QM_mynum(z0, v0z, (0.0, 1.05*T), v0y, I_sk, K39_params; saveat=0:1e-9:1.2*T);
+
 
 # Query state at arbitrary time:
 x_at_screen = 1e3*sol(T)[1];
@@ -279,7 +329,7 @@ for sk_row = 1:size(data_sk_pos,1)
     θe0 = data_sk_pre[sk_row,"θe"];
     T  = (y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) / v0y ;
 
-    sol = simulate_1d_piecewise_accel(z0, v0z, θe0, (0.0, T), v0y, I_sk, ki_sk, K39_params; saveat=0:0.000001:T) ; 
+    sol = CQD_mynum(z0, v0z, θe0, (0.0, T), v0y, I_sk, ki_sk, K39_params; saveat=0:0.000001:T) ; 
 
     # Query state at arbitrary time:
     x_at_screen = 1e3*sol(T)[1];
