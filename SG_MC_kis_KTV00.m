@@ -487,3 +487,34 @@ dphi(1,:) = (1./ps.vy') .* abs(ps.gamma_e * B0_y);
 du = [dz;dvz;dphi];
 du = du(:);
 end
+
+
+%%
+
+Icoils = [0.0, 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.010,...
+     0.015, 0.020, 0.025, 0.030, 0.035, 0.040, 0.045, 0.050, 0.055, 0.060, 0.065, 0.070, 0.075, 0.080, 0.085, 0.090, 0.095, 0.100,...
+     0.150, 0.200, 0.250, 0.300, 0.350, 0.400, 0.450, 0.500, 0.550, 0.600, 0.650, 0.700, 0.750, 0.800, 0.850, 0.900, 0.950, 1.000];
+
+% Read the field vs current data from manual plot
+fieldvscurrent = readmatrix('./SG_BvsI.csv');
+
+% Interpolate field for the given current
+B0 = interp1(fieldvscurrent(:,1),fieldvscurrent(:,2),Icoils,'makima','extrap');
+
+
+% Gradient vs current table from manual table
+gradientvscurrent = [0 0;
+    0.095 25.6;
+    0.2 58.4;
+    0.302 92.9;
+    0.405 132.2;
+    0.498 164.2;
+    0.6 196.3;
+    0.7 226;
+    0.75 240;
+    0.8 253.7;
+    0.902 277.2;
+    1.01 298.6];
+
+% Interpolate gradient for the given current
+dBzdz = interp1(gradientvscurrent(:,1),gradientvscurrent(:,2),Icoils,'makima','extrap');
