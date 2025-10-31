@@ -175,13 +175,14 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 2_000_000 ; 
+const Nss = 1_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
 gaussian_width_mm = 0.150
 λ0_raw            = 0.01
 λ0_spline         = 0.001
+
 
 # Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
@@ -476,11 +477,11 @@ zmax_gaussian_width = zeros(length(nz_bins_list),nI,length(gaussian_width_mm_lis
 for (jdx,nz) in enumerate(nz_bins_list)
     for (idx,val) in enumerate(gaussian_width_mm_list)
 
-        profiles_bottom = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+        profiles_bottom_temp = QM_analyze_profiles_to_dict(alive_screen, K39_params;
                         manifold=:F_bottom, n_bins= (nx_bins , nz), width_mm=val, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 
 
-        zmax_gaussian_width[jdx,:,idx] = [profiles_bottom[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+        zmax_gaussian_width[jdx,:,idx] = [profiles_bottom_temp[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
 
     end
 end
@@ -506,7 +507,8 @@ plot!(fig,I_exp[2:end], z_exp[2:end],
     fillcolor=:black, 
     )
 plot!(fig,
-    axis=:log10,
+    xaxis=:log10,
+    yaxis=:log10,
     xlims=(8e-3,2),
     ylims=(8e-3,2),
     xticks = ([ 1e-2, 1e-1, 1.0], 
@@ -519,10 +521,6 @@ plot!(fig,
     legend_columns = 4,)
 display(fig)
 savefig(fig,joinpath(OUTDIR,"qm_comparison_w_n.$(FIG_EXT)"))
-
-
-
-2+2
 
 
 #########################################################################################
@@ -552,11 +550,11 @@ SETUP FEATURES
 
 SIMULATION INFORMATION
     Number of atoms         : $(Nss)
-    Binning                 : $(nx_bins) × $(nz_bins)
+    Binning (nx,nz)         : ($(nx_bins),$(nz_bins))
     Gaussian width (mm)     : $(gaussian_width_mm)
     Smoothing raw           : $(λ0_raw)
     Smoothing spline        : $(λ0_spline)
-    Currents (A)            : $(round.(Icoils,digits=5))
+    Currents (A)            : $(round.(Icoils,sigdigits=3))
     No. of currents         : $(nI)
 
 CODE
