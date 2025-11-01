@@ -165,12 +165,12 @@ TheoreticalSimulation.default_R_tube            = R_tube;
 I_matlab = [0.0, 0.002, 0.004, 0.006, 0.008, 0.010,
      0.020, 0.030, 0.040, 0.050, 0.060, 0.070, 0.080, 0.090, 0.100,
      0.150, 0.200, 0.250, 0.300, 0.350, 0.400, 0.450, 0.500, 0.600, 0.700,
-     0.800, 0.900, 1.00]
+     0.800, 0.900, 1.00];
 I_coils = [0.000, 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.010,
            0.015, 0.020, 0.025,	0.030, 0.035, 0.040, 0.045,	0.050, 0.055, 0.060, 0.065,	
            0.070, 0.075, 0.080,	0.085, 0.090, 0.095, 0.100,	0.150, 0.200, 0.250, 0.300,
            0.350, 0.400, 0.450,	0.500, 0.550, 0.600, 0.650, 0.700, 0.750, 0.800, 0.850,
-           0.900, 0.950, 1.000]
+           0.900, 0.950, 1.000];
 B0_matlab = [0.000000000000000, 0.000757240744579, 0.001511867743341, 0.002263756661471, 0.003012783164159, 0.003758822916592, 
              0.004501751583957,	0.005241444831444, 0.005977778324238, 0.006710627727529, 0.007439868706503, 0.011027595518207,
              0.014506461500176,	0.017860924800881, 0.021061203998997, 0.024104602602527, 0.027063556732162, 0.030012805215533, 
@@ -178,8 +178,8 @@ B0_matlab = [0.000000000000000, 0.000757240744579, 0.001511867743341, 0.00226375
              0.052297113702953,	0.055684689137129, 0.059088511309483, 0.062477084029270, 0.065826142622610, 0.101979590539433,
              0.139806136141056,	0.179560711908128, 0.222746532428795, 0.267955372898295, 0.315406692585403, 0.364520457067929,
              0.413871329177959,	0.460046065231226, 0.503368911318113, 0.541754419774573, 0.576165476654194, 0.611168191353271,
-             0.643646574722572,	0.675004967851836, 0.702907241211002, 0.726826056270392, 0.748734155551346]         
-df = CSV.read(joinpath(@__DIR__,"SG_BvsI.csv"), DataFrame; header=["dI","Bz"])
+             0.643646574722572,	0.675004967851836, 0.702907241211002, 0.726826056270392, 0.748734155551346] ;      
+df = CSV.read(joinpath(@__DIR__,"SG_BvsI.csv"), DataFrame; header=["dI","Bz"]);
 G_matlab = [0, 0.245169023227448, 0.490961855002948, 0.737375053774835, 0.984405177991444, 1.232048786101112, 1.480302436552172,
             1.729162687792962, 1.978626098271814, 2.228689226437067, 2.479348630737054, 3.741469339949749, 5.017980719781120,
             6.308452576273089, 7.612454715467577, 8.929556943406510, 10.259329066131809, 11.601340889685392, 12.955162220109184,
@@ -187,9 +187,9 @@ G_matlab = [0, 0.245169023227448, 0.490961855002948, 0.737375053774835, 0.984405
             22.726441432963117,	24.159251835857805, 25.600000000000001, 27.052826575207895, 42.327637639949899, 58.399999999999999,
             74.875021553278344, 92.184071488699999, 1.111355628242844e2, 1.303766442545645e2, 1.480779363146106e2, 1.648550253159278e2,
             1.808530748581974e2, 1.963000000000000e2, 2.113651411281627e2, 226,	240, 2.537000000000000e2, 2.657170746928492e2, 
-            2.767759421141869e2, 2.871316062931601e2, 2.967826216759129e2]
-GRAD_CURRENTS = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01]
-GRAD_GRADIENT = [0, 25.6, 58.4, 92.9, 132.2, 164.2, 196.3, 226, 240, 253.7, 277.2, 298.6]
+            2.767759421141869e2, 2.871316062931601e2, 2.967826216759129e2];
+GRAD_CURRENTS = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01];
+GRAD_GRADIENT = [0, 25.6, 58.4, 92.9, 132.2, 164.2, 196.3, 226, 240, 253.7, 277.2, 298.6];
 
 fig1=plot(df.dI[2:end], df.Bz[2:end], 
     seriestype=:scatter, 
@@ -273,7 +273,7 @@ function CQD_mynum(x0::Real, v0::Real, θ::Real,
                     Ix::Real,
                     kx::Real,
                     pk::AtomParams;
-                    saveat=nothing, reltol=1e-9, abstol=1e-9)
+                    saveat=nothing, reltol=1e-18, abstol=1e-18)
 
     t1 = (y_FurnaceToSlit + y_SlitToSG) / v0y
     t2 = (y_FurnaceToSlit + y_SlitToSG + y_SG) / v0y
@@ -304,19 +304,21 @@ function CQD_mynum(x0::Real, v0::Real, θ::Real,
 
     u0   = (float(x0), float(v0))
     prob = ODEProblem(f!, collect(u0), (float(tspan[1]), float(tspan[2])))
-    sol  = solve(prob, Tsit5();
+    sol  = solve(prob, RadauIIA5();
                  tstops=(t1, t2),                # force steps at the phase boundaries
                  saveat=saveat,
                  reltol=reltol, abstol=abstol)
     return sol
 end
 
+[reverse([round(μF_effective(ix,F,mF,K39_params)/μB, sigdigits=5) for (F,mF) in quantum_numbers][6:8]) for ix in I_matlab]
+
 function QM_mynum(x0::Real, v0::Real, 
                     tspan::Tuple{Real,Real},
                     v0y::Real,
                     Ix::Real,
                     pk::AtomParams;
-                    saveat=nothing, reltol=1e-9, abstol=1e-9)
+                    saveat=nothing, reltol=1e-18, abstol=1e-18)
 
     # --- Time markers ---
     t1 = (y_FurnaceToSlit + y_SlitToSG) / v0y
@@ -341,7 +343,7 @@ function QM_mynum(x0::Real, v0::Real,
 
         u0 = (float(x0), float(v0))
         prob = ODEProblem(f!, collect(u0), (float(tspan[1]), float(tspan[2])))
-        results[i] = solve(prob, Tsit5();
+        results[i] = solve(prob, RadauIIA5();
                            tstops=(t1, t2),
                            saveat=saveat,
                            reltol=reltol,
@@ -352,16 +354,12 @@ function QM_mynum(x0::Real, v0::Real,
 end
 
 ki_init = 3.2
-i_init  = 800
-data_sk_pos = CSV.read(joinpath(dirname(OUTDIR),"20251029T171708070_corrected","initialstates_zqm_zcqd_ki$(ki_init)em6_I$(i_init)mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"]);
+i_init  = 20
 data_sk_pre = CSV.read(joinpath(dirname(OUTDIR),"20251029T120147579_original", "initialstates_zqm_zcqd_ki$(ki_init)em6_I$(i_init)mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"]);
+data_sk_pos = CSV.read(joinpath(dirname(OUTDIR),"20251031T150731329_corrected","initialstates_zqm_zcqd_ki$(ki_init)em6_I$(i_init)mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"]);
 
-I_sk = i_init*1e-3
-ki_sk = ki_init*1e-6
-
-TheoreticalSimulation.BvsI(I_sk)
-TheoreticalSimulation.GvsI(I_sk)
-
+I_sk    = i_init*1e-3
+ki_sk   = ki_init*1e-6
 
 sk_row = rand(1:minimum([size(data_sk_pre,1),size(data_sk_pos,1)]))
 
@@ -372,24 +370,23 @@ v0x = data_sk_pre[sk_row,"v0x"];
 v0y = data_sk_pre[sk_row,"v0y"];
 v0z = data_sk_pre[sk_row,"v0z"];
 θe0 = data_sk_pre[sk_row,"θe"];
-T  = (y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) / v0y ;
+T   = (y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) / v0y ;
 
-CQD_num_sol = CQD_mynum(z0, v0z, θe0, (0.0, T), v0y, I_sk, ki_sk, K39_params; saveat=0:0.000001:T) ; 
-QM_num_sol  = QM_mynum(z0, v0z, (0.0, 1.05*T), v0y, I_sk, K39_params; saveat=0:1e-9:1.2*T);
-
+CQD_num_sol = CQD_mynum(z0, v0z, θe0, (0.0, 1.2*T), v0y, I_sk, ki_sk, K39_params; saveat=0:1e-9:1.2*T) ; 
+QM_num_sol  = QM_mynum(z0, v0z, (0.0, 1.2*T), v0y, I_sk, K39_params; saveat=0:1e-9:1.2*T);
 
 # Query state at arbitrary time:
-x_at_screen = 1e3*sol(T)[1];
-v_at_screen = sol(T)[2];
+x_at_screen = 1e3*CQD_num_sol(T)[1];
+v_at_screen = CQD_num_sol(T)[2];
 
-screen_kt = 1e3*TheoreticalSimulation.CQD_Screen_position(I_sk, μₑ, 
+cqd_screen_kt = 1e3*TheoreticalSimulation.CQD_Screen_position(I_sk, μₑ, 
                                         [x0, y0, z0], [v0x,v0y,v0z],
                                         θe0, 3.2,
                                         ki_sk, K39_params);
-screen_sk_pre = 1e3*[data_sk_pre[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk_pre[sk_row,"zCQD"]];
-screen_sk_pos = 1e3*[data_sk_pos[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk_pos[sk_row,"zCQD"]];
+cqd_screen_sk_pre = 1e3*[data_sk_pre[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk_pre[sk_row,"zCQD"]];
+cqd_screen_sk_pos = 1e3*[data_sk_pos[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk_pos[sk_row,"zCQD"]];
 
-pretty_table(transpose([screen_sk_pre[3],screen_sk_pos[3],screen_kt[3], x_at_screen]),
+pretty_table(transpose([cqd_screen_sk_pre[3],cqd_screen_sk_pos[3],cqd_screen_kt[3], x_at_screen]),
         column_labels   = ["Previous", "Fixed", "Analytical", "Numerical"],
         title           = "CQD : 𝓏 -position at the screen (mm)",  
         formatters      = [ fmt__printf("%5.6f", 1:4)],        
@@ -403,10 +400,28 @@ pretty_table(transpose([screen_sk_pre[3],screen_sk_pos[3],screen_kt[3], x_at_scr
                             title                           = crayon"red bold"
                         ),)
 
+qm_screen_sk_pre    = 1e3*[data_sk_pre[sk_row,"zQM3"], data_sk_pre[sk_row,"zQM2"], data_sk_pre[sk_row,"zQM1"]]
+qm_screen_sk_pos    = 1e3*[data_sk_pos[sk_row,"zQM3"], data_sk_pos[sk_row,"zQM2"], data_sk_pos[sk_row,"zQM1"]]
+qm_screen_num_kt    = 1e3*[sol(T)[1] for sol in QM_num_sol][6:8]
+qm_screen_kt        = [1e3*TheoreticalSimulation.QM_Screen_position(I_sk,1,mf,[x0,y0,z0],[v0x,v0y,v0z], K39_params)[3] for mf=-1:1]
+
+pretty_table(hcat([qm_screen_sk_pre,qm_screen_sk_pos,qm_screen_num_kt, qm_screen_kt ]...),
+        column_labels   = ["Previous", "Fixed", "Numerical", "Analytical"],
+        title           = "QM : 𝓏 -position at the screen (mm)",  
+        formatters      = [ fmt__printf("%5.6f", 1:4)],        
+        alignment       = :c,
+        table_format    = TextTableFormat(borders = text_table_borders__unicode_rounded),
+        style           = TextTableStyle(
+                            first_line_merged_column_label  = crayon"light_red bold",
+                            first_line_column_label         = crayon"yellow bold",
+                            column_label                    = crayon"yellow",
+                            table_border                    = crayon"blue bold",
+                            title                           = crayon"red bold"
+                        ),)
 
 
 # COQUANTUM DYNAMICS 
-cqd_comp = zeros(size(data_sk_pos,1),5)            ;       
+cqd_comp = zeros(size(data_sk_pos,1),5);       
 for sk_row = 1:size(data_sk_pos,1)
 
     x0  = data_sk_pre[sk_row,"x0"];
@@ -451,8 +466,21 @@ end
 cqd_comp
 minimum(cqd_comp[:,5])
 maximum(cqd_comp[:,5])
-
 argmax(cqd_comp[:,5])
+
+fig1=plot(cqd_comp[:,1], 
+    seriestype=:scatter,
+    label="corrected",
+    marker=(:circle,:white,3),
+    markerstrokecolor=:black,
+    markerstrokewidth=1,)
+plot!(cqd_comp[:,3],
+    seriestype=:scatter,
+    label="analytical",
+    marker=(:xcross,:red,3))
+
+
+
 
 # QUANTUM MECHANICS          
 qm_comp = zeros(Int(3*size(data_sk_pos,1)),4) ;
@@ -487,39 +515,44 @@ for sk_row = 1:size(data_sk_pos,1)
     )
 end
 
+qm_comp[335:345,:]
 minimum(qm_comp[:,4])
 maximum(qm_comp[:,4])
+argmax(qm_comp[:,4])
+fig1=plot(qm_comp[1:3:end,2], 
+    seriestype=:scatter,
+    label="corrected",
+    marker=(:circle,:white,3),
+    markerstrokecolor=:black,
+    markerstrokewidth=1,)
+plot!(qm_comp[1:3:end,3],
+    seriestype=:scatter,
+    label="analytical",
+    marker=(:xcross,:red,3))
+fig2=plot(qm_comp[2:3:end,2], 
+    seriestype=:scatter,
+    label="corrected",
+    marker=(:circle,:white,3),
+    markerstrokecolor=:black,
+    markerstrokewidth=1,)
+plot!(qm_comp[2:3:end,3],
+    seriestype=:scatter,
+    label="analytical",
+    marker=(:xcross,:red,3))
+fig3=plot(qm_comp[3:3:end,2], 
+    seriestype=:scatter,
+    label="corrected",
+    marker=(:circle,:white,3),
+    markerstrokecolor=:black,
+    markerstrokewidth=1,)
+plot!(qm_comp[3:3:end,3],
+    seriestype=:scatter,
+    label="analytical",
+    marker=(:xcross,:red,3))
+plot(fig1,fig2,fig3,
+    layout=(3,1))
 
 
-using Interpolations, DataInterpolations
-@inline _posfloor(x::Real) = ifelse(x > 5.0e-17, x, 1.0e-21)
-df = CSV.read(joinpath(@__DIR__,"SG_BvsI.csv"), DataFrame; header=["dI","Bz"])
-# Enforce positivity in source data (handles any zero/negative entries)
-bz_pos = map(_posfloor, df.Bz)
-alt_BvsI = DataInterpolations.AkimaInterpolation(bz_pos, df.dI; extrapolation = ExtrapolationType.Linear)
-const GRAD_CURRENTS = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01]
-const GRAD_GRADIENT = [0, 25.6, 58.4, 92.9, 132.2, 164.2, 196.3, 226, 240, 253.7, 277.2, 298.6]
-alt_GvsI  = DataInterpolations.AkimaInterpolation(GRAD_GRADIENT, GRAD_CURRENTS; extrapolation = ExtrapolationType.Linear)
 
-IIc = 1e-3*collect(1:2000)
 
-plot(df.dI[2:end], bz_pos[2:end], seriestype=:scatter)
-plot!(IIc, TheoreticalSimulation.BvsI.(IIc))
-plot!(IIc, alt_BvsI.(IIc))
-plot!(
-    axis=:log10,
-    xlims=(minimum(IIc), maximum(IIc)),
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-)
-
-plot(GRAD_CURRENTS[2:end], GRAD_GRADIENT[2:end], seriestype=:scatter)
-plot!(IIc, TheoreticalSimulation.GvsI.(IIc))
-plot!(IIc, alt_GvsI.(IIc),
-)
-plot!(
-    xlims=(minimum(IIc), maximum(IIc)),
-    axis=:log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    # yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-    #         [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-)
+qm_comp[232,:]
