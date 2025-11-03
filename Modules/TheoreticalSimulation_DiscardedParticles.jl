@@ -761,7 +761,7 @@ function CQD_Bn_build_travelling_particles(
         # a_z for this current
         μG   = μₑ * GvsI(I0)
         a_z  = μG / p.M
-        ωL    = abs(γₑ * (BvsI(I0)+Bn*cos(θn)))
+        
         
         # No×12 matrix: 1–8 init, 9 x_scr, 10 z_scr, 11 vz_scr, 12 flag
         M = Matrix{Float64}(undef, No, 12)
@@ -781,6 +781,7 @@ function CQD_Bn_build_travelling_particles(
             v0x = M[j,4];  v0y = M[j,5];  v0z = M[j,6]
             θe0 = M[j,7];  θn0 = M[j,8]
 
+            ωL    = abs(γₑ * (BvsI(I0)+Bn*cos(θn0)))
             kω  = sign(θn0 - θe0) * kx * ωL
 
 
