@@ -305,7 +305,7 @@ function CQD_mynum(x0::Real, v0::Real, θ::Real,
     u0   = (float(x0), float(v0))
     prob = ODEProblem(f!, collect(u0), (float(tspan[1]), float(tspan[2])))
     sol  = solve(prob, RadauIIA5();
-                 tstops=(t1, t2),                # force steps at the phase boundaries
+                 tstops=(t1, t2),   # force steps at the phase boundaries
                  saveat=saveat,
                  reltol=reltol, abstol=abstol)
     return sol
@@ -353,8 +353,8 @@ function QM_mynum(x0::Real, v0::Real,
     return results
 end
 
-ki_init = 3.2
-i_init  = 20
+ki_init = 3.8
+i_init  = 800
 data_sk_pre = CSV.read(joinpath(dirname(OUTDIR),"20251029T120147579_original", "initialstates_zqm_zcqd_ki$(ki_init)em6_I$(i_init)mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"]);
 data_sk_pos = CSV.read(joinpath(dirname(OUTDIR),"20251031T150731329_corrected","initialstates_zqm_zcqd_ki$(ki_init)em6_I$(i_init)mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"]);
 
