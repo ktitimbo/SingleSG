@@ -71,7 +71,7 @@ atom        = "39K"  ;
 ## PHYSICAL CONSTANTS from NIST
 # RSU : Relative Standard Uncertainty
 const kb    = 1.380649e-23 ;       # Boltzmann constant (J/K)
-const ħ     = 6.62607015e-34/2π ;  # Reduced Planck constant (J s)
+const ħ     = 6.62607015e-34/2π   # Reduced Planck constant (J s)
 const μ₀    = 1.25663706127e-6;    # Vacuum permeability (Tm/A)
 const μB    = 9.2740100657e-24 ;   # Bohr magneton (J/T)
 const γₑ    = -1.76085962784e11 ;  # Electron gyromagnetic ratio  (1/sT). Relative Standard Uncertainty = 3.0e-10
@@ -194,20 +194,20 @@ GRAD_GRADIENT = [0, 25.6, 58.4, 92.9, 132.2, 164.2, 196.3, 226, 240, 253.7, 277.
 fig1=plot(df.dI[2:end], df.Bz[2:end], 
     seriestype=:scatter, 
     marker=(:white, :circle,3),
-    label="Manual")
+    label="Manual");
 plot!(fig1,I_coils[2:end], TheoreticalSimulation.BvsI.(I_coils)[2:end],
     label="Julia (Akima)",
-    line=(:red,2))
+    line=(:red,2));
 plot!(fig1, I_coils[2:end], B0_matlab[2:end],
     label="Matlab (makima)",
-    line=(:darkgreen,2))
+    line=(:darkgreen,2));
 plot!(fig1,
     xlabel="Current (A)",
     ylabel="Magnetic Field (T)",
     xaxis=:log10,
     yaxis=:log10,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"])
-    )
+    );
 display(fig1)
 
 ΔB_inter = TheoreticalSimulation.BvsI.(I_coils) .- B0_matlab
@@ -242,7 +242,7 @@ plot!(fig3,
     )
 display(fig3)
 
-ΔG_inter = TheoreticalSimulation.GvsI.(I_coils) .- G_matlab
+ΔG_inter = TheoreticalSimulation.GvsI.(I_coils) .- G_matlab;
 fig4=plot(I_coils[2:end], ΔG_inter[2:end], 
     line=(:red,1),
     marker=(:circle,:white,2),
@@ -252,8 +252,8 @@ fig4=plot(I_coils[2:end], ΔG_inter[2:end],
     ylabel="Residuals (T/m)",
     xaxis=:log10,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    legend=:topleft)
-display(fig4)
+    legend=:topleft);
+display(fig4);
 
 plot(fig1,fig2,fig3,fig4,
     layout = (2,2),
@@ -311,8 +311,6 @@ function CQD_mynum(x0::Real, v0::Real, θ::Real,
     return sol
 end
 
-[reverse([round(μF_effective(ix,F,mF,K39_params)/μB, sigdigits=5) for (F,mF) in quantum_numbers][6:8]) for ix in I_matlab]
-
 function QM_mynum(x0::Real, v0::Real, 
                     tspan::Tuple{Real,Real},
                     v0y::Real,
@@ -353,41 +351,42 @@ function QM_mynum(x0::Real, v0::Real,
     return results
 end
 
-ki_init = 3.8
-i_init  = 800
-data_sk_pre = CSV.read(joinpath(dirname(OUTDIR),"20251029T120147579_original", "initialstates_zqm_zcqd_ki$(ki_init)em6_I$(i_init)mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"]);
-data_sk_pos = CSV.read(joinpath(dirname(OUTDIR),"20251031T150731329_corrected","initialstates_zqm_zcqd_ki$(ki_init)em6_I$(i_init)mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"]);
 
-I_sk    = i_init*1e-3
-ki_sk   = ki_init*1e-6
 
-sk_row = rand(1:minimum([size(data_sk_pre,1),size(data_sk_pos,1)]))
+[reverse([round(μF_effective(ix,F,mF,K39_params)/μB, sigdigits=5) for (F,mF) in quantum_numbers][6:8]) for ix in I_matlab]
 
-x0  = data_sk_pre[sk_row,"x0"];
+ki_init = 1.90 ;
+i_init  = 800 ;
+data_sk_pos = CSV.read(joinpath(dirname(OUTDIR),"20251105T162102417","initialstates_zqm_zcqd_ki$(@sprintf("%.2f",ki_init))em6_I$(i_init)mA.CSV"),DataFrame; header=["x0","z0","v0x","v0y","v0z","θe","xD","zQM1","zQM2","zQM3","zCQD"]);
+n_data = size(data_sk_pos,1);
+I_sk    = i_init*1e-3 ;
+ki_sk   = ki_init*1e-6 ;
+
+sk_row = rand(1:n_data)
+
+x0  = data_sk_pos[sk_row,"x0"];
 y0  = 0.0;
-z0  = data_sk_pre[sk_row,"z0"];
-v0x = data_sk_pre[sk_row,"v0x"];
-v0y = data_sk_pre[sk_row,"v0y"];
-v0z = data_sk_pre[sk_row,"v0z"];
-θe0 = data_sk_pre[sk_row,"θe"];
+z0  = data_sk_pos[sk_row,"z0"];
+v0x = data_sk_pos[sk_row,"v0x"];
+v0y = data_sk_pos[sk_row,"v0y"];
+v0z = data_sk_pos[sk_row,"v0z"];
+θe0 = data_sk_pos[sk_row,"θe"];
 T   = (y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) / v0y ;
 
 CQD_num_sol = CQD_mynum(z0, v0z, θe0, (0.0, 1.2*T), v0y, I_sk, ki_sk, K39_params; saveat=0:1e-9:1.2*T) ; 
 QM_num_sol  = QM_mynum(z0, v0z, (0.0, 1.2*T), v0y, I_sk, K39_params; saveat=0:1e-9:1.2*T);
 
 # Query state at arbitrary time:
-x_at_screen = 1e3*CQD_num_sol(T)[1];
-v_at_screen = CQD_num_sol(T)[2];
+z_at_screen = 1e3*CQD_num_sol(T)[1];
 
 cqd_screen_kt = 1e3*TheoreticalSimulation.CQD_Screen_position(I_sk, μₑ, 
                                         [x0, y0, z0], [v0x,v0y,v0z],
                                         θe0, 3.2,
                                         ki_sk, K39_params);
-cqd_screen_sk_pre = 1e3*[data_sk_pre[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk_pre[sk_row,"zCQD"]];
 cqd_screen_sk_pos = 1e3*[data_sk_pos[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk_pos[sk_row,"zCQD"]];
 
-pretty_table(transpose([cqd_screen_sk_pre[3],cqd_screen_sk_pos[3],cqd_screen_kt[3], x_at_screen]),
-        column_labels   = ["Previous", "Fixed", "Analytical", "Numerical"],
+pretty_table(transpose([cqd_screen_sk_pos[3],cqd_screen_kt[3], z_at_screen]),
+        column_labels   = ["Fixed", "Analytical", "Numerical"],
         title           = "CQD : 𝓏 -position at the screen (mm)",  
         formatters      = [ fmt__printf("%5.6f", 1:4)],        
         alignment       = :c,
@@ -400,13 +399,13 @@ pretty_table(transpose([cqd_screen_sk_pre[3],cqd_screen_sk_pos[3],cqd_screen_kt[
                             title                           = crayon"red bold"
                         ),)
 
-qm_screen_sk_pre    = 1e3*[data_sk_pre[sk_row,"zQM3"], data_sk_pre[sk_row,"zQM2"], data_sk_pre[sk_row,"zQM1"]]
+# qm_screen_sk_pre    = 1e3*[data_sk_pre[sk_row,"zQM3"], data_sk_pre[sk_row,"zQM2"], data_sk_pre[sk_row,"zQM1"]]
 qm_screen_sk_pos    = 1e3*[data_sk_pos[sk_row,"zQM3"], data_sk_pos[sk_row,"zQM2"], data_sk_pos[sk_row,"zQM1"]]
 qm_screen_num_kt    = 1e3*[sol(T)[1] for sol in QM_num_sol][6:8]
 qm_screen_kt        = [1e3*TheoreticalSimulation.QM_Screen_position(I_sk,1,mf,[x0,y0,z0],[v0x,v0y,v0z], K39_params)[3] for mf=-1:1]
 
-pretty_table(hcat([qm_screen_sk_pre,qm_screen_sk_pos,qm_screen_num_kt, qm_screen_kt ]...),
-        column_labels   = ["Previous", "Fixed", "Numerical", "Analytical"],
+pretty_table(hcat([qm_screen_sk_pos,qm_screen_num_kt, qm_screen_kt ]...),
+        column_labels   = ["Fixed", "Numerical", "Analytical"],
         title           = "QM : 𝓏 -position at the screen (mm)",  
         formatters      = [ fmt__printf("%5.6f", 1:4)],        
         alignment       = :c,
@@ -421,36 +420,35 @@ pretty_table(hcat([qm_screen_sk_pre,qm_screen_sk_pos,qm_screen_num_kt, qm_screen
 
 
 # COQUANTUM DYNAMICS 
-cqd_comp = zeros(size(data_sk_pos,1),5);       
-for sk_row = 1:size(data_sk_pos,1)
+cqd_comp = zeros(n_data,4);
+for sk_row = 1:n_data
 
-    x0  = data_sk_pre[sk_row,"x0"];
+    x0  = data_sk_pos[sk_row,"x0"];
     y0  = 0.0;
-    z0  = data_sk_pre[sk_row,"z0"];
-    v0x = data_sk_pre[sk_row,"v0x"];
-    v0y = data_sk_pre[sk_row,"v0y"];
-    v0z = data_sk_pre[sk_row,"v0z"];
-    θe0 = data_sk_pre[sk_row,"θe"];
+    z0  = data_sk_pos[sk_row,"z0"];
+    v0x = data_sk_pos[sk_row,"v0x"];
+    v0y = data_sk_pos[sk_row,"v0y"];
+    v0z = data_sk_pos[sk_row,"v0z"];
+    θe0 = data_sk_pos[sk_row,"θe"];
     T  = (y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) / v0y ;
 
     sol = CQD_mynum(z0, v0z, θe0, (0.0, T), v0y, I_sk, ki_sk, K39_params; saveat=0:0.000001:T) ; 
 
     # Query state at arbitrary time:
     x_at_screen = 1e3*sol(T)[1];
-    v_at_screen = sol(T)[2];
 
     screen_kt = 1e3*TheoreticalSimulation.CQD_Screen_position(I_sk, μₑ, 
                                             [x0, y0, z0], [v0x,v0y,v0z],
                                             θe0, 3.2,
                                             ki_sk, K39_params);
-    screen_sk_pre = 1e3*[data_sk_pre[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk_pre[sk_row,"zCQD"]];
+    # screen_sk_pre = 1e3*[data_sk_pre[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk_pre[sk_row,"zCQD"]];
     screen_sk_pos = 1e3*[data_sk_pos[sk_row,"xD"], y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen, data_sk_pos[sk_row,"zCQD"]];
 
-    cqd_comp[sk_row,:] = [screen_sk_pre[3],screen_sk_pos[3],screen_kt[3], x_at_screen, abs(100*(screen_kt[3] .- screen_sk_pos[3])./screen_kt[3]) ]
+    cqd_comp[sk_row,:] = [screen_sk_pos[3],screen_kt[3], x_at_screen, abs(100*(screen_kt[3] .- screen_sk_pos[3])./screen_kt[3]) ]
 
     pretty_table(transpose(cqd_comp[sk_row,:]),
-            column_labels   = ["Previous", "Fixed", "Analytical", "Numerical", "Δ"],
-            title           = "CQD : 𝓏 -position at the screen (mm)",  
+            column_labels   = ["Matlab", "Analytical", "Numerical", "Δ"],
+            title           = "($sk_row/$(n_data)) CQD : 𝓏 -position at the screen (mm)",  
             formatters      = [ fmt__printf("%5.6f", 1:4)],        
             alignment       = :c,
             table_format    = TextTableFormat(borders = text_table_borders__unicode_rounded),
@@ -464,45 +462,70 @@ for sk_row = 1:size(data_sk_pos,1)
 end
 
 cqd_comp
-minimum(cqd_comp[:,5])
-maximum(cqd_comp[:,5])
-argmax(cqd_comp[:,5])
+minimum(cqd_comp[:,4])
+maximum(cqd_comp[:,4])
+argmax(cqd_comp[:,4])
+cqd_comp[argmax(cqd_comp[:,4]),:]
+data_sk_pos[argmax(cqd_comp[:,4]),:]
 
-fig1=plot(cqd_comp[:,1], 
+fig1=plot(abs.(cqd_comp[:,1]), 
     seriestype=:scatter,
-    label="corrected",
+    label="MATLAB num",
     marker=(:circle,:white,3),
     markerstrokecolor=:black,
     markerstrokewidth=1,)
-plot!(cqd_comp[:,3],
+plot!(abs.(cqd_comp[:,2]),
     seriestype=:scatter,
     label="analytical",
     marker=(:xcross,:red,3))
-
-
-
+plot!(yaxis=:log10,
+    xlabel="sample",
+    ylabel=L"$z$ (mm)",
+    # yticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+    legend=:bottomright,
+    background_color_legend = nothing,)
+fig2=plot(cqd_comp[:,4],
+    label=L"CQD relative error $I_{c}=%$(i_init)\mathrm{mA}$",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    line=(:red,1),
+    xlabel="sample",
+    ylabel="relative error (%)")
+fig = plot(fig1, fig2,
+    layout=(1,2),
+    size=(800,400),
+    bottom_margin = 3mm,
+    left_margin = 3mm,
+    plot_title= title=L"Screen $I_{c}=%$(i_init)\mathrm{mA}$",)
 
 # QUANTUM MECHANICS          
-qm_comp = zeros(Int(3*size(data_sk_pos,1)),4) ;
-for sk_row = 1:size(data_sk_pos,1)
+qm_comp = zeros(Int(3*n_data),4) ;
+for sk_row = 1:n_data
     x0  = data_sk_pos[sk_row,"x0"]
     y0  = 0.0
     z0  = data_sk_pos[sk_row,"z0"]
     v0x = data_sk_pos[sk_row,"v0x"]
     v0y = data_sk_pos[sk_row,"v0y"]
     v0z = data_sk_pos[sk_row,"v0z"]
+    T  = (y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) / v0y ;
 
-    rows = hcat(  1e3*[data_sk_pre[sk_row,"zQM1"], data_sk_pre[sk_row,"zQM2"], data_sk_pre[sk_row,"zQM3"]],
-                  1e3*[data_sk_pos[sk_row,"zQM1"], data_sk_pos[sk_row,"zQM2"], data_sk_pos[sk_row,"zQM3"]],
-                  [1e3*TheoreticalSimulation.QM_Screen_position(I_sk,1,mf,[x0,y0,z0],[v0x,v0y,v0z], K39_params)[3] for mf=1:-1:-1],
-                  abs.((1e3*[data_sk_pos[sk_row,"zQM1"], data_sk_pos[sk_row,"zQM2"], data_sk_pos[sk_row,"zQM3"]] .- [1e3*TheoreticalSimulation.QM_Screen_position(I_sk,1,mf,[x0,y0,z0],[v0x,v0y,v0z], K39_params)[3] for mf=1:-1:-1]) ./[1e3*TheoreticalSimulation.QM_Screen_position(I_sk,1,mf,[x0,y0,z0],[v0x,v0y,v0z], K39_params)[3] for mf=1:-1:-1])                 
-                    )
+    QM_num_sol  = QM_mynum(z0, v0z, (0.0, 1.2*T), v0y, I_sk, K39_params; saveat=0:1e-9:1.2*T);
+    qm_screen_num_kt    = 1e3*[sol(T)[1] for sol in QM_num_sol][6:8]
+
+    row_sk = 1e3*[data_sk_pos[sk_row,"zQM3"], data_sk_pos[sk_row,"zQM2"], data_sk_pos[sk_row,"zQM1"]]
+    row_kt = [1e3*TheoreticalSimulation.QM_Screen_position(I_sk,1,mf,[x0,y0,z0],[v0x,v0y,v0z], K39_params)[3] for mf=-1:1]
+    rows = hcat(
+                row_sk,
+                qm_screen_num_kt,
+                row_kt,
+                100 .* abs.( (row_sk .- row_kt) ./ row_kt)
+                )
 
     qm_comp[3*sk_row-2 : 3*sk_row,:] = rows
     pretty_table(rows,
-        column_labels   = ["Previous","Fixed", "Analytical", "Δ"],
+        column_labels   = ["Matlab", "Numerical",  "Analytical", "Δ"],
         formatters      = [ fmt__printf("%5.6f", 1:4)],
-        title           = "QM : 𝓏 -position at the screen (mm)",          
+        title           = "($(sk_row)/$(n_data)) QM : 𝓏 -position at the screen (mm)",          
         alignment       = :c,
         table_format    = TextTableFormat(borders = text_table_borders__unicode_rounded),
         style           = TextTableStyle(
@@ -515,13 +538,12 @@ for sk_row = 1:size(data_sk_pos,1)
     )
 end
 
-qm_comp[335:345,:]
 minimum(qm_comp[:,4])
 maximum(qm_comp[:,4])
 argmax(qm_comp[:,4])
-fig1=plot(qm_comp[1:3:end,2], 
+fig1=plot(qm_comp[1:3:end,1], 
     seriestype=:scatter,
-    label="corrected",
+    label="MATLAB num",
     marker=(:circle,:white,3),
     markerstrokecolor=:black,
     markerstrokewidth=1,)
@@ -529,9 +551,14 @@ plot!(qm_comp[1:3:end,3],
     seriestype=:scatter,
     label="analytical",
     marker=(:xcross,:red,3))
-fig2=plot(qm_comp[2:3:end,2], 
+plot!(
+    ylabel=L"$z$ (mm)",
+    # yticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+    legend=:bottomright,
+    background_color_legend = nothing,)
+fig2=plot(qm_comp[2:3:end,1], 
     seriestype=:scatter,
-    label="corrected",
+    label="MATLAB num",
     marker=(:circle,:white,3),
     markerstrokecolor=:black,
     markerstrokewidth=1,)
@@ -539,9 +566,13 @@ plot!(qm_comp[2:3:end,3],
     seriestype=:scatter,
     label="analytical",
     marker=(:xcross,:red,3))
-fig3=plot(qm_comp[3:3:end,2], 
+plot!(ylabel=L"$z$ (mm)",
+    # yticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+    legend=:bottomright,
+    background_color_legend = nothing,)
+fig3=plot(qm_comp[3:3:end,1], 
     seriestype=:scatter,
-    label="corrected",
+    label="MATLAB num",
     marker=(:circle,:white,3),
     markerstrokecolor=:black,
     markerstrokewidth=1,)
@@ -549,10 +580,60 @@ plot!(qm_comp[3:3:end,3],
     seriestype=:scatter,
     label="analytical",
     marker=(:xcross,:red,3))
-plot(fig1,fig2,fig3,
-    layout=(3,1))
+plot!(xlabel="sample",
+    ylabel=L"$z$ (mm)",
+    # yticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+    legend=:bottomright,
+    background_color_legend = nothing,)
+figa = plot(fig1,fig2,fig3,
+    layout=(3,1),
+    )
+figb = plot(qm_comp[:,4],
+    label="QM relative error",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    line=(:red,1),
+    xlabel="sample",
+    ylabel="relative error (%)")
+fig= plot(figa, figb,
+    size=(800,400),
+    left_margin =3mm,
+    bottom_margin = 3mm,
+    plot_title=L"Screen $I_{c}=%$(i_init)\mathrm{mA}$",
+    layout=(1,2))
+
+qm_comp[237,:]
+
+ki      = 1.8e-6
+v0y     = 165.12
+v0z     = 0.12
+yfinal  = y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen
+tspan   = collect(range(0,yfinal, length=10000 )) ./ v0y
+Itest   = 800e-3
 
 
 
+r_cqd = 1e6*TheoreticalSimulation.CQD_EqOfMotion_z.(tspan, Ref(Itest),Ref(μₑ),Ref([0,0,0]),Ref([0,v0y,v0z]), Ref(3π/4), Ref(3.14), Ref(ki), Ref(K39_params))
 
-qm_comp[232,:]
+r_qm1 = 1e6*TheoreticalSimulation.QM_EqOfMotion_z.(tspan, Ref(Itest),Ref(1.0),Ref(1.0),Ref([0,0,0]),Ref([0,v0y,v0z]), Ref(K39_params))
+r_qm2 = 1e6*TheoreticalSimulation.QM_EqOfMotion_z.(tspan, Ref(Itest),Ref(1.0),Ref(0.0),Ref([0,0,0]),Ref([0,v0y,v0z]), Ref(K39_params))
+r_qm3 = 1e6*TheoreticalSimulation.QM_EqOfMotion_z.(tspan, Ref(Itest),Ref(1.0),Ref(-1.0),Ref([0,0,0]),Ref([0,v0y,v0z]), Ref(K39_params))
+
+1e3*TheoreticalSimulation.QM_Screen_position(Itest,1,1,[0,0,0],[0,v0y,v0z], K39_params)
+1e3*TheoreticalSimulation.QM_Screen_position(Itest,1,0,[0,0,0],[0,v0y,v0z], K39_params)
+1e3*TheoreticalSimulation.QM_Screen_position(Itest,1,-1,[0,0,0],[0,v0y,v0z], K39_params)
+
+1e3*TheoreticalSimulation.CQD_Screen_position(Itest,μₑ,[0,0,0],[0,v0y,v0z], 3π/4, 3.14, ki, K39_params)
+
+
+TheoreticalSimulation.BvsI(Itest)
+TheoreticalSimulation.GvsI(Itest)
+
+
+[round(μF_effective(Itest,F,mF,K39_params)/μB, sigdigits=5) for (F,mF) in quantum_numbers]
+
+
+TheoreticalSimulation.QM_EqOfMotion.(tspan,Ref(Itest),Ref(1),Ref(1),Ref([0,0,0]),Ref([0,v0y,v0z]), Ref(K39_params))
+TheoreticalSimulation.QM_EqOfMotion.(tspan,Ref(Itest),Ref(1),Ref(0),Ref([0,0,0]),Ref([0,v0y,v0z]), Ref(K39_params))
+TheoreticalSimulation.QM_EqOfMotion.(tspan,Ref(Itest),Ref(1),Ref(-1),Ref([0,0,0]),Ref([0,v0y,v0z]), Ref(K39_params))
+TheoreticalSimulation.CQD_EqOfMotion.(tspan,Ref(Itest),Ref(μₑ),Ref([0,0,0]),Ref([0,v0y,v0z]), Ref(3π/4), Ref(3.14), Ref(ki), Ref(K39_params))
