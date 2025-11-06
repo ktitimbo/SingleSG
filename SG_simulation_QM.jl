@@ -192,8 +192,6 @@ if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
     plot_SG_geometry("SG_geometry")
     plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf_up")
-    # plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
-    # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
 
 ##################################################################################################
@@ -578,3 +576,5 @@ end
 println("script $RUN_STAMP has finished!")
 alert("script $RUN_STAMP has finished!")
 
+
+dataQM = load(joinpath("G:\\My Drive\\20251031T102342342","qm_2000000_screen_data.jld2"))["alive"]
