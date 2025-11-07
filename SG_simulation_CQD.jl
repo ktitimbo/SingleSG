@@ -190,7 +190,7 @@ jldsave( joinpath(OUTDIR,"cross_slit_particles_$(Nss).jld2"), data = crossing_sl
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
     plot_SG_geometry("SG_geometry")
-    plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf_up")
+    plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf")
     # plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
     # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
@@ -201,248 +201,248 @@ end
 
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
-ki = 0.75e-6;
-@time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
-@time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQD_up_particles_flag, K39_params);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
-@time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_DOWN, ki, K39_params; y_length=5001,verbose=true);
-@time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_DOWN, CQD_dw_particles_flag, K39_params);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+# ki = 0.75e-6;
+# @time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
+# @time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQD_up_particles_flag, K39_params);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+# @time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_DOWN, ki, K39_params; y_length=5001,verbose=true);
+# @time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_DOWN, CQD_dw_particles_flag, K39_params);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
 
-TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
-TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_dw_particles_trajectories, :down)
+# TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
+# TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_dw_particles_trajectories, :down)
 
-CQD_up_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_up_particles_trajectories,:screen ))
-CQD_dw_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_dw_particles_trajectories,:screen ))
-jldsave(joinpath(OUTDIR,"cqd_$(Nss)_up_screen.jld2"), screen = CQD_up_screen )
-jldsave(joinpath(OUTDIR,"cqd_$(Nss)_dw_screen.jld2"), screen = CQD_dw_screen )
+# CQD_up_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_up_particles_trajectories,:screen ))
+# CQD_dw_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(CQD_dw_particles_trajectories,:screen ))
+# jldsave(joinpath(OUTDIR,"cqd_$(Nss)_up_screen.jld2"), screen = CQD_up_screen )
+# jldsave(joinpath(OUTDIR,"cqd_$(Nss)_dw_screen.jld2"), screen = CQD_dw_screen )
 
-mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_up_screen;
-    n_bins = (nx_bins , nz_bins), width_mm = gaussian_width_mm, 
-    add_plot = false, plot_xrange= :all, branch=:up,
-    λ_raw = λ0_raw, λ_smooth = λ0_spline, mode = :probability);
+# mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_up_screen;
+#     n_bins = (nx_bins , nz_bins), width_mm = gaussian_width_mm, 
+#     add_plot = false, plot_xrange= :all, branch=:up,
+#     λ_raw = λ0_raw, λ_smooth = λ0_spline, mode = :probability);
 
-mm_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_dw_screen;
-    n_bins = (nx_bins , nz_bins), width_mm = gaussian_width_mm, 
-    add_plot = false, plot_xrange= :all, branch=:dw,
-    λ_raw = λ0_raw, λ_smooth = λ0_spline, mode = :probability);
+# mm_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(CQD_dw_screen;
+#     n_bins = (nx_bins , nz_bins), width_mm = gaussian_width_mm, 
+#     add_plot = false, plot_xrange= :all, branch=:dw,
+#     λ_raw = λ0_raw, λ_smooth = λ0_spline, mode = :probability);
 
-jldsave(
-    joinpath(OUTDIR,"cqd_$(Nss)_screen_profiles.jld2"), 
-    profile = OrderedDict(
-    :nz_bins    => nz_bins,
-    :gauss_w    => gaussian_width_mm,
-    :smothing   => (λ0_raw,λ0_spline),
-    :ki         => ki,
-    :mmup       => mm_up,
-    :mmdw       => mm_dw
-    ) 
-)
+# jldsave(
+#     joinpath(OUTDIR,"cqd_$(Nss)_screen_profiles.jld2"), 
+#     profile = OrderedDict(
+#     :nz_bins    => nz_bins,
+#     :gauss_w    => gaussian_width_mm,
+#     :smothing   => (λ0_raw,λ0_spline),
+#     :ki         => ki,
+#     :mmup       => mm_up,
+#     :mmdw       => mm_dw
+#     ) 
+# )
                                                                  
-# Profiles : up and down
-anim = @animate for j in eachindex(Icoils)
-    fig = plot(
-        title=L"CQD profiles : $k_i = %$(round(1e6*ki, sigdigits=2))\times 10^{-6}$",
-        legend=:topleft,
-        legendtitle=L"$I_{0}=%$(Icoils[j])\mathrm{A}$",
-        legendtitlefontsize=8,
-        yformatter = val -> string(round(val * 1e4, digits = 2)),
-        xlabel=L"$z$ (mm)",
-        ylabel="Intensity (au)",)
-    plot!(mm_up[j][:z_profile][:,1],mm_up[j][:z_profile][:,3],
-        label=L"$\vec{\mu}\upuparrows \hat{z}$",
-        line=(:solid,:orangered2,1),
-        marker=(:circle,:white,2),
-        markerstrokecolor=:orangered2,
-        markerstrokewidth=1)
-    vline!([mm_up[j][:z_max_smooth_spline_mm]], 
-        line=(:orangered2,0.5), 
-        label=L"$z_{\mathrm{max}}=%$(round(mm_up[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
-    plot!(mm_dw[j][:z_profile][:,1],mm_dw[j][:z_profile][:,3],
-        label=L"$\vec{\mu}\updownarrows \hat{z}$",
-        line=(:solid,:dodgerblue3,1),
-        marker=(:circle,:white,2),
-        markerstrokecolor=:dodgerblue3,
-        markerstrokewidth=1)
-    vline!([mm_dw[j][:z_max_smooth_spline_mm]],
-        line=(:dodgerblue3,0.5), 
-        label=L"$z_{\mathrm{max}}=%$(round(mm_dw[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
-    display(fig)
-end
-gif_path = joinpath(OUTDIR, "CQD_profiles.gif");
-gif(anim, gif_path, fps=2)  # adjust fps 
-@info "Saved GIF" gif_path ;
-anim = nothing
+# # Profiles : up and down
+# anim = @animate for j in eachindex(Icoils)
+#     fig = plot(
+#         title=L"CQD profiles : $k_i = %$(round(1e6*ki, sigdigits=2))\times 10^{-6}$",
+#         legend=:topleft,
+#         legendtitle=L"$I_{0}=%$(Icoils[j])\mathrm{A}$",
+#         legendtitlefontsize=8,
+#         yformatter = val -> string(round(val * 1e4, digits = 2)),
+#         xlabel=L"$z$ (mm)",
+#         ylabel="Intensity (au)",)
+#     plot!(mm_up[j][:z_profile][:,1],mm_up[j][:z_profile][:,3],
+#         label=L"$\vec{\mu}\upuparrows \hat{z}$",
+#         line=(:solid,:orangered2,1),
+#         marker=(:circle,:white,2),
+#         markerstrokecolor=:orangered2,
+#         markerstrokewidth=1)
+#     vline!([mm_up[j][:z_max_smooth_spline_mm]], 
+#         line=(:orangered2,0.5), 
+#         label=L"$z_{\mathrm{max}}=%$(round(mm_up[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+#     plot!(mm_dw[j][:z_profile][:,1],mm_dw[j][:z_profile][:,3],
+#         label=L"$\vec{\mu}\updownarrows \hat{z}$",
+#         line=(:solid,:dodgerblue3,1),
+#         marker=(:circle,:white,2),
+#         markerstrokecolor=:dodgerblue3,
+#         markerstrokewidth=1)
+#     vline!([mm_dw[j][:z_max_smooth_spline_mm]],
+#         line=(:dodgerblue3,0.5), 
+#         label=L"$z_{\mathrm{max}}=%$(round(mm_dw[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+#     display(fig)
+# end
+# gif_path = joinpath(OUTDIR, "CQD_profiles.gif");
+# gif(anim, gif_path, fps=2)  # adjust fps 
+# @info "Saved GIF" gif_path ;
+# anim = nothing
 
-# Profiles COMPARISON : different contributions 
-anim = @animate for j in 1:4:length(Icoils)
-    isodd(j) || continue        # keep only every other
-    fig = plot(title=L"$I_{0}=%$(Int(1e3*Icoils[j]))\mathrm{mA}$",
-        xlabel=L"$z$ (mm)",
-        ylabel="Intensity (au)",
-        yformatter = val -> string(round(val * 1e4, digits = 2)),)
-    plot!(mm_up[j][:z_profile][:,1],mm_up[j][:z_profile][:,3],
-        label=L"CQD UP $k_{i}=%$(round(1e6*ki,sigdigits=2))\times 10^{-6}$",
-        line=(:solid,:maroon3,1),
-        marker=(:circle,:white,2),
-        markerstrokecolor=:maroon3,
-        markerstrokewidth=1)
-    vline!([mm_up[j][:z_max_smooth_spline_mm]],
-        line=(:maroon3,0.5), 
-        label=L"$z_{\mathrm{max}}=%$(round(mm_up[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
-    plot!(mm_dw[j][:z_profile][:,1],mm_dw[j][:z_profile][:,3],
-        label=L"CQD DOWN $k_{i}=%$(round(1e6*ki,sigdigits=2))\times 10^{-6}$",
-        line=(:solid,:darkcyan,1),
-        marker=(:circle,:white,2),
-        markerstrokecolor=:darkcyan,
-        markerstrokewidth=1)
-    vline!([mm_dw[j][:z_max_smooth_spline_mm]],
-        line=(:darkcyan,0.5), 
-        label=L"$z_{\mathrm{max}}=%$(round(mm_dw[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
-    plot!(legend=:outerbottom,
-        background_legend_color = nothing,
-        foreground_legend_color = :red,
-        legend_columns = 2,
-        legendfontsize =6,
-        left_margin=3mm,
-        right_margin=3mm,)
-    display(fig)
-end
-gif_path = joinpath(OUTDIR, "QM_CQD_$(Nss)_profiles_comparison.gif");
-gif(anim, gif_path, fps=2)  # adjust fps 
-@info "Saved GIF" gif_path ;
-anim = nothing
+# # Profiles COMPARISON : different contributions 
+# anim = @animate for j in 1:4:length(Icoils)
+#     isodd(j) || continue        # keep only every other
+#     fig = plot(title=L"$I_{0}=%$(Int(1e3*Icoils[j]))\mathrm{mA}$",
+#         xlabel=L"$z$ (mm)",
+#         ylabel="Intensity (au)",
+#         yformatter = val -> string(round(val * 1e4, digits = 2)),)
+#     plot!(mm_up[j][:z_profile][:,1],mm_up[j][:z_profile][:,3],
+#         label=L"CQD UP $k_{i}=%$(round(1e6*ki,sigdigits=2))\times 10^{-6}$",
+#         line=(:solid,:maroon3,1),
+#         marker=(:circle,:white,2),
+#         markerstrokecolor=:maroon3,
+#         markerstrokewidth=1)
+#     vline!([mm_up[j][:z_max_smooth_spline_mm]],
+#         line=(:maroon3,0.5), 
+#         label=L"$z_{\mathrm{max}}=%$(round(mm_up[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+#     plot!(mm_dw[j][:z_profile][:,1],mm_dw[j][:z_profile][:,3],
+#         label=L"CQD DOWN $k_{i}=%$(round(1e6*ki,sigdigits=2))\times 10^{-6}$",
+#         line=(:solid,:darkcyan,1),
+#         marker=(:circle,:white,2),
+#         markerstrokecolor=:darkcyan,
+#         markerstrokewidth=1)
+#     vline!([mm_dw[j][:z_max_smooth_spline_mm]],
+#         line=(:darkcyan,0.5), 
+#         label=L"$z_{\mathrm{max}}=%$(round(mm_dw[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+#     plot!(legend=:outerbottom,
+#         background_legend_color = nothing,
+#         foreground_legend_color = :red,
+#         legend_columns = 2,
+#         legendfontsize =6,
+#         left_margin=3mm,
+#         right_margin=3mm,)
+#     display(fig)
+# end
+# gif_path = joinpath(OUTDIR, "QM_CQD_$(Nss)_profiles_comparison.gif");
+# gif(anim, gif_path, fps=2)  # adjust fps 
+# @info "Saved GIF" gif_path ;
+# anim = nothing
 
 
-# ATOMS PROPAGATION
-r = 1:4:nI;
-iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
-anim = @animate for j in iter
-    data_set = CQD_up_screen[:data][j]
+# # ATOMS PROPAGATION
+# r = 1:4:nI;
+# iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
+# anim = @animate for j in iter
+#     data_set = CQD_up_screen[:data][j]
     
-    #Furnace
-    xs_a = 1e3 .* data_set[:,1]; # mm
-    zs_a = 1e6 .* data_set[:,3]; # μm
-    figa = histogram2d(xs_a, zs_a;
-        bins = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
-        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
-        xticks = -1.0:0.25:1.0, yticks = -50:25:50,
-    );
+#     #Furnace
+#     xs_a = 1e3 .* data_set[:,1]; # mm
+#     zs_a = 1e6 .* data_set[:,3]; # μm
+#     figa = histogram2d(xs_a, zs_a;
+#         bins = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a)),
+#         show_empty_bins = true, color = :plasma, normalize=:pdf,
+#         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+#         xticks = -1.0:0.25:1.0, yticks = -50:25:50,
+#     );
 
-    # Slit
-    r_at_slit = Matrix{Float64}(undef, size(data_set, 1), 3);
-    for i in axes(data_set,1)
-        v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.CQD_EqOfMotion(y_FurnaceToSlit ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
-        r_at_slit[i,:] = r
-    end
-    xs_b = 1e3 .* r_at_slit[:,1]; # mm
-    zs_b = 1e6 .* r_at_slit[:,3]; # μm
-    figb = histogram2d(xs_b, zs_b;
-        bins = (FreedmanDiaconisBins(xs_b), FreedmanDiaconisBins(zs_b)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
-        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
-        xticks = -4.0:0.50:4.0, yticks = -200:50:200,
-        xlims=(-4,4),
-        ylims=(-200,200),
-    ) ;
+#     # Slit
+#     r_at_slit = Matrix{Float64}(undef, size(data_set, 1), 3);
+#     for i in axes(data_set,1)
+#         v0y = data_set[i,5]
+#         r , _ = TheoreticalSimulation.CQD_EqOfMotion(y_FurnaceToSlit ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
+#         r_at_slit[i,:] = r
+#     end
+#     xs_b = 1e3 .* r_at_slit[:,1]; # mm
+#     zs_b = 1e6 .* r_at_slit[:,3]; # μm
+#     figb = histogram2d(xs_b, zs_b;
+#         bins = (FreedmanDiaconisBins(xs_b), FreedmanDiaconisBins(zs_b)),
+#         show_empty_bins = true, color = :plasma, normalize=:pdf,
+#         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+#         xticks = -4.0:0.50:4.0, yticks = -200:50:200,
+#         xlims=(-4,4),
+#         ylims=(-200,200),
+#     ) ;
 
-    # SG entrance
-    r_at_SG_entrance = Matrix{Float64}(undef, size(data_set, 1), 3);
-    for i in axes(data_set,1)
-        v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG) ./ v0y , Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
-        r_at_SG_entrance[i,:] = r
-    end
-    xs_c = 1e3 .* r_at_SG_entrance[:,1]; # mm
-    zs_c = 1e6 .* r_at_SG_entrance[:,3]; # μm
-    figc = histogram2d(xs_c, zs_c;
-        bins = (FreedmanDiaconisBins(xs_c), FreedmanDiaconisBins(zs_c)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
-        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
-        xticks = -4.0:0.50:4.0, yticks = -1000:100:1000,
-        xlims=(-4,4), ylims=(-250,250),
-    );
+#     # SG entrance
+#     r_at_SG_entrance = Matrix{Float64}(undef, size(data_set, 1), 3);
+#     for i in axes(data_set,1)
+#         v0y = data_set[i,5]
+#         r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG) ./ v0y , Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
+#         r_at_SG_entrance[i,:] = r
+#     end
+#     xs_c = 1e3 .* r_at_SG_entrance[:,1]; # mm
+#     zs_c = 1e6 .* r_at_SG_entrance[:,3]; # μm
+#     figc = histogram2d(xs_c, zs_c;
+#         bins = (FreedmanDiaconisBins(xs_c), FreedmanDiaconisBins(zs_c)),
+#         show_empty_bins = true, color = :plasma, normalize=:pdf,
+#         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+#         xticks = -4.0:0.50:4.0, yticks = -1000:100:1000,
+#         xlims=(-4,4), ylims=(-250,250),
+#     );
 
-    # SG exit
-    r_at_SG_exit = Matrix{Float64}(undef, size(data_set, 1), 3);
-    for i in axes(data_set,1)
-        v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG) ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
-        r_at_SG_exit[i,:] = r
-    end
-    xs_d = 1e3 .* r_at_SG_exit[:,1]; # mm
-    zs_d = 1e6 .* r_at_SG_exit[:,3]; # μm
-    figd = histogram2d(xs_d, zs_d;
-        bins = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
-        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
-        xticks = -4.0:0.50:4.0, yticks = -1000:200:1000,
-        xlims=(-4,4), ylims=(-300,1000),
-    )
-    x_magnet = 1e-3*range(-1.0,1.0,length=1000)
-    plot!(figd,1e3*x_magnet,1e6*TheoreticalSimulation.z_magnet_edge.(x_magnet),line=(:dash,:black,2),label=false)
+#     # SG exit
+#     r_at_SG_exit = Matrix{Float64}(undef, size(data_set, 1), 3);
+#     for i in axes(data_set,1)
+#         v0y = data_set[i,5]
+#         r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG) ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
+#         r_at_SG_exit[i,:] = r
+#     end
+#     xs_d = 1e3 .* r_at_SG_exit[:,1]; # mm
+#     zs_d = 1e6 .* r_at_SG_exit[:,3]; # μm
+#     figd = histogram2d(xs_d, zs_d;
+#         bins = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d)),
+#         show_empty_bins = true, color = :plasma, normalize=:pdf,
+#         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+#         xticks = -4.0:0.50:4.0, yticks = -1000:200:1000,
+#         xlims=(-4,4), ylims=(-300,1000),
+#     )
+#     x_magnet = 1e-3*range(-1.0,1.0,length=1000)
+#     plot!(figd,1e3*x_magnet,1e6*TheoreticalSimulation.z_magnet_edge.(x_magnet),line=(:dash,:black,2),label=false)
 
-    # Screen
-    r_at_screen = Matrix{Float64}(undef, size(data_set, 1), 3);
-    for i in axes(data_set,1)
-        v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG+y_SGToScreen) ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
-        r_at_screen[i,:] = r
-    end
-    xs_e = 1e3 .* r_at_screen[:,1]; # mm
-    zs_e = 1e3 .* r_at_screen[:,3]; # μm
-    fige = histogram2d(xs_e, zs_e;
-        bins = (FreedmanDiaconisBins(xs_e), FreedmanDiaconisBins(zs_e)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
-        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{mm})$",
-        ylims=(-1,17.5),
-        # xticks = -4.0:0.50:4.0, yticks = -1250:50:1250,
-    );
+#     # Screen
+#     r_at_screen = Matrix{Float64}(undef, size(data_set, 1), 3);
+#     for i in axes(data_set,1)
+#         v0y = data_set[i,5]
+#         r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG+y_SGToScreen) ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
+#         r_at_screen[i,:] = r
+#     end
+#     xs_e = 1e3 .* r_at_screen[:,1]; # mm
+#     zs_e = 1e3 .* r_at_screen[:,3]; # μm
+#     fige = histogram2d(xs_e, zs_e;
+#         bins = (FreedmanDiaconisBins(xs_e), FreedmanDiaconisBins(zs_e)),
+#         show_empty_bins = true, color = :plasma, normalize=:pdf,
+#         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{mm})$",
+#         ylims=(-1,17.5),
+#         # xticks = -4.0:0.50:4.0, yticks = -1250:50:1250,
+#     );
 
-    fig = plot(figa,figb,figc,figd,fige,
-    layout=(5,1),
-    suptitle = L"$I_{0} = %$(Int(1000*Icoils[j]))\,\mathrm{mA}$",
-    size=(750,800),
-    right_margin=2mm,
-    bottom_margin=-2mm,
-    )
-    plot!(fig[1], xlabel="", bottom_margin=-3mm),
-    plot!(fig[2], xlabel="", bottom_margin=-3mm),
-    plot!(fig[3], xlabel="", bottom_margin=-3mm),
-    plot!(fig[4], xlabel="", bottom_margin=-3mm),
-    display(fig)
-end
-gif_path = joinpath(OUTDIR, "CQD_time_evolution.gif");
-gif(anim, gif_path, fps=2)  # adjust fps
-@info "Saved GIF" gif_path ;
-anim = nothing
+#     fig = plot(figa,figb,figc,figd,fige,
+#     layout=(5,1),
+#     suptitle = L"$I_{0} = %$(Int(1000*Icoils[j]))\,\mathrm{mA}$",
+#     size=(750,800),
+#     right_margin=2mm,
+#     bottom_margin=-2mm,
+#     )
+#     plot!(fig[1], xlabel="", bottom_margin=-3mm),
+#     plot!(fig[2], xlabel="", bottom_margin=-3mm),
+#     plot!(fig[3], xlabel="", bottom_margin=-3mm),
+#     plot!(fig[4], xlabel="", bottom_margin=-3mm),
+#     display(fig)
+# end
+# gif_path = joinpath(OUTDIR, "CQD_time_evolution.gif");
+# gif(anim, gif_path, fps=2)  # adjust fps
+# @info "Saved GIF" gif_path ;
+# anim = nothing
 
 
-fig = plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)") 
-plot!(I_exp[2:end],z_exp[2:end],
-    ribbon=δz_exp[5:end],
-    label="Experiment (combined)",
-    line=(:black,:dash,2),
-    fillalpha=0.23, 
-    fillcolor=:black, 
-    )
-Isim_start_idx = findall(>=(0.010), Icoils)[1]
-plot!(fig,Icoils[Isim_start_idx:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][Isim_start_idx:end],
-    label=L"CQD: $k_{i}=%$(1e6*ki)\times 10^{-6}$",
-    line=(:solid,:red,2))
-plot!(fig,xaxis=:log10,
-    yaxis=:log10,
-    xlims=(8e-3,2),
-    ylims=(8e-3,2),
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-            [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-            [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    legend=:topleft,
-    left_margin =2mm,
-)
-display(fig)
-savefig(fig, joinpath(OUTDIR,"CQD_results_comparison.$FIG_EXT"))
+# fig = plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)") 
+# plot!(I_exp[2:end],z_exp[2:end],
+#     ribbon=δz_exp[5:end],
+#     label="Experiment (combined)",
+#     line=(:black,:dash,2),
+#     fillalpha=0.23, 
+#     fillcolor=:black, 
+#     )
+# Isim_start_idx = findall(>=(0.010), Icoils)[1]
+# plot!(fig,Icoils[Isim_start_idx:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][Isim_start_idx:end],
+#     label=L"CQD: $k_{i}=%$(1e6*ki)\times 10^{-6}$",
+#     line=(:solid,:red,2))
+# plot!(fig,xaxis=:log10,
+#     yaxis=:log10,
+#     xlims=(8e-3,2),
+#     ylims=(8e-3,2),
+#     xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+#             [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+#     yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+#             [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+#     legend=:topleft,
+#     left_margin =2mm,
+# )
+# display(fig)
+# savefig(fig, joinpath(OUTDIR,"CQD_results_comparison.$FIG_EXT"))
 
 
 
