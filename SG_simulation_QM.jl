@@ -437,7 +437,7 @@ for j in iter
     # Text position
     xpos, ypos = -3.0, 180
     # Draw a small white rectangle behind the text
-    dx, dy = 1.0, 25   # adjust width and height
+    dx, dy = 0.8, 30   # adjust width and height
     plot!(figc, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
                   [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
       color=:white, opacity=0.65, linealpha=0,
@@ -463,9 +463,9 @@ for j in iter
     x_magnet = 1e-3*range(-1.0,1.0,length=1000)
     plot!(figd,1e3*x_magnet,1e6*TheoreticalSimulation.z_magnet_edge.(x_magnet),line=(:dash,:black,2),label=false);
     # Text position
-    xpos, ypos = -3.0, 800
+    xpos, ypos = -3.0, 700
     # Draw a small white rectangle behind the text
-    dx, dy = 0.6, 200   # adjust width and height
+    dx, dy = 0.6, 160   # adjust width and height
     plot!(figd, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
                   [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
       color=:white, opacity=0.65, linealpha=0,
@@ -500,7 +500,7 @@ for j in iter
     # Text position
     xpos, ypos = -3.0, 2400
     # Draw a small white rectangle behind the text
-    dx, dy = 0.7, 200   # adjust width and height
+    dx, dy = 0.7, 270   # adjust width and height
     plot!(figf, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
                   [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
       color=:white, opacity=0.65, linealpha=0,
