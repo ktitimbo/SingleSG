@@ -221,8 +221,16 @@ TheoreticalSimulation.travelling_particles_summary(Icoils, quantum_numbers, part
 jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_trajectories))
 
 alive_screen = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:screen ));
-dead_crash   = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:crash ));
+# dead_crash   = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.select_flagged(particles_trajectories,:crash ));
 jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), alive = alive_screen)
+
+# clean memory
+crossing_slit           = nothing
+particles_flag          = nothing
+particles_trajectories  = nothing
+GC.gc()
+@info "Memory cleaned after QM data acquired"
+@show Sys.free_memory()
 
 println("Profiles F=$(K39_params.Ispin+0.5)")
 profiles_top = QM_analyze_profiles_to_dict(alive_screen, K39_params;
@@ -626,10 +634,12 @@ SETUP FEATURES
     Temperature             : $(T_K)
     Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
     Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
+    Post-SG aperture radius : $(1e3*R_aper)mm
     Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
     Slit → SG magnet        : $(1e3*y_SlitToSG)mm
     SG magnet               : $(1e3*y_SG)mm
     SG magnet → Screen      : $(1e3*y_SGToScreen)mm
+    SG magnet → Aperture    : $(1e3*y_SGToAperture)mm
     Tube radius             : $(1e3*R_tube)mm
 
 SIMULATION INFORMATION
@@ -663,5 +673,12 @@ println("script $RUN_STAMP has finished!")
 alert("script $RUN_STAMP has finished!")
 
 
-# dataQM = load(joinpath(dirname(OUTDIR),"qm_3000000_valid_particles_data.jld2"))["alive"]
+dataQM = load(joinpath(dirname(OUTDIR),"qm_3000000_valid_particles_data.jld2"))["data"]
+
+alive_screen = OrderedDict(
+            :Icoils=>dataQM[:Icoils], 
+            :levels => dataQM[:levels], 
+            :data => TheoreticalSimulation.select_flagged(dataQM[:data] ,:screen));
+jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), alive = alive_screen)
+
 
