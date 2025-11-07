@@ -686,7 +686,7 @@ TheoreticalSimulation.QM_select_flagged(data,:screen)
 @time alive_screen = OrderedDict(
             :Icoils => dataQM[:Icoils], 
             :levels => dataQM[:levels], 
-            :data   => TheoreticalSimulation.select_flagged(dataQM[:data],:screen));
+            :data   => TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen));
 jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), alive = alive_screen)
 dataQM = nothing
 
