@@ -165,7 +165,7 @@ TheoreticalSimulation.default_c_aperture        = R_aper;
 TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
 
 ##################################################################################################
-avg_data = load(joinpath(@__DIR__, "analysis_data", "smoothing_binning","data_averaged_2.jld2"), "data" )
+avg_data = load(joinpath(@__DIR__, "analysis_data", "smoothing_binning","data_averaged_2.jld2"), "data" );
 I_exp  = avg_data[:i_smooth];
 z_exp  = avg_data[:z_smooth];
 δz_exp = avg_data[:δz_smooth];
@@ -373,7 +373,7 @@ display(fig)
 savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
 
 # ATOMS PROPAGATION
-r = 1:10:nI;
+r = 1:3:nI;
 iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
 lvl = 5 #Int(4*K39_params.Ispin+2)
 anim = @animate for j in iter
@@ -678,7 +678,9 @@ dataQM = load(joinpath(dirname(OUTDIR),"qm_3000000_valid_particles_data.jld2"))[
 alive_screen = OrderedDict(
             :Icoils=>dataQM[:Icoils], 
             :levels => dataQM[:levels], 
-            :data => TheoreticalSimulation.select_flagged(dataQM[:data] ,:screen));
+            :data => TheoreticalSimulation.select_flagged(dataQM[:data],:screen));
 jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), alive = alive_screen)
+dataQM = nothing
+
 
 
