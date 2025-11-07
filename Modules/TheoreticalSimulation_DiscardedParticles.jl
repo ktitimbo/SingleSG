@@ -411,6 +411,7 @@ function select_flagged(initial_by_current::OrderedDict{K, Vector{Matrix{Float64
               which === :all        ? (0,1,2,3,4)   : 
           error("which must be :screen, :crash_SG, :crash_tube, :cras_aper, :crash, or :all")
 
+    flagset_set = Set(flagset)
     out = OrderedDict{Int8, Vector{Matrix{Float64}}}()
 
     for (idx, mats) in initial_by_current
@@ -420,15 +421,27 @@ function select_flagged(initial_by_current::OrderedDict{K, Vector{Matrix{Float64
         @inbounds for k in 1:nlevels
             M = mats[k]
             @assert 1 ≤ flagcol ≤ size(M,2) "flagcol out of bounds"
-            col = @view M[:, flagcol]
+            @views col =  M[:, flagcol]
+            nrows, ncols = size(M, 1), flagcol - 1
 
+            nkeep = 0
+            buf = Matrix{Float64}(undef,nrows,ncols)
+
+            @inbounds @simd for i in 1:nrows
+                f = col[i]
+                if f in flagset_set
+                    nkeep +=1
+                    @views buf[nkeep,:] .= M[i, 1:ncols]
+                end
+            end
+
+            v[k] =@view buf[1:nkeep,:]
             # keep rows where flag ∈ flagset (works for 1, 2, or 3 values)
-            keep = findall(in.(col, Ref(flagset)))
+            # keep = findall(in.(col, Ref(flagset)))
             # Alternatively (avoids building index vector):
             # mask = in.(col, Ref(flagset))
             # v[k] = M[mask, :]
-
-            v[k] = M[keep, 1:flagcol-1]   # copy rows into a dense Matrix
+            # v[k] = M[keep, 1:flagcol-1]   # copy rows into a dense Matrix
         end
 
         out[idx] = v
