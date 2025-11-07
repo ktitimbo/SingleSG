@@ -175,7 +175,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 1_000 ; 
+const Nss = 500 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -471,6 +471,9 @@ for (i,ki) in enumerate(kis)
     temp_CQD_up_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(temp_CQD_up_particles_trajectories,:screen ))
     temp_CQD_dw_screen = OrderedDict(:Icoils=>Icoils, :data => TheoreticalSimulation.CQD_select_flagged(temp_CQD_dw_particles_trajectories,:screen ))
 
+    jldsave(joinpath(OUTDIR,"cqd_$(Nss)_ki$(@sprintf("%02d", i))_up_screen.jld2"), screen=CQD_up_screen)
+    jldsave(joinpath(OUTDIR,"cqd_$(Nss)_ki$(@sprintf("%02d", i))_dw_screen.jld2"), screen=CQD_dw_screen )
+
     temp_mm_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(temp_CQD_up_screen;
         n_bins = (nx_bins , nz_bins), width_mm = gaussian_width_mm, 
         add_plot = false, plot_xrange= :all, branch=:up,
@@ -536,6 +539,7 @@ report = """
 ***************************************************
 EXPERIMENT
     Single Stern–Gerlach Experiment
+    CO-QUANTUM DYNAMICS SIMULATION
     atom                    : $(atom)
     Output directory        : $(OUTDIR)
     RUN_STAMP               : $(RUN_STAMP)
