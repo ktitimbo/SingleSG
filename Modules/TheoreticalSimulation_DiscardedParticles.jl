@@ -450,6 +450,61 @@ function select_flagged(initial_by_current::OrderedDict{K, Vector{Matrix{Float64
     return out
 end
 
+# Global buffer pool (per size)
+const _select_flagged_pool = Dict{Tuple{Int,Int}, Matrix{Float64}}()
+
+function QM_select_flagged(initial_by_current::OrderedDict{K, Vector{Matrix{Float64}}},
+                        which::Symbol; flagcol::Int=10) where {K<:Integer}
+
+    flagset = which === :screen     ? (0,) :
+              which === :crash_SG   ? (1, 2) :
+              which === :crash_tube ? (3,) :
+              which === :crash_aper ? (4,) :
+              which === :crash      ? (1, 2, 3, 4) :
+              which === :all        ? (0, 1, 2, 3, 4) :
+              error("Invalid which value")
+
+    flagset_set = Set(flagset)
+    out = OrderedDict{Int8, Vector{Matrix{Float64}}}()
+
+    @inbounds for (idx, mats) in initial_by_current
+        nlevels = length(mats)
+        v = Vector{Matrix{Float64}}(undef, nlevels)
+
+        for k in 1:nlevels
+            M = mats[k]
+            nrows, ncols = size(M, 1), flagcol - 1
+            @views col = M[:, flagcol]
+
+            # --- fetch or grow a persistent buffer ---
+            buf = get!(_select_flagged_pool, (nrows, ncols)) do
+                Matrix{Float64}(undef, nrows, ncols)
+            end
+            if size(buf, 1) < nrows
+                resize!(buf, nrows, ncols)  # grow if needed
+            end
+
+            nkeep = 0
+            @inbounds @simd for i in 1:nrows
+                f = col[i]
+                if f in flagset_set
+                    nkeep += 1
+                    @views buf[nkeep, :] .= M[i, 1:ncols]
+                end
+            end
+
+            # copy *out* the filtered slice (small, bounded copy)
+            outM = Matrix{Float64}(undef, nkeep, ncols)
+            @views outM .= buf[1:nkeep, :]
+            v[k] = outM
+        end
+
+        out[idx] = v
+    end
+
+    return out
+end
+
 ########################################################################################################################################
 # Co-Quantum Dynamics
 ########################################################################################################################################
