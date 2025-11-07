@@ -675,9 +675,15 @@ alert("script $RUN_STAMP has finished!")
 
 dataQM = load(joinpath(dirname(OUTDIR),"qm_3000000_valid_particles_data.jld2"))["data"]
 
-TheoreticalSimulation.select_flagged(dataQM[:data],:screen)
+data = dataQM[:data]
+count(==(4.0), dataQM[:data][34][5][:,10])
+dataQM = nothing
+GC.gc()
 
-alive_screen = OrderedDict(
+
+TheoreticalSimulation.QM_select_flagged(data,:screen)
+
+@time alive_screen = OrderedDict(
             :Icoils => dataQM[:Icoils], 
             :levels => dataQM[:levels], 
             :data   => TheoreticalSimulation.select_flagged(dataQM[:data],:screen));
