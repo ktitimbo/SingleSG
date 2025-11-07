@@ -675,12 +675,15 @@ alert("script $RUN_STAMP has finished!")
 
 dataQM = load(joinpath(dirname(OUTDIR),"qm_3000000_valid_particles_data.jld2"))["data"]
 
+TheoreticalSimulation.select_flagged(dataQM[:data],:screen)
+
 alive_screen = OrderedDict(
-            :Icoils=>dataQM[:Icoils], 
+            :Icoils => dataQM[:Icoils], 
             :levels => dataQM[:levels], 
-            :data => TheoreticalSimulation.select_flagged(dataQM[:data],:screen));
+            :data   => TheoreticalSimulation.select_flagged(dataQM[:data],:screen));
 jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), alive = alive_screen)
 dataQM = nothing
 
 
 
+2+2
