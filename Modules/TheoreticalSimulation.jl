@@ -63,10 +63,13 @@ module TheoreticalSimulation
     # Slit
     default_x_slit              = 4.0e-3 ;
     default_z_slit              = 300e-6 ;
+    # Circular aperture
+    default_c_aperture          = 5.8e-3/2; # radius of the circular aperture after the pole pieces
     # Propagation distances
     default_y_FurnaceToSlit     = 224.0e-3 ;
     default_y_SlitToSG          = 44.0e-3 ;
     default_y_SG                = 7.0e-2 ;
+    default_y_SGToAperture      = 42.0e-3 ; 
     default_y_SGToScreen        = 32.0e-2 ;
     # Connecting pipes
     default_R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
@@ -251,7 +254,7 @@ module TheoreticalSimulation
     include(joinpath(@__DIR__, "TheoreticalSimulation_VelocityPDF.jl"))
     include(joinpath(@__DIR__, "TheoreticalSimulation_Sampling.jl"))
     include(joinpath(@__DIR__, "TheoreticalSimulation_DiscardedParticles.jl"))
-    include(joinpath(@__DIR__, "TheoreticalSimulation_QMSpline.jl"))
+    include(joinpath(@__DIR__, "TheoreticalSimulation_Spline.jl"))
     include(joinpath(@__DIR__, "TheoreticalSimulation_Plots.jl"))
 
 

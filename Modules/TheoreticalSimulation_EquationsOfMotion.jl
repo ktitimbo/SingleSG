@@ -1053,7 +1053,7 @@ and 0 if neither happens, for y ∈ [y_in, y_in + default_y_SG].
 - `eps` is a safety/touch tolerance (set >0 to require clearance).
 - Pass a precomputed `ygrid` (vector of y values spanning [y_in,y_in + default_y_SG]) to avoid rebuilding it per call.
 """
-function QM_cavity_crash(μG_ix::Float64,
+@inline function QM_cavity_crash(μG_ix::Float64,
                          x0::Float64, y0::Float64, z0::Float64,
                          v0x::Float64, v0y::Float64, v0z::Float64,
                          p::AtomParams,
@@ -1069,6 +1069,9 @@ function QM_cavity_crash(μG_ix::Float64,
     Ld     = (default_y_SGToScreen)::Float64
     Ltot   = (y_in + Lsg + Ld)::Float64
     R2tube = (default_R_tube * default_R_tube)::Float64
+    Lcirc  = (default_y_SGToAperture)::Float64
+    Lapert = (y_in+Lsg+Lcirc)::Float64
+    R2circ = (default_c_aperture * default_c_aperture)::Float64
 
     # Kinematics
     inv_vy  = 1.0 / v0y
@@ -1079,7 +1082,7 @@ function QM_cavity_crash(μG_ix::Float64,
     γ = v0z * inv_vy
 
     # --- Cavity scan; short-circuit on first breach ---
-    @inbounds for y in ygrid
+    @inbounds @fastmath for y in ygrid
         dy = y - y0
         x  = x0 + α * dy
         Δ  = dy - y_in
@@ -1090,10 +1093,15 @@ function QM_cavity_crash(μG_ix::Float64,
         (z - z_magnet_trench(x)) <= -eps && return 0x02 # 2 bottom
     end
 
+    # Circular aperture
+    x_aper = x0 + v0x * inv_vy * Lapert
+    z_aper = z0 + v0z * inv_vy * Lapert + κ * Lsg * (Lsg+2*Lcirc)
+    (x_aper*x_aper + z_aper*z_aper >= R2circ ) && return 0x04 # 4 circular aperture
+ 
     # --- Screen check (only if cavity was clear) ---
     x_screen = x0 + Ltot * v0x * inv_vy 
     z_screen = z0 + Ltot * v0z * inv_vy  + κ * (Lsg*Lsg + 2*Lsg*Ld)
-    return (x_screen*x_screen + z_screen*z_screen >= R2tube) ? UInt8(0x03) : UInt8(0x00) # 3 tubes
+    return (x_screen*x_screen + z_screen*z_screen >= R2tube) ? 0x03 : 0x00 # 3 tubes
 end
 
 

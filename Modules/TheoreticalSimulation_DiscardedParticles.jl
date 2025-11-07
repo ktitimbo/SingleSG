@@ -306,11 +306,13 @@ function travelling_particles_summary(Ixs, q_numbers, particles)
         if eltype(col) <: Integer
             pass = count(==(0),  col); top = count(==(1), col)
             bot  = count(==(2),  col); tub = count(==(3), col)
+            aper = count(==(4),  col);
         else
             pass = count(==(0.0), col); top = count(==(1.0), col)
             bot  = count(==(2.0), col); tub = count(==(3.0), col)
+            aper = count(==(4.0), col);
         end
-        return (pass=pass, top=top, bot=bot, tub=tub)
+        return (pass=pass, top=top, bot=bot, tub=tub, aper=aper)
     end
 
     for i in eachindex(Ixs)
@@ -318,28 +320,28 @@ function travelling_particles_summary(Ixs, q_numbers, particles)
         mats = particles[i]  # Vector of No×10 matrices, one per level
 
         nrows = nlevels
-        data  = Matrix{Float64}(undef, nrows, 9)
+        data  = Matrix{Float64}(undef, nrows, 10)
 
         # rows per level
         for j in 1:nlevels
             F, mF = q_numbers[j]
             M     = mats[j]
             c     = counts_from_M(M)
-            tot   = c.pass + c.top + c.bot + c.tub
+            tot   = c.pass + c.top + c.bot + c.tub + c.aper
 
             passp = tot == 0 ? 0.0 : 100.0 * c.pass / tot
-            lossp = tot == 0 ? 0.0 : 100.0 * (c.top + c.bot + c.tub) / tot
+            lossp = tot == 0 ? 0.0 : 100.0 * (c.top + c.bot + c.tub + c.aper) / tot
 
             data[j, :] = [Float64(F), Float64(mF),
-                          c.pass, c.top, c.bot, c.tub,
+                          c.pass, c.top, c.bot, c.aper, c.tub,
                           tot, passp, lossp]
         end
 
         pretty_table(
             data;
-            column_labels = ["F","mF","Pass","Top","Bottom","Tube","Total","Pass %","Loss %"],
+            column_labels = ["F","mF","Pass","Top","Bottom","Aperture","Tube","Total","Pass %","Loss %"],
             title = @sprintf("I₀ = %.3f A", I0),
-            formatters    = [fmt__printf("%d", 3:7), fmt__printf("%5.1f", 8:9)],
+            formatters    = [fmt__printf("%d", 3:8), fmt__printf("%5.1f", 9:10)],
             alignment = :c,
             table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
             style = TextTableStyle(first_line_column_label = crayon"yellow bold",
@@ -401,12 +403,13 @@ only_screen[1][3]
 
 """
 function select_flagged(initial_by_current::OrderedDict{K, Vector{Matrix{Float64}}},which::Symbol; flagcol::Integer=10) where {K<:Integer}
-    flagset = which === :screen     ? (0,)      :
-              which === :crash_SG   ? (1, 2)    :
-              which === :crash_tube ? (3,)      :
-              which === :crash      ? (1,2,3)   :
-              which === :all        ? (0,1,2,3) :
-          error("which must be :screen, :crash_SG, :crash_tube, :crash, or :all")
+    flagset = which === :screen     ? (0,)          :
+              which === :crash_SG   ? (1, 2)        :
+              which === :crash_tube ? (3,)          :
+              which === :crash_aper ? (4,)
+              which === :crash      ? (1,2,3,4)     :
+              which === :all        ? (0,1,2,3,4)   : 
+          error("which must be :screen, :crash_SG, :crash_tube, :cras_aper, :crash, or :all")
 
     out = OrderedDict{Int8, Vector{Matrix{Float64}}}()
 

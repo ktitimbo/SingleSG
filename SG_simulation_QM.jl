@@ -119,9 +119,12 @@ T_K = 273.15 + 205 ; # Furnace temperature (K)
 # Furnace aperture
 const x_furnace = 2.0e-3 ;
 const z_furnace = 100e-6 ;
-# Slit
+# Slit : Pre SG
 const x_slit  = 4.0e-3 ;
 const z_slit  = 300e-6 ;
+# Circular Aperture : Post SG
+const R_aper            = 5.8e-3/2 ;
+const y_SGToAperture    = 42.0e-3 ;   
 # Propagation distances
 const y_FurnaceToSlit = 224.0e-3 ;
 const y_SlitToSG      = 44.0e-3 ;
@@ -156,6 +159,8 @@ TheoreticalSimulation.default_y_SlitToSG        = y_SlitToSG;
 TheoreticalSimulation.default_y_SG              = y_SG;
 TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
 TheoreticalSimulation.default_R_tube            = R_tube;
+TheoreticalSimulation.default_c_aperture        = R_aper;
+TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
 
 ##################################################################################################
 avg_data = load(joinpath(@__DIR__, "analysis_data", "smoothing_binning","data_averaged_2.jld2"), "data" )
@@ -175,11 +180,11 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 1_000 ; 
+const Nss = 100_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
-gaussian_width_mm = 0.150
+gaussian_width_mm = 0.065
 λ0_raw            = 0.01
 λ0_spline         = 0.001
 
@@ -358,15 +363,15 @@ display(fig)
 savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
 
 # ATOMS PROPAGATION
-r = 1:2:nI;
+r = 1:10:nI;
 iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
 lvl = 5 #Int(4*K39_params.Ispin+2)
-anim = @animate for j in iter
+anim = @animate 
+for j in iter
     f,mf=quantum_numbers[lvl]
     # data_set = vcat((alive_screen[:data][j][k] for k in Int(2*K39_params.Ispin + 3):Int(4*K39_params.Ispin + 2))...)
     data_set = alive_screen[:data][j][lvl] 
     
-
     #Furnace
     xs_a = 1e3 .* data_set[:,1]; # mm
     zs_a = 1e6 .* data_set[:,3]; # μm
@@ -376,6 +381,15 @@ anim = @animate for j in iter
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
         xticks = -1.0:0.25:1.0, yticks = -50:25:50,
     );
+    # Text position
+    xpos, ypos = -0.75, 35
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.15, 7   # adjust width and height
+    plot!(figa, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(figa, xpos, ypos,  text("Furnace", 10, :black, :bold, :center, "Helvetica") )
 
     # Slit
     r_at_slit = Matrix{Float64}(undef, size(data_set, 1), 3);
@@ -394,7 +408,16 @@ anim = @animate for j in iter
         xlims=(-4,4),
         ylims=(-200,200),
     ) ;
-
+    # Text position
+    xpos, ypos = -3.5, 150
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.4, 20   # adjust width and height
+    plot!(figb, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(figb, xpos, ypos,  text("Slit", 10, :black, :bold, :center, "Helvetica") );
+    
     # SG entrance
     r_at_SG_entrance = Matrix{Float64}(undef, size(data_set, 1), 3);
     for i in axes(data_set,1)
@@ -411,12 +434,21 @@ anim = @animate for j in iter
         xticks = -4.0:0.50:4.0, yticks = -1000:100:1000,
         xlims=(-4,4), ylims=(-250,250),
     );
+    # Text position
+    xpos, ypos = -3.0, 180
+    # Draw a small white rectangle behind the text
+    dx, dy = 1.0, 25   # adjust width and height
+    plot!(figc, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(figc, xpos, ypos,  text("SG entrance", 10, :black, :bold, :center, "Helvetica") );
 
     # SG exit
     r_at_SG_exit = Matrix{Float64}(undef, size(data_set, 1), 3);
     for i in axes(data_set,1)
         v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG) ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
+        r , _ = TheoreticalSimulation.QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SG) ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
         r_at_SG_exit[i,:] = r
     end
     xs_d = 1e3 .* r_at_SG_exit[:,1]; # mm
@@ -429,7 +461,51 @@ anim = @animate for j in iter
         xlims=(-4,4), ylims=(-300,1000),
     )
     x_magnet = 1e-3*range(-1.0,1.0,length=1000)
-    plot!(figd,1e3*x_magnet,1e6*TheoreticalSimulation.z_magnet_edge.(x_magnet),line=(:dash,:black,2),label=false)
+    plot!(figd,1e3*x_magnet,1e6*TheoreticalSimulation.z_magnet_edge.(x_magnet),line=(:dash,:black,2),label=false);
+    # Text position
+    xpos, ypos = -3.0, 800
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.6, 200   # adjust width and height
+    plot!(figd, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(figd, xpos, ypos,  text("SG exit", 10, :black, :bold, :center, "Helvetica") );
+
+
+    # Circular Aperture : Post-SG
+    r_at_aperture = Matrix{Float64}(undef, size(data_set, 1), 3);
+    for i in axes(data_set,1)
+        v0y = data_set[i,5]
+        r , _ = TheoreticalSimulation.QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToAperture) ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
+        r_at_aperture[i,:] = r
+    end
+    xs_d = 1e3 .* r_at_aperture[:,1]; # mm
+    zs_d = 1e6 .* r_at_aperture[:,3]; # μm
+    figf = histogram2d(xs_d, zs_d;
+        bins = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -4.0:0.50:4.0, yticks = -1000:500:3000,
+        xlims=(-4,4), ylims=(-300,3000),
+    );
+    # center and radius (in mm)
+    xc, zc_mm = 0.0, 0.0
+    R_mm = 1e3*R_aper
+    θ = range(0, 2π, length=361)
+    x_circ = xc .+ R_mm .* cos.(θ)                 # mm
+    z_circ = (zc_mm*1000) .+ (1000R_mm) .* sin.(θ) # μm  (convert mm→μm)
+    plot!(figf, x_circ, z_circ;
+      linestyle=:dash, lw=2, color=:gray, legend=false);
+    # Text position
+    xpos, ypos = -3.0, 2400
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.7, 200   # adjust width and height
+    plot!(figf, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(figf, xpos, ypos,  text("⊚ Aperture", 10, :black, :bold, :center, "Helvetica") );
 
     # Screen
     r_at_screen = Matrix{Float64}(undef, size(data_set, 1), 3);
@@ -443,15 +519,25 @@ anim = @animate for j in iter
     fige = histogram2d(xs_e, zs_e;
         bins = (FreedmanDiaconisBins(xs_e), FreedmanDiaconisBins(zs_e)),
         show_empty_bins = true, color = :plasma, normalize=:pdf,
-        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{mm})$",
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"Screen : $z \ (\mathrm{mm})$",
         ylims=(-1,17.5),
         # xticks = -4.0:0.50:4.0, yticks = -1250:50:1250,
-    );
+    )
+    # Text position
+    xpos, ypos = -4.0, 14
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.9, 0.9   # adjust width and height
+    plot!(fige, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(fige, xpos, ypos,  text("Screen", 10, :black, :bold, :center, "Helvetica") )
 
-    fig = plot(figa,figb,figc,figd,fige,
-    layout=(5,1),
+
+    fig = plot(figa,figb,figc,figd,figf,fige,
+    layout=(6,1),
     suptitle = L"$I_{0} = %$(Int(1000*Icoils[j]))\,\mathrm{mA}$",
-    size=(750,800),
+    size=(750,850),
     right_margin=2mm,
     bottom_margin=-2mm,
     )
@@ -459,14 +545,13 @@ anim = @animate for j in iter
     plot!(fig[2], xlabel="", bottom_margin=-3mm),
     plot!(fig[3], xlabel="", bottom_margin=-3mm),
     plot!(fig[4], xlabel="", bottom_margin=-3mm),
+    plot!(fig[5], xlabel="", bottom_margin=-3mm),
     display(fig)
 end
 gif_path = joinpath(OUTDIR, "QM_time_evolution.gif");
 gif(anim, gif_path, fps=2)  # adjust fps
 @info "Saved GIF" gif_path ;
 anim = nothing
-
-
 
 nz_bins_list = [1,2,4];
 ls_list = [:solid,:dash,:dot];
