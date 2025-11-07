@@ -182,7 +182,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 500_000 ; 
+const Nss = 1_000_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -368,8 +368,7 @@ savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
 r = 1:10:nI;
 iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
 lvl = 5 #Int(4*K39_params.Ispin+2)
-anim = @animate 
-for j in iter
+anim = @animate for j in iter
     f,mf=quantum_numbers[lvl]
     # data_set = vcat((alive_screen[:data][j][k] for k in Int(2*K39_params.Ispin + 3):Int(4*K39_params.Ispin + 2))...)
     data_set = alive_screen[:data][j][lvl] 
@@ -664,4 +663,5 @@ println("script $RUN_STAMP has finished!")
 alert("script $RUN_STAMP has finished!")
 
 
-dataQM = load(joinpath("G:\\My Drive\\20251031T102342342","qm_2000000_screen_data.jld2"))["alive"]
+# dataQM = load(joinpath(dirname(OUTDIR),"qm_3000000_valid_particles_data.jld2"))["alive"]
+
