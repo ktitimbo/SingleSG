@@ -139,10 +139,12 @@ SETUP FEATURES
     Temperature             : $(T_K)
     Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
     Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
+    Post-SG aperture radius : $(1e3*R_aper)mm
     Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
     Slit → SG magnet        : $(1e3*y_SlitToSG)mm
     SG magnet               : $(1e3*y_SG)mm
     SG magnet → Screen      : $(1e3*y_SGToScreen)mm
+    SG magnet → Aperture    : $(1e3*y_SGToAperture)mm
     Tube radius             : $(1e3*R_tube)mm
 ***************************************************
 """)
@@ -180,7 +182,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 3_000_000 ; 
+const Nss = 500_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -196,7 +198,7 @@ jldsave( joinpath(OUTDIR,"cross_slit_particles_$(Nss).jld2"), data = crossing_sl
 if SAVE_FIG
     plot_μeff(K39_params,"mm_effective")
     plot_SG_geometry("SG_geometry")
-    plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf_up")
+    plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf")
 end
 
 ##################################################################################################
