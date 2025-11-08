@@ -4,9 +4,9 @@
 
 ############## EXPERIMENT ANALYSIS PREAMBLE ##############
 # Headless/Windows-safe GR: set before using Plots
-if !haskey(ENV, "GKSwstype")
-    ENV["GKSwstype"] = "100"  # offscreen; avoids popup windows/crashes
-end
+# if !haskey(ENV, "GKSwstype")
+#     ENV["GKSwstype"] = "100"  # offscreen; avoids popup windows/crashes
+# end
 
 # Plotting backend and general appearance settings
 using Plots; gr()
@@ -60,18 +60,22 @@ data_JSF = OrderedDict(
 );
 
 # To be generalized
-Ic_qm =  [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-zm_qm = [ 0.07000392151832582, 0.12103624215126021,
- 0.1637624935340883, 0.19920462520122545, 0.23292316199064259, 0.25916178963661196,
- 0.2878604881906509, 0.31263042984724054, 0.3374424611139296, 0.4497195784807205,
- 0.5458749029445646, 0.641772232809067, 0.7316863846147059, 0.830490922909975,
- 0.9258644851398463, 1.0140804073005922, 1.0981745467764124, 1.2656789418584087,
- 1.4240360171699535, 1.5814155127000782, 1.6859927244621518, 1.8169193762660025]
+data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
+chosen_qm = data_qm[(2,0.150)]
+Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
+zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
+# Ic_qm =  [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+# zm_qm = [ 0.07000392151832582, 0.12103624215126021,
+#  0.1637624935340883, 0.19920462520122545, 0.23292316199064259, 0.25916178963661196,
+#  0.2878604881906509, 0.31263042984724054, 0.3374424611139296, 0.4497195784807205,
+#  0.5458749029445646, 0.641772232809067, 0.7316863846147059, 0.830490922909975,
+#  0.9258644851398463, 1.0140804073005922, 1.0981745467764124, 1.2656789418584087,
+#  1.4240360171699535, 1.5814155127000782, 1.6859927244621518, 1.8169193762660025]
 #
 
 parent_folder = joinpath(@__DIR__, "analysis_data");
 data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
-magnification_factor = 1.2697 ;
+magnification_factor = (1.1198,0.0061) ;
 
 n_runs = length(data_directories);
 I_all  = Vector{Vector{Float64}}(undef, n_runs);
@@ -119,15 +123,13 @@ plot!(fig_Is,
 display(fig_Is)
 saveplot(fig_Is, "currents_sampled")
 
-
 # only load a few columns from each fw_data.csv
 sel = [:Icoil_A, :Icoil_error_A, :F1_z_centroid_mm, :F1_z_centroid_se_mm]; 
 
 for data_directory in data_directories
     # Data Directory
     # data_directory = "20250825" ;
-    
-    
+        
     m = DataReading.collect_fw_map(parent_folder; 
                                     select=sel, 
                                     filename="fw_data.csv", 
@@ -158,9 +160,12 @@ for data_directory in data_directories
     fig=plot(title="Experimental Data : binning & spline smoothing factor",
     titlefontsize = 12)
     for (i,key) in enumerate(key_labels)
-        plot!(fig,m[key][3][2:end,"Icoil_A"], abs.(m[key][3][2:end,"F1_z_centroid_mm"]/magnification_factor), 
+        z_real  = abs.(m[key][3][2:end,"F1_z_centroid_mm"]/magnification_factor[1])
+        δz_real = z_real .* sqrt.( (m[key][3][2:end,"F1_z_centroid_se_mm"] ./ m[key][3][2:end,"F1_z_centroid_mm"]).^2 .+ (magnification_factor[2]./magnification_factor[1]).^2  ) 
+
+        plot!(fig,m[key][3][2:end,"Icoil_A"], z_real, 
         xerror = m[key][3][2:end,"Icoil_error_A"],
-        yerror = m[key][3][2:end,"F1_z_centroid_se_mm"]/magnification_factor,
+        yerror = δz_real,
         label="n=$(m[key][1]) | λ=$(m[key][2])", 
         color=cols_k[i],
         marker=(:circle,cols_k[i],2),
@@ -249,9 +254,9 @@ for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, cols))
     # columns and transforms
     I_A   = M[r][3][2:end, "Icoil_A"]            # mA -> A, abs
     δI_A  = M[r][3][2:end, "Icoil_error_A"]
-    z_mm  = M[r][3][2:end, "F1_z_centroid_mm"] ./ magnification_factor
-    δz_mm = M[r][3][2:end, "F1_z_centroid_se_mm"] ./ magnification_factor
-
+    z_mm  = M[r][3][2:end, "F1_z_centroid_mm"] ./ magnification_factor[1]
+    δz_mm = abs.(z_mm) .* sqrt.( ( M[r][3][2:end, "F1_z_centroid_se_mm"] ./ M[r][3][2:end, "F1_z_centroid_mm"]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
+    
     # guard for log10 axes: filter out non-positive values
     I_A   = ifelse.(I_A .> 0, I_A, missing)
     z_mm  = ifelse.(z_mm .> 0, z_mm, missing)
@@ -295,8 +300,8 @@ for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, cols))
     # columns and transforms
     I_A   = M[r][3][2:end, "Icoil_A"]            # mA -> A, abs
     δI_A  = M[r][3][2:end, "Icoil_error_A"]
-    z_mm  = M[r][3][2:end, "F1_z_centroid_mm"] ./ magnification_factor
-    δz_mm = M[r][3][2:end, "F1_z_centroid_se_mm"] ./ magnification_factor
+    z_mm  = M[r][3][2:end, "F1_z_centroid_mm"] ./ magnification_factor[1]
+    δz_mm = abs.(z_mm) .* sqrt.( ( M[r][3][2:end, "F1_z_centroid_se_mm"] ./ M[r][3][2:end, "F1_z_centroid_mm"]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
 
     # guard for log10 axes: filter out non-positive values
     I_A   = ifelse.(I_A .> 0, I_A, missing)
@@ -450,14 +455,15 @@ col = Dict(
     :sy => :F1_z_centroid_se_mm,
 )
 
-scale_mag_factor = inv(magnification_factor)   # = 1 / magnification_factor
+scale_mag_factor = inv(magnification_factor[1])   # = 1 / magnification_factor
 threshold = 0.010 # lower cut-off for experimental currents
 CURRENT_ROW_START = [first_gt_idx(t, col[:x], threshold) for t in tables]
 
 xsets  = [t[i:end, col[:x]]                      for (t,i) in zip(tables, CURRENT_ROW_START)]
 ysets  = [scale_mag_factor .* t[i:end, col[:y]]  for (t,i) in zip(tables, CURRENT_ROW_START)]
 σxsets = [t[i:end, col[:sx]]                     for (t,i) in zip(tables, CURRENT_ROW_START)]
-σysets = [scale_mag_factor .* t[i:end, col[:sy]] for (t,i) in zip(tables, CURRENT_ROW_START)]
+# σysets = [scale_mag_factor .* t[i:end, col[:sy]] for (t,i) in zip(tables, CURRENT_ROW_START)]
+σysets = [abs.(scale_mag_factor .* t[i:end, col[:y]]) .* sqrt.( ( t[i:end, col[:sy]] ./ t[i:end, col[:y]]  ).^2 .+ (magnification_factor[2] .* scale_mag_factor ).^2) for (t,i) in zip(tables, CURRENT_ROW_START)]
 
 i_sampled_length = 300
 
@@ -485,7 +491,7 @@ fig = plot(
 )
 for i=1:length(data_directories)
     xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]/magnification_factor
+    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]/magnification_factor[1]
     scatter!(fig,xs, ys,
         label=data_directories[i],
         marker=(:circle, :white,3),
@@ -565,7 +571,8 @@ cols = palette(:darkrainbow, length(data_directories))
 for i=1:length(data_directories)
     xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
     ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]*scale_mag_factor
-    δys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"]*scale_mag_factor
+    # δys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"]*scale_mag_factor
+    δys = abs.(ys) .* sqrt.( (m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"] ./ m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]).^2 .+ (magnification_factor[2]*scale_mag_factor).^2 )
     spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
     z_final_fit[i,:] = spl.(i_xx)
     scatter!(fig,xs, ys,
@@ -658,7 +665,7 @@ plot!(fig, TheoreticalSimulation.GvsI(xq), μ;
     label="Interpolation MC",
     color=:orangered2
 )
-plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
+plot!(fig, TheoreticalSimulation.GvsI.(Ic_qm), zm_qm, label="QM", line=(:red,:dash,2))
 plot!(fig,
 xaxis=:log10, 
 yaxis=:log10,
