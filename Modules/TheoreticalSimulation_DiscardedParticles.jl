@@ -456,11 +456,11 @@ const _select_flagged_pool = Dict{Tuple{Int,Int}, Matrix{Float64}}()
 function QM_select_flagged(initial_by_current::OrderedDict{K, Vector{Matrix{Float64}}},
                         which::Symbol; flagcol::Int=10) where {K<:Integer}
 
-    flagset = which === :screen     ? (0,) :
-              which === :crash_SG   ? (1, 2) :
-              which === :crash_tube ? (3,) :
-              which === :crash_aper ? (4,) :
-              which === :crash      ? (1, 2, 3, 4) :
+    flagset = which === :screen     ? (0,)            :
+              which === :crash_SG   ? (1, 2)          :
+              which === :crash_tube ? (3,)            :
+              which === :crash_aper ? (4,)            :
+              which === :crash      ? (1, 2, 3, 4)    :
               which === :all        ? (0, 1, 2, 3, 4) :
               error("Invalid which value")
 
