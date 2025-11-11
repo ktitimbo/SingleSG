@@ -674,7 +674,7 @@ alert("script $RUN_STAMP has finished!")
 
 
 Ns = 3_000_000
-data_exists = isfile(joinpath(dirname(OUTDIR),"quantum_simulation_3m","qm_$(Ns)_screen_data.jld2"));
+data_exists = isfile(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_$(Ns)_screen_data.jld2"));
 
 if !data_exists
     println("Analyzing data arriving to the screen")
@@ -891,42 +891,46 @@ else
     anim = nothing
 
 
-    nx_bins = 64
-    nz_bins = [1,2,4,8]  # try different nz_bins
-    gaussian_width_mm = [0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.500 ]  # try different gaussian widths
-    λ0_raw            = 0.01
-    λ0_spline         = 0.001
+    nx_bins = 64 ;
+    nz_bins = [1,2,4,8];  # try different nz_bins
+    gaussian_width_mm = [0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.500 ];  # try different gaussian widths
+    λ0_raw_list       = [0.005, 0.01, 0.02, 0.03, 0.04, 0.05];
+    λ0_spline         = 0.001;
 
-    table = OrderedDict{Tuple{Int, Float64}, OrderedDict{Int64, OrderedDict{Symbol,Any}}}()
-    @time for nz in nz_bins, gw in gaussian_width_mm
+    # three-dimensional dictionary keyed by (nz, gw, λ0_raw)
+    table = OrderedDict{Tuple{Int, Float64, Float64},
+                        OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
+    @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
         println("Profiles F=$(K39_params.Ispin-0.5), for nz_bin=$nz, and gaussian convolution of width=$(Int(1e3*gw))μm")
         profiles_bottom_loop = QM_analyze_profiles_to_dict(
             alive_screen, K39_params;
             manifold=:F_bottom, n_bins=(nx_bins, nz), width_mm=gw,
             add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth=λ0_spline, mode=:probability
         )
-        table[(nz, gw)] = profiles_bottom_loop
+        table[(nz, gw, λ0_raw)] = profiles_bottom_loop
     end
     jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_profiles_table.jld2"), table = table)
 
 
-    clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm))
+    clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list) )
     fig = plot(
         xlabel = "Currents (A)",
         ylabel = L"$z_{\mathrm{max}}$ (mm)",
     )
     local color_idx = 1
     line_styles = [:solid, :dash, :dot, :dashdot]
-    for gw in gaussian_width_mm
-        nz_idx = 1
-        for nz in nz_bins
-            zvals = [table[(nz, gw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
-            label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$"
-            plot!(Icoils[2:end], zvals[2:end],
-                line = (line_styles[nz_idx], clrs[color_idx], 2),
-                label = label)
-            nz_idx      += 1
-            color_idx   += 1
+    for λ0_raw in λ0_raw_list
+        for gw in gaussian_width_mm
+            nz_idx = 1
+            for nz in nz_bins
+                zvals = [table[(nz, gw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$"
+                plot!(Icoils[2:end], zvals[2:end],
+                    line = (line_styles[nz_idx], clrs[color_idx], 2),
+                    label = label)
+                nz_idx      += 1
+                color_idx   += 1
+            end
         end
     end
     display(fig)
@@ -977,7 +981,7 @@ else
         Number of atoms         : $(Ns)
         Binning (nx,nz)         : ($(nx_bins),$(nz_bins))
         Gaussian width (mm)     : $(gaussian_width_mm)
-        Smoothing raw           : $(λ0_raw)
+        Smoothing raw           : $(λ0_raw_list)
         Smoothing spline        : $(λ0_spline)
         Currents (A)            : $(round.(Icoils,sigdigits=3))
         No. of currents         : $(nI)
