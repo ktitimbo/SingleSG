@@ -564,7 +564,7 @@ anim = nothing
 
 nz_bins_list = [1,2,4];
 ls_list = [:solid,:dash,:dot];
-gaussian_width_mm_list = [0.050,0.065,0.100,0.150,0.200,0.300,0.400,0.500];
+gaussian_width_mm_list = [0.050, 0.065, 0.100, 0.150, 0.200, 0.300, 0.400, 0.500];
 zmax_gaussian_width = zeros(length(nz_bins_list),nI,length(gaussian_width_mm_list));
 for (jdx,nz) in enumerate(nz_bins_list)
     for (idx,val) in enumerate(gaussian_width_mm_list)
@@ -900,12 +900,12 @@ else
     table = OrderedDict{Tuple{Int, Float64}, OrderedDict{Int64, OrderedDict{Symbol,Any}}}()
     @time for nz in nz_bins, gw in gaussian_width_mm
         println("Profiles F=$(K39_params.Ispin-0.5), for nz_bin=$nz, and gaussian convolution of width=$(Int(1e3*gw))μm")
-        profiles_bottom = QM_analyze_profiles_to_dict(
+        profiles_bottom_loop = QM_analyze_profiles_to_dict(
             alive_screen, K39_params;
             manifold=:F_bottom, n_bins=(nx_bins, nz), width_mm=gw,
             add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth=λ0_spline, mode=:probability
         )
-        table[(nz, gw)] = profiles_bottom
+        table[(nz, gw)] = profiles_bottom_loop
     end
     jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_profiles_table.jld2"), table = table)
 
@@ -915,18 +915,18 @@ else
         xlabel = "Currents (A)",
         ylabel = L"$z_{\mathrm{max}}$ (mm)",
     )
-    clr_idx = 1
+    local color_idx = 1
     line_styles = [:solid, :dash, :dot, :dashdot]
     for gw in gaussian_width_mm
         nz_idx = 1
         for nz in nz_bins
-            zvals = [table[(nz, gw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end]
+            zvals = [table[(nz, gw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
             label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$"
-            plot!(Icoils[2:end], zvals,
-                line = (line_styles[nz_idx], clrs[clr_idx], 2),
+            plot!(Icoils[2:end], zvals[2:end],
+                line = (line_styles[nz_idx], clrs[color_idx], 2),
                 label = label)
-            nz_idx  += 1
-            clr_idx += 1
+            nz_idx      += 1
+            color_idx   += 1
         end
     end
     display(fig)
