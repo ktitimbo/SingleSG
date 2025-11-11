@@ -46,7 +46,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20251006" ;
+data_directory      = "20251109" ;
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
 
@@ -54,12 +54,12 @@ outfile_processed   = joinpath(data_directory, "data_processed.jld2")
 # Camera and pixel geometry : intrinsic properties
 cam_pixelsize           = 6.5e-6 ;  # Physical pixel size of camera [m]
 nx_pixels , nz_pixels   = (2160, 2560); # (Nx,Nz) pixels
-magnification_factor    = 1.2697 ;
+magnification_factor    = 0.996 ;
 # Experiment resolution
 exp_bin_x, exp_bin_z    = (4,1) ;  # Camera binning
 exp_pixelsize_x, exp_pixelsize_z = (exp_bin_x, exp_bin_z).*cam_pixelsize ; # Effective pixel size after binning [m]
 # Furnace 
-Temperature = 273+205
+Temperature = 273.15+205
 # Image dimensions (adjusted for binning)
 x_pixels = Int(nx_pixels / exp_bin_x);  # Number of x-pixels after binning
 z_pixels = Int(nz_pixels / exp_bin_z);  # Number of z-pixels after binning
@@ -96,6 +96,17 @@ data_JSF = OrderedDict(
     [0.0409, 0.0566, 0.0830, 0.1015, 0.1478, 0.1758, 0.2409, 0.3203, 0.4388, 0.5433, 0.6423, 0.8394, 1.1267, 1.5288], #CQD
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
+
+data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
+chosen_qm = data_qm[(8,0.300)]
+Ic_QM = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
+zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
+
+data_JSF[:model]
+plot(data_JSF[:model][:,1], data_JSF[:model][:,3])
+plot!(Ic_QM, zm_qm,
+    xaxis=:log10,
+    yaxis=:log10)
 
 # Importing data
 if !isfile(outfile_processed) # check if the processed images exists
