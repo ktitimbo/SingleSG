@@ -61,7 +61,7 @@ data_JSF = OrderedDict(
 
 # To be generalized
 data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
-chosen_qm = data_qm[(2,0.150)]
+chosen_qm = data_qm[(2,0.065)]
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
 zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
 # Ic_qm =  [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
