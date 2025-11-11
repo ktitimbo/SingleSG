@@ -1027,13 +1027,13 @@ module MyExperimentalAnalysis
                 # --- Maxima via minimizing negative spline from multiple guesses
                 negative_spline(x) = -S_fit(x[1])
                 initial_guesses = sort([
-                    ceil(minimum(z_fit)),
+                    # ceil(minimum(z_fit)),
                     quantile(z_fit, 0.40),
                     z_fit[argmax(y_fit)],
                     quantile(z_fit, 0.65),
                     quantile(z_fit, 0.75),
                     quantile(z_fit, 0.90),
-                    floor(maximum(z_fit)),
+                    # floor(maximum(z_fit)),
                 ])
 
                 candidates = Float64[]
@@ -1186,13 +1186,13 @@ module MyExperimentalAnalysis
             # --- Maxima via minimizing negative spline from multiple guesses
             negative_spline(x) = -S_fit(x[1])
             initial_guesses = sort([
-                ceil(minimum(z_fit)),
+                # ceil(minimum(z_fit)),
                 quantile(z_fit, 0.40),
                 z_fit[argmax(y_fit)],
                 quantile(z_fit, 0.65),
                 quantile(z_fit, 0.75),
                 quantile(z_fit, 0.90),
-                floor(maximum(z_fit)),
+                # floor(maximum(z_fit)),
             ])
 
             minima_candidates = Float64[]
@@ -1472,7 +1472,7 @@ module MyExperimentalAnalysis
         # - post-threshold: exponentially increasing (stabilized to avoid overflow)
         w = fill(eps, n)
         w[idx0:end] .= exp.( (0:(n - idx0)) ./ τ )
-        println("weights = $w")
+        # println("weights = $w")
         
         μ = mean(x, Weights(w))
 
