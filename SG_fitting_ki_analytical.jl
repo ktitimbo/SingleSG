@@ -340,7 +340,10 @@ function simulation_paths(n_bin::Integer)
     return (cqd = cqd_paths, qm = qm_paths)
 end
 
-cqd_01 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T191632404","cqd_2000000_kis.jld2"))["data"]
+cqd_01 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m","20251105T104205936","cqd_2500000_ki01_up_screen.jld2"))["data"]
+
+
+cqd_01 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T191632404","cqd_2500000_ki01_up_screen.jld2"))["data"]
 cqd_02 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T191832489","cqd_2000000_kis.jld2"))["data"]
 cqd_03 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T191902603","cqd_2000000_kis.jld2"))["data"]
 cqd_04 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T191938897","cqd_2000000_kis.jld2"))["data"]
@@ -1084,3 +1087,23 @@ legend=:bottomright,
 )
 display(fig)
 savefig(fig,joinpath(OUTDIR,"avg_comparison_grad_$(n_bin).$(FIG_EXT)"))
+
+
+using MAT
+
+read_matlab = matread(joinpath(@__DIR__,"20251109","data.mat"))
+
+read_matlab["data"]
+
+read_matlab["data"]["Current_mA"]
+
+plot(vec(read_matlab["data"]["Current_mA"]),vec(read_matlab["data"]["MagneticField_G"]))
+
+vec(read_matlab["data"]["MagneticField_G"])
+
+keys(read_matlab)
+
+for i=1:209
+    ll = keys(read_matlab)
+    println(ll[i])
+end
