@@ -50,6 +50,8 @@ data_directory      = "20251109" ;
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
 
+matread(joinpath(@__DIR__,"202501109", "Cur374mA_Bin1x4_Exp2000ms_Ran1000mA_Vol3940mV.mat"))
+
 # STERN–GERLACH EXPERIMENT SETUP
 # Camera and pixel geometry : intrinsic properties
 cam_pixelsize           = 6.5e-6 ;  # Physical pixel size of camera [m]
@@ -98,15 +100,6 @@ data_JSF = OrderedDict(
 );
 
 data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
-chosen_qm = data_qm[(8,0.300)]
-Ic_QM = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
-zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
-
-data_JSF[:model]
-plot(data_JSF[:model][:,1], data_JSF[:model][:,3])
-plot!(Ic_QM, zm_qm,
-    xaxis=:log10,
-    yaxis=:log10)
 
 # Importing data
 if !isfile(outfile_processed) # check if the processed images exists
@@ -163,13 +156,17 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     MyExperimentalAnalysis.OUTDIR   = OUTDIR;
     summary_table[row,:] = Cell[RUN_STAMP, n_bins, λ0]
 
+    chosen_qm = data_qm[(n_bins, 0.150)]
+    Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
+    zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
+
     # position
     z_mm        = 1e3 .* pixel_positions(z_pixels, n_bins, exp_pixelsize_z)
     z_mm_error  = 1e3 * 0.5 * exp_pixelsize_z * n_bins # half of the pixel size
 
-    Icoils = data_processed[:Currents]
+    Icoils  = data_processed[:Currents]
     ΔIcoils = data_processed[:CurrentsError]
-    nI = length(Icoils)
+    nI      = length(Icoils)
 
     fig_I0 = plot(Icoils, 
         yerror = ΔIcoils,
@@ -233,7 +230,6 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
 
     f1_mean_max = my_process_mean_maxima("F1", data_processed, n_bins; half_max=true, λ0=λ0)
     f2_mean_max = my_process_mean_maxima("F2", data_processed, n_bins; half_max=true, λ0=λ0)
-
 
     data_centroid_mean  = 0.5 * (f1_mean_max .+ f2_mean_max)
     data_centroid_mean_error = 0.5 * sqrt(2)*z_mm_error*ones(length(data_centroid_mean))
@@ -507,6 +503,10 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     markerstrokewidth=2,
     label="10142024: QM"
     )
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
+    )
     plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
     line=(:dot, :red, 3),
     markerstrokewidth=2,
@@ -549,6 +549,10 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     line=(:dash, :blue, 3),
     markerstrokewidth=2,
     label="10142024: QM"
+    )
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
     )
     plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
     line=(:dot, :red, 3),
@@ -622,6 +626,10 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     markerstrokewidth=2,
     label="10142024: QM"
     );
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
+    );
     plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
     line=(:dot, :red, 3),
     markerstrokewidth=2,
@@ -673,6 +681,10 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     line=(:dash, :blue, 3),
     markerstrokewidth=2,
     label="10142024: QM"
+    );
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
     );
     plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
     line=(:dot, :red, 3),
@@ -972,17 +984,21 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     line=(:purple, :dash, 2, 0.5),
     markerstrokewidth=2,
     label="10142024"
-    )
+    );
     plot!(data_JSF[:model][:,1], data_JSF[:model][:,2],
     line=(:dash, :blue, 3),
     markerstrokewidth=2,
     label="10142024: QM"
-    )
+    );
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
+    );
     plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
     line=(:dot, :red, 3),
     markerstrokewidth=2,
     label="10142024: CQD"
-    )
+    );
     display(fig_log)
     saveplot(fig_log, "fw_000")
 
@@ -1020,6 +1036,10 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     markerstrokewidth=2,
     label="10142024: QM"
     )
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM",
+    );
     plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
     line=(:dot, :red, 3),
     markerstrokewidth=2,
@@ -1091,6 +1111,10 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     markerstrokewidth=2,
     label="10142024: QM"
     );
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
+    );
     plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
     line=(:dot, :red, 3),
     markerstrokewidth=2,
@@ -1139,6 +1163,10 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     line=(:dash, :blue, 3),
     markerstrokewidth=2,
     label="10142024: QM"
+    );
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
     );
     plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
     line=(:dot, :red, 3),
@@ -1190,17 +1218,21 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
         guidefontsize=14,
         legendfontsize=10,
         left_margin=3mm,
-    ) 
+    ) ;
     plot!(fig_comp,data_JSF[:model][:,1], data_JSF[:model][:,2],
     line=(:dash, :blue, 3),
     markerstrokewidth=2,
     label="10142024: QM"
-    )
+    );
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
+    );
     plot!(fig_comp,data_JSF[:model][:,1], data_JSF[:model][:,3],
     line=(:dot, :red, 3),
     markerstrokewidth=2,
     label="10142024: CQD"
-    )
+    );
     saveplot(fig_comp,"comparison_zoom")
 
     fig_comp=plot(
@@ -1242,6 +1274,10 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     markerstrokewidth=2,
     label="10142024: QM"
     )
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
+    );
     plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
     line=(:dot, :red, 3),
     markerstrokewidth=2,
