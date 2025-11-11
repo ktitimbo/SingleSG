@@ -4,10 +4,9 @@
 
 ############## EXPERIMENT ANALYSIS PREAMBLE ##############
 # Headless/Windows-safe GR: set before using Plots
-if !haskey(ENV, "GKSwstype")
-    ENV["GKSwstype"] = "100"  # offscreen; avoids popup windows/crashes
-end
-
+# if !haskey(ENV, "GKSwstype")
+#     ENV["GKSwstype"] = "100"  # offscreen; avoids popup windows/crashes
+# end
 # Plotting backend and general appearance settings
 using Plots; gr()
 # Set default plot aesthetics
@@ -49,8 +48,6 @@ MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 data_directory      = "20251109" ;
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
-
-matread(joinpath(@__DIR__,"202501109", "Cur374mA_Bin1x4_Exp2000ms_Ran1000mA_Vol3940mV.mat"))
 
 # STERN–GERLACH EXPERIMENT SETUP
 # Camera and pixel geometry : intrinsic properties
@@ -98,7 +95,6 @@ data_JSF = OrderedDict(
     [0.0409, 0.0566, 0.0830, 0.1015, 0.1478, 0.1758, 0.2409, 0.3203, 0.4388, 0.5433, 0.6423, 0.8394, 1.1267, 1.5288], #CQD
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
-
 data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
 
 # Importing data
@@ -127,7 +123,7 @@ if !isfile(outfile_processed) # check if the processed images exists
         title=L"$\langle$ Flat Frame $\rangle$",
         xlabel=L"$z\ \mathrm{(mm)}$",
         ylabel=L"$x\ \mathrm{(mm)}$");
-    fig = plot(p1, p2; layout=(1,2), link=:both, size=(1000,400), 
+    local fig = plot(p1, p2; layout=(1,2), link=:both, size=(1000,400), 
     left_margin=4mm,
     bottom_margin=3mm)
     savefig(fig, joinpath(data_directory,"dark_flat"))
