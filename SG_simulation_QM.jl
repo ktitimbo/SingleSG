@@ -4,7 +4,7 @@
 # August 2025
 
 #  Plotting Setup
-# ENV["GKS_WSTYPE"] = "100"
+ENV["GKS_WSTYPE"] = "100"
 using Plots; gr()
 Plots.default(
     show=true, dpi=800, fontfamily="Computer Modern", 
@@ -182,7 +182,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 1_000_000 ; 
+const Nss = 1_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
