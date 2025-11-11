@@ -673,24 +673,27 @@ println("script $RUN_STAMP has finished!")
 alert("script $RUN_STAMP has finished!")
 
 
+Ns = 3_000_000
 data_exists = isfile(joinpath(dirname(OUTDIR),"quantum_simulation_3m","qm_$(Ns)_screen_data.jld2"));
 
-if data_exists
-    # data analysis
-    println("QM approach : data analysis") 
-    Ns = 3_000_000
+if !data_exists
+    println("Analyzing data arriving to the screen")
 
-    # dataQM = load(joinpath(dirname(OUTDIR),"qm_$(Ns)_valid_particles_data.jld2"))["data"]
-    # @time alive_screen = OrderedDict(
-    #             :Icoils => dataQM[:Icoils], 
-    #             :levels => dataQM[:levels], 
-    #             :data   => TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen));
-    # jldsave(joinpath(OUTDIR,,"qm_$(Ns)_screen_data.jld2"), alive = alive_screen)
-    # dataQM = nothing
-    # GC.gc()
-    # @info "Memory cleaned after QM data acquired"
+    dataQM = load(joinpath(dirname(OUTDIR),"qm_$(Ns)_valid_particles_data.jld2"))["data"]
+    @time alive_screen = OrderedDict(
+                :Icoils => dataQM[:Icoils], 
+                :levels => dataQM[:levels], 
+                :data   => TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen));
+    jldsave(joinpath(OUTDIR,"quantum_simulation_3m","qm_$(Ns)_screen_data.jld2"), alive = alive_screen)
+    dataQM = nothing
+    GC.gc()
+    @info "Memory cleaned after QM data acquired"
+else    
+    # data analysis
+    println("QM approach : peak position data analysis") 
 
     alive_screen = load(joinpath(dirname(OUTDIR),"quantum_simulation_3m","qm_$(Ns)_screen_data.jld2"))["alive"];
+    @info "file loaded"
 
     Icoils  = alive_screen[:Icoils];
     nI      = length(Icoils);
@@ -890,7 +893,7 @@ if data_exists
 
     nx_bins = 64
     nz_bins = [1,2,4,8]  # try different nz_bins
-    gaussian_width_mm = [0.065, 0.100, 0.150, 0.200, 0.250, 0.300 ]  # try different gaussian widths
+    gaussian_width_mm = [0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.500 ]  # try different gaussian widths
     λ0_raw            = 0.01
     λ0_spline         = 0.001
 
