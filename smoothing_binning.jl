@@ -350,7 +350,7 @@ println("\nComparison of differente experiments finished!\n\n")
 ######################################### AVERAGING ###################################################################
 #######################################################################################################################
 
-m_sets = m_sets[1:end-1]
+
 magnification_factor = mag_factor("20250825")
 """
 Monte-Carlo average of multiple (x,y) sets onto a common grid, propagating x- and y-uncertainties.
