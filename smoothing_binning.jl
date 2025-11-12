@@ -77,6 +77,10 @@ parent_folder = joinpath(@__DIR__, "analysis_data");
 data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
 magnification_factor = (1.1198,0.0061) ;
 
+data_directories = ["202511096"];
+magnification_factor = (0.9996,0.0047) ;
+
+
 n_runs = length(data_directories);
 I_all  = Vector{Vector{Float64}}(undef, n_runs);
 dI_all = Vector{Vector{Float64}}(undef, n_runs);
