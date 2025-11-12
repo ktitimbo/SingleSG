@@ -61,7 +61,7 @@ data_JSF = OrderedDict(
 
 # To be generalized
 data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
-chosen_qm = data_qm[(2,0.065)]
+chosen_qm = data_qm[(2,0.150)]
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
 zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
 # Ic_qm =  [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
@@ -73,13 +73,18 @@ zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)
 #  1.4240360171699535, 1.5814155127000782, 1.6859927244621518, 1.8169193762660025]
 #
 
+function mag_factor(directory::String)
+    if directory == "20251109"
+        values = (0.996,0.0047)
+    else
+        values = (1.1198,0.0061) 
+    end
+    return values
+end
+
+
 parent_folder = joinpath(@__DIR__, "analysis_data");
-data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
-magnification_factor = (1.1198,0.0061) ;
-
-data_directories = ["202511096"];
-magnification_factor = (0.9996,0.0047) ;
-
+data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006","20251109"];
 
 n_runs = length(data_directories);
 I_all  = Vector{Vector{Float64}}(undef, n_runs);
@@ -133,6 +138,8 @@ sel = [:Icoil_A, :Icoil_error_A, :F1_z_centroid_mm, :F1_z_centroid_se_mm];
 for data_directory in data_directories
     # Data Directory
     # data_directory = "20250825" ;
+
+    magnification_factor = mag_factor(data_directory) ;
         
     m = DataReading.collect_fw_map(parent_folder; 
                                     select=sel, 
@@ -249,12 +256,13 @@ fig1 = plot(
     xlims  = (8e-3, 1.2),
     ylims  = (1e-4, 5.0),
     legend = :outerright,
-    legend_title = L"sim $n=%$(selected_bin)$",
+    legend_title = L"sim $n=%$(selected_bin)$ & $\lambda_{0}=%$(selected_spl)$",
     size   = (900, 420),
     left_margin = 4mm,
     bottom_margin = 3mm,
 )
 for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, cols))
+    magnification_factor = mag_factor(d)
     # columns and transforms
     I_A   = M[r][3][2:end, "Icoil_A"]            # mA -> A, abs
     δI_A  = M[r][3][2:end, "Icoil_error_A"]
@@ -301,6 +309,7 @@ fig2 = plot(
     bottom_margin = 3mm,
 )
 for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, cols))
+    magnification_factor = mag_factor(d)
     # columns and transforms
     I_A   = M[r][3][2:end, "Icoil_A"]            # mA -> A, abs
     δI_A  = M[r][3][2:end, "Icoil_error_A"]
@@ -341,7 +350,8 @@ println("\nComparison of differente experiments finished!\n\n")
 ######################################### AVERAGING ###################################################################
 #######################################################################################################################
 
-
+m_sets = m_sets[1:end-1]
+magnification_factor = mag_factor("20250825")
 """
 Monte-Carlo average of multiple (x,y) sets onto a common grid, propagating x- and y-uncertainties.
 
