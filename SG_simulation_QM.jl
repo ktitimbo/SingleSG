@@ -901,7 +901,7 @@ else
     table = OrderedDict{Tuple{Int, Float64, Float64},
                         OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
     @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-        println("Profiles F=$(K39_params.Ispin-0.5), for nz_bin=$nz, and gaussian convolution of width=$(Int(1e3*gw))μm")
+        println("Profiles F=$(K39_params.Ispin-0.5), for nz_bin=$nz, Gaussian convolution σ=$(Int(1e3*gw))μm, SplineFit smoothing factor λ₀=$(λ0_raw)")
         profiles_bottom_loop = QM_analyze_profiles_to_dict(
             alive_screen, K39_params;
             manifold=:F_bottom, n_bins=(nx_bins, nz), width_mm=gw,
