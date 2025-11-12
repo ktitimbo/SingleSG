@@ -923,8 +923,8 @@ else
         for gw in gaussian_width_mm
             nz_idx = 1
             for nz in nz_bins
-                zvals = [table[(nz, gw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
-                label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$"
+                zvals = [table[(nz, gw, λ0_raw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0_raw)$"
                 plot!(Icoils[2:end], zvals[2:end],
                     line = (line_styles[nz_idx], clrs[color_idx], 2),
                     label = label)
