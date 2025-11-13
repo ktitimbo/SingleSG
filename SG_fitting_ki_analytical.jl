@@ -226,121 +226,113 @@ function load_blocks(paths::AbstractVector{<:AbstractString};
 
 end
 
-"""
-    simulation_paths(n_bin::Integer) -> (cqd::Vector{String}, qm::Vector{String})
+# Simulated currents
+Icoils_sim = [0.00,
+            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
+            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
+            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
+            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
+            0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
+];
+nI_sim = length(Icoils_sim);
 
-Return the lists of CSV paths for CQD and QM simulations corresponding to the
-requested binning `n_bin ∈ {8, 4, 2, 1}`.
+CQD_directories = ["20251105T104205936",
+                   "20251105T104302406",
+                   "20251105T104420970",
+                   "20251105T104515029",
+                   "20251105T104606565",
+                   "20251105T104852029",
+                   ]
+ndir = length(CQD_directories)
+nruns= 10
 
-Throws an error if there is no data for the chosen binning.
+induction_coeff = 1e-6 * [
+    range(0.01,0.10,length=nruns),
+    range(0.1,1.0,length=nruns),
+    range(1.1,2.0,length=nruns),
+    range(2.1,3.0,length=nruns),
+    range(3.1,4.0,length=nruns),
+    range(4.1,5.0,length=nruns),
+    range(5.1,6.0,length=nruns),
+    range(10,100,length=nruns),
+]
 
-# Example
-c = simulation_paths(4)c.cqd  # -> Vector of CQD CSVs for n_bin = 4
-c.qm   # -> Vector of QM  CSVs for n_bin = 4
-"""
-function simulation_paths(n_bin::Integer)
-    cqd_map = Dict(
-        8 => [
-            "./simulation_data/nbin8/results_CQD_20250910T132101.csv",
-            "./simulation_data/nbin8/results_CQD_20250910T132211.csv",
-            "./simulation_data/nbin8/results_CQD_20250910T132250.csv",
-            "./simulation_data/nbin8/results_CQD_20250910T132323.csv",
-        ],
-        4 => [
-            "./simulation_data/nbin4/results_CQD_20250909T095554.csv",
-            "./simulation_data/nbin4/results_CQD_20250909T095606.csv",
-            "./simulation_data/nbin4/results_CQD_20250909T095619.csv",
-            "./simulation_data/nbin4/results_CQD_20250909T095645.csv",
-        ],
-        2 => [
-            #################### B0
-            "./simulation_data/nbin2/round3/results_CQD_20250926T163642PDT.csv",
-            "./simulation_data/nbin2/round3/results_CQD_20250926T163725PDT.csv",
-            "./simulation_data/nbin2/round3/results_CQD_20250926T162134PDT.csv",
-            "./simulation_data/nbin2/round3/results_CQD_20250926T162714PDT.csv",
-            "./simulation_data/nbin2/round3/results_CQD_20250926T162801PDT.csv",
-            "./simulation_data/nbin2/round3/results_CQD_20250926T162912PDT.csv",
-            "./simulation_data/nbin2/round3/results_CQD_20250926T163017PDT.csv",
-            "./simulation_data/nbin2/round3/results_CQD_20250926T163123PDT.csv",
-            ####################
-            # "./simulation_data/nbin2/results_CQD_20250905T150919.csv",
-            # "./simulation_data/nbin2/results_CQD_20250905T110806.csv",
-            # "./simulation_data/nbin2/results_CQD_20250905T110819.csv",
-            # "./simulation_data/nbin2/results_CQD_20250905T110834.csv",
-            #################### B0+Bn_QM
-            # "./simulation_data/nbin2/round4/results_CQD_20251014T104843PDT.csv",
-            # "./simulation_data/nbin2/round4/results_CQD_20251014T104859PDT.csv",
-            # "./simulation_data/nbin2/round4/results_CQD_20251014T105004PDT.csv",
-            # "./simulation_data/nbin2/round4/results_CQD_20251014T105054PDT.csv",
-            # "./simulation_data/nbin2/round4/results_CQD_20251014T105127PDT.csv",
-            # "./simulation_data/nbin2/round4/results_CQD_20251014T105158PDT.csv",
-            # "./simulation_data/nbin2/round4/results_CQD_20251014T105218PDT.csv",
-            # "./simulation_data/nbin2/round4/results_CQD_20251014T105248PDT.csv",
-        ],
-        1 => [
-            "./simulation_data/nbin1/results_CQD_20250905T190626.csv",
-            "./simulation_data/nbin1/results_CQD_20250905T190640.csv",
-            "./simulation_data/nbin1/results_CQD_20250910T113900.csv",
-            "./simulation_data/nbin1/results_CQD_20250905T190714.csv",
-        ],
-    )
 
-    qm_map = Dict(
-        8 => [
-            "./simulation_data/nbin8/results_QM_20250910T132101.csv",
-            "./simulation_data/nbin8/results_QM_20250910T132211.csv",
-            "./simulation_data/nbin8/results_QM_20250910T132250.csv",
-            "./simulation_data/nbin8/results_QM_20250910T132323.csv",
-        ],
-        4 => [
-            "./simulation_data/nbin4/results_QM_20250909T095554.csv",
-            "./simulation_data/nbin4/results_QM_20250909T095606.csv",
-            "./simulation_data/nbin4/results_QM_20250909T095619.csv",
-            "./simulation_data/nbin4/results_QM_20250909T095645.csv",
-        ],
-        2 => [
-            # "./simulation_data/nbin2/results_QM_20250926T163642PDT.csv",
-            # "./simulation_data/nbin2/results_QM_20250926T163725PDT.csv",
-            # "./simulation_data/nbin2/results_QM_20250926T162134PDT.csv",
-            # "./simulation_data/nbin2/results_QM_20250926T162714PDT.csv",
-            # "./simulation_data/nbin2/results_QM_20250926T162801PDT.csv",
-            # "./simulation_data/nbin2/results_QM_20250926T162912PDT.csv",
-            # "./simulation_data/nbin2/results_QM_20250926T163017PDT.csv",
-            # "./simulation_data/nbin2/results_QM_20250926T163123PDT.csv",
-            # "./simulation_data/nbin2/results_QM_20250905T150919.csv",
-            # "./simulation_data/nbin2/results_QM_20250905T110806.csv",
-            # "./simulation_data/nbin2/results_QM_20250905T110819.csv",
-            # "./simulation_data/nbin2/results_QM_20250905T110834.csv",
-            #################### B0+Bn_QM
-            "./simulation_data/nbin2/round4/results_QM_20251014T104843PDT.csv",
-            "./simulation_data/nbin2/round4/results_QM_20251014T104859PDT.csv",
-            "./simulation_data/nbin2/round4/results_QM_20251014T105004PDT.csv",
-            "./simulation_data/nbin2/round4/results_QM_20251014T105054PDT.csv",
-            "./simulation_data/nbin2/round4/results_QM_20251014T105127PDT.csv",
-            "./simulation_data/nbin2/round4/results_QM_20251014T105158PDT.csv",
-            "./simulation_data/nbin2/round4/results_QM_20251014T105218PDT.csv",
-            "./simulation_data/nbin2/round4/results_QM_20251014T105248PDT.csv",
-        ],
-        1 => [
-            "./simulation_data/nbin1/results_QM_20250905T190626.csv",
-            "./simulation_data/nbin1/results_QM_20250905T190640.csv",
-            "./simulation_data/nbin1/results_QM_20250910T113900.csv",
-            "./simulation_data/nbin1/results_QM_20250905T190714.csv",
-        ],
-    )
+nx_bins , nz_bins = 64 , 2
+gaussian_width_mm = 0.300
+λ0_raw            = 0.01
+λ0_spline         = 0.001
 
-    cqd_paths = get(cqd_map, n_bin, String[])
-    qm_paths  = get(qm_map,  n_bin, String[])
+# --- Preallocate results matrix ---
+zmm_matrix = Matrix{Float64}(undef, nI_sim, ndir*nruns)
+idx_num = 1
+for i = 1:ndir
+    println("($(@sprintf("%02d", i))/$(@sprintf("%02d", ndir))) Reading $(CQD_directories[i])")
+    @time for j = 1:nruns
+        println("\t($(@sprintf("%02d", j))/$(nruns)) Running ki=$(@sprintf("%2.1e",induction_coeff[i][j]))")
+        cqd_data = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[i],"cqd_2500000_ki$(@sprintf("%02d", j))_up_screen.jld2"))["screen"]
+        Icoil   = cqd_data[:Icoils]
+        nI      = length(Icoil)
 
-    if isempty(cqd_paths) || isempty(qm_paths)
-        error("No data corresponding to the chosen binning (n_bin = $n_bin).")
+        # ✅ Sanity check: ensure Icoil matches the rsimulated
+        if nI_sim != nI || !isapprox(Icoil, Icoils_sim; atol=1e-8)
+            @warn "Icoil vector differs in run $j!"
+        end
+
+        data_z_mm = TheoreticalSimulation.CQD_analyze_profiles_to_dict(cqd_data;
+                n_bins = (nx_bins , nz_bins), width_mm = gaussian_width_mm, 
+                add_plot = false, plot_xrange= :all, branch=:up,
+                λ_raw = λ0_raw, λ_smooth = λ0_spline, mode = :probability)
+
+        zmm_matrix[:,idx_num] = [data_z_mm[v][:z_max_smooth_spline_mm] for v in 1:nI]
+        idx_num += 1
+        cqd_data  = nothing
+        data_z_mm = nothing
+        GC.gc()
     end
-    @assert length(cqd_paths) == length(qm_paths) "CQD/QM path counts differ for n_bin=$n_bin."
-
-    return (cqd = cqd_paths, qm = qm_paths)
 end
 
-cqd_01 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m","20251105T104205936","cqd_2500000_ki01_up_screen.jld2"))["data"]
+color_list = palette(:darkrainbow, nruns * ndir)
+fig = plot(xlabel="Current (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)")
+idx_num = 1
+for i=1:ndir
+for j=1:nruns
+    plot!(fig,Icoils_sim[2:end], abs.(zmm_matrix[2:end,idx_num]),
+        label = L"$k_{i}=%$(round(1e6*induction_coeff[i][j], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[idx_num]),
+    )
+    display(fig)
+    idx_num += 1
+end
+end
+plot!(fig, 
+    size=(850,600),
+    xaxis=:log10, 
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns = 2,
+    legendfontsize=6,)
+display(fig)
+
+plot(zmm_matrix[1,:])
+plot!(zmm_matrix[2,:])
+plot!(zmm_matrix[3,:])
+
+
+cqd_02 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki02_up_screen.jld2"))["screen"]
+cqd_03 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki03_up_screen.jld2"))["screen"]
+cqd_04 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki04_up_screen.jld2"))["screen"]
+cqd_05 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki05_up_screen.jld2"))["screen"]
+cqd_06 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki06_up_screen.jld2"))["screen"]
+cqd_07 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki07_up_screen.jld2"))["screen"]
+cqd_08 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki08_up_screen.jld2"))["screen"]
+cqd_09 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki09_up_screen.jld2"))["screen"]
+cqd_10 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki10_up_screen.jld2"))["screen"]
+
+
+
+
 
 
 cqd_01 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T191632404","cqd_2500000_ki01_up_screen.jld2"))["data"]
