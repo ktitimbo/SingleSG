@@ -313,6 +313,7 @@ plot!(fig,
     legend=:outerright,
     legend_columns = 2,
     legendfontsize=6,)
+
 display(fig)
 
 plot(zmm_matrix[1,:])
