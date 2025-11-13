@@ -44,6 +44,15 @@ SAVE_FIG = false
 MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
+function mag_factor(directory::String)
+    if directory == "20251109"
+        values = (0.996,0.0047)
+    else
+        values = (1.1198,0.0061) 
+    end
+    return values
+end
+
 # Data Directory
 data_directory      = "20251109" ;
 outfile_raw         = joinpath(data_directory, "data.jld2")
@@ -53,7 +62,7 @@ outfile_processed   = joinpath(data_directory, "data_processed.jld2")
 # Camera and pixel geometry : intrinsic properties
 cam_pixelsize           = 6.5e-6 ;  # Physical pixel size of camera [m]
 nx_pixels , nz_pixels   = (2160, 2560); # (Nx,Nz) pixels
-magnification_factor    = 0.996 ;
+magnification_factor    = mag_factor(data_directory)[1] ;
 # Experiment resolution
 exp_bin_x, exp_bin_z    = (4,1) ;  # Camera binning
 exp_pixelsize_x, exp_pixelsize_z = (exp_bin_x, exp_bin_z).*cam_pixelsize ; # Effective pixel size after binning [m]
@@ -152,7 +161,7 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     MyExperimentalAnalysis.OUTDIR   = OUTDIR;
     summary_table[row,:] = Cell[RUN_STAMP, n_bins, λ0]
 
-    chosen_qm = data_qm[(n_bins, 0.150)]
+    chosen_qm = data_qm[(n_bins, 0.150, λ0)]
     Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
     zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
 
