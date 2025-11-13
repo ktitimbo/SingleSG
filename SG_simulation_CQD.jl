@@ -55,8 +55,8 @@ HOSTNAME = gethostname();
 @info "Running on host" HOSTNAME=HOSTNAME
 # Random seeds
 base_seed_set = 145;
-# rng_set = MersenneTwister(base_seed_set)
-rng_set = TaskLocalRNG();
+rng_set = MersenneTwister(base_seed_set)
+# rng_set = TaskLocalRNG();
 # Custom modules
 include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
@@ -446,17 +446,7 @@ data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set;
 
 
 
-kis = collect(1e-7*range(0.1,1.0, length=10))
-kis = collect(1e-6*range(0.1,1.0, length=10))
-kis = collect(range(1.1,2.0, length=10)/1e6)
-kis = collect(range(2.1,3.0, length=10)/1e6)
-kis = collect(range(3.1,4.0, length=10)/1e6)
-kis = collect(range(4.1,5.0, length=10)/1e6)
-kis = collect(range(5.1,6.0, length=10)/1e6)
-kis = collect(range(10,100, length=10)/1e6)
-
 kis = vcat(
-    collect(1e-7*range(0.1,1.0, length=10)),
     collect(1e-7*range(0.1,1.0, length=10)),
     collect(1e-6*range(0.1,1.0, length=10)),
     collect(range(1.1,2.0, length=10)/1e6),
@@ -464,12 +454,13 @@ kis = vcat(
     collect(range(3.1,4.0, length=10)/1e6),
     collect(range(4.1,5.0, length=10)/1e6),
     collect(range(5.1,6.0, length=10)/1e6),
-    collect(range(10,100, length=10)/1e6))
+    collect(range(10,100, length=10)/1e6),
+    )
 
 dta_ki_up = zeros(length(kis),length(Icoils));
 dta_ki_dw = zeros(length(kis),length(Icoils));
 for (i,ki) in enumerate(kis)
-    @info "Running for kᵢ = $(round(1e6*ki,sigdigits=2))×10⁻⁶"
+    @info "Running for kᵢ = $(round(1e6*ki,sigdigits=3))×10⁻⁶"
 
     @time temp_CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
     @time temp_CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, temp_CQD_up_particles_flag, K39_params)      # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
@@ -494,7 +485,6 @@ for (i,ki) in enumerate(kis)
         n_bins = (nx_bins , nz_bins), width_mm = gaussian_width_mm, 
         add_plot = false, plot_xrange= :all, branch=:dw,
         λ_raw = λ0_raw, λ_smooth = λ0_spline, mode = :probability)
-
 
     dta_ki_up[i,:] = [temp_mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][1:end]
     dta_ki_dw[i,:] = [temp_mm_dw[v][:z_max_smooth_spline_mm] for v in 1:nI][1:end]
@@ -587,7 +577,7 @@ SIMULATION INFORMATION
     Smoothing spline        : $(λ0_spline)
     Currents (A)            : $(round.(Icoils,sigdigits=3))
     No. of currents         : $(nI)
-    Induction term (×10⁻⁶)  : $(round.(1e6*kis, sigdigits=2))
+    Induction term (×10⁻⁶)  : $(round.(1e6*kis, sigdigits=3))
 
 CODE
     Code name               : $(PROGRAM_FILE)
