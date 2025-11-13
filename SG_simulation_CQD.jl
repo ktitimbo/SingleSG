@@ -175,7 +175,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 500 ; 
+const Nss = 2_800_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -455,6 +455,17 @@ kis = collect(range(4.1,5.0, length=10)/1e6)
 kis = collect(range(5.1,6.0, length=10)/1e6)
 kis = collect(range(10,100, length=10)/1e6)
 
+kis = vcat(
+    collect(1e-7*range(0.1,1.0, length=10)),
+    collect(1e-7*range(0.1,1.0, length=10)),
+    collect(1e-6*range(0.1,1.0, length=10)),
+    collect(range(1.1,2.0, length=10)/1e6),
+    collect(range(2.1,3.0, length=10)/1e6),
+    collect(range(3.1,4.0, length=10)/1e6),
+    collect(range(4.1,5.0, length=10)/1e6),
+    collect(range(5.1,6.0, length=10)/1e6),
+    collect(range(10,100, length=10)/1e6))
+
 dta_ki_up = zeros(length(kis),length(Icoils));
 dta_ki_dw = zeros(length(kis),length(Icoils));
 for (i,ki) in enumerate(kis)
@@ -487,6 +498,16 @@ for (i,ki) in enumerate(kis)
 
     dta_ki_up[i,:] = [temp_mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][1:end]
     dta_ki_dw[i,:] = [temp_mm_dw[v][:z_max_smooth_spline_mm] for v in 1:nI][1:end]
+
+    temp_CQD_up_particles_flag         = nothing
+    temp_CQD_up_particles_trajectories = nothing
+    temp_CQD_dw_particles_flag         = nothing
+    temp_CQD_dw_particles_trajectories = nothing
+    temp_CQD_up_screen = nothing
+    temp_CQD_dw_screen = nothing
+    temp_mm_up = nothing
+    temp_mm_dw = nothing
+    GC.gc()
 end
 
 jldsave( joinpath(OUTDIR, "cqd_$(Nss)_kis.jld2"), 
