@@ -445,7 +445,6 @@ data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set;
 # savefig(fig, joinpath(OUTDIR,"CQD_results_comparison.$FIG_EXT"))
 
 
-
 kis = vcat(
     collect(1e-7*range(0.1,1.0, length=10)),
     collect(1e-6*range(0.1,1.0, length=10)),
