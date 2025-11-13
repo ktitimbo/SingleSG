@@ -55,8 +55,8 @@ HOSTNAME = gethostname();
 @info "Running on host" HOSTNAME=HOSTNAME
 # Random seeds
 base_seed_set = 145;
-rng_set = MersenneTwister(base_seed_set)
-# rng_set = TaskLocalRNG();
+# rng_set = MersenneTwister(base_seed_set)
+rng_set = TaskLocalRNG();
 # Custom modules
 include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
