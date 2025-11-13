@@ -226,6 +226,15 @@ function load_blocks(paths::AbstractVector{<:AbstractString};
 
 end
 
+function mag_factor(directory::String)
+    if directory == "20251109"
+        values = (0.996,0.0047)
+    else
+        values = (1.1198,0.0061) 
+    end
+    return values
+end
+
 # Simulated currents
 Icoils_sim = [0.00,
             0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
@@ -242,6 +251,8 @@ CQD_directories = ["20251105T104205936",
                    "20251105T104515029",
                    "20251105T104606565",
                    "20251105T104852029",
+                   "20251105T182353687",
+                   "20251105T183846453"
                    ]
 ndir = length(CQD_directories)
 nruns= 10
@@ -262,6 +273,13 @@ nx_bins , nz_bins = 64 , 2
 gaussian_width_mm = 0.300
 λ0_raw            = 0.01
 λ0_spline         = 0.001
+
+# --- Quantum mechanics data ---
+table_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"];
+data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)]
+Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)][1:end]
+zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)]
+# ------------------------------
 
 # --- Preallocate results matrix ---
 zmm_matrix = Matrix{Float64}(undef, nI_sim, ndir*nruns)
@@ -292,9 +310,24 @@ for i = 1:ndir
     end
 end
 
+jldsave(joinpath(OUTDIR, "zmax_ki.jld2"),
+    data = OrderedDict(:Icoils      => Icoils_sim,
+                           :directories => CQD_directories,
+                           :ki_values   => induction_coeff, 
+                           :z_mm        => zmm_matrix,
+                           :nbins       => (nx_bins , nz_bins),
+                           :sigma_conv  => gaussian_width_mm,
+                           :λ0          => λ0_raw,
+                           :λ0_spline   => λ0_spline
+                )
+)
+
+load(joinpath(OUTDIR, "zmax_ki.jld2"))["data"]
+
 color_list = palette(:darkrainbow, nruns * ndir)
 fig = plot(xlabel="Current (A)",
-    ylabel=L"$z_{\mathrm{max}}$ (mm)")
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
 idx_num = 1
 for i=1:ndir
 for j=1:nruns
@@ -306,54 +339,39 @@ for j=1:nruns
     idx_num += 1
 end
 end
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
 plot!(fig, 
     size=(850,600),
     xaxis=:log10, 
     yaxis=:log10,
+    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+        [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+        [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     legend=:outerright,
     legend_columns = 2,
     legendfontsize=6,)
-
 display(fig)
 
-plot(zmm_matrix[1,:])
-plot!(zmm_matrix[2,:])
-plot!(zmm_matrix[3,:])
-
-
-cqd_02 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki02_up_screen.jld2"))["screen"]
-cqd_03 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki03_up_screen.jld2"))["screen"]
-cqd_04 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki04_up_screen.jld2"))["screen"]
-cqd_05 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki05_up_screen.jld2"))["screen"]
-cqd_06 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki06_up_screen.jld2"))["screen"]
-cqd_07 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki07_up_screen.jld2"))["screen"]
-cqd_08 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki08_up_screen.jld2"))["screen"]
-cqd_09 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki09_up_screen.jld2"))["screen"]
-cqd_10 = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[1],"cqd_2500000_ki10_up_screen.jld2"))["screen"]
-
-
-
-
-
-
-cqd_01 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T191632404","cqd_2500000_ki01_up_screen.jld2"))["data"]
-cqd_02 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T191832489","cqd_2000000_kis.jld2"))["data"]
-cqd_03 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T191902603","cqd_2000000_kis.jld2"))["data"]
-cqd_04 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T191938897","cqd_2000000_kis.jld2"))["data"]
-cqd_05 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T192041160","cqd_2000000_kis.jld2"))["data"]
-cqd_06 = load(joinpath(@__DIR__,"simulation_data","analytic_sim","20251031T192130732","cqd_2000000_kis.jld2"))["data"]
-cqd_sim_up = vcat(cqd_01[:up],cqd_02[:up],cqd_03[:up],cqd_04[:up],cqd_05[:up],cqd_06[:up])
-Ic_cqd = cqd_01[:Icoils]
+cls = palette(:rainbow, 4)
+plot(zmm_matrix[1,:], label="CQD $(1000*Icoils_sim[1])mA", line = (:solid,cls[1],2))
+hline!([zmax_QM[1]], label="QM", line=(:dash,cls[1],1.5))
+plot!(zmm_matrix[2,:], label="CQD $(1000*Icoils_sim[2])mA", line = (:solid,cls[2],2))
+hline!([zmax_QM[2]], label="QM", line=(:dash,cls[2],1.5))
+plot!(zmm_matrix[3,:], label="CQD $(1000*Icoils_sim[3])mA", line = (:solid,cls[3],2))
+hline!([zmax_QM[3]], label="QM", line=(:dash,cls[3],1.5))
+plot!(zmm_matrix[12,:], label="CQD $(1000*Icoils_sim[12])mA", line = (:solid,cls[4],2))
+hline!([zmax_QM[12]], label="QM", line=(:dash,cls[4],1.5))
+# plot!(zmm_matrix[end,:], label="$(Icoils_sim[end])A")
+plot!(yaxis=:log10,
+    legend=:right)
 
 # Select experimental data
-wanted_data_dir = "20251006" ;
+wanted_data_dir = "20250825" ;
 wanted_binning  = 2 ; 
 wanted_smooth   = 0.01 ;
-# Simulation
-ki_sim = collect(0.10:0.10:6.0);
-cols = palette(:darkrainbow, length(ki_sim));
-nz_vals = [2]
-
 # Data loading
 res = DataReading.find_report_data(
         joinpath(@__DIR__, "analysis_data");
@@ -365,28 +383,41 @@ if res === nothing
     @warn "No matching report found"
 else
     @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+    mag, δmag = mag_factor(wanted_data_dir)
     # I_exp = sort(res.currents_mA / 1_000);
     # z_exp = res.framewise_mm/res.magnification;
 end
 load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
 I_exp       = load_data[!,"Icoil_A"]
 I_exp_error = load_data[!,"Icoil_error_A"]
-z_exp       = load_data[!,"F1_z_centroid_mm"]/(1.05*res.magnification)
-z_exp_error = load_data[!,"F1_z_centroid_se_mm"]/(1.05*res.magnification)
-data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[8:end,:]
+z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag)
+z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) 
+i_start = searchsortedfirst(I_exp,0.015)
+data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
 
-cls = palette(:darkrainbow,size(cqd_sim_up,1))
+color_list = palette(:darkrainbow,size(zmm_matrix,2))
 fig = plot(xlabel="Currents (A)",ylabel=L"$z_{\mathrm{max}}$ (mm)")
-for i in 1:60
-    plot!(Ic_cqd[2:end], cqd_sim_up[i,2:end],
-        line=(:solid, cls[i],1),
-        label=L"$k_{i}=%$(ki_sim[i])\times 10^{-6}$")
+idx_num = 1
+for i=1:ndir
+for j=1:nruns
+    plot!(fig,Icoils_sim[2:end], abs.(zmm_matrix[2:end,idx_num]),
+        label = L"$k_{i}=%$(round(1e6*induction_coeff[i][j], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[idx_num]),
+    )
+    idx_num += 1
+end
 end
 plot!(I_exp[2:end],z_exp[2:end],
+    ribbon = z_exp_error[2:end],
     line=(:black,:dash,2),
-    label="$(wanted_data_dir)")
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"
+    
+    )
 plot!(
-    size=(800,600),
+    size=(850,600),
+    xlims=(8e-3,1.2),
     xaxis=:log10,
     yaxis=:log10,
     legend=:outerright,
