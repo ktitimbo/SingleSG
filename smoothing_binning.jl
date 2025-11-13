@@ -61,7 +61,8 @@ data_JSF = OrderedDict(
 
 # To be generalized
 data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
-chosen_qm = data_qm[(2,0.150)]
+nz_fix, σ_fix, λ0_fix = (2,0.300,0.01)
+chosen_qm = data_qm[(nz_fix, σ_fix, λ0_fix)]
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
 zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
 # Ic_qm =  [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
@@ -183,8 +184,27 @@ for data_directory in data_directories
         markerstrokewidth = 1,
         markerstrokecolor=cols_k[i]
         )
+        chosen_qm_i  = data_qm[(m[key][1],σ_fix,m[key][2])]
+        Ic_qm_i      = [chosen_qm_i[i][:Icoil] for i in eachindex(chosen_qm_i)][2:end]
+        zm_qm_i      = [chosen_qm_i[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm_i)][2:end]
+        if m[key][1] == 1
+            qm_color = :grey28
+        elseif m[key][1] == 2
+            qm_color = :grey42
+        elseif m[key][1] ==3
+            qm_color = :grey56
+        else
+            qm_color = :grey70
+        end
+
+        plot!(Ic_qm_i,zm_qm_i,
+            label=false,
+            line=(qm_color,:dash,1.5))
+
+
     end
-    plot!(fig,Ic_qm,zm_qm, label="QM", line=(:solid,:black,2), marker=(:square,:grey66,2))
+    plot!(fig,Ic_qm,zm_qm, label=L"QM: 
+    $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:solid,:black,2), marker=(:square,:grey66,2))
     plot!(fig,
         xlabel="Current (A)",
         ylabel=L"$z_{F_{1}}$ (mm)",
@@ -194,7 +214,7 @@ for data_directory in data_directories
         yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
         xlims=(1e-3,1.2),
         ylims=(5e-4,5),
-        size=(800,600),
+        size=(850,600),
         legend=:outerright,
         legend_columns=1,
         legendfontsize=8,
@@ -221,7 +241,6 @@ m_sets = map(d -> DataReading.collect_fw_map(
                  sort_on=:binning,
                  data_dir_filter=d
              ), data_directories)
-
 
 # desired values
 selected_bin = 2
@@ -290,9 +309,10 @@ plot!(fig1,
     label = "Alexander's data",
     line = (:dash, :green, 2),
 )
-plot!(fig1, Ic_qm, zm_qm, label="QM", line=(:black,2))
+plot!(fig1, Ic_qm, zm_qm, label=L"QM $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:black,2))
 display(fig1)
 saveplot(fig1, "bin_vs_smoothing_log")   # use explicit extension; pdf/png/svg as you like
+
 
 
 fig2 = plot(
@@ -339,7 +359,7 @@ plot!(fig2,
     label = "Alexander's data",
     line = (:dash, :green, 2),
 )
-plot!(fig2, Ic_qm, zm_qm, label="QM", line=(:black,2))
+plot!(fig2, Ic_qm, zm_qm, label=L"QM $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:black,2))
 display(fig2)
 saveplot(fig2, "bin_vs_smoothing_lin")   # use explicit extension; pdf/png/svg as you like
 
@@ -351,7 +371,8 @@ println("\nComparison of differente experiments finished!\n\n")
 #######################################################################################################################
 
 
-magnification_factor = mag_factor("20250825")
+magnification_factor_ith =  [mag_factor(d)[1] for d in data_directories]
+magnification_factor_error_ith =  [mag_factor(d)[2] for d in data_directories]
 """
 Monte-Carlo average of multiple (x,y) sets onto a common grid, propagating x- and y-uncertainties.
 
@@ -469,16 +490,18 @@ col = Dict(
     :sy => :F1_z_centroid_se_mm,
 )
 
-scale_mag_factor = inv(magnification_factor[1])   # = 1 / magnification_factor
+scale_mag_factor = inv.([mag_factor(d)[1] for d in data_directories])   # = 1 / magnification_factor
 threshold = 0.010 # lower cut-off for experimental currents
 CURRENT_ROW_START = [first_gt_idx(t, col[:x], threshold) for t in tables]
 
 xsets  = [t[i:end, col[:x]]                      for (t,i) in zip(tables, CURRENT_ROW_START)]
-ysets  = [scale_mag_factor .* t[i:end, col[:y]]  for (t,i) in zip(tables, CURRENT_ROW_START)]
+ysets  = [smf .* t[i:end, col[:y]] for (t, i, smf) in zip(tables, CURRENT_ROW_START, scale_mag_factor)]
 σxsets = [t[i:end, col[:sx]]                     for (t,i) in zip(tables, CURRENT_ROW_START)]
-# σysets = [scale_mag_factor .* t[i:end, col[:sy]] for (t,i) in zip(tables, CURRENT_ROW_START)]
-σysets = [abs.(scale_mag_factor .* t[i:end, col[:y]]) .* sqrt.( ( t[i:end, col[:sy]] ./ t[i:end, col[:y]]  ).^2 .+ (magnification_factor[2] .* scale_mag_factor ).^2) for (t,i) in zip(tables, CURRENT_ROW_START)]
-
+σysets = [abs.(smf .* t[i:end, col[:y]]) .* sqrt.(
+              (t[i:end, col[:sy]] ./ t[i:end, col[:y]]).^2 .+
+              (magfac_err .* smf).^2
+          )
+          for (t, i, smf,magfac_err) in zip(tables, CURRENT_ROW_START, scale_mag_factor, magnification_factor_error_ith)]
 i_sampled_length = 300
 
 # pick a log-spaced grid across the overall x-range (nice for decades-wide currents)
@@ -505,7 +528,7 @@ fig = plot(
 )
 for i=1:length(data_directories)
     xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]/magnification_factor[1]
+    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]/magnification_factor_ith[i]
     scatter!(fig,xs, ys,
         label=data_directories[i],
         marker=(:circle, :white,3),
@@ -542,7 +565,7 @@ z_final = zeros(length(data_directories),i_sampled_length)
 cols = palette(:darkrainbow, length(data_directories))
 for i=1:length(data_directories)
     xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]*scale_mag_factor
+    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]*scale_mag_factor[i]
     spl = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
     z_final[i,:] = spl.(i_xx)
     scatter!(fig,xs, ys,
@@ -584,9 +607,9 @@ z_final_fit = zeros(length(data_directories),i_sampled_length)
 cols = palette(:darkrainbow, length(data_directories))
 for i=1:length(data_directories)
     xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]*scale_mag_factor
+    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]*scale_mag_factor[i]
     # δys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"]*scale_mag_factor
-    δys = abs.(ys) .* sqrt.( (m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"] ./ m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]).^2 .+ (magnification_factor[2]*scale_mag_factor).^2 )
+    δys = abs.(ys) .* sqrt.( (m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"] ./ m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]).^2 .+ (magnification_factor_error_ith[i]*scale_mag_factor[i]).^2 )
     spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
     z_final_fit[i,:] = spl.(i_xx)
     scatter!(fig,xs, ys,
@@ -643,7 +666,7 @@ plot!(fig, xq, μ;
     label="Interpolation MC",
     color=:orangered2
 )
-plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
+plot!(fig, Ic_qm, zm_qm, label=L"QM $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:red,:dash,2))
 plot!(fig,
 xaxis=:log10, 
 yaxis=:log10,
@@ -679,7 +702,7 @@ plot!(fig, TheoreticalSimulation.GvsI(xq), μ;
     label="Interpolation MC",
     color=:orangered2
 )
-plot!(fig, TheoreticalSimulation.GvsI.(Ic_qm), zm_qm, label="QM", line=(:red,:dash,2))
+plot!(fig, TheoreticalSimulation.GvsI.(Ic_qm), zm_qm, label=L"QM $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:red,:dash,2))
 plot!(fig,
 xaxis=:log10, 
 yaxis=:log10,
@@ -712,5 +735,7 @@ jldsave(joinpath(OUTDIR,"data_averaged_$(selected_bin).jld2"),
     )
 )
 
-println("\nEXPERIMENTS ANALYSIS FINISHED!")
+T_END = Dates.now()
+T_RUN = Dates.canonicalize(T_END-T_START)
+println("\nEXPERIMENTS ANALYSIS FINISHED! $(T_RUN)")
 alert("EXPERIMENTS ANALYSIS FINISHED!")
