@@ -700,7 +700,7 @@ else
     quantum_numbers = alive_screen[:levels];
 
     # ATOMS PROPAGATION
-    r    = 1:5:nI;
+    r    = 1:2:nI;
     iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
     lvl  = 5 ; # Int(4*K39_params.Ispin+2);
     anim = @animate for j in iter
