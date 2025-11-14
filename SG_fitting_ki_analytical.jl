@@ -322,7 +322,8 @@ jldsave(joinpath(OUTDIR, "zmax_ki.jld2"),
                 )
 )
 
-load(joinpath(OUTDIR, "zmax_ki.jld2"))["data"]
+zmm_matrix = load(joinpath(dirname(OUTDIR),"20251113T122749649", "zmax_ki.jld2"))["data"][:z_mm]
+
 
 color_list = palette(:darkrainbow, nruns * ndir)
 fig = plot(xlabel="Current (A)",
@@ -355,18 +356,65 @@ plot!(fig,
     legendfontsize=6,)
 display(fig)
 
-cls = palette(:rainbow, 4)
-plot(zmm_matrix[1,:], label="CQD $(1000*Icoils_sim[1])mA", line = (:solid,cls[1],2))
+
+ki_list = round.(1e6*vcat(induction_coeff...), sigdigits=2)
+groups = Dict{Any, Vector{Int}}()
+for (i, v) in pairs(ki_list)
+    push!(get!(groups, v, Int[]), i)
+end
+filter!(kv -> length(kv[2]) > 1, groups)
+to_remove = sort!(vcat([idxs[2:end] for idxs in values(groups)]...), rev=true)
+for i in to_remove
+    deleteat!(ki_list, i)
+end
+zmm_cqd = zmm_matrix[:, setdiff(1:size(zmm_matrix,2), to_remove)]
+
+
+cls = palette(:rainbow, 8)
+plot(zmm_cqd[1,:], label="CQD $(1000*Icoils_sim[1])mA", line = (:solid,cls[1],2))
 hline!([zmax_QM[1]], label="QM", line=(:dash,cls[1],1.5))
-plot!(zmm_matrix[2,:], label="CQD $(1000*Icoils_sim[2])mA", line = (:solid,cls[2],2))
+plot!(zmm_cqd[2,:], label="CQD $(1000*Icoils_sim[2])mA", line = (:solid,cls[2],2))
 hline!([zmax_QM[2]], label="QM", line=(:dash,cls[2],1.5))
-plot!(zmm_matrix[3,:], label="CQD $(1000*Icoils_sim[3])mA", line = (:solid,cls[3],2))
+plot!(zmm_cqd[3,:], label="CQD $(1000*Icoils_sim[3])mA", line = (:solid,cls[3],2))
 hline!([zmax_QM[3]], label="QM", line=(:dash,cls[3],1.5))
-plot!(zmm_matrix[12,:], label="CQD $(1000*Icoils_sim[12])mA", line = (:solid,cls[4],2))
+plot!(zmm_cqd[12,:], label="CQD $(1000*Icoils_sim[12])mA", line = (:solid,cls[4],2))
 hline!([zmax_QM[12]], label="QM", line=(:dash,cls[4],1.5))
-# plot!(zmm_matrix[end,:], label="$(Icoils_sim[end])A")
-plot!(yaxis=:log10,
+plot!(
+    size=(850,500),
+    yaxis=:log10,
+    ylims=(1e-4,1e-1),
+    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+        [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlabel=L"$k_{i} \quad (\,\times 10^{-6})$",
+    xticksfontsize=4,
+    xticks = (1:length(ki_list), round.(ki_list,sigdigits=2)),
+    xminorticks = false,
+    xrotation=88,   
+    bottom_margin=4mm,
     legend=:right)
+
+plot(zmm_cqd[end,:], label="CQD $(1000*Icoils_sim[end])mA", line = (:solid,cls[5],2))
+hline!([zmax_QM[end]], label="QM", line=(:dash,cls[5],1.5))
+plot!(zmm_cqd[end-1,:], label="CQD $(1000*Icoils_sim[end-1])mA", line = (:solid,cls[6],2))
+hline!([zmax_QM[end-1]], label="QM", line=(:dash,cls[6],1.5))
+plot!(zmm_cqd[end-2,:], label="CQD $(1000*Icoils_sim[end-2])mA", line = (:solid,cls[7],2))
+hline!([zmax_QM[end-2]], label="QM", line=(:dash,cls[7],1.5))
+plot!(zmm_cqd[end-3,:], label="CQD $(1000*Icoils_sim[end-3])mA", line = (:solid,cls[8],2))
+hline!([zmax_QM[end-3]], label="QM", line=(:dash,cls[8],1.5))
+plot!(
+    size=(850,500),
+    yaxis=:log10,
+    ylims=(5e-1,2),
+    yticks = ([1e-1, 1.0, 10], 
+        [L"10^{-1}", L"10^{0}", L"10^{+1}"]),
+    xlabel=L"$k_{i} \quad (\,\times 10^{-6})$",
+    xticksfontsize=4,
+    xticks = (1:length(ki_list), round.(ki_list,sigdigits=2)),
+    xminorticks = false,
+    xrotation=88,   
+    bottom_margin=4mm,
+    legend=:right)
+
 
 # Select experimental data
 wanted_data_dir = "20250825" ;
@@ -395,29 +443,29 @@ z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load
 i_start = searchsortedfirst(I_exp,0.015)
 data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
 
-color_list = palette(:darkrainbow,size(zmm_matrix,2))
-fig = plot(xlabel="Currents (A)",ylabel=L"$z_{\mathrm{max}}$ (mm)")
-idx_num = 1
-for i=1:ndir
-for j=1:nruns
-    plot!(fig,Icoils_sim[2:end], abs.(zmm_matrix[2:end,idx_num]),
-        label = L"$k_{i}=%$(round(1e6*induction_coeff[i][j], sigdigits=3))\times 10^{-6}$",
-        line=(:solid,color_list[idx_num]),
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_sim[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
     )
-    idx_num += 1
-end
 end
 plot!(I_exp[2:end],z_exp[2:end],
     ribbon = z_exp_error[2:end],
     line=(:black,:dash,2),
     fillalpha=0.25, 
     fillcolor=:gray13,  
-    label="$(wanted_data_dir)"
-    
+    label="$(wanted_data_dir)"  
     )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
 plot!(
     size=(850,600),
-    xlims=(8e-3,1.2),
+    # xlims=(8e-3,1.2),
     xaxis=:log10,
     yaxis=:log10,
     legend=:outerright,
@@ -426,9 +474,9 @@ plot!(
 display(fig)
 
 # Interpolated surface
-ki_start , ki_stop = 1 , 60 #length(ki_sim)
-println("Interpolation in the induction term goes from $(ki_sim[ki_start])×10⁻⁶ to $(ki_sim[ki_stop])×10⁻⁶")
-itp = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], transpose(cqd_sim_up)[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+ki_start , ki_stop = 1 , 69 #length(ki_sim)
+println("Interpolation in the induction term goes from $(ki_list[ki_start])×10⁻⁶ to $(ki_list[ki_stop])×10⁻⁶")
+itp = Spline2D(Icoils_sim, ki_list[ki_start:ki_stop], zmm_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
 i_surface = range(10e-3,1.0; length = 61)
 ki_surface = range(ki_sim[ki_start],ki_sim[ki_stop]; length = 41)
