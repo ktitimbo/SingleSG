@@ -886,7 +886,7 @@ else
         plot!(fig[4], xlabel="", bottom_margin=-3mm),
         plot!(fig[5], xlabel="", bottom_margin=-3mm),
         display(fig)
-        savefig(fig, joinpath(OUTDIr,"QM_time_evolution_$(@sprintf("%02d", j)).$(FIG_EXT)"))
+        savefig(fig, joinpath(OUTDIR,"QM_time_evolution_$(@sprintf("%02d", j)).$(FIG_EXT)"))
     end
     gif_path = joinpath(OUTDIR, "QM_time_evolution.gif");
     # gif(anim, gif_path, fps=2)  # adjust fps
