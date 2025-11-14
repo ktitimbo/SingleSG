@@ -479,7 +479,7 @@ println("Interpolation in the induction term goes from $(ki_list[ki_start])×10�
 itp = Spline2D(Icoils_sim, ki_list[ki_start:ki_stop], zmm_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
 i_surface = range(10e-3,1.0; length = 61)
-ki_surface = range(ki_sim[ki_start],ki_sim[ki_stop]; length = 41)
+ki_surface = range(ki_list[ki_start],ki_list[ki_stop]; length = 41)
 Z = [itp(x, y) for y in ki_surface, x in i_surface] 
 
 
@@ -552,7 +552,7 @@ function loss(ki) # loss function
 end
 
 #(
-fit_param = optimize(loss, ki_sim[ki_start], ki_sim[ki_stop],Brent())
+fit_param = optimize(loss, ki_list[ki_start], ki_list[ki_stop],Brent())
 k_fit = Optim.minimizer(fit_param)
 # diagnostics
 mse = loss(k_fit)
@@ -561,7 +561,7 @@ coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
 #)
 
 # given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(itp, data_fitting; bounds=(ki_sim[ki_start], ki_sim[ki_stop]))
+out = fit_ki_with_error(itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]))
 @info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
 I_scan = logspace10(10e-3,1.00; n=30)
 fig= plot(
@@ -609,6 +609,9 @@ plot!(fig,
     ylims=(8e-3,2),
     legend=:bottomright,
 )
+plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
 display(fig)
 
 
