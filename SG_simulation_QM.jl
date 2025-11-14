@@ -4,7 +4,7 @@
 # August 2025
 
 #  Plotting Setup
-ENV["GKS_WSTYPE"] = "100"
+# ENV["GKS_WSTYPE"] = "100"
 using Plots; gr()
 Plots.default(
     show=true, dpi=800, fontfamily="Computer Modern", 
@@ -674,17 +674,18 @@ alert("script $RUN_STAMP has finished!")
 
 
 Ns = 3_000_000
-data_exists = isfile(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_$(Ns)_screen_data.jld2"));
+const OUTDIR = joinpath(@__DIR__,"simulation_data","quantum_simulation_$(Int(1e-6*Ns))m")
+data_exists = isfile(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))
 
 if !data_exists
     println("Analyzing data arriving to the screen")
 
-    dataQM = load(joinpath(dirname(OUTDIR),"qm_$(Ns)_valid_particles_data.jld2"))["data"]
+    dataQM = load(joinpath(OUTDIR,"qm_$(Ns)_valid_particles_data.jld2"))["data"]
     @time alive_screen = OrderedDict(
                 :Icoils => dataQM[:Icoils], 
                 :levels => dataQM[:levels], 
                 :data   => TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen));
-    jldsave(joinpath(OUTDIR,"quantum_simulation_3m","qm_$(Ns)_screen_data.jld2"), alive = alive_screen)
+    jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"), alive = alive_screen)
     dataQM = nothing
     GC.gc()
     @info "Memory cleaned after QM data acquired"
@@ -692,7 +693,7 @@ else
     # data analysis
     println("QM approach : peak position data analysis") 
 
-    alive_screen = load(joinpath(dirname(OUTDIR),"quantum_simulation_3m","qm_$(Ns)_screen_data.jld2"))["alive"];
+    alive_screen = load(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))["alive"];
     @info "file loaded"
 
     Icoils  = alive_screen[:Icoils];
@@ -700,10 +701,11 @@ else
     quantum_numbers = alive_screen[:levels];
 
     # ATOMS PROPAGATION
-    r    = 1:2:nI;
+    r    = 1:1:nI;
     iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
     lvl  = 5 ; # Int(4*K39_params.Ispin+2);
-    anim = @animate for j in iter
+    # anim = @animate 
+    for j in iter
         f,mf=quantum_numbers[lvl]
         # data_set = vcat((alive_screen[:data][j][k] for k in Int(2*K39_params.Ispin + 3):Int(4*K39_params.Ispin + 2))...)
         data_set = alive_screen[:data][j][lvl] 
@@ -884,9 +886,10 @@ else
         plot!(fig[4], xlabel="", bottom_margin=-3mm),
         plot!(fig[5], xlabel="", bottom_margin=-3mm),
         display(fig)
+        savefig(fig, joinpath(OUTDIr,"QM_time_evolution_$(@sprintf("%02d", j)).$(FIG_EXT)"))
     end
     gif_path = joinpath(OUTDIR, "QM_time_evolution.gif");
-    gif(anim, gif_path, fps=2)  # adjust fps
+    # gif(anim, gif_path, fps=2)  # adjust fps
     @info "Saved GIF" gif_path ;
     anim = nothing
 
