@@ -236,14 +236,14 @@ function mag_factor(directory::String)
 end
 
 # Simulated currents
-Icoils_sim = [0.00,
+Icoils_cqd = [0.00,
             0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
             0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
             0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
             0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
             0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
 ];
-nI_sim = length(Icoils_sim);
+nI_sim = length(Icoils_cqd);
 
 CQD_directories = ["20251105T104205936",
                    "20251105T104302406",
@@ -268,7 +268,6 @@ induction_coeff = 1e-6 * [
     range(10,100,length=nruns),
 ]
 
-
 nx_bins , nz_bins = 64 , 2
 gaussian_width_mm = 0.300
 λ0_raw            = 0.01
@@ -277,12 +276,13 @@ gaussian_width_mm = 0.300
 # --- Quantum mechanics data ---
 table_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"];
 data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)]
-Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)][1:end]
+Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)]
 zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)]
+zqm = Spline1D(Ic_QM,zmax_QM,k=3)
 # ------------------------------
 
 # --- Preallocate results matrix ---
-zmm_matrix = Matrix{Float64}(undef, nI_sim, ndir*nruns)
+z_mm_ki = Matrix{Float64}(undef, nI_sim, ndir*nruns)
 idx_num = 1
 for i = 1:ndir
     println("($(@sprintf("%02d", i))/$(@sprintf("%02d", ndir))) Reading $(CQD_directories[i])")
@@ -293,7 +293,7 @@ for i = 1:ndir
         nI      = length(Icoil)
 
         # ✅ Sanity check: ensure Icoil matches the rsimulated
-        if nI_sim != nI || !isapprox(Icoil, Icoils_sim; atol=1e-8)
+        if nI_sim != nI || !isapprox(Icoil, Icoils_cqd; atol=1e-8)
             @warn "Icoil vector differs in run $j!"
         end
 
@@ -302,7 +302,7 @@ for i = 1:ndir
                 add_plot = false, plot_xrange= :all, branch=:up,
                 λ_raw = λ0_raw, λ_smooth = λ0_spline, mode = :probability)
 
-        zmm_matrix[:,idx_num] = [data_z_mm[v][:z_max_smooth_spline_mm] for v in 1:nI]
+        z_mm_ki[:,idx_num] = [data_z_mm[v][:z_max_smooth_spline_mm] for v in 1:nI]
         idx_num += 1
         cqd_data  = nothing
         data_z_mm = nothing
@@ -311,10 +311,10 @@ for i = 1:ndir
 end
 
 jldsave(joinpath(OUTDIR, "zmax_ki.jld2"),
-    data = OrderedDict(:Icoils      => Icoils_sim,
+    data = OrderedDict(:Icoils      => Icoils_cqd,
                            :directories => CQD_directories,
                            :ki_values   => induction_coeff, 
-                           :z_mm        => zmm_matrix,
+                           :z_mm        => z_mm_ki,
                            :nbins       => (nx_bins , nz_bins),
                            :sigma_conv  => gaussian_width_mm,
                            :λ0          => λ0_raw,
@@ -322,29 +322,29 @@ jldsave(joinpath(OUTDIR, "zmax_ki.jld2"),
                 )
 )
 
-zmm_matrix = load(joinpath(dirname(OUTDIR),"20251113T122749649", "zmax_ki.jld2"))["data"][:z_mm]
+z_mm_ki = load(joinpath(dirname(OUTDIR),"20251113T122749649", "zmax_ki.jld2"))["data"][:z_mm]
 
-
-color_list = palette(:darkrainbow, nruns * ndir)
+color_list = palette(:darkrainbow, nruns * ndir);
 fig = plot(xlabel="Current (A)",
     ylabel=L"$z_{\mathrm{max}}$ (mm)",
-    legend=:outerright,)
-idx_num = 1
+    legend=:outerright,
+    legend_title = L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendtitlefontsize = 6,);
+idx_num = 1;
 for i=1:ndir
-for j=1:nruns
-    plot!(fig,Icoils_sim[2:end], abs.(zmm_matrix[2:end,idx_num]),
-        label = L"$k_{i}=%$(round(1e6*induction_coeff[i][j], sigdigits=3))\times 10^{-6}$",
-        line=(:solid,color_list[idx_num]),
-    )
-    display(fig)
-    idx_num += 1
-end
+    for j=1:nruns
+        plot!(fig,Icoils_cqd[2:end], abs.(z_mm_ki[2:end,idx_num]),
+            label = L"$k_{i}=%$(round(1e6*induction_coeff[i][j], sigdigits=3))\times 10^{-6}$",
+            line=(:solid,color_list[idx_num]),
+        )
+        idx_num += 1
+    end
 end
 plot!(Ic_QM[2:end],zmax_QM[2:end],
     label="QM",
     line=(:dashdot,:black,2))
 plot!(fig, 
-    size=(850,600),
+    size=(1250,600),
     xaxis=:log10, 
     yaxis=:log10,
     xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
@@ -353,10 +353,15 @@ plot!(fig,
         [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     legend=:outerright,
     legend_columns = 2,
-    legendfontsize=6,)
+    legendfontsize=6,
+    left_margin=6mm,
+    bottom_margin=5mm)
 display(fig)
 
 
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 ki_list = round.(1e6*vcat(induction_coeff...), sigdigits=2)
 groups = Dict{Any, Vector{Int}}()
 for (i, v) in pairs(ki_list)
@@ -367,21 +372,21 @@ to_remove = sort!(vcat([idxs[2:end] for idxs in values(groups)]...), rev=true)
 for i in to_remove
     deleteat!(ki_list, i)
 end
-zmm_cqd = zmm_matrix[:, setdiff(1:size(zmm_matrix,2), to_remove)]
-
+zmm_cqd = z_mm_ki[:, setdiff(1:size(z_mm_ki,2), to_remove)]
 
 cls = palette(:rainbow, 8)
-plot(zmm_cqd[1,:], label="CQD $(1000*Icoils_sim[1])mA", line = (:solid,cls[1],2))
+plot(zmm_cqd[1,:], label="CQD $(1000*Icoils_cqd[1])mA", line = (:solid,cls[1],2))
 hline!([zmax_QM[1]], label="QM", line=(:dash,cls[1],1.5))
-plot!(zmm_cqd[2,:], label="CQD $(1000*Icoils_sim[2])mA", line = (:solid,cls[2],2))
+plot!(zmm_cqd[2,:], label="CQD $(1000*Icoils_cqd[2])mA", line = (:solid,cls[2],2))
 hline!([zmax_QM[2]], label="QM", line=(:dash,cls[2],1.5))
-plot!(zmm_cqd[3,:], label="CQD $(1000*Icoils_sim[3])mA", line = (:solid,cls[3],2))
+plot!(zmm_cqd[3,:], label="CQD $(1000*Icoils_cqd[3])mA", line = (:solid,cls[3],2))
 hline!([zmax_QM[3]], label="QM", line=(:dash,cls[3],1.5))
-plot!(zmm_cqd[12,:], label="CQD $(1000*Icoils_sim[12])mA", line = (:solid,cls[4],2))
+plot!(zmm_cqd[12,:], label="CQD $(1000*Icoils_cqd[12])mA", line = (:solid,cls[4],2))
 hline!([zmax_QM[12]], label="QM", line=(:dash,cls[4],1.5))
 plot!(
     size=(850,500),
     yaxis=:log10,
+    ylabel=L"$z_{max}$ (mm)",
     ylims=(1e-4,1e-1),
     yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
         [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
@@ -391,19 +396,21 @@ plot!(
     xminorticks = false,
     xrotation=88,   
     bottom_margin=4mm,
+    left_margin=3mm,
     legend=:right)
 
-plot(zmm_cqd[end,:], label="CQD $(1000*Icoils_sim[end])mA", line = (:solid,cls[5],2))
+plot(zmm_cqd[end,:], label="CQD $(1000*Icoils_cqd[end])mA", line = (:solid,cls[5],2))
 hline!([zmax_QM[end]], label="QM", line=(:dash,cls[5],1.5))
-plot!(zmm_cqd[end-1,:], label="CQD $(1000*Icoils_sim[end-1])mA", line = (:solid,cls[6],2))
+plot!(zmm_cqd[end-1,:], label="CQD $(1000*Icoils_cqd[end-1])mA", line = (:solid,cls[6],2))
 hline!([zmax_QM[end-1]], label="QM", line=(:dash,cls[6],1.5))
-plot!(zmm_cqd[end-2,:], label="CQD $(1000*Icoils_sim[end-2])mA", line = (:solid,cls[7],2))
+plot!(zmm_cqd[end-2,:], label="CQD $(1000*Icoils_cqd[end-2])mA", line = (:solid,cls[7],2))
 hline!([zmax_QM[end-2]], label="QM", line=(:dash,cls[7],1.5))
-plot!(zmm_cqd[end-3,:], label="CQD $(1000*Icoils_sim[end-3])mA", line = (:solid,cls[8],2))
+plot!(zmm_cqd[end-3,:], label="CQD $(1000*Icoils_cqd[end-3])mA", line = (:solid,cls[8],2))
 hline!([zmax_QM[end-3]], label="QM", line=(:dash,cls[8],1.5))
 plot!(
     size=(850,500),
     yaxis=:log10,
+    ylabel=L"$z_{max}$ (mm)",
     ylims=(5e-1,2),
     yticks = ([1e-1, 1.0, 10], 
         [L"10^{-1}", L"10^{0}", L"10^{+1}"]),
@@ -413,74 +420,17 @@ plot!(
     xminorticks = false,
     xrotation=88,   
     bottom_margin=4mm,
+    left_margin=3mm,
     legend=:right)
 
-
-# Select experimental data
-wanted_data_dir = "20250825" ;
-wanted_binning  = 2 ; 
-wanted_smooth   = 0.01 ;
-# Data loading
-res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
-        wanted_data_dir=wanted_data_dir,
-        wanted_binning=wanted_binning,
-        wanted_smooth=wanted_smooth
-);
-if res === nothing
-    @warn "No matching report found"
-else
-    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
-    mag, δmag = mag_factor(wanted_data_dir)
-    # I_exp = sort(res.currents_mA / 1_000);
-    # z_exp = res.framewise_mm/res.magnification;
-end
-load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp       = load_data[!,"Icoil_A"]
-I_exp_error = load_data[!,"Icoil_error_A"]
-z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag)
-z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) 
-i_start = searchsortedfirst(I_exp,0.015)
-data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
-
-color_list = palette(:darkrainbow,size(ki_list,1))
-fig = plot(xlabel="Currents (A)",
-    ylabel=L"$z_{\mathrm{max}}$ (mm)",
-    legend=:outerright,)
-for i=1:length(ki_list)
-    plot!(fig,Icoils_sim[2:end], zmm_cqd[2:end,i],
-        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
-        line=(:solid,color_list[i]),
-    )
-end
-plot!(I_exp[2:end],z_exp[2:end],
-    ribbon = z_exp_error[2:end],
-    line=(:black,:dash,2),
-    fillalpha=0.25, 
-    fillcolor=:gray13,  
-    label="$(wanted_data_dir)"  
-    )
-plot!(Ic_QM[2:end],zmax_QM[2:end],
-    label="QM",
-    line=(:dashdot,:black,2))
-plot!(
-    size=(850,600),
-    # xlims=(8e-3,1.2),
-    xaxis=:log10,
-    yaxis=:log10,
-    legend=:outerright,
-    legend_columns=2,
-    legendfontsize=6)
-display(fig)
-
-# Interpolated surface
-ki_start , ki_stop = 1 , 69 #length(ki_sim)
+# Interpolated kᵢ surface
+ki_start , ki_stop = 1 , 79 #length(ki_sim)
 println("Interpolation in the induction term goes from $(ki_list[ki_start])×10⁻⁶ to $(ki_list[ki_stop])×10⁻⁶")
-itp = Spline2D(Icoils_sim, ki_list[ki_start:ki_stop], zmm_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+ki_itp = Spline2D(Icoils_cqd, ki_list[ki_start:ki_stop], zmm_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
 i_surface = range(10e-3,1.0; length = 61)
 ki_surface = range(ki_list[ki_start],ki_list[ki_stop]; length = 41)
-Z = [itp(x, y) for y in ki_surface, x in i_surface] 
+Z = [ki_itp(x, y) for y in ki_surface, x in i_surface] 
 
 
 fit_surface = surface(log10.(i_surface), ki_surface, log10.(abs.(Z));
@@ -527,6 +477,1939 @@ fit_figs = plot(fit_surface, fit_contour,
 )
 display(fit_figs)
 
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Select experimental data
+wanted_data_dir = "20250814" ;
+wanted_binning  = 2 ; 
+wanted_smooth   = 0.01 ;
+# Data loading
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+);
+if res === nothing
+    @warn "No matching report found"
+else
+    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+    mag, δmag = mag_factor(wanted_data_dir)
+    # I_exp = sort(res.currents_mA / 1_000);
+    # z_exp = res.framewise_mm/res.magnification;
+end
+load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
+I_exp       = load_data[!,"Icoil_A"]
+I_exp_error = load_data[!,"Icoil_error_A"]
+z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag)
+z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) 
+i_start     = searchsortedfirst(I_exp,0.015)
+data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
+data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z],
+    ribbon = data_exp[!,:δz],
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+
+n = 2
+yexp = last(data_exp[!,:z],n) 
+ythe = last(zqm.(data_exp[!,:Ic]),n)
+p = dot(yexp,yexp) / dot(yexp,ythe)
+plot(data_exp[!,:Ic], data_exp[!,:z],
+    label="$(wanted_data_dir)",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    line=(:solid,:red,1))
+plot!(data_exp[!,:Ic], zqm.(data_exp[!,:Ic]),
+    label="QM",
+    marker=(:xcross,:blue,2),
+    markerstrokecolor=:red,
+    line=(:solid,:blue,1))
+plot!(data_exp[!,:Ic], data_exp[!,:z]./p,
+    label="data / $(@sprintf("%1.3f",p))",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:orangered,
+    line=(:solid,:orangered,1))
+scaled_mag = mag * p
+plot!(title="Magnification: $(@sprintf("%1.4f",mag)) → $(@sprintf("%1.4f",scaled_mag))",
+    ylabel=L"$z_{max}$ (mm)",
+    xlabel="Current (A)")
+
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z]/p,
+    ribbon = data_exp[!,:δz]/p,
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+# 20250814
+data_fitting        = data[[1:4; (end-3):(end)], :]
+
+
+data_fitting_scaled = copy(data_fitting)
+data_fitting_scaled[:, end-1:end] ./= p
+data_fitting_scaled
+
+
+function loss_scaled(ki) # loss function
+    # ni=12
+    z_pred = ki_itp.(data_fitting_scaled[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data_fitting_scaled[:,3]))
+end
+
+#(
+fit_param = optimize(loss_scaled, ki_list[ki_start], ki_list[ki_stop],Brent())
+k_fit = Optim.minimizer(fit_param)
+# diagnostics
+mse = loss_scaled(k_fit)
+pred = ki_itp.(I_exp, Ref(k_fit))
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+#)
+
+# given: itp, data (N×2), ki_sim
+out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]))
+@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+I_scan = logspace10(10e-3,1.00; n=30);
+fig= plot(
+    # title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
+    size=(850,600),
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)",
+    left_margin = 2mm,
+)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z], 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting[:,1], data_fitting[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:black,2),
+    markerstrokecolor=:black,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan,ki_itp.(I_scan, Ref(out.ci[2])),
+    color=:royalblue1,
+    label=false,
+    linewidth=0,
+    fillrange= ki_itp.(I_scan, Ref(out.ci[1])),
+    fillcolor=:royalblue1,
+    fillalpha=0.35,
+)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(out.k_hat)),
+    label=L"$k_{i}= \left( %$(round(out.k_hat, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,2),
+    marker=(:xcross, :blue, 1),
+)
+plot!([1,1],label="Scaled Magnification", color=:white)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z]/p, 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:orangered2, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting_scaled[:,1], data_fitting_scaled[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:grey26,2),
+    markerstrokecolor=:grey26,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:seagreen,2.2),
+    marker=(:xcross, :seagreen, 1),
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
+display(fig)
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Select experimental data
+wanted_data_dir = "20250820" ;
+wanted_binning  = 2 ; 
+wanted_smooth   = 0.01 ;
+# Data loading
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+);
+if res === nothing
+    @warn "No matching report found"
+else
+    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+    mag, δmag = mag_factor(wanted_data_dir)
+    # I_exp = sort(res.currents_mA / 1_000);
+    # z_exp = res.framewise_mm/res.magnification;
+end
+load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
+I_exp       = load_data[!,"Icoil_A"]
+I_exp_error = load_data[!,"Icoil_error_A"]
+z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag)
+z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) 
+i_start     = searchsortedfirst(I_exp,0.015)
+data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
+data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z],
+    ribbon = data_exp[!,:δz],
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+
+n = 2
+yexp = last(data_exp[!,:z],n) 
+ythe = last(zqm.(data_exp[!,:Ic]),n)
+p = dot(yexp,yexp) / dot(yexp,ythe)
+plot(data_exp[!,:Ic], data_exp[!,:z],
+    label="$(wanted_data_dir)",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    line=(:solid,:red,1))
+plot!(data_exp[!,:Ic], zqm.(data_exp[!,:Ic]),
+    label="QM",
+    marker=(:xcross,:blue,2),
+    markerstrokecolor=:red,
+    line=(:solid,:blue,1))
+plot!(data_exp[!,:Ic], data_exp[!,:z]./p,
+    label="data / $(@sprintf("%1.3f",p))",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:orangered,
+    line=(:solid,:orangered,1))
+scaled_mag = mag * p
+plot!(title="Magnification: $(@sprintf("%1.4f",mag)) → $(@sprintf("%1.4f",scaled_mag))",
+    ylabel=L"$z_{max}$ (mm)",
+    xlabel="Current (A)")
+
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z]/p,
+    ribbon = data_exp[!,:δz]/p,
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+# 20250814
+data_fitting        = data[[1:4; (end-3):(end)], :]
+
+
+data_fitting_scaled = copy(data_fitting)
+data_fitting_scaled[:, end-1:end] ./= p
+data_fitting_scaled
+
+
+function loss_scaled(ki) # loss function
+    # ni=12
+    z_pred = ki_itp.(data_fitting_scaled[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data_fitting_scaled[:,3]))
+end
+
+#(
+fit_param = optimize(loss_scaled, ki_list[ki_start], ki_list[ki_stop],Brent())
+k_fit = Optim.minimizer(fit_param)
+# diagnostics
+mse = loss_scaled(k_fit)
+pred = ki_itp.(I_exp, Ref(k_fit))
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+#)
+
+# given: itp, data (N×2), ki_sim
+out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]))
+@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+I_scan = logspace10(10e-3,1.00; n=30);
+fig= plot(
+    # title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
+    size=(850,600),
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)",
+    left_margin = 2mm,
+)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z], 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting[:,1], data_fitting[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:black,2),
+    markerstrokecolor=:black,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan,ki_itp.(I_scan, Ref(out.ci[2])),
+    color=:royalblue1,
+    label=false,
+    linewidth=0,
+    fillrange= ki_itp.(I_scan, Ref(out.ci[1])),
+    fillcolor=:royalblue1,
+    fillalpha=0.35,
+)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(out.k_hat)),
+    label=L"$k_{i}= \left( %$(round(out.k_hat, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,2),
+    marker=(:xcross, :blue, 1),
+)
+plot!([1,1],label="Scaled Magnification", color=:white)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z]/p, 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:orangered2, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting_scaled[:,1], data_fitting_scaled[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:grey26,2),
+    markerstrokecolor=:grey26,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:seagreen,2.2),
+    marker=(:xcross, :seagreen, 1),
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
+display(fig)
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Select experimental data
+wanted_data_dir = "20250825" ;
+wanted_binning  = 2 ; 
+wanted_smooth   = 0.01 ;
+# Data loading
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+);
+if res === nothing
+    @warn "No matching report found"
+else
+    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+    mag, δmag = mag_factor(wanted_data_dir)
+    # I_exp = sort(res.currents_mA / 1_000);
+    # z_exp = res.framewise_mm/res.magnification;
+end
+load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
+I_exp       = load_data[!,"Icoil_A"]
+I_exp_error = load_data[!,"Icoil_error_A"]
+z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag)
+z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) 
+i_start     = searchsortedfirst(I_exp,0.015)
+data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
+data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z],
+    ribbon = data_exp[!,:δz],
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+
+n = 2
+yexp = last(data_exp[!,:z],n) 
+ythe = last(zqm.(data_exp[!,:Ic]),n)
+p = dot(yexp,yexp) / dot(yexp,ythe)
+plot(data_exp[!,:Ic], data_exp[!,:z],
+    label="$(wanted_data_dir)",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    line=(:solid,:red,1))
+plot!(data_exp[!,:Ic], zqm.(data_exp[!,:Ic]),
+    label="QM",
+    marker=(:xcross,:blue,2),
+    markerstrokecolor=:red,
+    line=(:solid,:blue,1))
+plot!(data_exp[!,:Ic], data_exp[!,:z]./p,
+    label="data / $(@sprintf("%1.3f",p))",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:orangered,
+    line=(:solid,:orangered,1))
+scaled_mag = mag * p
+plot!(title="Magnification: $(@sprintf("%1.4f",mag)) → $(@sprintf("%1.4f",scaled_mag))",
+    ylabel=L"$z_{max}$ (mm)",
+    xlabel="Current (A)")
+
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z]/p,
+    ribbon = data_exp[!,:δz]/p,
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+# 20250814
+data_fitting        = data[[1:3; (end-3):(end)], :]
+
+
+data_fitting_scaled = copy(data_fitting)
+data_fitting_scaled[:, end-1:end] ./= p
+data_fitting_scaled
+
+
+function loss_scaled(ki) # loss function
+    # ni=12
+    z_pred = ki_itp.(data_fitting_scaled[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data_fitting_scaled[:,3]))
+end
+
+#(
+fit_param = optimize(loss_scaled, ki_list[ki_start], ki_list[ki_stop],Brent())
+k_fit = Optim.minimizer(fit_param)
+# diagnostics
+mse = loss_scaled(k_fit)
+pred = ki_itp.(I_exp, Ref(k_fit))
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+#)
+
+# given: itp, data (N×2), ki_sim
+out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]))
+@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+I_scan = logspace10(10e-3,1.00; n=30);
+fig= plot(
+    # title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
+    size=(850,600),
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)",
+    left_margin = 2mm,
+)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z], 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting[:,1], data_fitting[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:black,2),
+    markerstrokecolor=:black,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan,ki_itp.(I_scan, Ref(out.ci[2])),
+    color=:royalblue1,
+    label=false,
+    linewidth=0,
+    fillrange= ki_itp.(I_scan, Ref(out.ci[1])),
+    fillcolor=:royalblue1,
+    fillalpha=0.35,
+)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(out.k_hat)),
+    label=L"$k_{i}= \left( %$(round(out.k_hat, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,2),
+    marker=(:xcross, :blue, 1),
+)
+plot!([1,1],label="Scaled Magnification", color=:white)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z]/p, 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:orangered2, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting_scaled[:,1], data_fitting_scaled[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:grey26,2),
+    markerstrokecolor=:grey26,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:seagreen,2.2),
+    marker=(:xcross, :seagreen, 1),
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
+display(fig)
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Select experimental data
+wanted_data_dir = "20250919" ;
+wanted_binning  = 2 ; 
+wanted_smooth   = 0.01 ;
+# Data loading
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+);
+if res === nothing
+    @warn "No matching report found"
+else
+    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+    mag, δmag = mag_factor(wanted_data_dir)
+    # I_exp = sort(res.currents_mA / 1_000);
+    # z_exp = res.framewise_mm/res.magnification;
+end
+load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
+I_exp       = load_data[!,"Icoil_A"]
+I_exp_error = load_data[!,"Icoil_error_A"]
+z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag)
+z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) 
+i_start     = searchsortedfirst(I_exp,0.015)
+data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
+data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z],
+    ribbon = data_exp[!,:δz],
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+
+n = 2
+yexp = last(data_exp[!,:z],n) 
+ythe = last(zqm.(data_exp[!,:Ic]),n)
+p = dot(yexp,yexp) / dot(yexp,ythe)
+plot(data_exp[!,:Ic], data_exp[!,:z],
+    label="$(wanted_data_dir)",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    line=(:solid,:red,1))
+plot!(data_exp[!,:Ic], zqm.(data_exp[!,:Ic]),
+    label="QM",
+    marker=(:xcross,:blue,2),
+    markerstrokecolor=:red,
+    line=(:solid,:blue,1))
+plot!(data_exp[!,:Ic], data_exp[!,:z]./p,
+    label="data / $(@sprintf("%1.3f",p))",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:orangered,
+    line=(:solid,:orangered,1))
+scaled_mag = mag * p
+plot!(title="Magnification: $(@sprintf("%1.4f",mag)) → $(@sprintf("%1.4f",scaled_mag))",
+    ylabel=L"$z_{max}$ (mm)",
+    xlabel="Current (A)")
+
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z]/p,
+    ribbon = data_exp[!,:δz]/p,
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    # xaxis=:log10,
+    # yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+# 20250919
+data_fitting        = data[[1:3; (end-2):(end)], :]
+
+data_fitting_scaled = copy(data_fitting)
+data_fitting_scaled[:, end-1:end] ./= p
+data_fitting_scaled
+
+
+function loss_scaled(ki) # loss function
+    # ni=12
+    z_pred = ki_itp.(data_fitting_scaled[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data_fitting_scaled[:,3]))
+end
+
+#(
+fit_param = optimize(loss_scaled, ki_list[ki_start], ki_list[ki_stop],Brent())
+k_fit = Optim.minimizer(fit_param)
+# diagnostics
+mse = loss_scaled(k_fit)
+pred = ki_itp.(I_exp, Ref(k_fit))
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+#)
+
+# given: itp, data (N×2), ki_sim
+out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]))
+@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+I_scan = logspace10(10e-3,1.00; n=30);
+fig= plot(
+    # title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
+    size=(850,600),
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)",
+    left_margin = 2mm,
+)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z], 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting[:,1], data_fitting[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:black,2),
+    markerstrokecolor=:black,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan,ki_itp.(I_scan, Ref(out.ci[2])),
+    color=:royalblue1,
+    label=false,
+    linewidth=0,
+    fillrange= ki_itp.(I_scan, Ref(out.ci[1])),
+    fillcolor=:royalblue1,
+    fillalpha=0.35,
+)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(out.k_hat)),
+    label=L"$k_{i}= \left( %$(round(out.k_hat, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,2),
+    marker=(:xcross, :blue, 1),
+)
+plot!([1,1],label="Scaled Magnification", color=:white)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z]/p, 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:orangered2, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting_scaled[:,1], data_fitting_scaled[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:grey26,2),
+    markerstrokecolor=:grey26,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:seagreen,2.2),
+    marker=(:xcross, :seagreen, 1),
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
+display(fig)
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Select experimental data
+wanted_data_dir = "20251002" ;
+wanted_binning  = 2 ; 
+wanted_smooth   = 0.01 ;
+# Data loading
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+);
+if res === nothing
+    @warn "No matching report found"
+else
+    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+    mag, δmag = mag_factor(wanted_data_dir)
+    # I_exp = sort(res.currents_mA / 1_000);
+    # z_exp = res.framewise_mm/res.magnification;
+end
+load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
+I_exp       = load_data[!,"Icoil_A"]
+I_exp_error = load_data[!,"Icoil_error_A"]
+z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag)
+z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) 
+i_start     = searchsortedfirst(I_exp,0.015)
+data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
+data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z],
+    ribbon = data_exp[!,:δz],
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+
+n = 2
+yexp = last(data_exp[!,:z],n) 
+ythe = last(zqm.(data_exp[!,:Ic]),n)
+p = dot(yexp,yexp) / dot(yexp,ythe)
+plot(data_exp[!,:Ic], data_exp[!,:z],
+    label="$(wanted_data_dir)",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    line=(:solid,:red,1))
+plot!(data_exp[!,:Ic], zqm.(data_exp[!,:Ic]),
+    label="QM",
+    marker=(:xcross,:blue,2),
+    markerstrokecolor=:red,
+    line=(:solid,:blue,1))
+plot!(data_exp[!,:Ic], data_exp[!,:z]./p,
+    label="data / $(@sprintf("%1.3f",p))",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:orangered,
+    line=(:solid,:orangered,1))
+scaled_mag = mag * p
+plot!(title="Magnification: $(@sprintf("%1.4f",mag)) → $(@sprintf("%1.4f",scaled_mag))",
+    ylabel=L"$z_{max}$ (mm)",
+    xlabel="Current (A)")
+
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z]/p,
+    ribbon = data_exp[!,:δz]/p,
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+# 20250919
+data_fitting        = data[[2:3; (end):(end)], :]
+
+data_fitting_scaled = copy(data_fitting)
+data_fitting_scaled[:, end-1:end] ./= p
+data_fitting_scaled
+
+
+function loss_scaled(ki) # loss function
+    # ni=12
+    z_pred = ki_itp.(data_fitting_scaled[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data_fitting_scaled[:,3]))
+end
+
+#(
+fit_param = optimize(loss_scaled, ki_list[ki_start], ki_list[ki_stop],Brent())
+k_fit = Optim.minimizer(fit_param)
+# diagnostics
+mse = loss_scaled(k_fit)
+pred = ki_itp.(I_exp, Ref(k_fit))
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+#)
+
+# given: itp, data (N×2), ki_sim
+out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]))
+@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+I_scan = logspace10(10e-3,1.00; n=30);
+fig= plot(
+    # title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
+    size=(850,600),
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)",
+    left_margin = 2mm,
+)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z], 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting[:,1], data_fitting[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:black,2),
+    markerstrokecolor=:black,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan,ki_itp.(I_scan, Ref(out.ci[2])),
+    color=:royalblue1,
+    label=false,
+    linewidth=0,
+    fillrange= ki_itp.(I_scan, Ref(out.ci[1])),
+    fillcolor=:royalblue1,
+    fillalpha=0.35,
+)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(out.k_hat)),
+    label=L"$k_{i}= \left( %$(round(out.k_hat, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,2),
+    marker=(:xcross, :blue, 1),
+)
+plot!([1,1],label="Scaled Magnification", color=:white)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z]/p, 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:orangered2, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting_scaled[:,1], data_fitting_scaled[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:grey26,2),
+    markerstrokecolor=:grey26,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:seagreen,2.2),
+    marker=(:xcross, :seagreen, 1),
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
+display(fig)
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Select experimental data
+wanted_data_dir = "20251003" ;
+wanted_binning  = 2 ; 
+wanted_smooth   = 0.01 ;
+# Data loading
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+);
+if res === nothing
+    @warn "No matching report found"
+else
+    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+    mag, δmag = mag_factor(wanted_data_dir)
+    # I_exp = sort(res.currents_mA / 1_000);
+    # z_exp = res.framewise_mm/res.magnification;
+end
+load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
+I_exp       = load_data[!,"Icoil_A"]
+I_exp_error = load_data[!,"Icoil_error_A"]
+z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag)
+z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) 
+i_start     = searchsortedfirst(I_exp,0.015)
+data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
+data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z],
+    ribbon = data_exp[!,:δz],
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+
+n = 3
+yexp = last(data_exp[!,:z],n) 
+ythe = last(zqm.(data_exp[!,:Ic]),n)
+p = dot(yexp,yexp) / dot(yexp,ythe)
+plot(data_exp[!,:Ic], data_exp[!,:z],
+    label="$(wanted_data_dir)",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    line=(:solid,:red,1))
+plot!(data_exp[!,:Ic], zqm.(data_exp[!,:Ic]),
+    label="QM",
+    marker=(:xcross,:blue,2),
+    markerstrokecolor=:red,
+    line=(:solid,:blue,1))
+plot!(data_exp[!,:Ic], data_exp[!,:z]./p,
+    label="data / $(@sprintf("%1.3f",p))",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:orangered,
+    line=(:solid,:orangered,1))
+scaled_mag = mag * p
+plot!(title="Magnification: $(@sprintf("%1.4f",mag)) → $(@sprintf("%1.4f",scaled_mag))",
+    ylabel=L"$z_{max}$ (mm)",
+    xlabel="Current (A)")
+
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z]/p,
+    ribbon = data_exp[!,:δz]/p,
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+# 20251003
+data_fitting        = data[[2:4; (end):(end)], :]
+data_fitting        = data[2:4, :]
+data_fitting_scaled = copy(data_fitting)
+data_fitting_scaled[:, end-1:end] ./= p
+data_fitting_scaled
+
+
+function loss_scaled(ki) # loss function
+    # ni=12
+    z_pred = ki_itp.(data_fitting_scaled[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data_fitting_scaled[:,3]))
+end
+
+#(
+fit_param = optimize(loss_scaled, ki_list[ki_start], ki_list[ki_stop],Brent())
+k_fit = Optim.minimizer(fit_param)
+# diagnostics
+mse = loss_scaled(k_fit)
+pred = ki_itp.(I_exp, Ref(k_fit))
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+#)
+
+# given: itp, data (N×2), ki_sim
+out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]))
+@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+I_scan = logspace10(10e-3,1.00; n=30);
+fig= plot(
+    # title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
+    size=(850,600),
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)",
+    left_margin = 2mm,
+)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z], 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting[:,1], data_fitting[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:black,2),
+    markerstrokecolor=:black,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan,ki_itp.(I_scan, Ref(out.ci[2])),
+    color=:royalblue1,
+    label=false,
+    linewidth=0,
+    fillrange= ki_itp.(I_scan, Ref(out.ci[1])),
+    fillcolor=:royalblue1,
+    fillalpha=0.35,
+)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(out.k_hat)),
+    label=L"$k_{i}= \left( %$(round(out.k_hat, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,2),
+    marker=(:xcross, :blue, 1),
+)
+plot!([1,1],label="Scaled Magnification", color=:white)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z]/p, 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:orangered2, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting_scaled[:,1], data_fitting_scaled[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:grey26,2),
+    markerstrokecolor=:grey26,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:seagreen,2.2),
+    marker=(:xcross, :seagreen, 1),
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
+display(fig)
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Select experimental data
+wanted_data_dir = "20251006" ;
+wanted_binning  = 2 ; 
+wanted_smooth   = 0.01 ;
+# Data loading
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+);
+if res === nothing
+    @warn "No matching report found"
+else
+    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+    mag, δmag = mag_factor(wanted_data_dir)
+    # I_exp = sort(res.currents_mA / 1_000);
+    # z_exp = res.framewise_mm/res.magnification;
+end
+load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
+I_exp       = load_data[!,"Icoil_A"]
+I_exp_error = load_data[!,"Icoil_error_A"]
+z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag)
+z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) 
+i_start     = searchsortedfirst(I_exp,0.015)
+data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
+data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z],
+    ribbon = data_exp[!,:δz],
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+
+n = 3
+yexp = last(data_exp[!,:z],n) 
+ythe = last(zqm.(data_exp[!,:Ic]),n)
+p = dot(yexp,yexp) / dot(yexp,ythe)
+plot(data_exp[!,:Ic], data_exp[!,:z],
+    label="$(wanted_data_dir)",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    line=(:solid,:red,1))
+plot!(data_exp[!,:Ic], zqm.(data_exp[!,:Ic]),
+    label="QM",
+    marker=(:xcross,:blue,2),
+    markerstrokecolor=:red,
+    line=(:solid,:blue,1))
+plot!(data_exp[!,:Ic], data_exp[!,:z]./p,
+    label="data / $(@sprintf("%1.3f",p))",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:orangered,
+    line=(:solid,:orangered,1))
+scaled_mag = mag * p
+plot!(title="Magnification: $(@sprintf("%1.4f",mag)) → $(@sprintf("%1.4f",scaled_mag))",
+    ylabel=L"$z_{max}$ (mm)",
+    xlabel="Current (A)")
+
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z]/p,
+    ribbon = data_exp[!,:δz]/p,
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+# 20251003
+data_fitting        = data[[2:4; (end):(end)], :]
+data_fitting_scaled = copy(data_fitting)
+data_fitting_scaled[:, end-1:end] ./= p
+data_fitting_scaled
+
+
+function loss_scaled(ki) # loss function
+    # ni=12
+    z_pred = ki_itp.(data_fitting_scaled[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data_fitting_scaled[:,3]))
+end
+
+#(
+fit_param = optimize(loss_scaled, ki_list[ki_start], ki_list[ki_stop],Brent())
+k_fit = Optim.minimizer(fit_param)
+# diagnostics
+mse = loss_scaled(k_fit)
+pred = ki_itp.(I_exp, Ref(k_fit))
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+#)
+
+# given: itp, data (N×2), ki_sim
+out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]))
+@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+I_scan = logspace10(10e-3,1.00; n=30);
+fig= plot(
+    # title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
+    size=(850,600),
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)",
+    left_margin = 2mm,
+)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z], 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting[:,1], data_fitting[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:black,2),
+    markerstrokecolor=:black,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan,ki_itp.(I_scan, Ref(out.ci[2])),
+    color=:royalblue1,
+    label=false,
+    linewidth=0,
+    fillrange= ki_itp.(I_scan, Ref(out.ci[1])),
+    fillcolor=:royalblue1,
+    fillalpha=0.35,
+)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(out.k_hat)),
+    label=L"$k_{i}= \left( %$(round(out.k_hat, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,2),
+    marker=(:xcross, :blue, 1),
+)
+plot!([1,1],label="Scaled Magnification", color=:white)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z]/p, 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:orangered2, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting_scaled[:,1], data_fitting_scaled[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:grey26,2),
+    markerstrokecolor=:grey26,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:seagreen,2.2),
+    marker=(:xcross, :seagreen, 1),
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
+display(fig)
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Select experimental data
+wanted_data_dir = "20251109" ;
+wanted_binning  = 2 ; 
+wanted_smooth   = 0.01 ;
+# Data loading
+res = DataReading.find_report_data(
+        joinpath(@__DIR__, "analysis_data");
+        wanted_data_dir=wanted_data_dir,
+        wanted_binning=wanted_binning,
+        wanted_smooth=wanted_smooth
+);
+if res === nothing
+    @warn "No matching report found"
+else
+    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+    mag, δmag = mag_factor(wanted_data_dir)
+    # I_exp = sort(res.currents_mA / 1_000);
+    # z_exp = res.framewise_mm/res.magnification;
+end
+load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
+I_exp       = load_data[!,"Icoil_A"]
+I_exp_error = load_data[!,"Icoil_error_A"]
+z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag)
+z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) 
+i_start     = searchsortedfirst(I_exp,0.015)
+data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:]
+data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z],
+    ribbon = data_exp[!,:δz],
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+
+n = 2
+yexp = last(data_exp[!,:z],n) 
+ythe = last(zqm.(data_exp[!,:Ic]),n)
+p = dot(yexp,yexp) / dot(yexp,ythe)
+plot(data_exp[!,:Ic], data_exp[!,:z],
+    label="$(wanted_data_dir)",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:red,
+    line=(:solid,:red,1))
+plot!(data_exp[!,:Ic], zqm.(data_exp[!,:Ic]),
+    label="QM",
+    marker=(:xcross,:blue,2),
+    markerstrokecolor=:red,
+    line=(:solid,:blue,1))
+plot!(data_exp[!,:Ic], data_exp[!,:z]./p,
+    label="data / $(@sprintf("%1.3f",p))",
+    marker=(:circle,:white,2),
+    markerstrokecolor=:orangered,
+    line=(:solid,:orangered,1))
+scaled_mag = mag * p
+plot!(title="Magnification: $(@sprintf("%1.4f",mag)) → $(@sprintf("%1.4f",scaled_mag))",
+    ylabel=L"$z_{max}$ (mm)",
+    xlabel="Current (A)")
+
+
+color_list = palette(:darkrainbow,size(ki_list,1))
+fig = plot(xlabel="Currents (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    legend=:outerright,)
+for i=1:length(ki_list)
+    plot!(fig,Icoils_cqd[2:end], zmm_cqd[2:end,i],
+        label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
+        line=(:solid,color_list[i]),
+    )
+end
+plot!(data_exp[!,:Ic], data_exp[!,:z]/p,
+    ribbon = data_exp[!,:δz]/p,
+    line=(:black,:dash,2),
+    fillalpha=0.25, 
+    fillcolor=:gray13,  
+    label="$(wanted_data_dir)"  
+    )
+plot!(Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:magenta,3))
+plot!(
+    size=(850,600),
+    # xlims=(8e-3,1.2),
+    xaxis=:log10,
+    yaxis=:log10,
+    legend=:outerright,
+    legend_columns=2,
+    legendfontsize=6,
+    left_margin=3mm,)
+display(fig)
+
+# 20251003
+data_fitting        = data[[2:4; (end-1):(end)], :]
+data_fitting_scaled = copy(data_fitting)
+data_fitting_scaled[:, end-1:end] ./= p
+data_fitting_scaled
+
+
+function loss_scaled(ki) # loss function
+    # ni=12
+    z_pred = ki_itp.(data_fitting_scaled[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data_fitting_scaled[:,3]))
+end
+
+#(
+fit_param = optimize(loss_scaled, ki_list[ki_start], ki_list[ki_stop],Brent())
+k_fit = Optim.minimizer(fit_param)
+# diagnostics
+mse = loss_scaled(k_fit)
+pred = ki_itp.(I_exp, Ref(k_fit))
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+#)
+
+# given: itp, data (N×2), ki_sim
+out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]))
+@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+I_scan = logspace10(10e-3,1.00; n=30);
+fig= plot(
+    # title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
+    size=(850,600),
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)",
+    left_margin = 2mm,
+)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z], 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting[:,1], data_fitting[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:black,2),
+    markerstrokecolor=:black,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan,ki_itp.(I_scan, Ref(out.ci[2])),
+    color=:royalblue1,
+    label=false,
+    linewidth=0,
+    fillrange= ki_itp.(I_scan, Ref(out.ci[1])),
+    fillcolor=:royalblue1,
+    fillalpha=0.35,
+)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(out.k_hat)),
+    label=L"$k_{i}= \left( %$(round(out.k_hat, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,2),
+    marker=(:xcross, :blue, 1),
+)
+plot!([1,1],label="Scaled Magnification", color=:white)
+plot!(fig,
+    data_exp[!,:Ic], data_exp[!,:z]/p, 
+    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
+    seriestype=:scatter,
+    yerror = data_exp[!,:δz],
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:orangered2, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    data_fitting_scaled[:,1], data_fitting_scaled[:,3],
+    seriestype=:scatter,
+    label="Used for fitting",
+    marker=(:xcross,:grey26,2),
+    markerstrokecolor=:grey26,
+    markerstrokewidth=2,)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:seagreen,2.2),
+    marker=(:xcross, :seagreen, 1),
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
+display(fig)
+
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+
+data_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"]
+data = hcat(data_avg[:i_smooth],data_avg[:z_smooth])
+data_fitting = data[[3:6; (end-5):(end)], :]
+
+function loss_scaled(ki) # loss function
+    # ni=12
+    z_pred = ki_itp.(data_fitting[:,1], Ref(ki))
+    return mean(abs2,log10.(z_pred) .- log10.(data_fitting[:,2]))
+end
+
+#(
+fit_param = optimize(loss_scaled, ki_list[ki_start], ki_list[ki_stop],Brent())
+k_fit = Optim.minimizer(fit_param)
+# diagnostics
+mse = loss_scaled(k_fit)
+pred = ki_itp.(I_exp, Ref(k_fit))
+coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
+#)
+
+I_scan = logspace10(10e-3,1.00; n=30);
+fig= plot(
+    # title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
+    size=(850,600),
+    xlabel=L"Coil current $I_{c}$ (A)",
+    ylabel=L"$z$ (mm)",
+    left_margin = 2mm,
+)
+plot!(fig,
+    data[:,1], data[:,2], 
+    label="Experiment (avg)",
+    seriestype=:scatter,
+    marker=(:circle,:white,1.8), 
+    markerstrokecolor=:red, 
+    markerstrokewidth=2
+)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(k_fit)),
+    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,2),
+    marker=(:xcross, :blue, 1),
+)
+plot!(fig,
+    xaxis=:log10,
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(8e-3,1.5),
+    ylims=(8e-3,2),
+    legend=:bottomright,
+)
+plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
+    label="QM",
+    line=(:dashdot,:black,2))
+display(fig)
+
+
+plot(data_avg[:i_smooth],data_avg[:z_smooth])
+
+
+2+2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## choose a few points for low currents and high currents
 if wanted_data_dir == "20250815"
     data_fitting = data[[9,10,11,15,19:22...],:] # for fitting purposes
@@ -542,7 +2425,7 @@ end
     
 
 
-data_fitting = data
+
 
 
 function loss(ki) # loss function
