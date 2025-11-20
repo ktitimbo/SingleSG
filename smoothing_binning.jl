@@ -593,7 +593,7 @@ plot!(fig, i_xx, zf1,
     ribbon = δzf1,
     fillalpha=0.40, 
     fillcolor=:gray36, 
-    label="Average",
+    label="Mean",
     line=(:dash,:black,:2))
 display(fig)
 saveplot(fig, "interpolation")
@@ -640,7 +640,7 @@ plot!(fig, i_xx, zf1_fit,
     ribbon = δzf1_fit,
     fillalpha=0.40, 
     fillcolor=:gray36, 
-    label="Average",
+    label="Mean",
     line=(:dash,:black,:2))
 display(fig)
 saveplot(fig, "smoothing_interpolation")
