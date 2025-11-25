@@ -207,10 +207,10 @@ function fit_ki_with_error(itp, data;
         result=res)
 end
 
-function compare_datasets(x_ref::AbstractVector, 
-                            A::AbstractVector, 
-                            B::AbstractVector, 
-                            C::AbstractVector;
+function compare_datasets(x_ref::AbstractVector, # current 
+                            A::AbstractVector,   # Experimental
+                            B::AbstractVector,   # CQD
+                            C::AbstractVector;   # QM
                             plot_errors=true)
     """
         compare_datasets(A, B; plot_errors=true)
@@ -234,10 +234,10 @@ function compare_datasets(x_ref::AbstractVector,
     @assert all(A .> 0) && all(B .> 0) && all(C .> 0) "All values must be > 0 for log comparison."
 
 # --- helper ---
-    function compute_metrics(A, X)
+    function compute_metrics(A,X)
         LA = log10.(A)
         LX = log10.(X)
-        log_err = LA .- LX
+        log_err = LX .- LA
 
         log_MSE  = mean(abs2, log_err)
         log_RMSE = sqrt(log_MSE)
@@ -259,7 +259,7 @@ function compare_datasets(x_ref::AbstractVector,
 
         A_norm = cumsum(A ./ sum(A))
         X_norm = cumsum(X ./ sum(X))
-        KS_distance = maximum(abs.(A_norm .- X_norm))
+        KS_distance = maximum(abs.(X_norm .- A_norm))
 
         return (
             log_MSE = log_MSE,
@@ -339,7 +339,7 @@ function compare_datasets(x_ref::AbstractVector,
         fig = plot( x_ref,
             R_B.log_err,
             seriestype=:scatter,
-            label="log10(exp) - log10(cqd)",
+            label="log10(cqd) - log10(exp)",
             title="Log Errors for CQD and QM",
             xlabel="Current", ylabel="Log Error",
             markersize=3,
@@ -350,7 +350,7 @@ function compare_datasets(x_ref::AbstractVector,
             seriestype=:scatter,
             markersize=3,
             markerstrokewidth=0.01,
-            label="log10(exp) - log10(qm)"
+            label="log10(qm) - log10(exp)"
         )
         display(fig)
     end
@@ -458,6 +458,7 @@ nI_sim = length(Icoils_cqd);
 
 nruns= 10
 induction_coeff = 1e-6 * [
+    # 20251113T102859450
     range(0.01,0.10,length=nruns),
     range(0.1,1.0,length=nruns),
     range(1.1,2.0,length=nruns),
@@ -466,7 +467,9 @@ induction_coeff = 1e-6 * [
     range(4.1,5.0,length=nruns),
     range(5.1,6.0,length=nruns),
     range(10,100,length=nruns),
+    # 20251116T164054691
     [0.001,0.01],
+    # 20251117T200727431
     range(6.1,10.0,length=4*nruns),
     [100.0,1000.0,10000.0]
 
@@ -485,9 +488,9 @@ sort!(ki_list)
 n_ki = length(ki_list)
 
 # --- CoQuantum Dynamics ---
-table_cqd =load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.8m","cqd_2800000_screen_profiles_table_thread_v2.jld2"),"table")
+table_cqd =load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.8m","cqd_2800000_screen_profiles_table_thread.jld2"),"table");
 @info "CQD data loaded"
-keys_vec = collect(keys(table_cqd))  # Vector of tuples
+keys_vec = collect(keys(table_cqd)) ; # Vector of tuples
 ki_set  = sort(unique(first.(keys_vec)))
 nz_set  = sort(unique(getindex.(keys_vec, 2)))
 gw_set  = sort(unique(getindex.(keys_vec, 3)))
@@ -569,7 +572,7 @@ display(fig)
 
 
 # Interpolated kᵢ surface
-ki_start , ki_stop = 1 , 110 #length(ki_sim)
+ki_start , ki_stop = 1 , 119 #length(ki_sim)
 println("Interpolation in the induction term goes from $(ki_list[ki_start])×10⁻⁶ to $(ki_list[ki_stop])×10⁻⁶")
 ki_itp = Spline2D(Icoils_cqd, ki_list[ki_start:ki_stop], z_mm_ki[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
@@ -783,7 +786,7 @@ function plot_zmax_vs_current(
         yaxis = yscale,
         legend = :outerright,
         legend_columns = 2,
-        legendfontsize = 6,
+        legendfontsize = 4,
         left_margin = 3mm,
     )
 
@@ -887,7 +890,8 @@ end
 
 function plot_full_ki_fit(
         data_exp, data_fitting,
-        p, k_fit, mse;
+        p0,p, 
+        k_fit, mse;
         wanted_data_dir,
         wanted_binning,
         wanted_smooth,
@@ -957,7 +961,7 @@ function plot_full_ki_fit(
     )
 
     # Dummy entry for legend separation
-    plot!([1,1], label = "Scaled Magnification", color = :white)
+    plot!([1,1], label = "Scaled Magnification m=($(round(p,sigdigits=5))×$(round(p0, sigdigits=5))) ", color = :white)
 
     # --- Scaled experimental data ---
     plot!(
@@ -1019,999 +1023,170 @@ end
 
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
-# Select experimental data
-wanted_data_dir = "20250814" ;
-wanted_binning  = 2 ; 
-wanted_smooth   = 0.01 ;
-# Data loading
-res = DataReading.find_report_data(
+# List of experimental data directories to process
+wanted_data_dirs = [
+    "20250814", "20250820",
+    "20250825", "20250919",
+    "20251002", "20251003",
+    "20251006", "20251109"
+    # ...
+]
+
+wanted_binning = 2
+wanted_smooth  = 0.01
+current_threshold = 0.020
+
+for wanted_data_dir in wanted_data_dirs
+    @info "Processing dataset" wanted_data_dir
+
+    # Data loading
+    res = DataReading.find_report_data(
         joinpath(@__DIR__, "analysis_data");
-        wanted_data_dir=wanted_data_dir,
-        wanted_binning=wanted_binning,
-        wanted_smooth=wanted_smooth
-);
-if res === nothing
-    @warn "No matching report found"
-else
-    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+        wanted_data_dir = wanted_data_dir,
+        wanted_binning  = wanted_binning,
+        wanted_smooth   = wanted_smooth,
+    )
+
+    if res === nothing
+        @warn "No matching report found" wanted_data_dir
+        continue
+    else
+        @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
+
+    end
+
     mag, δmag = mag_factor(wanted_data_dir)
-    # I_exp = sort(res.currents_mA / 1_000);
-    # z_exp = res.framewise_mm/res.magnification;
+
+    # Load framewise data
+    load_data   = CSV.read(joinpath(dirname(res.path), "fw_data.csv"), DataFrame; header = true)
+    I_exp       = load_data[!, "Icoil_A"]
+    I_exp_error = load_data[!, "Icoil_error_A"]
+    z_exp       = load_data[!, "F1_z_centroid_mm"] / mag
+    z_exp_error = abs.(z_exp) .* sqrt.(
+        (load_data[!, "F1_z_centroid_se_mm"] ./ load_data[!, "F1_z_centroid_mm"]).^2 .+
+        (δmag / mag)^2
+    )
+
+    i_start  = searchsortedfirst(I_exp, current_threshold)
+    data     = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end, :]
+    data_exp = DataFrame(data, [:Ic, :δIc, :z, :δz])
+
+    # Plot 1: raw magnification
+    fig = plot_zmax_vs_current(
+        data_exp, ki_list;
+        Icoils_cqd = Icoils_cqd,
+        zmm_cqd    = z_mm_ki,
+        Ic_QM      = Ic_QM,
+        zmax_QM    = zmax_QM,
+        axis_scale = :loglog,
+        data_label = wanted_data_dir,
+    )
+    display(fig)
+
+    # Scaling factor fit
+    p, fig = plot_scaling_factor(
+        2,
+        data_exp,
+        wanted_data_dir,
+        mag;
+        zqm = zqm,
+    )
+    display(fig)
+    println("Scaled Magnification factor 𝓂 = $(@sprintf("%2.4f", mag * p))")
+
+    # Plot 2: scaled experimental data
+    fig = plot_zmax_vs_current(
+        data_exp, ki_list;
+        Icoils_cqd = Icoils_cqd,
+        zmm_cqd    = z_mm_ki,
+        Ic_QM      = Ic_QM,
+        zmax_QM    = zmax_QM,
+        p          = p,
+        scale_exp  = true,
+        data_label = wanted_data_dir,
+        axis_scale = :loglog,
+    )
+    display(fig)
+
+    # Choose fitting subset (first 4 and last 4 points)
+    data_fitting = data[[1:4; (end-3):end], :]
+
+    # Fit ki using rescaled data
+    k_fit, mse, r2 = fit_k_parameter(
+        data_fitting,
+        p,
+        ki_list,
+        ki_start,
+        ki_stop;
+        ki_itp = ki_itp,
+        I_exp  = I_exp,
+        z_exp  = z_exp,
+    )
+    @info @info "Fitting for rescaled data (𝓂 = $(p*mag))" "kᵢ\t\t" = k_fit "Err kᵢ\t" = mse "R²\t\t" = r2
+
+    # Fit ki with error estimation (unscaled magnification)
+    out = fit_ki_with_error(
+        ki_itp,
+        data_fitting;
+        bounds = (ki_list[ki_start], ki_list[ki_stop]),
+    )
+    @info "Fitting (𝓂 = $(mag))" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+
+    # Full ki-fit plot
+    fig = plot_full_ki_fit(
+        data_exp, data_fitting,
+        mag, p, k_fit, mse;
+        wanted_data_dir = wanted_data_dir,
+        wanted_binning  = wanted_binning,
+        wanted_smooth   = wanted_smooth,
+        ki_itp          = ki_itp,
+        out             = out,
+        Ic_QM           = Ic_QM,
+        zmax_QM         = zmax_QM,
+    )
+    display(fig)
+
+    println("Finished processing dataset $wanted_data_dir\n" * "-"^60 * "\n")
 end
-load_data   = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp       = load_data[!,"Icoil_A"];
-I_exp_error = load_data[!,"Icoil_error_A"];
-z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag);
-z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  );
-i_start     = searchsortedfirst(I_exp,0.015);
-data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:];
-data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
+# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = z_mm_ki,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    axis_scale =:loglog,
-    data_label = wanted_data_dir,
-)
-display(fig)
 
-p, fig = plot_scaling_factor(
-    2,
-    data_exp,
-    wanted_data_dir,
-    mag;
-    zqm = zqm
-)
-display(fig)
-println("Scaled Magnificatiopn factor 𝓂 = $(@sprintf("%2.4f",mag*p))")
 
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    p = p,
-    scale_exp = true,
-    data_label = wanted_data_dir,
-    axis_scale = :loglog
-);
-display(fig)
+
+
+
+
+
+
+
+
+
+
+
 
 # 20250814
-data_fitting        = data[[1:4; (end-3):(end)], :]
-
-k_fit, mse, r2 = fit_k_parameter(
-    data_fitting,
-    p,
-    ki_list,
-    ki_start , 
-    ki_stop;
-    ki_itp = ki_itp,
-    I_exp = I_exp,
-    z_exp = z_exp
-)
-@info "Fitting for rescaled data (𝓂 = $(p*mag))" "kᵢ\t\t" = k_fit "Err kᵢ\t" = mse "R²\t\t" = r2
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]));
-@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-
-fig = plot_full_ki_fit(
-    data_exp, data_fitting,
-    p, k_fit, mse;
-    wanted_data_dir = wanted_data_dir,
-    wanted_binning = wanted_binning,
-    wanted_smooth = wanted_smooth,
-    ki_itp = ki_itp,
-    out = out,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM
-);
-display(fig)
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-
-
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# Select experimental data
-wanted_data_dir = "20250820" ;
-wanted_binning  = 2 ; 
-wanted_smooth   = 0.01 ;
-# Data loading
-res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
-        wanted_data_dir=wanted_data_dir,
-        wanted_binning=wanted_binning,
-        wanted_smooth=wanted_smooth
-);
-if res === nothing
-    @warn "No matching report found"
-else
-    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
-    mag, δmag = mag_factor(wanted_data_dir)
-    # I_exp = sort(res.currents_mA / 1_000);
-    # z_exp = res.framewise_mm/res.magnification;
-end
-load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp       = load_data[!,"Icoil_A"];
-I_exp_error = load_data[!,"Icoil_error_A"];
-z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag);
-z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) ;
-i_start     = searchsortedfirst(I_exp,0.015);
-data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:];
-data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    axis_scale =:loglog,
-    data_label = wanted_data_dir,
-)
-display(fig)
-
-p, fig = plot_scaling_factor(
-    2,
-    data_exp,
-    wanted_data_dir,
-    mag;
-    zqm = zqm
-);
-display(fig)
-println("Scaled Magnificatiopn factor 𝓂 = $(@sprintf("%2.4f",mag*p))")
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    p = p,
-    scale_exp = true,
-    data_label = wanted_data_dir,
-    axis_scale = :loglog
-);
-display(fig)
-
+data_fitting = data[[1:4; (end-3):(end)], :]
 # 20250820
 data_fitting = data[[1:4; (end-3):(end)], :]
-
-k_fit, mse, r2 = fit_k_parameter(
-    data_fitting,
-    p,
-    ki_list,
-    ki_start , 
-    ki_stop;
-    ki_itp = ki_itp,
-    I_exp = I_exp,
-    z_exp = z_exp
-)
-@info "Fitting for rescaled data (𝓂 = $(p*mag))" "kᵢ\t\t" = k_fit "Err kᵢ\t" = mse "R²\t\t" = r2
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]));
-@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-
-fig = plot_full_ki_fit(
-    data_exp, data_fitting,
-    p, k_fit, mse;
-    wanted_data_dir = wanted_data_dir,
-    wanted_binning = wanted_binning,
-    wanted_smooth = wanted_smooth,
-    ki_itp = ki_itp,
-    out = out,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM
-);
-display(fig)
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-
-
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# Select experimental data
-wanted_data_dir = "20250825" ;
-wanted_binning  = 2 ; 
-wanted_smooth   = 0.01 ;
-# Data loading
-res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
-        wanted_data_dir=wanted_data_dir,
-        wanted_binning=wanted_binning,
-        wanted_smooth=wanted_smooth
-);
-if res === nothing
-    @warn "No matching report found"
-else
-    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
-    mag, δmag = mag_factor(wanted_data_dir)
-    # I_exp = sort(res.currents_mA / 1_000);
-    # z_exp = res.framewise_mm/res.magnification;
-end
-load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp       = load_data[!,"Icoil_A"];
-I_exp_error = load_data[!,"Icoil_error_A"];
-z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag);
-z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) ;
-i_start     = searchsortedfirst(I_exp,0.015);
-data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:];
-data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
-
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    axis_scale =:loglog,
-    data_label = wanted_data_dir,
-)
-display(fig)
-
-p, fig = plot_scaling_factor(
-    2,
-    data_exp,
-    wanted_data_dir,
-    mag;
-    zqm = zqm
-);
-display(fig)
-println("Scaled Magnificatiopn factor 𝓂 = $(@sprintf("%2.4f",mag*p))")
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    p = p,
-    scale_exp = true,
-    data_label = wanted_data_dir,
-    axis_scale = :loglog
-);
-display(fig)
-
 # 20250825
-data_fitting        = data[[1:3; (end-3):(end)], :]
-
-k_fit, mse, r2 = fit_k_parameter(
-    data_fitting,
-    p,
-    ki_list,
-    ki_start , 
-    ki_stop;
-    ki_itp = ki_itp,
-    I_exp = I_exp,
-    z_exp = z_exp
-)
-@info "Fitting for rescaled data (𝓂 = $(p*mag))" "kᵢ\t\t" = k_fit "Err kᵢ\t" = mse "R²\t\t" = r2
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]));
-@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-
-fig = plot_full_ki_fit(
-    data_exp, data_fitting,
-    p, k_fit, mse;
-    wanted_data_dir = wanted_data_dir,
-    wanted_binning = wanted_binning,
-    wanted_smooth = wanted_smooth,
-    ki_itp = ki_itp,
-    out = out,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM
-);
-display(fig)
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-
-
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# Select experimental data
-wanted_data_dir = "20250919" ;
-wanted_binning  = 2 ; 
-wanted_smooth   = 0.01 ;
-# Data loading
-res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
-        wanted_data_dir=wanted_data_dir,
-        wanted_binning=wanted_binning,
-        wanted_smooth=wanted_smooth
-);
-if res === nothing
-    @warn "No matching report found"
-else
-    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
-    mag, δmag = mag_factor(wanted_data_dir)
-    # I_exp = sort(res.currents_mA / 1_000);
-    # z_exp = res.framewise_mm/res.magnification;
-end
-load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp       = load_data[!,"Icoil_A"];
-I_exp_error = load_data[!,"Icoil_error_A"];
-z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag);
-z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) ;
-i_start     = searchsortedfirst(I_exp,0.015);
-data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:];
-data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    axis_scale =:loglog,
-    data_label = wanted_data_dir,
-);
-display(fig)
-
-p, fig = plot_scaling_factor(
-    2,
-    data_exp,
-    wanted_data_dir,
-    mag;
-    zqm = zqm
-);
-display(fig)
-println("Scaled Magnificatiopn factor 𝓂 = $(@sprintf("%2.4f",mag*p))")
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    p = p,
-    scale_exp = true,
-    data_label = wanted_data_dir,
-    axis_scale = :loglog
-);
-display(fig)
-
+data_fitting = data[[1:3; (end-3):(end)], :]
 # 20250919
-data_fitting        = data[[1:2; (end-3):(end)], :]
-
-k_fit, mse, r2 = fit_k_parameter(
-    data_fitting,
-    p,
-    ki_list,
-    ki_start , 
-    ki_stop;
-    ki_itp = ki_itp,
-    I_exp = I_exp,
-    z_exp = z_exp
-)
-@info "Fitting for rescaled data (𝓂 = $(p*mag))" "kᵢ\t\t" = k_fit "Err kᵢ\t" = mse "R²\t\t" = r2
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]));
-@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-
-fig = plot_full_ki_fit(
-    data_exp, data_fitting,
-    p, k_fit, mse;
-    wanted_data_dir = wanted_data_dir,
-    wanted_binning = wanted_binning,
-    wanted_smooth = wanted_smooth,
-    ki_itp = ki_itp,
-    out = out,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM
-);
-display(fig)
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-
-
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# Select experimental data
-wanted_data_dir = "20251002" ;
-wanted_binning  = 2 ; 
-wanted_smooth   = 0.01 ;
-# Data loading
-res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
-        wanted_data_dir=wanted_data_dir,
-        wanted_binning=wanted_binning,
-        wanted_smooth=wanted_smooth
-);
-if res === nothing
-    @warn "No matching report found"
-else
-    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
-    mag, δmag = mag_factor(wanted_data_dir)
-    # I_exp = sort(res.currents_mA / 1_000);
-    # z_exp = res.framewise_mm/res.magnification;
-end
-load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp       = load_data[!,"Icoil_A"];
-I_exp_error = load_data[!,"Icoil_error_A"];
-z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag);
-z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) ;
-i_start     = searchsortedfirst(I_exp,0.015);
-data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:];
-data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    axis_scale =:loglog,
-    data_label = wanted_data_dir,
-);
-display(fig)
-
-p, fig = plot_scaling_factor(
-    2,
-    data_exp,
-    wanted_data_dir,
-    mag;
-    zqm = zqm
-);
-display(fig)
-println("Scaled Magnificatiopn factor 𝓂 = $(@sprintf("%2.4f",mag*p))")
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    p = p,
-    scale_exp = true,
-    data_label = wanted_data_dir,
-    axis_scale = :loglog
-);
-display(fig)
-
+data_fitting = data[[1:2; (end-3):(end)], :]
 # 20251002
-data_fitting  = data[[2:3; (end):(end)], :]
-
-k_fit, mse, r2 = fit_k_parameter(
-    data_fitting,
-    p,
-    ki_list,
-    ki_start , 
-    ki_stop;
-    ki_itp = ki_itp,
-    I_exp = I_exp,
-    z_exp = z_exp
-)
-@info "Fitting for rescaled data (𝓂 = $(p*mag))" "kᵢ\t\t" = k_fit "Err kᵢ\t" = mse "R²\t\t" = r2
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]));
-@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-
-fig = plot_full_ki_fit(
-    data_exp, data_fitting,
-    p, k_fit, mse;
-    wanted_data_dir = wanted_data_dir,
-    wanted_binning = wanted_binning,
-    wanted_smooth = wanted_smooth,
-    ki_itp = ki_itp,
-    out = out,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM
-);
-display(fig)
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-
-
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# Select experimental data
-wanted_data_dir = "20251003" ;
-wanted_binning  = 2 ; 
-wanted_smooth   = 0.01 ;
-# Data loading
-res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
-        wanted_data_dir=wanted_data_dir,
-        wanted_binning=wanted_binning,
-        wanted_smooth=wanted_smooth
-);
-if res === nothing
-    @warn "No matching report found"
-else
-    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
-    mag, δmag = mag_factor(wanted_data_dir)
-    # I_exp = sort(res.currents_mA / 1_000);
-    # z_exp = res.framewise_mm/res.magnification;
-end
-load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp       = load_data[!,"Icoil_A"];
-I_exp_error = load_data[!,"Icoil_error_A"];
-z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag);
-z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) ;
-i_start     = searchsortedfirst(I_exp,0.015);
-data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:];
-data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    axis_scale =:loglog,
-    data_label = wanted_data_dir,
-);
-display(fig)
-
-p, fig = plot_scaling_factor(
-    3,
-    data_exp,
-    wanted_data_dir,
-    mag;
-    zqm = zqm
-);
-display(fig)
-println("Scaled Magnificatiopn factor 𝓂 = $(@sprintf("%2.4f",mag*p))")
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    p = p,
-    scale_exp = true,
-    data_label = wanted_data_dir,
-    axis_scale = :loglog
-);
-display(fig)
-
+data_fitting = data[[2:3; (end):(end)], :]
 # 20251003
-data_fitting        = data[[2:4; (end):(end)], :]
-data_fitting        = data[2:4, :]
-
-k_fit, mse, r2 = fit_k_parameter(
-    data_fitting,
-    p,
-    ki_list,
-    ki_start , 
-    ki_stop;
-    ki_itp = ki_itp,
-    I_exp = I_exp,
-    z_exp = z_exp
-)
-@info "Fitting for rescaled data (𝓂 = $(p*mag))" "kᵢ\t\t" = k_fit "Err kᵢ\t" = mse "R²\t\t" = r2
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]));
-@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-
-fig = plot_full_ki_fit(
-    data_exp, data_fitting,
-    p, k_fit, mse;
-    wanted_data_dir = wanted_data_dir,
-    wanted_binning = wanted_binning,
-    wanted_smooth = wanted_smooth,
-    ki_itp = ki_itp,
-    out = out,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM
-);
-display(fig)
-
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-
-
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# Select experimental data
-wanted_data_dir = "20251006" ;
-wanted_binning  = 2 ; 
-wanted_smooth   = 0.01 ;
-# Data loading
-res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
-        wanted_data_dir=wanted_data_dir,
-        wanted_binning=wanted_binning,
-        wanted_smooth=wanted_smooth
-);
-if res === nothing
-    @warn "No matching report found"
-else
-    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
-    mag, δmag = mag_factor(wanted_data_dir)
-    # I_exp = sort(res.currents_mA / 1_000);
-    # z_exp = res.framewise_mm/res.magnification;
-end
-load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp       = load_data[!,"Icoil_A"];
-I_exp_error = load_data[!,"Icoil_error_A"];
-z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag);
-z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) ;
-i_start     = searchsortedfirst(I_exp,0.015);
-data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:];
-data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    axis_scale =:loglog,
-    data_label = wanted_data_dir,
-);
-display(fig)
-
-p, fig = plot_scaling_factor(
-    3,
-    data_exp,
-    wanted_data_dir,
-    mag;
-    zqm = zqm
-);
-display(fig)
-println("Scaled Magnificatiopn factor 𝓂 = $(@sprintf("%2.4f",mag*p))")
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    p = p,
-    scale_exp = true,
-    data_label = wanted_data_dir,
-    axis_scale = :loglog
-);
-display(fig)
-
+data_fitting = data[[2:4; (end):(end)], :]
+data_fitting = data[2:4, :]
 # 20251006
-data_fitting        = data[[2:4; (end):(end)], :]
-
-k_fit, mse, r2 = fit_k_parameter(
-    data_fitting,
-    p,
-    ki_list,
-    ki_start , 
-    ki_stop;
-    ki_itp = ki_itp,
-    I_exp = I_exp,
-    z_exp = z_exp
-)
-@info "Fitting for rescaled data (𝓂 = $(p*mag))" "kᵢ\t\t" = k_fit "Err kᵢ\t" = mse "R²\t\t" = r2
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]));
-@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-
-fig = plot_full_ki_fit(
-    data_exp, data_fitting,
-    p, k_fit, mse;
-    wanted_data_dir = wanted_data_dir,
-    wanted_binning = wanted_binning,
-    wanted_smooth = wanted_smooth,
-    ki_itp = ki_itp,
-    out = out,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM
-);
-display(fig)
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-
-
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# Select experimental data
-wanted_data_dir = "20251109" ;
-wanted_binning  = 2 ; 
-wanted_smooth   = 0.01 ;
-# Data loading
-res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
-        wanted_data_dir=wanted_data_dir,
-        wanted_binning=wanted_binning,
-        wanted_smooth=wanted_smooth
-);
-if res === nothing
-    @warn "No matching report found"
-else
-    @info "Imported experimental data" "Path\t\t" = res.path "Date label\t\t"  = res.data_dir "Analysis label\t" = res.name "Binning\t\t" = res.binning "Smoothing\t\t" =res.smoothing
-    mag, δmag = mag_factor(wanted_data_dir)
-    # I_exp = sort(res.currents_mA / 1_000);
-    # z_exp = res.framewise_mm/res.magnification;
-end
-load_data = CSV.read(joinpath(dirname(res.path),"fw_data.csv"),DataFrame; header=true);
-I_exp       = load_data[!,"Icoil_A"];
-I_exp_error = load_data[!,"Icoil_error_A"];
-z_exp       = load_data[!,"F1_z_centroid_mm"]/(mag);
-z_exp_error = abs.(z_exp) .* sqrt.( ( load_data[!,"F1_z_centroid_se_mm"] ./ load_data[!,"F1_z_centroid_mm"] ).^2 .+ (δmag / mag ).^2  ) ;
-i_start     = searchsortedfirst(I_exp,0.015);
-data        = hcat(I_exp, I_exp_error, z_exp, z_exp_error)[i_start:end,:];
-data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    axis_scale =:loglog,
-    data_label = wanted_data_dir,
-);
-display(fig)
-
-p, fig = plot_scaling_factor(
-    3,
-    data_exp,
-    wanted_data_dir,
-    mag;
-    zqm = zqm
-);
-display(fig)
-println("Scaled Magnificatiopn factor 𝓂 = $(@sprintf("%2.4f",mag*p))")
-
-fig = plot_zmax_vs_current(
-    data_exp, ki_list;
-    Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM,
-    p = p,
-    scale_exp = true,
-    data_label = wanted_data_dir,
-    axis_scale = :loglog
-);
-display(fig)
-
-
+data_fitting = data[[2:4; (end):(end)], :]
 # 20251109
-data_fitting        = data[[2:4; (end-1):(end)], :]
+data_fitting = data[[2:4; (end-1):(end)], :]
 
-k_fit, mse, r2 = fit_k_parameter(
-    data_fitting,
-    p,
-    ki_list,
-    ki_start , 
-    ki_stop;
-    ki_itp = ki_itp,
-    I_exp = I_exp,
-    z_exp = z_exp
-)
-@info "Fitting for rescaled data (𝓂 = $(p*mag))" "kᵢ\t\t" = k_fit "Err kᵢ\t" = mse "R²\t\t" = r2
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(ki_itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]));
-@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-
-fig = plot_full_ki_fit(
-    data_exp, data_fitting,
-    p, k_fit, mse;
-    wanted_data_dir = wanted_data_dir,
-    wanted_binning = wanted_binning,
-    wanted_smooth = wanted_smooth,
-    ki_itp = ki_itp,
-    out = out,
-    Ic_QM = Ic_QM,
-    zmax_QM = zmax_QM
-);
-display(fig)
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
-
-data_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"]
-data     = hcat(data_avg[:i_smooth],data_avg[:z_smooth],data_avg[:δz_smooth])
-i_start  = searchsortedfirst(data_avg[:i_smooth],0.030)
-data = data[i_start:end,:]
-
-plot(data[1:2:end,1],data[1:2:end,2],
-    color=:gray35,
-    marker=(:circle,:gray35,1),
-    markerstrokecolor=:gray35,
-    markerstrokewidth=1,
-    # ribbon = data[:,3],
-    label="Combined data")
-plot!(data[:,1], zqm.(data[:,1]),
-    label="Quantum mechanics",
-    line=(:solid,:red,1.5))
-# --- Compute scaling factor ---
-n=50
-yexp = last(data[:, 2], n)
-ythe = last(zqm.(data[:, 1]), n)
-p = dot(yexp, yexp) / dot(yexp, ythe)
-# Scaled magnification
-scaled_mag = p
-plot!(data[:,1],data[:,2]./p,
-    ribbon = data[:,3]./p,
-    label=L"Combined data (scaled $m_{p} = %$(round(p, digits=4))$ )",
-    line=(:dash,:darkgreen,1.2),
-    fillcolor = :darkgreen,
-    fillalpha = 0.35,
-)
-plot!(
-    xlabel = "Current (A)",
-    ylabel = L"$z_{\mathrm{max}}$ (mm)",
-    xaxis=:log10,
-    yaxis=:log10,
-    labelfontsize=14,
-    tickfontsize=12,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    size=(900,800),
-    legendfontsize=12,
-    left_margin=3mm,)
-data_fitting = data[[1:6; (end-5):(end)], :]
-# data_fitting = data
-function loss_scaled(ki) # loss function
-    # ni=12
-    z_pred = ki_itp.(data_fitting[:,1], Ref(ki))
-    return mean(abs2,log10.(z_pred) .- log10.(data_fitting[:,2]))
-end
-#(
-fit_param = optimize(loss_scaled, ki_list[ki_start], ki_list[ki_stop],Brent())
-k_fit = Optim.minimizer(fit_param)
-# diagnostics
-mse = loss_scaled(k_fit)
-pred = ki_itp.(I_exp, Ref(k_fit))
-coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
-#)
-I_scan = logspace10(30e-3,1.00; n=30);
-plot!(
-    I_scan, ki_itp.(I_scan, Ref(k_fit)),
-    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
-    line=(:solid,:blue,2),
-    marker=(:xcross, :blue, 0.8),
-    markerstrokewidth=1
-)
-
-
-
-
-
-
-
-fig= plot(
-    # title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
-    size=(850,600),
-    xlabel=L"Coil current $I_{c}$ (A)",
-    ylabel=L"$z$ (mm)",
-    left_margin = 2mm,
-)
-plot!(fig,
-    data[:,1], data[:,2], 
-    ribbon = data[:,3],
-    label="Experiment (mean)",
-    color=:red,
-    fillcolor=:red,
-    fillalpha=0.35,
-    # seriestype=:scatter,
-    marker=(:circle,:white,1), 
-    markerstrokecolor=:red, 
-    markerstrokewidth=1,
-
-)
-plot!(fig,
-    I_scan, ki_itp.(I_scan, Ref(k_fit)),
-    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
-    line=(:solid,:blue,2),
-    marker=(:xcross, :blue, 1),
-)
-plot!(fig,
-    xaxis=:log10,
-    yaxis=:log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(8e-3,1.5),
-    ylims=(8e-3,2),
-    legend=:bottomright,
-)
-plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
-    label="Quantum Mechanics",
-    line=(:dashdot,:black,2),
-    # xlims=(20e-3,1.05)
-    )
-display(fig)
-savefig(fig,"comparison.png")
-
-plot(data_avg[:i_smooth],data_avg[:z_smooth])
-
-
-2+2
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 ## choose a few points for low currents and high currents
 if wanted_data_dir == "20250815"
@@ -2024,647 +1199,4 @@ elseif wanted_data_dir == "20250919"
     data_fitting = data[[2:4; (end-3):(end-1)], :]
 else
     data_fitting = data[[10,11,12,14,22:25...],:] # for fitting purposes
-end
-    
-
-
-
-
-
-function loss(ki) # loss function
-    # ni=12
-    z_pred = itp.(data_fitting[:,1], Ref(ki))
-    return mean(abs2,log10.(z_pred) .- log10.(data_fitting[:,3]))
-end
-
-#(
-fit_param = optimize(loss, ki_list[ki_start], ki_list[ki_stop],Brent())
-k_fit = Optim.minimizer(fit_param)
-# diagnostics
-mse = loss(k_fit)
-pred = itp.(I_exp, Ref(k_fit))
-coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
-#)
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(itp, data_fitting; bounds=(ki_list[ki_start], ki_list[ki_stop]))
-@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-I_scan = logspace10(10e-3,1.00; n=30)
-fig= plot(
-    title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(2))",
-    xlabel=L"Coil current $I_{c}$ (A)",
-    ylabel=L"$z$ (mm)"
-)
-plot!(fig,
-    I_exp[8:end], z_exp[8:end], 
-    label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
-    seriestype=:scatter,
-    yerror = z_exp_error[8:end],
-    marker=(:circle,:white,1.8), 
-    markerstrokecolor=:red, 
-    markerstrokewidth=2
-)
-plot!(fig,
-    data_fitting[:,1], data_fitting[:,3],
-    seriestype=:scatter,
-    label="Used for fitting",
-    marker=(:xcross,:black,2),
-    markerstrokecolor=:black,
-    markerstrokewidth=2,)
-plot!(fig,
-    I_scan,itp.(I_scan, Ref(out.ci[2])),
-    color=:royalblue1,
-    label=false,
-    linewidth=0,
-    fillrange= itp.(I_scan, Ref(out.ci[1])),
-    fillcolor=:royalblue1,
-    fillalpha=0.35,
-)
-plot!(fig,
-    I_scan, itp.(I_scan, Ref(k_fit)),
-    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
-    line=(:solid,:blue,1),
-    marker=(:xcross, :blue, 1),
-)
-plot!(fig,
-    xaxis=:log10,
-    yaxis=:log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(8e-3,1.5),
-    ylims=(8e-3,2),
-    legend=:bottomright,
-)
-plot!(fig,Ic_QM[2:end],zmax_QM[2:end],
-    label="QM",
-    line=(:dashdot,:black,2))
-display(fig)
-
-
-
-
-# pre allocation of vectors
-data_collected_exp = Vector{Matrix{Float64}}();
-data_collected_qm  = Vector{Matrix{Float64}}();
-data_collected_cqd = Vector{Matrix{Float64}}();
-qm_export  = OrderedDict{Int,Matrix{Float64}}();
-data_export = OrderedDict( :dir=>wanted_data_dir, :nz_bin => wanted_binning, :λ_spline => wanted_smooth)
-for n_bin in nz_vals 
-    println("\t\tUsing simulated data with binning nz=$(n_bin)")
-
-    Ic_cqd , data_sim_cqd = load_blocks(simulation_paths(n_bin).cqd; z_group=3)
-    Ic_qm  , data_sim_qm  = load_blocks(simulation_paths(n_bin).qm; z_group=3)
-
-    Ic_cqd , data_sim_cqd = Ic_cqd[6:end] , data_sim_cqd[6:end,:]
-    Ic_qm  , data_sim_qm  = Ic_qm[6:end]  , data_sim_qm[6:end,:]
-
-    # Quantum mechanics
-    z_QMsim = vec(mapslices(x -> mean(skipmissing(x)), 
-                map(x-> x < 0.0 ? missing : x, data_sim_qm); 
-                dims=2))
-    z_QMsim_err = vec(mapslices(r -> begin
-                    xs = collect(skipmissing(r))
-                    isempty(xs) ? missing : std(xs) / sqrt(length(xs))
-                    end, map(x-> x < 0.0 ? missing : x, data_sim_qm); dims=2))
-
-    fig=plot(title="MonteCarlo QM simulation: n=$(n_bin)",
-        xlabel="Coil Current (A)",
-        ylabel=L"$z_{F_{1}}$ (mm)"
-    )
-    for i in eachindex(ki_sim)
-        data_qm_ki = hcat(Ic_qm, data_sim_qm[:, i])
-
-        # filtered pairs
-        mask = (data_qm_ki[:,2] .> 0) .& (data_qm_ki[:,1] .> 0)
-        x = data_qm_ki[mask, 1]; y = data_qm_ki[mask, 2]
-
-        plot!(fig,
-        x,y, 
-        label=false,
-        line=(:solid,cols[i],1),
-        alpha=0.33,
-        marker=(:xcross,2, cols[i]))
-    end
-    data_QM = hcat(Ic_qm, z_QMsim, z_QMsim_err)
-    mask = (data_QM[:,1] .> 0) .& (data_QM[:,2] .> 0) .& (abs.(data_QM[:,2] .- data_QM[:,3]) .> 0)
-    x = data_QM[mask, 1]; y = data_QM[mask, 2]; y_err = data_QM[mask,3]
-    qm_export[n_bin] = hcat(x,y, y_err)
-    plot!(fig,
-        x, y,
-        label="QM + Class.Trajs.",
-        ribbon = y_err,
-        line=(:dash,:black,2),
-        fillalpha=0.23, 
-        fillcolor=:black, 
-    )
-    plot!(fig, 
-        legend=:bottomright,
-        legendfontsize=6,
-        xaxis=:log10,
-        yaxis=:log10,
-    )
-    display(fig)
-    savefig(fig,joinpath(OUTDIR,"montecarlo_qm_$(n_bin).$(FIG_EXT)"))
-
-    # Co-Quantum Dymamics
-    fig = plot(
-        xlabel=L"$I_{c}$ (A)",
-        ylabel=L"$z_{F_{1}}$ (mm)",)
-    for i=15:length(ki_sim)
-
-        data_cqd_ki = hcat(Ic_cqd, data_sim_cqd[:, i])
-        # filtered pairs
-        mask = (data_cqd_ki[:,2] .> 0) .& (data_cqd_ki[:,1] .> 0)
-        x = data_cqd_ki[mask, 1]; y = data_cqd_ki[mask, 2]
-
-        plot!(fig, 
-            x, y, 
-            label = L"$k_{i} =%$(round(ki_sim[i], digits=2)) \times 10^{-6}$",
-            line=(:solid,cols[i],1)
-        )
-    end
-    plot!(fig, 
-        Ic_qm[2:end], abs.(z_QMsim[2:end]),
-        label="QM + Class.Trajs.",
-        ribbon = z_QMsim_err[2:end],
-        line=(:dash,:black,2),
-        fillcolor=:black,
-        fillalpha=0.35,
-    )
-    plot!(fig, 
-        title="CQD Simulation. n=$(n_bin)",
-        xlims=(1e-3,1.5),
-        ylims=(8e-5,2.5),
-        xaxis=:log10,
-        yaxis=:log10,
-        xticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        legend=:outerright,
-        legendfontsize=7,
-        legend_columns=2,
-        size=(950,600),
-        left_margin=5mm,
-    )
-    display(fig)
-    savefig(fig,joinpath(OUTDIR,"montecarlo_cqd_$(n_bin).$(FIG_EXT)"))
-
-    # Interpolated surface
-    ki_start , ki_stop = 20 , 60 #length(ki_sim)
-    println("Interpolation in the induction term goes from $(ki_sim[ki_start])×10⁻⁶ to $(ki_sim[ki_stop])×10⁻⁶")
-    itp = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
-
-    i_surface = range(10e-3,1.0; length = 60)
-    ki_surface = range(ki_sim[ki_start],ki_sim[ki_stop]; length = 41)
-    Z = [itp(x, y) for y in ki_surface, x in i_surface] 
-
-    fit_surface = surface(log10.(i_surface), ki_surface, log10.(abs.(Z));
-        title = "Fitting surface",
-        xlabel = L"I_{c}",
-        ylabel = L"$k_{i}\times 10^{-6}$",
-        zlabel = L"$z\ (\mathrm{mm})$",
-        legend = false,
-        color = :viridis,
-        xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
-        camera = (20, 25),     # (azimuth, elevation)
-        xlims = log10.((8e-4,2.05)),
-        zlims = log10.((2e-4,10.0)),
-        gridalpha = 0.3,
-    )
-
-    Zp   = max.(abs.(Z), 1e-12)      # guard against zeros
-    logZ = log10.(Zp)
-    lo , hi  = floor(minimum(logZ)) , ceil(maximum(logZ)) 
-    decades = collect(lo:1:hi) # [-4,-3,-2,-1,0] 
-    labels = [L"10^{%$k}" for k in decades]
-    fit_contour = contourf(i_surface, ki_surface, logZ; 
-        levels=101,
-        title="Fitting contour",
-        xlabel=L"$I_{c}$ (A)", 
-        ylabel=L"$k_{i}\times 10^{-6}$", 
-        color=:viridis, 
-        linewidth=0.2,
-        linestyle=:dash,
-        xaxis=:log10,
-        xlims = (9e-3,1.05),
-        xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        clims = (lo, hi),   # optional explicit range
-        colorbar_ticks = (decades, labels),      # show ticks as 10^k
-        colorbar_title = L"$ z \ \mathrm{(mm)}$",   # what the values mean
-    )
-
-    fit_figs = plot(fit_surface, fit_contour,
-        layout=@layout([a b]),
-        size = (1800,750),
-        bottom_margin = 8mm,
-        top_margin = 3mm,
-    )
-    display(fit_figs)
-    savefig(fit_figs,joinpath(OUTDIR,"fitting_parameters_$(n_bin).$(FIG_EXT)"))
-
-
-    # # choose a few points for low currents and high currents
-    if wanted_data_dir == "20250815"
-        data_fitting = data[[9,10,11,15,19:22...],:] # for fitting purposes
-    elseif wanted_data_dir == "20250820"
-        data_fitting = data[[2:4; (end-3):(end-1)], :]
-    elseif wanted_data_dir == "20250825"
-        data_fitting = data[[2:4; (end-3):(end-1)], :]
-    elseif wanted_data_dir == "20250919"
-        data_fitting = data[[2:4; (end-3):(end-1)], :]
-    else
-        data_fitting = data[[10,11,12,14,22:25...],:] # for fitting purposes
-    end
-    
-    function loss(ki) # loss function
-        # ni=12
-        z_pred = itp.(data_fitting[:,1], Ref(ki))
-        return mean(abs2,log10.(z_pred) .- log10.(data_fitting[:,3]))
-    end
-
-    #(
-    fit_param = optimize(loss, ki_sim[ki_start], ki_sim[ki_stop],Brent())
-    k_fit = Optim.minimizer(fit_param)
-    # diagnostics
-    mse = loss(k_fit)
-    pred = itp.(I_exp, Ref(k_fit))
-    coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
-    #)
-
-    # given: itp, data (N×2), ki_sim
-    out = fit_ki_with_error(itp, data_fitting; bounds=(ki_sim[ki_start], ki_sim[ki_stop]))
-    @info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-    I_scan = logspace10(10e-3,1.00; n=30)
-    fig= plot(
-        title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(n_bin))",
-        xlabel=L"Coil current $I_{c}$ (A)",
-        ylabel=L"$z$ (mm)"
-    )
-    plot!(fig,
-        I_exp[8:end], z_exp[8:end], 
-        label="Experiment $(wanted_data_dir): n=$(wanted_binning) | λ=$(wanted_smooth)",
-        seriestype=:scatter,
-        yerror = z_exp_error[8:end],
-        marker=(:circle,:white,1.8), 
-        markerstrokecolor=:red, 
-        markerstrokewidth=2
-    )
-    plot!(fig,
-        data_fitting[:,1], data_fitting[:,3],
-        seriestype=:scatter,
-        label="Used for fitting",
-        marker=(:xcross,:black,2),
-        markerstrokecolor=:black,
-        markerstrokewidth=2,)
-    plot!(fig,
-        I_scan,itp.(I_scan, Ref(out.ci[2])),
-        color=:royalblue1,
-        label=false,
-        linewidth=0,
-        fillrange= itp.(I_scan, Ref(out.ci[1])),
-        fillcolor=:royalblue1,
-        fillalpha=0.35,
-    )
-    plot!(fig,
-        I_scan, itp.(I_scan, Ref(k_fit)),
-        label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
-        line=(:solid,:blue,1),
-        marker=(:xcross, :blue, 1),
-    )
-    plot!(fig, 
-        Ic_qm[1:end], z_QMsim[1:end],
-        label="QM + Class.Trajs.",
-        ribbon = z_QMsim_err[1:end],
-        line=(:dash,:green,2),
-        fillalpha=0.23, 
-        fillcolor=:green, 
-    )
-    plot!(fig,
-        xaxis=:log10,
-        yaxis=:log10,
-        xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        xlims=(8e-3,1.5),
-        ylims=(8e-3,2),
-        legend=:bottomright,
-    )
-    display(fig)
-    savefig(fig,joinpath(OUTDIR,"fitting_$(wanted_data_dir)_cqd_qm_$(n_bin).$(FIG_EXT)"))
-
-    push!(data_collected_qm,  hcat(Ic_qm, z_QMsim, z_QMsim_err))
-    push!(data_collected_exp, hcat(I_exp, z_exp, z_exp_error))
-    push!(data_collected_cqd, hcat(I_scan, itp.(I_scan, Ref(k_fit)), k_fit*ones(length(I_scan))))
-    
-    println("\n")
-
-end
-
-cols = palette(:rainbow, 2*4);
-fig= plot(
-    xlabel=L"Coil current $I_{c}$ (A)",
-    ylabel=L"$z$ (mm)",
-    size=(800,560),
-)
-# --- Experiment (scatter with error bars) --
-plot!(fig, 
-    data_collected_exp[1][9:end,1],
-    data_collected_exp[1][9:end,2],
-    label="Experiment $(wanted_data_dir)",
-    seriestype=:scatter,
-    yerror = data_collected_exp[1][9:end,3],
-    marker=(:circle,:white,2.2), 
-    markerstrokecolor=:black, 
-    markerstrokewidth=1.8
-)
-# --- QM curves (dashed) ---
-for (i, n) in enumerate(nz_vals)
-    plot!(fig,
-        data_collected_qm[i][2:end, 1],
-        data_collected_qm[i][2:end, 2];
-        label = "QM n=$(n)",
-        line  = (:dash, 2.2, cols[i]),
-    )
-end
-# --- CQD curves (solid) with LaTeX labels showing k_i × 10^{-6} ---
-for (i, n) in enumerate(nz_vals)
-    ki = round(data_collected_cqd[i][1, 3], digits = 3)  # value in 10^-6 units per your original
-    plot!(fig,
-        data_collected_cqd[i][2:end, 1],
-        data_collected_cqd[i][2:end, 2];
-        label = L"CQD n=%$(n). $k_{i}=%$(ki) \times 10^{-6}$",
-        line  = (:solid, 2.4, cols[4 + i]),
-    )
-end
-# --- Axes: log scales, ticks, limits ---
-plot!(fig,
-    xaxis=:log10,
-    yaxis=:log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(8e-3,1.5),
-    ylims=(2e-4,2),
-    legend=:bottomright,
-    left_margin=3mm,
-)
-display(fig)
-savefig(fig,joinpath(OUTDIR,"summary_$(wanted_data_dir).$(FIG_EXT)"))
-
-
-data_export[:runs] = OrderedDict(
-    k => OrderedDict(
-        :ki       => data_collected_cqd[i][1, 3],
-        :data_QM  => qm_export[k],
-        :data_CQD => @view data_collected_cqd[i][:, 1:2]
-    )
-    for (k, i) in zip(nz_vals, eachindex(nz_vals))
-)
-
-jldsave( joinpath(OUTDIR,"data_num_$(wanted_data_dir).jld2"), data = data_export)
-
-T_END = Dates.now();
-T_RUN = Dates.canonicalize(T_END-T_START);
-println("kᵢ fitting done in $(T_RUN)")
-
-
-
-#####################################################################################################
-#####################################################################################################
-#####################################################################################################
-#####################################################################################################
-#####################################################################################################
-
-avg_data = load(joinpath(@__DIR__, "analysis_data", "smoothing_binning","data_averaged_2.jld2"), "data" )
-
-n_bin           = 2
-lower_cut_off   = 7
-ki_start , ki_stop = 20 , 50 
-
-qm_export  = OrderedDict{Int,Matrix{Float64}}();
-
-Ic_cqd , data_sim_cqd = load_blocks(simulation_paths(n_bin).cqd; z_group=3)
-Ic_qm  , data_sim_qm  = load_blocks(simulation_paths(n_bin).qm; z_group=3)
-
-Ic_cqd , data_sim_cqd = Ic_cqd[lower_cut_off:end] , data_sim_cqd[lower_cut_off:end,:]
-Ic_qm  , data_sim_qm  = Ic_qm[lower_cut_off:end]  , data_sim_qm[lower_cut_off:end,:]
-
-row_missing = [count(ismissing, row) for row in eachrow(ifelse.(data_sim_cqd .< 0, missing, data_sim_cqd)[:,ki_start:ki_stop])]
-sum(row_missing)
-
-# Quantum mechanics
-z_QMsim = vec(mapslices(x -> mean(skipmissing(x)), 
-            map(x-> x < 0.0 ? missing : x, data_sim_qm); 
-            dims=2))
-z_QMsim_err = vec(mapslices(r -> begin
-                xs = collect(skipmissing(r))
-                isempty(xs) ? missing : std(xs) / sqrt(length(xs))
-                end, map(x-> x < 0.0 ? missing : x, data_sim_qm); dims=2))
-
-fig=plot(title="QM simulation: n=$(n_bin)",
-    xlabel="Coil Current (A)",
-    ylabel=L"$z_{F_{1}}$ (mm)"
-)
-data_QM = hcat(Ic_qm, z_QMsim, z_QMsim_err)
-mask = (data_QM[:,1] .> 0) .& (data_QM[:,2] .> 0) .& (abs.(data_QM[:,2] .- data_QM[:,3]) .> 0)
-x = data_QM[mask, 1]; y = data_QM[mask, 2]; y_err = data_QM[mask,3]
-qm_export[n_bin] = hcat(x,y, y_err)
-plot!(fig,
-    x, y,
-    label="QM + Class.Trajs.",
-    ribbon = y_err,
-    line=(:dash,:black,2),
-    fillalpha=0.23, 
-    fillcolor=:black, 
-)
-plot!(fig, 
-    legend=:bottomright,
-    legendfontsize=6,
-    xaxis=:log10,
-    yaxis=:log10,
-)
-display(fig)
-
-# Co-Quantum Dymamics
-cols = palette(:darkrainbow, length(ki_sim));
-fig = plot(
-    xlabel=L"$I_{c}$ (A)",
-    ylabel=L"$z_{F_{1}}$ (mm)",)
-for i=ki_start:ki_stop
-    data_cqd_ki = hcat(Ic_cqd, data_sim_cqd[:, i])
-    # pretty_table(data_cqd_ki)
-    # filtered pairs
-    mask = (data_cqd_ki[:,2] .> 0) .& (data_cqd_ki[:,1] .> 0)
-    x = data_cqd_ki[mask, 1]; 
-    y = data_cqd_ki[mask, 2]
-
-    plot!(fig, 
-        x, y, 
-        label = L"$k_{i} =%$(round(ki_sim[i], digits=2)) \times 10^{-6}$",
-        line=(:solid,cols[i],1)
-    )
-end
-plot!(fig, 
-    Ic_qm, z_QMsim,
-    label="QM + Class.Trajs.",
-    ribbon = z_QMsim_err,
-    line=(:dash,:black,2),
-    fillcolor=:black,
-    fillalpha=0.35,
-)
-plot!(fig, 
-    title="CQD Simulation. n=$(n_bin)",
-    xlims=(10e-3,1.5),
-    ylims=(8e-5,2.5),
-    xaxis=:log10,
-    yaxis=:log10,
-    xticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    legend=:outerright,
-    legendfontsize=7,
-    legend_columns=2,
-    size=(950,600),
-    left_margin=5mm,
-)
-display(fig)
-
-# Interpolated surface
-println("Interpolation in the induction term goes from $(ki_sim[ki_start])×10⁻⁶ to $(ki_sim[ki_stop])×10⁻⁶")
-itp_ki = Spline2D(Ic_cqd, ki_sim[ki_start:ki_stop], data_sim_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
-
-data_fitting = hcat(avg_data[:i_smooth], ones(length(avg_data[:i_smooth])), avg_data[:z_smooth], avg_data[:δz_smooth])[5:end,:]
-
-function loss(ki) # loss function
-    # ni=12
-    z_pred = itp_ki.(data_fitting[:,1], Ref(ki))
-    return mean(abs2,log10.(z_pred) .- log10.(data_fitting[:,3]))
-end
-
-#(
-fit_param = optimize(loss, ki_sim[ki_start], ki_sim[ki_stop],Brent())
-k_fit = Optim.minimizer(fit_param)
-# diagnostics
-mse = loss(k_fit)
-pred = itp_ki.(I_exp, Ref(k_fit))
-coef_r2 = 1 - sum(abs2, pred .- z_exp) / sum(abs2, z_exp .- mean(z_exp))
-#)
-
-# given: itp, data (N×2), ki_sim
-out = fit_ki_with_error(itp_ki, data_fitting; bounds=(ki_sim[ki_start], ki_sim[ki_stop]))
-@info "Fitting" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
-I_scan = logspace10(minimum(data_fitting[:,1]),1.00; n=30)
-fig= plot(
-    title =L"$R^{2}=%$(round(coef_r2,digits=4))$. (n=%$(n_bin))",
-    xlabel=L"Coil current $I_{c}$ (A)",
-    ylabel=L"$z$ (mm)"
-)
-plot!(fig,
-    data_fitting[:,1], data_fitting[:,3], 
-    label="Experiment: n=$(wanted_binning) | λ=$(wanted_smooth)",
-    seriestype=:scatter,
-    yerror = data_fitting[:,4],
-    marker=(:circle,:white,1.8), 
-    markerstrokecolor=:red, 
-    markerstrokewidth=2
-)
-plot!(fig,
-    I_scan,itp_ki.(I_scan, Ref(out.ci[2])),
-    color=:royalblue1,
-    label=false,
-    linewidth=0,
-    fillrange= itp_ki.(I_scan, Ref(out.ci[1])),
-    fillcolor=:royalblue1,
-    fillalpha=0.35,
-)
-plot!(fig,
-    I_scan, itp_ki.(I_scan, Ref(k_fit)),
-    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
-    line=(:solid,:blue,1),
-    marker=(:xcross, :blue, 1),
-)
-plot!(fig, 
-    Ic_qm, z_QMsim,
-    label="QM + Class.Trajs.",
-    ribbon = z_QMsim_err,
-    line=(:dash,:green,2),
-    fillalpha=0.23, 
-    fillcolor=:green, 
-)
-plot!(fig,
-    xaxis=:log10,
-    yaxis=:log10,
-    xticks = ([ 1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([ 1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(10e-3,1.5),
-    ylims=(8e-3,2),
-    legend=:bottomright,
-)
-display(fig)
-savefig(fig,joinpath(OUTDIR,"avg_comparison_$(n_bin).$(FIG_EXT)"))
-
-include("./Modules/TheoreticalSimulation.jl");
-
-
-fig = plot(
-    xlabel="Magnetic field gradient  (T/m)",
-    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
-)
-plot!(fig,TheoreticalSimulation.GvsI(data_fitting[:,1]), data_fitting[:,3],
-    ribbon = data_fitting[:,4],
-    fillalpha=0.40, 
-    fillcolor=:red, 
-    label="Experiment",
-    line=(:dot,:red,:2),
-)
-plot!(fig,
-    TheoreticalSimulation.GvsI(I_scan),itp_ki.(I_scan, Ref(out.ci[2])),
-    color=:orangered2,
-    label=false,
-    linewidth=0,
-    fillrange= itp_ki.(I_scan, Ref(out.ci[1])),
-    fillcolor=:orangered2,
-    fillalpha=0.35,
-)
-plot!(fig,
-    TheoreticalSimulation.GvsI(I_scan), itp_ki.(I_scan, Ref(k_fit)),
-    label=L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
-    line=(:solid,:blue,1),
-    marker=(:xcross, :blue, 1),
-)
-plot!(fig, 
-    TheoreticalSimulation.GvsI(Ic_qm), z_QMsim,
-    label="QM + Class.Trajs.",
-    ribbon = z_QMsim_err,
-    line=(:dash,:green,2),
-    fillalpha=0.23, 
-    fillcolor=:green, 
-)
-plot!(fig,
-xaxis=:log10, 
-yaxis=:log10,
-xticks = ([ 1.0, 10, 100, 1000], [L"10^{0}", L"10^{1}", L"10^{2}", L"10^{3}"]),
-yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-xlims = (3,400,),
-ylims = (8e-3, 2),
-legend=:bottomright,
-)
-display(fig)
-savefig(fig,joinpath(OUTDIR,"avg_comparison_grad_$(n_bin).$(FIG_EXT)"))
-
-
-using MAT
-
-read_matlab = matread(joinpath(@__DIR__,"20251109","data.mat"))
-
-read_matlab["data"]
-
-read_matlab["data"]["Current_mA"]
-
-plot(vec(read_matlab["data"]["Current_mA"]),vec(read_matlab["data"]["MagneticField_G"]))
-
-vec(read_matlab["data"]["MagneticField_G"])
-
-keys(read_matlab)
-
-for i=1:209
-    ll = keys(read_matlab)
-    println(ll[i])
 end
