@@ -595,116 +595,11 @@ open(joinpath(OUTDIR,"simulation_report.txt"), "w") do io
     write(io, report)
 end
 
-
 println("script $RUN_STAMP has finished!")
 alert("script $RUN_STAMP has finished!")
 
-Ns = 2_500_000
-data_dir = joinpath(@__DIR__,"simulation_data","cqd_simulation_$(1e-6*Ns)m")
-const OUTDIR = data_dir
-folders = filter(name -> isdir(joinpath(data_dir, name)), readdir(data_dir))
-
-nruns = 10
-induction_coeff = [
-    range(0.01,0.10,length=nruns),
-    range(0.1,1.0,length=nruns),
-    range(1.1,2.0,length=nruns),
-    range(2.1,3.0,length=nruns),
-    range(3.1,4.0,length=nruns),
-    range(4.1,5.0,length=nruns),
-    range(5.1,6.0,length=nruns),
-    range(10,100,length=nruns),
-] 
-
-nz_bins           = [1,2,4,8];
-gaussian_width_mm = [0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.500 ];
-λ0_raw_list       = [0.005, 0.01, 0.02, 0.03, 0.04, 0.05];
-λ0_spline         = 0.001;
-
-# --- Preallocate dictionary capacity ---
-Ntot = length(folders) * nruns * length(nz_bins) *
-       length(gaussian_width_mm) * length(λ0_raw_list)
-table = OrderedDict{Tuple{Float64,Int, Float64, Float64},
-                    OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
-
-
-jobs = Vector{Tuple{String, String, Float64, Int, Float64, Float64}}()
-for (i, folder) in enumerate(folders)
-    data_dir_sims = joinpath(data_dir, folder)
-    files = filter(f -> endswith(f, ".jld2"), readdir(data_dir_sims))
-
-    for (j, fname) in enumerate(files)
-        ki = induction_coeff[i][j]
-        simpath = joinpath(data_dir_sims, fname)
-
-        for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-            push!(jobs, (simpath, fname, ki, nz, gw, λ0_raw))
-        end
-    end
-end
-lk = ReentrantLock()
-@threads for k in 1:length(jobs)
-    simpath, fname, ki, nz, gw, λ0_raw = jobs[k]
-
-    data_sim = load(simpath)["screen"]
-
-    profiles_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
-        data_sim;
-        n_bins      = (nx_bins, nz),
-        width_mm    = gw,
-        add_plot    = false,
-        plot_xrange = :all,
-        branch      = :up,
-        λ_raw       = λ0_raw,
-        λ_smooth    = λ0_spline,
-        mode        = :probability
-    )
-    # PROTECTED WRITE
-    lock(lk)
-    table[(ki, nz, gw, λ0_raw)] = profiles_up
-    unlock(lk)
-end
-jldsave(joinpath(OUTDIR,"cqd_$(Ns)_screen_profiles_table_thread.jld2"), table = table)
-
-
-idx = 1
-for (i, folder) in enumerate(folders)
-    data_dir_sims = joinpath(data_dir, folder)
-    files = filter(f -> endswith(f, ".jld2"), readdir(data_dir_sims))
-
-    for (j, fname) in enumerate(files)
-        ki = induction_coeff[i][j]
-        simpath = joinpath(data_dir_sims, fname)
-        data_sim = load(simpath)["screen"]
-      
-        @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-            @info "Running" ki nz gw λ0_raw
-        
-            profiles_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(data_sim;
-                    n_bins = (nx_bins , nz), width_mm = gw, 
-                    add_plot = false, plot_xrange= :all, branch=:up,
-                    λ_raw = λ0_raw, λ_smooth = λ0_spline, mode = :probability)
-            table[(ki, nz, gw, λ0_raw)] = profiles_up
-            idx += 1
-            profiles_up = nothing
-            data_sim    = nothing
-
-        end
-    end
-end
-@info "Completed populating table" entries=idx-1
-jldsave(joinpath(OUTDIR,"cqd_$(Ns)_screen_profiles_table_1.jld2"), table = table)
-
-
-
-
-
-
-
-
 Ns = 2_800_000
-data_dir = joinpath("F:\\cqd_simulation_$(1e-6*Ns)m","20251113T102859450","up")
-const INDIR = data_dir
+const INDIR = joinpath("F:\\cqd_simulation_$(1e-6*Ns)m","20251113T102859450","up")
 
 # --- Files ---
 files = sort(filter(f -> isfile(joinpath(INDIR, f)) && endswith(f, ".jld2"),
@@ -722,6 +617,9 @@ induction_coeff = vcat([
     range(4.1,5.0,length=nruns),
     range(5.1,6.0,length=nruns),
     range(10,100,length=nruns),
+    [0.001,0.01],
+    collect(range(6.1,10.0,length=4*nruns)),
+    [100.0,1000.0,10000.0]
 ] ...)
 nz_bins           = [1,2,4,8];
 gaussian_width_mm = [0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.500 ];
@@ -741,7 +639,7 @@ lk = ReentrantLock()
     ki    = induction_coeff[j]
     simpath = joinpath(INDIR, fname)
 
-    @info "Processing file $(j)/$(nfiles)" fname=fname ki=ki/1e6
+    @info "Processing file $(j)/$(nfiles)" fname=fname ki=ki
 
     # load once per file
     data_sim = load(simpath, "screen")
@@ -764,83 +662,7 @@ lk = ReentrantLock()
         unlock(lk)
     end
 end
+@info "Completed populating table"
 jldsave(joinpath(OUTDIR,"cqd_$(Ns)_screen_profiles_table_thread.jld2"), table = table)
 
-
-data01=load(joinpath(INDIR,"cqd_2800000_ki80_up_screen.jld2"), "screen")[:data]
-data02=load(joinpath(INDIR,"cqd_2800000_ki10_up_screen.jld2"), "screen")[:data]
-
-data03=load(joinpath("F:\\cqd_simulation_2.8m\\20251117T200727431\\up","cqd_2800000_ki16_up_screen.jld2"),"screen")[:data]
-
-a=data01[2][53980:53990,1:8]
-b=data03[2][53980:53990,1:8]
-a.-b
-
-data03
-
-
-
-
-jobs = Vector{Tuple{String, Float64, Int, Float64, Float64}}()
-for (j, fname) in enumerate(files)
-    ki = induction_coeff[j]
-    simpath = joinpath(OUTDIR, fname)
-
-    for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-        push!(jobs, (fname, ki, nz, gw, λ0_raw))
-    end
-end
-lk = ReentrantLock()
-@threads for k in 1:length(jobs)
-    @info "Job ($(Ntot))" k
-    fname, ki, nz, gw, λ0_raw = jobs[k]
-
-    data_sim = load(joinpath(OUTDIR, fname),"screen")
-
-    profiles_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
-        data_sim;
-        n_bins      = (64, nz),
-        width_mm    = gw,
-        add_plot    = false,
-        plot_xrange = :all,
-        branch      = :up,
-        λ_raw       = λ0_raw,
-        λ_smooth    = λ0_spline,
-        mode        = :probability
-    )
-    # PROTECTED WRITE
-    lock(lk)
-    table[(ki, nz, gw, λ0_raw)] = profiles_up
-    unlock(lk)
-end
-jldsave(joinpath(OUTDIR,"cqd_$(Ns)_screen_profiles_table_thread.jld2"), table = table)
-
-
-idx = 1
-for (i, folder) in enumerate(folders)
-    data_dir_sims = joinpath(data_dir, folder)
-    files = filter(f -> endswith(f, ".jld2"), readdir(data_dir_sims))
-
-    for (j, fname) in enumerate(files)
-        ki = induction_coeff[i][j]
-        simpath = joinpath(data_dir_sims, fname)
-        data_sim = load(simpath)["screen"]
-      
-        @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-            @info "Running" ki nz gw λ0_raw
-        
-            profiles_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(data_sim;
-                    n_bins = (nx_bins , nz), width_mm = gw, 
-                    add_plot = false, plot_xrange= :all, branch=:up,
-                    λ_raw = λ0_raw, λ_smooth = λ0_spline, mode = :probability)
-            table[(ki, nz, gw, λ0_raw)] = profiles_up
-            idx += 1
-            profiles_up = nothing
-            data_sim    = nothing
-
-        end
-    end
-end
-@info "Completed populating table" entries=idx-1
-jldsave(joinpath(OUTDIR,"cqd_$(Ns)_screen_profiles_table_1.jld2"), table = table)
-
+println("script $RUN_STAMP has finished!")
