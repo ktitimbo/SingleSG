@@ -501,7 +501,7 @@ exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_avera
 # --------------------------------
 
 nx_bins , nz_bins = 64 , 2
-gaussian_width_mm = 0.500
+gaussian_width_mm = 0.200
 λ0_raw            = 0.02
 λ0_spline         = 0.001
 
@@ -697,111 +697,6 @@ display(fig)
 
 compare_datasets(data_scaled[:,1], data_scaled[:,2], ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)), zqm.(data[:,1]); plot_errors=true);
 
-
-
-
-
-
-
-
-# --- Preallocate results matrix ---
-z_mm_ki = Matrix{Float64}(undef, nI_sim, ndir*nruns)
-idx_num = 1
-for i = 1:ndir
-    println("($(@sprintf("%02d", i))/$(@sprintf("%02d", ndir))) Reading $(CQD_directories[i])")
-    @time for j = 1:nruns
-        println("\t($(@sprintf("%02d", j))/$(nruns)) Running ki=$(@sprintf("%2.1e",induction_coeff[i][j]))")
-        cqd_data = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.5m",CQD_directories[i],"cqd_2500000_ki$(@sprintf("%02d", j))_up_screen.jld2"))["screen"]
-        Icoil   = cqd_data[:Icoils]
-        nI      = length(Icoil)
-
-        # ✅ Sanity check: ensure Icoil matches the rsimulated
-        if nI_sim != nI || !isapprox(Icoil, Icoils_cqd; atol=1e-8)
-            @warn "Icoil vector differs in run $j!"
-        end
-
-        data_z_mm = TheoreticalSimulation.CQD_analyze_profiles_to_dict(cqd_data;
-                n_bins = (nx_bins , nz_bins), width_mm = gaussian_width_mm, 
-                add_plot = false, plot_xrange= :all, branch=:up,
-                λ_raw = λ0_raw, λ_smooth = λ0_spline, mode = :probability)
-
-        z_mm_ki[:,idx_num] = [data_z_mm[v][:z_max_smooth_spline_mm] for v in 1:nI]
-        idx_num += 1
-        cqd_data  = nothing
-        data_z_mm = nothing
-        GC.gc()
-    end
-end
-
-jldsave(joinpath(OUTDIR, "zmax_ki.jld2"),
-    data = OrderedDict(:Icoils      => Icoils_cqd,
-                           :directories => CQD_directories,
-                           :ki_values   => induction_coeff, 
-                           :z_mm        => z_mm_ki,
-                           :nbins       => (nx_bins , nz_bins),
-                           :sigma_conv  => gaussian_width_mm,
-                           :λ0          => λ0_raw,
-                           :λ0_spline   => λ0_spline
-                )
-)
-
-z_mm_ki = load(joinpath(dirname(OUTDIR),"20251113T122749649", "zmax_ki.jld2"))["data"][:z_mm]
-
-color_list = palette(:darkrainbow, nruns * ndir);
-fig = plot(xlabel="Current (A)",
-    ylabel=L"$z_{\mathrm{max}}$ (mm)",
-    legend=:outerright,
-    legend_title = L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
-    legendtitlefontsize = 6,);
-idx_num = 1;
-for i=1:ndir
-    for j=1:nruns
-        plot!(fig,Icoils_cqd[2:end], abs.(z_mm_ki[2:end,idx_num]),
-            label = L"$k_{i}=%$(round(1e6*induction_coeff[i][j], sigdigits=3))\times 10^{-6}$",
-            line=(:solid,color_list[idx_num]),
-        )
-        idx_num += 1
-    end
-end
-plot!(Ic_QM[2:end],zmax_QM[2:end],
-    label="QM",
-    line=(:dashdot,:black,2));
-plot!(fig, 
-    size=(1250,600),
-    xaxis=:log10, 
-    yaxis=:log10,
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-        [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-        [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    legend=:outerright,
-    legend_columns = 2,
-    legendfontsize=6,
-    left_margin=6mm,
-    bottom_margin=5mm);
-display(fig)
-
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-ki_list = round.(1e6*vcat(induction_coeff...), sigdigits=2);
-groups = Dict{Any, Vector{Int}}();
-for (i, v) in pairs(ki_list)
-    push!(get!(groups, v, Int[]), i)
-end
-filter!(kv -> length(kv[2]) > 1, groups);
-to_remove = sort!(vcat([idxs[2:end] for idxs in values(groups)]...), rev=true)
-for i in to_remove
-    deleteat!(ki_list, i)
-end
-zmm_cqd = z_mm_ki[:, setdiff(1:size(z_mm_ki,2), to_remove)]
-
-
-
-
-fig = plot_cqd_vs_qm(z_mm_ki, zmax_QM, Icoils_cqd, ki_list);
-display(fig)
 
 
 # ------------------------------------------------------------------------------
@@ -1155,7 +1050,7 @@ data_exp    = DataFrame(data, [:Ic, :δIc, :z, :δz])
 fig = plot_zmax_vs_current(
     data_exp, ki_list;
     Icoils_cqd = Icoils_cqd,
-    zmm_cqd = zmm_cqd,
+    zmm_cqd = z_mm_ki,
     Ic_QM = Ic_QM,
     zmax_QM = zmax_QM,
     axis_scale =:loglog,
