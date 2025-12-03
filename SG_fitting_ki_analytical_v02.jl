@@ -2,7 +2,7 @@
 # Interpolation of the grid for fitting the induction term
 # Kelvin Titimbo
 # California Institute of Technology
-# September 2025
+# November 2025
 
 using Plots; gr()
 Plots.default(
@@ -243,7 +243,7 @@ function compare_datasets(x_ref::AbstractVector, # current
         log_RMSE = sqrt(log_MSE)
         max_log_error = maximum(abs.(log_err))
 
-        rel_err = abs.((A .- X) ./ A)
+        rel_err = abs.((X .- A) ./ A)
         rel_mean   = mean(rel_err)
         rel_median = median(rel_err)
         rel_max    = maximum(rel_err)
@@ -251,8 +251,8 @@ function compare_datasets(x_ref::AbstractVector, # current
         MAPE  = 100 * mean(rel_err)
         sMAPE = 100 * mean(abs.(A .- X) ./ ((abs.(A) .+ abs.(X)) ./ 2))
 
-        L2_norm     = norm(A .- X) / norm(A)
-        L2_log_norm = norm(LA .- LX) / norm(LA)
+        L2_norm     = norm(X .- A) / norm(A)
+        L2_log_norm = norm(LX .- LA) / norm(LA)
 
         σlog = std(log_err)
         chi2_log = sum((log_err ./ σlog).^2)
@@ -456,7 +456,7 @@ Icoils_cqd = [0.00,
 ];
 nI_sim = length(Icoils_cqd);
 
-nruns= 10
+nruns= 10;
 induction_coeff = 1e-6 * [
     # 20251113T102859450
     range(0.01,0.10,length=nruns),
@@ -484,7 +484,7 @@ to_remove = sort!(vcat([idxs[2:end] for idxs in values(groups)]...), rev=true)
 for i in to_remove
     deleteat!(ki_list, i)
 end
-sort!(ki_list)
+sort!(ki_list);
 n_ki = length(ki_list)
 
 # --- CoQuantum Dynamics ---
@@ -512,7 +512,7 @@ gaussian_width_mm = 0.200
 data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)];
 Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)];
 zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)];
-zqm = Spline1D(Ic_QM,zmax_QM,k=3)
+zqm = Spline1D(Ic_QM,zmax_QM,k=3);
 # ------------------------------
 
 z_mm_ki = Matrix{Float64}(undef, nI_sim, length(ki_list));
@@ -630,7 +630,7 @@ display(fit_figs)
 ##################################################################################################
 ##################################################################################################
 # --- Analysis : Combined experimental data --- 
-i_threshold = 0.030;
+i_threshold = 0.025;
 i_start  = searchsortedfirst(exp_avg[:i_smooth],i_threshold);
 data     = hcat(exp_avg[:i_smooth],exp_avg[:z_smooth],exp_avg[:δz_smooth])[i_start:end,:];
 
@@ -698,10 +698,79 @@ plot!(
 );
 display(fig)
 
-compare_datasets(data_scaled[:,1], data_scaled[:,2], ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)), zqm.(data[:,1]); plot_errors=true);
+compare_datasets(data_scaled[:,1], data_scaled[:,2], ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)), zqm.(data_scaled[:,1]); plot_errors=true);
+fig1 = plot(data_scaled[:,1], (zqm.(data_scaled[:,1]) .- data_scaled[:,2]) ./ data_scaled[:,2],
+    label="QM",
+    line=(:solid,:red,2))
+plot!(data_scaled[:,1], (ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)) .- data_scaled[:,2]) ./ data_scaled[:,2],
+    label=L"CQD ($k_{i}=%$(round(fit_scaled.ki,sigdigits=4)) \times10^{-6}$)",
+    line=(:solid,:blue,2))
+plot!(
+    title="Relative Error - Scaled data",
+    titlefontsize=24,
+    xlabel = "Current (A)",
+    ylabel = L"$z_{\mathrm{max}}$ (mm)",
+    xaxis=:log10,
+    # yaxis=:log10,
+    labelfontsize=14,
+    tickfontsize=12,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(0.020,1.05),
+    ylims=(-0.10,0.25),
+    size=(800,500),
+    legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendfontsize=12,
+    left_margin=3mm,
+    bottom_margin=3mm,
+)
 
+compare_datasets(data[:,1], data[:,2], ki_itp.(data[:,1], Ref(fit_original.ki)), zqm.(data[:,1]); plot_errors=true);
+fig2=plot(data[:,1], ((zqm.(data[:,1]) .- data[:,2]) ./ data[:,2]) ,
+    label="QM",
+    line=(:solid,:red,2))
+plot!(data[:,1], (ki_itp.(data[:,1], Ref(fit_original.ki)) .- data[:,2]) ./ data[:,2],
+    label=L"CQD ($k_{i}=%$(round(fit_original.ki,sigdigits=4)) \times10^{-6}$)",
+    line=(:solid,:blue,2))
+plot!(
+    title="Relative Error - Original data",
+    titlefontsize=24,
+    xlabel = "Current (A)",
+    ylabel = L"$z_{\mathrm{max}}$ (mm)",
+    xaxis=:log10,
+    # yaxis=:log10,
+    labelfontsize=14,
+    tickfontsize=12,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(0.020,1.05),
+    ylims=(-0.10,0.25),
+    size=(800,500),
+    legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendfontsize=12,
+    left_margin=3mm,
+    bottom_margin=3mm,
+)
 
+fig= plot(fig2,fig1,
+    layout=(2,1),
+    size=(1000,600))
 
+df = DataFrame(hcat(data_scaled[:,1],
+    (zqm.(data_scaled[:,1]) .- data_scaled[:,2]) ./ data_scaled[:,2],
+    (ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)) .- data_scaled[:,2]) ./ data_scaled[:,2]
+),
+[:Ic, :eQM, :eCQD]
+)
+CSV.write(joinpath(OUTDIR,"rel_error_scaled.csv"),df)
+
+df = DataFrame(hcat(data[:,1],
+    (zqm.(data[:,1]) .- data[:,2]) ./ data[:,2],
+    (ki_itp.(data[:,1], Ref(fit_original.ki)) .- data[:,2]) ./ data[:,2]
+),
+[:Ic, :eQM, :eCQD]
+)
+CSV.write(joinpath(OUTDIR,"rel_error_original.csv"),df)
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
