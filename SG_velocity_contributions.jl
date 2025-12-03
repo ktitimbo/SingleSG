@@ -315,31 +315,6 @@ cqd_up_pool = sortslices(cqd_data[:data][nI_chosen],
                 dims=1, by=row->(row[10], row[5])
             )
 
-
-
-
-
-
-
-d_in  = Dict(:data => Dict(:a => [1,2,3], :b => [4,5,6]))
-d_out = deepcopy(d_in)
-
-data_dict = d_out[:data]
-data_dict[:a] = [1, 2]     # mutate only the copy
-
-d_in[:data][:a]   # [1,2,3]
-d_out[:data][:a]  # [1,2]
-
-
-
-idx_pass = remove_post_SG(cqd_up_pool)
-cqd_up_pool = cqd_up_pool[idx_pass,:]
-cqd_data[:data][nI_chosen]=cqd_up_pool
-cqd_at_nI = CQD_analyze_profiles_to_dict(cqd_data;
-    n_bins=(nx_bins, nz_bins), width_mm=width_mm,
-    branch=:up, add_plot=false, plot_xrange=:all,
-    λ_raw=λ_raw, λ_smooth=λ_smooth, mode=hist_mode)[nI_chosen]
-
 θmax = asin(effusion_params.sinθmax);
 mean_vy_i0  = sqrt(π/2 *effusion_params.α2) * (cos(θmax) + 0.5*sec(θmax/2)^2);
 mean_vy_qm  = mean(qm_F1_pool[:,5]);
