@@ -174,9 +174,9 @@ Icoils = [0.00,
 ];
 nI = length(Icoils);
 ##################################################################################################
-nI_chosen = nI;
+nI_chosen = 15;
 nx_bins , nz_bins = 2, 2
-width_mm = 0.250 ; 
+width_mm = 0.200 ; 
 λ_raw    = 0.01 ;
 λ_smooth = 0.001 ;
 hist_mode = :density ;

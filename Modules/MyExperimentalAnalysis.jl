@@ -1495,6 +1495,18 @@ module MyExperimentalAnalysis
         return (mean=μ, sem=sem)
     end
 
+
+    function mag_factor(directory::String)
+        if directory == "20251109"
+            # values = (0.996,0.0047)
+            values = (1.08,0.03)
+        else
+            # values = (1.1198,0.0061) 
+            values = (1.28,0.01) 
+        end
+        return values
+    end
+
     # Public API
     export saveplot, 
            compute_weights, 
@@ -1515,6 +1527,7 @@ module MyExperimentalAnalysis
            mean_z_profile,
            extract_profiles,
            plot_profiles,
-           post_threshold_mean
+           post_threshold_mean,
+           mag_factor
 
 end

@@ -46,9 +46,11 @@ MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 function mag_factor(directory::String)
     if directory == "20251109"
-        values = (0.996,0.0047)
+        # values = (0.996,0.0047)
+        values = (1.08,0.03)
     else
-        values = (1.1198,0.0061) 
+        # values = (1.1198,0.0061) 
+        values = (1.28,0.01) 
     end
     return values
 end
