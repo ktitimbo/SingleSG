@@ -740,7 +740,7 @@ idx = 8
 # -------------------------------------------------------------
 # 1. Scaling model:   z_scaled = X/s + r
 # -------------------------------------------------------------
-scale_model(X, r, s) = @. X/s + r
+scale_model(X, r, s) = @. X/s + r 
 
 # -------------------------------------------------------------
 # 2. Log-error function with positivity constraints
@@ -768,121 +768,71 @@ function fit_rs(X::Vector, Y::Vector; x0=[0.0, 1.0])
     return Optim.minimizer(res) 
 end
 
+# -------------------------------------------------------------
+# Plot (QM vs Experiment)
+# -------------------------------------------------------------
+function plotting_qm_fixed(X::Vector,Y::Vector; idx::Integer = 1, title::String = "title" , yscale::Symbol = :identity)
+    z0_fit, m_fit = fit_rs(X, Y; x0=[0.0, 1.0])
 
+    X_scaled = scale_model(X, z0_fit, m_fit)
 
-figa = plot(Ic_qm, zm_qm,
-    label="Model: QM",
-    line=(:dash,:blue,2))
+    fig1 = plot(Ic_qm, zm_qm,
+        label="Model: QM",
+        line=(:dash,:blue,2));
+    plot!(i_xx[idx:end], X_scaled,
+        label="Experiment: Scaled ($(@sprintf("%2.2f",m_fit*mean(magnification_factor_ith))), $(@sprintf("%2.2f",1000*z0_fit))μm)",
+        line=(:solid,0.75,2,:red)
+    );
+    plot!(
+        title=title,
+        xaxis = (L"$I_{c} \ (\mathrm{A})$",
+                (10e-3,1),
+                ([1e-3, 1e-2, 1e-1, 1.0], 
+                    [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+                :log10,),
+        yaxis=(L"$z_{\mathrm{max}} \ (\mathrm{mm})$",yscale),
+        legend=:bottomright,
+    );
+    display(fig1)
 
+    fig2 = plot(i_xx[idx:end], 100 .*( Y ./ X  .- 1),
+        label="Experiment : original",
+        line=(:solid,:red,2)
+    );
+    plot!(i_xx[idx:end], 100*(Y ./ X_scaled .- 1),
+        label  = "Experiment : scaled",
+        line=(:solid,:dodgerblue4,2),
+        ylabel = "Relative Error (%)",
+        xaxis = (L"$I_{c} \ (\mathrm{A})$",
+                (10e-3,1),
+                ([1e-3, 1e-2, 1e-1, 1.0], 
+                    [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+                :log10,),
+    );
+    hline!([0], line=(:dash,:black,1), label=nothing)
 
+    fig = plot(fig1,fig2,
+        layout=(2,1),
+        size=(800,500),
+        left_margin=3mm,)
+    display(fig)
 
-
-
-
-
-
-
-
-
-
-
-
-i_xx[idx:end]
-
-
-A = zQM_itpl.(i_xx[idx:end])
-B = zf1_fit[idx:end]
-
-function log_error_rs(x)
-    r, s = x
-    if s <= 0
-        return Inf
-    end
-    vals = B ./ s .+ r
-    if any(<=(0), vals)  # equivalent to any(v -> v <= 0, vals)
-        return Inf
-    end
-
-    diff = log10.(A) .- log10.(vals)
-    return sum(diff .^ 2)
+    return (m_fit = m_fit, z0_fit = z0_fit, fig=fig)
 end
 
-res = optimize(log_error_rs, [0.0, 1.0], NelderMead())
-c_fit, m_fit = Optim.minimizer(res)
+plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx[idx:end]); idx=idx, title="Spline fitting", yscale=:log10)
+plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx[idx:end]); idx=idx, title="Spline fitting", yscale=:identity)
 
-plot(Ic_qm, zm_qm,
-    label="Model: QM",
-    line=(:dash,:blue,2))
-plot!(i_xx[idx:end], B/m_fit .+ c_fit,
-    label="Experiment: Scaled ($(@sprintf("%2.2f",m_fit*mean(magnification_factor_ith))), $(@sprintf("%2.2f",1000*c_fit))μm)",
-    )
-plot!(
-    title="Spline fitting",
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-        [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(10e-3,1),
-    yaxis=:log10)
+plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx[idx:end]); idx=idx, title="Spline interpolation", yscale=:log10)
+plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx[idx:end]); idx=idx, title="Spline interpolation", yscale=:identity)
 
-plot(i_xx[idx:end], 100*(zQM_itpl.(i_xx[idx:end]) ./ B  .- 1),
-    label="Experiment : original",
-    line=(:solid,:red,2)
-)
-plot!(i_xx[idx:end], 100*(zQM_itpl.(i_xx[idx:end]) ./ (B/m_fit .+ c_fit)  .- 1),
-    label  = "Experiment : scaled",
-    line=(:solid,:dodgerblue4,2),
-    ylabel = "Relative Error (%)",
-    xaxis  = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-        [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-)
-hline!([0], line=(:dash,:black,1), label=nothing)
+ss = load(joinpath(@__DIR__,"20250820","data_processed.jld2"))
 
+ss["data"]
+ss["data"][:Currents]
+size(ss["data"][:F1ProcessedImages])
+ss["data"][:F1ProcessedImages]
 
-A = zQM_itpl.(i_xx[idx:end])
-B = zf1[idx:end]
+[:,:,30,20]
 
-function log_error_rs(x)
-    r, s = x
-    if s <= 0
-        return Inf
-    end
-    vals = B ./ s .+ r
-    if any(<=(0), vals)  # equivalent to any(v -> v <= 0, vals)
-        return Inf
-    end
-
-    diff = log10.(A) .- log10.(vals)
-    return sum(diff .^ 2)
-end
-
-res = optimize(log_error_rs, [0.0, 1.0], NelderMead())
-c_fit, m_fit = Optim.minimizer(res)
-
-plot(Ic_qm, zm_qm,
-    label="Model: QM",
-    line=(:dash,:blue,2))
-plot!(i_xx[idx:end], B/m_fit .+ c_fit,
-    label="Experiment: Scaled ($(@sprintf("%2.2f",m_fit*mean(magnification_factor_ith))), $(@sprintf("%2.2f",1000*c_fit))μm)",
-    )
-plot!(
-    title = "Spline Interpolation",
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-        [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(10e-3,1),
-    yaxis=:log10)
-
-plot(i_xx[idx:end], 100*(zQM_itpl.(i_xx[idx:end]) ./ B  .- 1),
-    label="Experiment : original",
-    line=(:solid,:red,2)
-)
-plot!(i_xx[idx:end], 100*(zQM_itpl.(i_xx[idx:end]) ./ (B/m_fit .+ c_fit)  .- 1),
-    label  = "Experiment : scaled",
-    line=(:solid,:dodgerblue4,2),
-    ylabel = "Relative Error (%)",
-    xaxis  = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-        [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-)
-hline!([0], line=(:dash,:black,1), label=nothing)
+[:F1_data]
