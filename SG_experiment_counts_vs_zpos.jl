@@ -61,7 +61,7 @@ z_binned_mm = 1e3 .* pixel_positions(z_pixels, nz_binning, effective_cam_pixelsi
 # ---------------------------------------------------------------------------
 data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
 
-data_results = Dict{String, NamedTuple{(:fw_centroid_mm, :framewise_mm, :δframewise_mm), Tuple{Any, Any, Any}}}()
+data_results = OrderedDict{String, NamedTuple{(:fw_centroid_mm, :framewise_mm, :δframewise_mm), Tuple{Any, Any, Any}}}()
 for dir in data_directories
     res = DataReading.find_report_data(
         joinpath(@__DIR__, "analysis_data");
@@ -85,7 +85,6 @@ plot(data_directories,[data_results[dir].fw_centroid_mm[1] for dir in data_direc
 plot!(
     yaxis=(L"$z_{c}$ (mm)",:identity),
     xlim=(-1,length(data_directories)+2),
-    xticks = (1:length(data_directories), data_directories),
     xminorticks = false,
     xrotation=65,
     bottom_margin=-2mm,
@@ -99,7 +98,7 @@ for (i, dir) in enumerate(data_directories)
     Ics[i] = data[:Currents]
 end
 
-function cluster_by_tolerance(Ics; tol=0.10)
+function cluster_by_tolerance(Ics; tol=0.08)
     # Flatten values, dataset ids, and index-in-dataset
     vals  = Float64[]
     vidx  = Int[]
@@ -148,7 +147,7 @@ function cluster_by_tolerance(Ics; tol=0.10)
     return multi
 end
 
-clusters = cluster_by_tolerance(Ics; tol=0.08);
+clusters = cluster_by_tolerance(Ics; tol=0.05);
 summaries = [
     (
         mean_val = mean(getfield.(c, :val)),
@@ -191,6 +190,16 @@ plot!(plt;
 );
 display(plt)
 
+const F1_cache = Dict{String, Array}()
+function get_F1(datadir)
+    if !haskey(F1_cache, datadir)
+        path = joinpath(@__DIR__, datadir, "data_processed.jld2")
+        @info "Loading F1 from $datadir"
+        data = load(path, "data")
+        F1_cache[datadir] = data[:F1ProcessedImages]  # only store this part
+    end
+    return F1_cache[datadir]
+end
 
 peak_positions_dict = OrderedDict{Tuple{Int,String}, Matrix{Float64}}()
 for i in eachindex(summaries)
@@ -200,8 +209,9 @@ for i in eachindex(summaries)
         datadir = data_directories[jset]
         println("\t data set $(datadir)")
 
-        data = load(joinpath(@__DIR__, datadir, "data_processed.jld2"), "data")
-        F1  = data[:F1ProcessedImages]
+        # data = load(joinpath(@__DIR__, datadir, "data_processed.jld2"), "data")
+        # F1  = data[:F1ProcessedImages]
+        F1 = get_F1(datadir)
         nx, nz, nframes, ncurr = size(F1)
 
         frameidx = summaries[i].indices[j]
@@ -236,13 +246,13 @@ for i in eachindex(summaries)
             # --- Maxima via minimizing negative spline from multiple guesses
             negative_spline(x) = -S_fit(x[1])
             initial_guesses = sort([
-                first(z_fit),
+                ceil(minimum(z_fit)),
                 quantile(z_fit, 0.40),
                 z_fit[argmax(y_fit)],
                 quantile(z_fit, 0.65),
                 quantile(z_fit, 0.75),
                 quantile(z_fit, 0.90),
-                last(z_fit),
+                floor(maximum(z_fit))
             ])
 
             minima_candidates = Float64[]
@@ -297,56 +307,117 @@ for i in eachindex(summaries)
     end
 end
 
-peak_positions_dict[(18,"20250814")]
+for s in 1:length(summaries)
+    filtered_data = OrderedDict(
+        k => copy(v) for (k,v) in peak_positions_dict if k[1] == s
+    )
+    filtered_label = [k[2] for k in keys(filtered_data)]
+    colrs = palette(:darkrainbow,length(filtered_label));
+    fig = plot(
+        title = "$(@sprintf("%0.3f",summaries[s].mean_val))A",
+        yaxis=(L"$z_{\mathrm{max}} \ (\mathrm{mm})$",:identity),
+        xaxis=("Amplitude", :identity),
+    )
+    for (idx,f_dir) in enumerate(filtered_label)
+        # f_dir = filtered_label[1]
+        z0_dir = data_results[f_dir].fw_centroid_mm
+        peak_amp_dir = filtered_data[(s,f_dir)]
+        peak_amp_dir[:,1] = peak_amp_dir[:,1] .- z0_dir[1]
+        plot!(fig, peak_amp_dir[:,2], peak_amp_dir[:,1], 
+            label=f_dir,
+            seriestype=:scatter,
+            marker=(:circle,0.75,3,colrs[idx],stroke(2,0.99,colrs[idx]))
+        )
+        hline!(fig, [data_results[f_dir].framewise_mm[summaries[s].indices[idx]]],
+            ribbon = data_results[f_dir].δframewise_mm[summaries[s].indices[idx]],
+            line=(:dot, colrs[idx],2),
+            fillcolor = colrs[idx],
+            fillalpha = 0.1,
+            label= nothing)
 
-s = 18
-summaries[s]
-summaries[s].currents
-filtered_data = filter(kv -> kv.first[1] == s, peak_positions_dict)
-filtered_label = [k[2] for k in keys(filtered_data)]
-fig = plot(
-    xaxis=(L"$z_{\mathrm{max}} \ (\mathrm{mm})$",:identity),
-    yaxis=("Amplitude", :identity),
+        x0 = mean(peak_amp_dir[:,2]);
+        err = std(peak_amp_dir[:,2]) / sqrt(length(peak_amp_dir[:,2]));
+        # Draw the vertical uncertainty band
+        vspan!(fig, [x0 - err, x0 + err],
+            color = colrs[idx],
+            alpha = 0.1,
+            label = nothing)
+
+        # Draw the vertical line
+        vline!(fig, [x0],
+            line = (:dot, colrs[idx], 2),
+            label = nothing)
+    end
+    plot!(fig,
+        legend=:outerright,)
+    display(fig)
+end
+
+# New dictionary: key = s, value = Matrix with all rows concatenated
+peak_amp_by_s = OrderedDict{Int, Matrix{Float64}}()
+for s in 1:length(summaries)
+
+    filtered_data = OrderedDict(
+        k => copy(v) for (k,v) in peak_positions_dict if k[1] == s
+    )
+    filtered_label = [k[2] for k in keys(filtered_data)]
+
+    # collect all peak_amp_dir for this s
+    collected = Matrix{Float64}[]  # vector of matrices
+
+    for (idx, f_dir) in enumerate(filtered_label)
+        z0_dir = data_results[f_dir].fw_centroid_mm
+        peak_amp_dir = filtered_data[(s, f_dir)]      # this is an N×2 matrix
+
+        # shift z column in-place
+        peak_amp_dir[:, 1] .-= z0_dir[1]
+
+        # store this matrix for later concatenation
+        push!(collected, peak_amp_dir)
+    end
+
+    # vcat all matrices for this s into one big matrix
+    # if there were no entries, skip; otherwise stack them
+    if !isempty(collected)
+        peak_amp_by_s[s] = vcat(collected...)  # rows from all datasets for this s
+    end
+end
+
+keys_s = sort(collect(keys(peak_amp_by_s)))         # ordered keys
+colors = palette(:darkrainbow, length(keys_s))      # one color per s
+
+fig = plot3d(
+    xlabel = "",#"Current (A)",
+    ylabel = "Amplitude",
+    zlabel = L"$z_{\mathrm{max}}$ (mm)",
+    title  = "3D Scatter of All Peak Positions",
+    legend = false,
+    xticks = (collect(1:2:39),["$(@sprintf("%1.3f",summaries[i].mean_val))" for i in 1:2:39]),
+    size = (800, 800),  
+    xtickfont = font(8),
+    ytickfont = font(8),
+    ztickfont = font(8),
+    guidefont = font(11), 
+    xrotation = 45,  
 )
-for f_dir in filtered_label
-    # f_dir = filtered_label[1]
-    z0_dir = data_results[f_dir].fw_centroid_mm
-    println(z0_dir)
-    peak_amp_dir = filtered_data[(s,f_dir)]
-    println(peak_amp_dir[:,1])
-    peak_amp_dir[:,1] = peak_amp_dir[:,1] .- z0_dir[1]
-    println(peak_amp_dir[:,1])
-plot!(fig, peak_amp_dir[:,1], peak_amp_dir[:,2],
-    seriestype=:scatter,
+for (i, s) in enumerate(keys_s)
+    M = peak_amp_by_s[s]   # N×2 matrix
+
+    xs = fill(s, size(M,1))     # x-axis: the key
+    ys = M[:,2]                 # y-axis: amplitude
+    zs = M[:,1]                 # z-axis: shifted z
+
+    scatter3d!(
+        xs, ys, zs,
+        markersize = 4,
+        color = colors[i],
+        alpha = 0.9,
     )
 end
+annotate!(
+    0.5, 0.02, -1.3,       # centered under plot; adjust if needed
+    text("Current (A)", 12, :black)   # font size & color
+)
 display(fig)
 
 
-filtered
-
-peak_positions_dict
-
-plot(stack_z)
-
-plot(z_fit, y_fit)
-plot!(z_fit, S_fit.(z_fit))
-plot!(z_binned_mm, stack_z_bin[1])
-
-
-
-peak_positions = maxima[1]
-
-
-Ic = data[:Currents]
-F1data = ss["data"][:F1ProcessedImages]
-
-
-ss["data"]
-ss["data"][:Currents]
-size(ss["data"][:F1ProcessedImages])
-ss["data"][:F1ProcessedImages]
-
-[:,:,30,20]
-
-[:F1_data])
