@@ -503,9 +503,9 @@ exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_avera
 @info "Experimental data loaded"
 # --------------------------------
 
-nx_bins , nz_bins = 64 , 2
+nx_bins , nz_bins = 128 , 2
 gaussian_width_mm = 0.200
-λ0_raw            = 0.02
+λ0_raw            = 0.01
 λ0_spline         = 0.001
 
 # ------------------------------
@@ -717,7 +717,7 @@ plot!(
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     # yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     xlims=(0.020,1.05),
-    ylims=(-0.10,0.25),
+    # ylims=(-0.10,0.25),
     size=(800,500),
     legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
     legendfontsize=12,
@@ -744,7 +744,7 @@ plot!(
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     # yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     xlims=(0.020,1.05),
-    ylims=(-0.10,0.25),
+    # ylims=(-0.10,0.25),
     size=(800,500),
     legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
     legendfontsize=12,
@@ -763,7 +763,6 @@ df = DataFrame(hcat(data_scaled[:,1],
 [:Ic, :eQM, :eCQD]
 )
 CSV.write(joinpath(OUTDIR,"rel_error_scaled.csv"),df)
-
 df = DataFrame(hcat(data[:,1],
     (zqm.(data[:,1]) .- data[:,2]) ./ data[:,2],
     (ki_itp.(data[:,1], Ref(fit_original.ki)) .- data[:,2]) ./ data[:,2]
@@ -1219,6 +1218,175 @@ for wanted_data_dir in wanted_data_dirs
 end
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
+
+
+i_threshold = 0.025;
+i_start  = searchsortedfirst(exp_avg[:i_smooth],i_threshold);
+data     = hcat(exp_avg[:i_smooth],exp_avg[:z_smooth],exp_avg[:δz_smooth])[i_start:end,:];
+
+using Optim
+
+"""
+Fit ki using:
+  • Scaling from the high-current tail (I >= thresholdI)
+  • Reference model = w*QM + (1-w)*CQD
+  • Fitting region = first n_front points + last n_back points
+
+Inputs:
+  data        :: Nx3 matrix  (I, z_exp, δz)
+  zqm         :: callable: zqm(I)
+  ki_itp      :: callable: ki_itp(I, ki)
+  thresholdI  :: Float, threshold for tail region
+  ki_range    :: (kmin, kmax)
+  n_front     :: number of points to use at beginning
+  n_back      :: number of points to use at end
+  w           :: QM weight in combined reference (0–1)
+
+Returns:
+  (ki_fit, scale_factor, mse)
+"""
+function fit_ki_joint_scaling_fitsubset(
+    data,
+    zqm,
+    ki_itp,
+    thresholdI::Float64,
+    ki_range;
+    n_front::Int = 6,
+    n_back::Int  = 6,
+    w::Float64   = 0.7,
+)
+
+    Iexp = data[:,1]
+    yexp = data[:,2]
+
+    N = length(Iexp)
+
+    # Tail region (for scaling)
+    tail_idx = findall(Iexp .>= thresholdI)
+    if isempty(tail_idx)
+        error("No experimental points with current ≥ $thresholdI A")
+    end
+
+    I_tail  = Iexp[tail_idx]
+    y_tail  = yexp[tail_idx]
+
+    # Fitting region (first n_front and last n_back)
+    fit_idx = vcat(1:n_front, (N-n_back+1):N)
+
+    function loss(ki)
+        # CQD model for all points
+        y_cqd = ki_itp.(Iexp, ki)
+
+        # reference model in tail
+        zref_tail = w .* zqm.(I_tail) .+
+                    (1-w) .* ki_itp.(I_tail, ki)
+
+        # scale factor
+        scale = dot(y_tail, zref_tail) /
+                dot(zref_tail, zref_tail)
+
+        # scale experimental data
+        yexp_scaled = yexp ./ scale
+
+        # loss only on selected fit indices
+        r = log.(yexp_scaled[fit_idx]) .-
+            log.(y_cqd[fit_idx])
+
+        return mean(abs2, r)
+    end
+
+    # optimize over ki
+    kmin, kmax = ki_range
+    opt = optimize(loss, kmin, kmax, Brent())
+
+    ki_fit = Optim.minimizer(opt)
+    mse    = Optim.minimum(opt)
+
+    # final scale factor
+    zref_tail_final = w .* zqm.(I_tail) .+
+                      (1-w) .* ki_itp.(I_tail, ki_fit)
+    scale_final = dot(y_tail, zref_tail_final) /
+                  dot(zref_tail_final, zref_tail_final)
+
+    return (
+        ki_fit       = ki_fit,
+        scale_factor = scale_final,
+        mse          = mse,
+        n_front      = n_front,
+        n_back       = n_back,
+        w            = w
+    )
+end
+
+
+i_threshold = 0.025;
+i_start  = searchsortedfirst(exp_avg[:i_smooth],i_threshold);
+data     = hcat(exp_avg[:i_smooth],exp_avg[:z_smooth],exp_avg[:δz_smooth])[i_start:end,:];
+result = fit_ki_joint_scaling_fitsubset(
+    data,
+    zqm,
+    ki_itp,
+    0.92,                                  # tail threshold
+    (ki_list[ki_start], ki_list[ki_stop]); # bracket
+    n_front = 6,
+    n_back  = 6,
+    w       = 0.55
+)
+
+
+fig=plot(data[:,1], zqm.(data[:,1]),
+    label="Quantum mechanics",
+    line=(:solid,:red,1.75)
+)
+# Scaled magnification
+scaled_mag = result.scale_factor
+data_scaled = copy(data)
+data_scaled[:, 2] ./= scaled_mag
+data_scaled[:, 3] ./= scaled_mag
+plot!(data_scaled[:,1],data_scaled[:,2],
+    ribbon = data_scaled[:,3],
+    label=L"Combined data (scaled $m_{p} = %$(round(scaled_mag, digits=4))$ )",
+    line=(:dash,:darkgreen,1.2),
+    fillcolor = :darkgreen,
+    fillalpha = 0.35,
+)
+data_fitting = data[[1:6; (end-5):(end)], :]
+data_scaled_fitting = data_scaled[[1:6; (end-5):(end)], :]
+fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, ki_list, (ki_start,ki_stop))
+I_scan = logspace10(i_threshold,1.00; n=101);
+plot!(
+    I_scan, ki_itp.(I_scan, Ref(fit_scaled.ki)),
+    label=L"Scaled: $k_{i}= \left( %$(round(fit_scaled.ki, digits=4)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
+    line=(:solid,:blue,2),
+    # marker=(:xcross, :blue, 0.2),
+    markerstrokewidth=1
+)
+plot!(
+    xlabel = "Current (A)",
+    ylabel = L"$z_{\mathrm{max}}$ (mm)",
+    xaxis=:log10,
+    yaxis=:log10,
+    labelfontsize=14,
+    tickfontsize=12,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # xlims=(0.010,1.05),
+    size=(900,800),
+    legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendfontsize=12,
+    left_margin=3mm,
+)
+display(fig)
+
+
+
+
+
+
+
+
+
+
 
 
 
