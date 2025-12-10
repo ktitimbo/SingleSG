@@ -47,7 +47,8 @@ isdir(OUTDIR) || mkpath(OUTDIR);
 hostname = gethostname();
 @info "Running on host" hostname=hostname
 include("./Modules/TheoreticalSimulation.jl");
-include("./Modules/DataReading.jl")
+include("./Modules/DataReading.jl");
+include("./Modules/MyExperimentalAnalysis.jl");
 
 logspace10(lo, hi; n=50) = 10.0 .^ range(log10(lo), log10(hi); length=n)
 
@@ -356,15 +357,6 @@ function compare_datasets(x_ref::AbstractVector, # current
     end
 
     return (CQD = R_B, QM = R_C)
-end
-
-function mag_factor(directory::String)
-    if directory == "20251109"
-        values = (0.996,0.0047)
-    else
-        values = (1.1198,0.0061) 
-    end
-    return values
 end
 
 function plot_cqd_vs_qm(zmm_cqd, zmax_QM, Icoils_cqd, ki_list;
@@ -1123,7 +1115,7 @@ for wanted_data_dir in wanted_data_dirs
 
     end
 
-    mag, δmag = mag_factor(wanted_data_dir)
+    mag, δmag = MyExperimentalAnalysis.mag_factor(wanted_data_dir)
 
     # Load framewise data
     load_data   = CSV.read(joinpath(dirname(res.path), "fw_data.csv"), DataFrame; header = true)
@@ -1219,31 +1211,63 @@ end
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 
-
-i_threshold = 0.025;
-i_start  = searchsortedfirst(exp_avg[:i_smooth],i_threshold);
-data     = hcat(exp_avg[:i_smooth],exp_avg[:z_smooth],exp_avg[:δz_smooth])[i_start:end,:];
-
-using Optim
-
 """
-Fit ki using:
-  • Scaling from the high-current tail (I >= thresholdI)
-  • Reference model = w*QM + (1-w)*CQD
-  • Fitting region = first n_front points + last n_back points
+Fit the CQD parameter `ki` while dynamically rescaling the experimental data
+using a high-current tail region and a combined QM+CQD reference.
 
-Inputs:
-  data        :: Nx3 matrix  (I, z_exp, δz)
-  zqm         :: callable: zqm(I)
-  ki_itp      :: callable: ki_itp(I, ki)
-  thresholdI  :: Float, threshold for tail region
-  ki_range    :: (kmin, kmax)
-  n_front     :: number of points to use at beginning
-  n_back      :: number of points to use at end
-  w           :: QM weight in combined reference (0–1)
+Inputs
+------
+data      :: Matrix{<:Real}
+    Nx3 array with columns:
+        1. Iexp  - experimental current (A)
+        2. yexp  - experimental z_max (mm)
+        3. (ignored here, usually y-error)
 
-Returns:
-  (ki_fit, scale_factor, mse)
+zqm       :: callable
+    Interpolated QM model: zqm(I) → z_QM(I)
+
+ki_itp    :: callable
+    Interpolated CQD model: ki_itp(I, ki) → z_CQD(I; ki)
+
+thresholdI :: Float64
+    Current threshold (A) defining the "tail" region used for scaling.
+    Only points with Iexp ≥ thresholdI contribute to the scale factor.
+
+ki_range :: Tuple{<:Real,<:Real}
+    (kmin, kmax) bracket for the 1D Brent optimizer over ki.
+
+Keyword arguments
+-----------------
+n_front :: Int = 6
+    Number of lowest-current points used in the ki fit.
+
+n_back  :: Int = 6
+    Number of highest-current points used in the ki fit.
+
+w       :: Float64 = 0.7
+    Weight for the QM model in the combined reference:
+        ref = w * QM + (1-w) * CQD   (arithmetic)
+        ref = QM^w * CQD^(1-w)       (geometric)
+
+ref_type :: Symbol = :arith
+    Type of combination for the tail reference model:
+        :arith  → arithmetic blend  z_ref = w*zQM + (1-w)*zCQD
+        :geom   → geometric blend   z_ref = zQM^w * zCQD^(1-w)
+
+Method summary
+--------------
+1. Select a tail region (I ≥ thresholdI) used ONLY to determine a global
+   scale factor s(ki), which maps experimental data to theory.
+2. Define a reference tail curve z_ref_tail(ki) as an arithmetic or geometric
+   combination of QM and CQD in that tail region.
+3. For each trial ki, compute the least-squares projection scale:
+       s(ki) = <y_tail, z_ref_tail> / <z_ref_tail, z_ref_tail>
+4. Scale the *entire* experimental dataset by 1/s(ki).
+5. Fit ki by minimizing the mean squared log-residual between the scaled
+   experiment and the CQD model, but using only a subset of points:
+       - the first n_front points (low current)
+       - the last  n_back  points (high current).
+6. Return the best-fit ki, the final scale factor s(ki_fit), and diagnostics.
 """
 function fit_ki_joint_scaling_fitsubset(
     data,
@@ -1254,14 +1278,19 @@ function fit_ki_joint_scaling_fitsubset(
     n_front::Int = 6,
     n_back::Int  = 6,
     w::Float64   = 0.7,
+    ref_type::Symbol = :arith,   # :arith or :geom
 )
 
+    # Unpack experimental current and z_max
     Iexp = data[:,1]
     yexp = data[:,2]
 
     N = length(Iexp)
 
-    # Tail region (for scaling)
+    # ------------------------------
+    # 1) Tail region (for scaling)
+    # ------------------------------
+    # Use only points with Iexp ≥ thresholdI to compute the scale factor.
     tail_idx = findall(Iexp .>= thresholdI)
     if isempty(tail_idx)
         error("No experimental points with current ≥ $thresholdI A")
@@ -1270,53 +1299,104 @@ function fit_ki_joint_scaling_fitsubset(
     I_tail  = Iexp[tail_idx]
     y_tail  = yexp[tail_idx]
 
-    # Fitting region (first n_front and last n_back)
+    # -----------------------------------------
+    # 2) Fitting region (for ki optimisation)
+    # -----------------------------------------
+    # Only use a subset of points for the ki fit:
+    # - first n_front points (low current)
+    # - last  n_back points (high current)
     fit_idx = vcat(1:n_front, (N-n_back+1):N)
 
+    # ------------------------------------------------
+    # 3) Reference model in the tail: z_ref(I; ki)
+    # ------------------------------------------------
+    # Given a trial ki, construct the tail-region reference curve that
+    # will be used to define the scale factor. This can be:
+    #
+    #  - arithmetic blend:  z_ref = w*zQM + (1-w)*zCQD
+    #  - geometric blend:   z_ref = zQM^w * zCQD^(1-w)
+    #
+    # Note: we only evaluate this in the tail region.
+    function zref_tail_for(ki)
+        zqm_tail  = zqm.(I_tail)         # QM prediction in tail
+        zcqd_tail = ki_itp.(I_tail, ki)  # CQD prediction in tail
+
+        if ref_type == :arith
+            # Arithmetic blend in linear space
+            return w .* zqm_tail .+ (1 - w) .* zcqd_tail
+
+        elseif ref_type == :geom
+            # Geometric blend (equivalent to weighted average in log-space)
+            # z_ref = zQM^w * zCQD^(1-w)
+            return zqm_tail .^ w .* zcqd_tail .^ (1 - w)
+
+        else
+            error("Invalid ref_type = $ref_type. Use :arith or :geom.")
+        end
+    end
+
+    # ------------------------------------------------
+    # 4) Loss function over ki
+    # ------------------------------------------------
+    # For each trial ki, we:
+    #  - build CQD prediction y_cqd(I; ki)
+    #  - compute the tail reference z_ref_tail(ki)
+    #  - compute the optimal scale s(ki) so that
+    #       y_tail ≈ s(ki) * z_ref_tail
+    #    in a least-squares sense:
+    #       s(ki) = <y_tail, z_ref_tail> / <z_ref_tail, z_ref_tail>
+    #  - scale the *full* experimental data by 1/s(ki)
+    #  - compute log-residuals between scaled experiment and CQD model
+    #    only for the chosen fit_idx points
+    #  - return mean squared log-residuals as the loss.
     function loss(ki)
-        # CQD model for all points
+        # CQD model evaluated at all experimental currents
         y_cqd = ki_itp.(Iexp, ki)
 
-        # reference model in tail
-        zref_tail = w .* zqm.(I_tail) .+
-                    (1-w) .* ki_itp.(I_tail, ki)
+        # Tail reference model for this ki
+        zref_tail = zref_tail_for(ki)
 
-        # scale factor
-        scale = dot(y_tail, zref_tail) /
-                dot(zref_tail, zref_tail)
+        # Scale factor: least-squares projection of y_tail onto zref_tail
+        scale = dot(y_tail, zref_tail) / dot(zref_tail, zref_tail)
 
-        # scale experimental data
+        # Apply global scaling to experimental data
         yexp_scaled = yexp ./ scale
 
-        # loss only on selected fit indices
-        r = log.(yexp_scaled[fit_idx]) .-
-            log.(y_cqd[fit_idx])
+        # Log-space residuals restricted to fitting subset
+        r = log.(yexp_scaled[fit_idx]) .- log.(y_cqd[fit_idx])
 
+        # Mean squared residuals (this is the objective being minimized)
         return mean(abs2, r)
     end
 
-    # optimize over ki
+    # ------------------------------------------------
+    # 5) 1D optimisation over ki (Brent)
+    # ------------------------------------------------
     kmin, kmax = ki_range
     opt = optimize(loss, kmin, kmax, Brent())
 
-    ki_fit = Optim.minimizer(opt)
-    mse    = Optim.minimum(opt)
+    ki_fit = Optim.minimizer(opt)   # best-fit ki
+    mse    = Optim.minimum(opt)     # minimum loss value (mean squared log-residual)
 
-    # final scale factor
-    zref_tail_final = w .* zqm.(I_tail) .+
-                      (1-w) .* ki_itp.(I_tail, ki_fit)
-    scale_final = dot(y_tail, zref_tail_final) /
-                  dot(zref_tail_final, zref_tail_final)
+    # ------------------------------------------------
+    # 6) Final scale factor at ki_fit (for output)
+    # ------------------------------------------------
+    # Recompute the reference tail with the best-fit ki and get the final
+    # scale factor that defines the global rescaling of the experiment.
+    zref_tail_final = zref_tail_for(ki_fit)
+    scale_final = dot(y_tail, zref_tail_final) / dot(zref_tail_final, zref_tail_final)
 
+    # ------------------------------------------------
+    # 7) Return results and configuration parameters
+    # ------------------------------------------------
     return (
-        ki_fit       = ki_fit,
-        scale_factor = scale_final,
-        mse          = mse,
-        n_front      = n_front,
-        n_back       = n_back,
-        w            = w
+        ki_fit       = ki_fit,        # best-fit ki
+        scale_factor = scale_final,   # global magnification correction
+        mse          = mse,           # mean squared log-residual at optimum
     )
 end
+
+
 
 
 i_threshold = 0.025;
@@ -1326,27 +1406,29 @@ result = fit_ki_joint_scaling_fitsubset(
     data,
     zqm,
     ki_itp,
-    0.92,                                  # tail threshold
+    0.750,                                  # tail threshold
     (ki_list[ki_start], ki_list[ki_stop]); # bracket
-    n_front = 6,
+    n_front = 7,
     n_back  = 6,
-    w       = 0.55
+    w       = 0.50,
+    ref_type=:geom,
+    # ref_type=:arith,
 )
 
 
-fig=plot(data[:,1], zqm.(data[:,1]),
-    label="Quantum mechanics",
-    line=(:solid,:red,1.75)
-)
+fig=plot(    
+    title = L"Peak position ($F=1$)",)
 # Scaled magnification
 scaled_mag = result.scale_factor
 data_scaled = copy(data)
 data_scaled[:, 2] ./= scaled_mag
 data_scaled[:, 3] ./= scaled_mag
-plot!(data_scaled[:,1],data_scaled[:,2],
+global_mag_factor = scaled_mag*MyExperimentalAnalysis.mag_factor("20250814")[1]
+plot!(fig,
+    data_scaled[:,1],data_scaled[:,2],
     ribbon = data_scaled[:,3],
-    label=L"Combined data (scaled $m_{p} = %$(round(scaled_mag, digits=4))$ )",
-    line=(:dash,:darkgreen,1.2),
+    label=L"Experimental data (magnif.factor $m = %$(round(global_mag_factor, digits=4))$)",
+    line=(:dash,:darkgreen,3),
     fillcolor = :darkgreen,
     fillalpha = 0.35,
 )
@@ -1354,15 +1436,19 @@ data_fitting = data[[1:6; (end-5):(end)], :]
 data_scaled_fitting = data_scaled[[1:6; (end-5):(end)], :]
 fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, ki_list, (ki_start,ki_stop))
 I_scan = logspace10(i_threshold,1.00; n=101);
-plot!(
+plot!(fig,I_scan, zqm.(I_scan),
+    label="Quantum mechanical model",
+    line=(:solid,:red,1.75)
+)
+plot!(fig,
     I_scan, ki_itp.(I_scan, Ref(fit_scaled.ki)),
-    label=L"Scaled: $k_{i}= \left( %$(round(fit_scaled.ki, digits=4)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
-    line=(:solid,:blue,2),
+    label=L"CoQuantum dynamics: $k_{i}= \left( %$(round(result.ki_fit, digits=4)) \pm %$(round(result.mse, sigdigits=1)) \right) \times 10^{-6} $",
+    line=(:dot,:blue,2),
     # marker=(:xcross, :blue, 0.2),
     markerstrokewidth=1
 )
-plot!(
-    xlabel = "Current (A)",
+plot!(fig,
+    xlabel = "Coil Current (A)",
     ylabel = L"$z_{\mathrm{max}}$ (mm)",
     xaxis=:log10,
     yaxis=:log10,
@@ -1372,68 +1458,263 @@ plot!(
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     # xlims=(0.010,1.05),
     size=(900,800),
-    legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    # legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
     legendfontsize=12,
     left_margin=3mm,
 )
 display(fig)
+savefig(fig,joinpath(OUTDIR,"single_SG_comparison.svg"))
+joinpath(OUTDIR,"single_SG_comparison.SVG")
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# 20250814
-data_fitting = data[[1:4; (end-3):(end)], :]
-# 20250820
-data_fitting = data[[1:4; (end-3):(end)], :]
-# 20250825
-data_fitting = data[[1:3; (end-3):(end)], :]
-# 20250919
-data_fitting = data[[1:2; (end-3):(end)], :]
-# 20251002
-data_fitting = data[[2:3; (end):(end)], :]
-# 20251003
-data_fitting = data[[2:4; (end):(end)], :]
-data_fitting = data[2:4, :]
-# 20251006
-data_fitting = data[[2:4; (end):(end)], :]
-# 20251109
-data_fitting = data[[2:4; (end-1):(end)], :]
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-
-## choose a few points for low currents and high currents
-if wanted_data_dir == "20250815"
-    data_fitting = data[[9,10,11,15,19:22...],:] # for fitting purposes
-elseif wanted_data_dir == "20250820"
-    data_fitting = data[[2:4; (end-3):(end-1)], :]
-elseif wanted_data_dir == "20250825"
-    data_fitting = data[[2:4; (end-3):(end-1)], :]
-elseif wanted_data_dir == "20250919"
-    data_fitting = data[[2:4; (end-3):(end-1)], :]
-else
-    data_fitting = data[[10,11,12,14,22:25...],:] # for fitting purposes
+struct FitStats
+    logMSE::Float64
+    logRMSE::Float64
+    R2_log::Float64
+    chi2_log::Float64
+    chi2_red::Float64
+    p_chi2::Float64
+    AIC::Float64
+    BIC::Float64
+    NMAD::Float64
 end
+
+function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
+    @assert length(x) == length(y) == length(ypred)
+
+    N = length(y)
+
+    # --- residuals in log-space ---
+    logy    = log.(y)
+    logpred = log.(ypred)
+    r       = logy .- logpred
+
+    # --- core metrics in log-space ---
+    logMSE  = mean(r .^ 2)
+    logRMSE = sqrt(logMSE)
+    R2_log  = 1 - sum(r .^ 2) / sum((logy .- mean(logy)) .^ 2)
+
+    # --- robust scatter (NMAD) ---
+    NMAD = 1.4826 * median(abs.(r))
+
+    # --- χ², p-value, AIC, BIC ---
+    if isnothing(σ)
+        # No uncertainties: we cannot do a proper χ² test
+        chi2_log = NaN
+        chi2_red = NaN
+        p_chi2   = NaN
+        # Use logMSE as a surrogate for variance in "likelihood"
+        AIC = 2k + N * log(logMSE)
+        BIC = k * log(N) + N * log(logMSE)
+    else
+        @assert length(σ) == N
+        # Propagate σ into log-space: σ_log ≈ σ / y
+        σlog    = σ ./ y
+        chi2_log = sum((r ./ σlog) .^ 2)
+        dof      = max(N - k, 1)  # degrees of freedom
+        chi2_red = chi2_log / dof
+
+        # p-value: P(χ² >= observed χ² | dof)
+        dist   = Chisq(dof)
+        p_chi2 = ccdf(dist, chi2_log)  # 1 - cdf(dist, chi2_log)
+
+        # AIC/BIC using χ² (Gaussian likelihood)
+        AIC = 2k + chi2_log
+        BIC = k * log(N) + chi2_log
+    end
+
+    return FitStats(logMSE, logRMSE, R2_log, chi2_log, chi2_red, p_chi2, AIC, BIC, NMAD)
+end
+
+
+data     = hcat(exp_avg[:i_smooth],exp_avg[:z_smooth],exp_avg[:δz_smooth])[i_start:5:end,:]
+
+x_exp = data[:,1]
+y_exp = data[:,2] ./ scaled_mag
+σ_exp = data[:,3] ./ scaled_mag
+y_CQD = ki_itp.(x_exp, Ref(result.ki_fit))
+y_QM  = zqm.(x_exp) 
+
+stats_CQD = goodness_of_fit(x_exp, y_exp, y_CQD; σ = σ_exp, k = 2)
+stats_QM  = goodness_of_fit(x_exp, y_exp, y_QM;  σ = σ_exp, k = 1)
+
+
+metrics = [
+    "logMSE",
+    "logRMSE",
+    "R2_log",
+    "chi2_log",
+    "chi2_red",
+    "p_chi2",
+    "AIC",
+    "BIC",
+    "NMAD",
+]
+
+data = [
+    stats_CQD.logMSE   stats_QM.logMSE
+    stats_CQD.logRMSE  stats_QM.logRMSE
+    stats_CQD.R2_log   stats_QM.R2_log
+    stats_CQD.chi2_log stats_QM.chi2_log
+    stats_CQD.chi2_red stats_QM.chi2_red
+    stats_CQD.p_chi2   stats_QM.p_chi2
+    stats_CQD.AIC      stats_QM.AIC
+    stats_CQD.BIC      stats_QM.BIC
+    stats_CQD.NMAD     stats_QM.NMAD
+]
+
+lower_is_better  = Set(["logMSE", "logRMSE", "chi2_log", "chi2_red", "AIC", "BIC", "NMAD"])
+higher_is_better = Set(["R2_log", "p_chi2"])
+
+hl_best = TextHighlighter(
+    (tbl, i, j) -> begin
+        # Only evaluate columns 1 (CQD) and 2 (QM)
+        if !(j == 1 || j == 2)
+            return false
+        end
+
+        metric = metrics[i]   # row label from your vector
+        v_CQD = tbl[i, 1]
+        v_QM  = tbl[i, 2]
+
+        # safety: both numeric
+        if !(isa(v_CQD, Number) && isa(v_QM, Number))
+            return false
+        end
+
+        if metric in lower_is_better
+            best = min(v_CQD, v_QM)
+            return tbl[i, j] == best
+
+        elseif metric in higher_is_better
+            best = max(v_CQD, v_QM)
+            return tbl[i, j] == best
+        end
+
+        return false
+    end,
+    crayon"fg:black bg:#fff7a1"
+)
+
+
+pretty_table(
+    data;
+    column_labels = ["CQD", "QM"],
+    row_labels    = metrics,
+    row_label_column_alignment = :l,
+    highlighters  = [hl_best],
+    alignment     = [:c,:c],
+    style         = TextTableStyle(
+                first_line_column_label = crayon"yellow bold",
+                table_border  = crayon"blue bold",
+                column_label  = crayon"yellow bold",
+                ),
+    table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    equal_data_column_widths= true,
+)
+
+
+
+function make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD::FitStats, stats_QM::FitStats; σ = nothing)
+"""
+    make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD, stats_QM; σ = nothing)
+
+Create a set of diagnostic plots illustrating the goodness-of-fit metrics
+for two models (CQD and QM) against experimental data.
+
+Plots:
+1. Data vs models in log-log space.
+2. Log-space residuals vs x.
+3. Histogram of log-space residuals with NMAD and logRMSE annotated.
+4. Bar chart comparing key scalar metrics (logRMSE, R2_log, chi2_red, AIC, BIC, NMAD).
+
+Returns a tuple of plots: (p_data, p_residuals, p_hist, p_bars).
+"""
+    # --- residuals in log-space ---
+    logy     = log.(y)
+    logCQD   = log.(y_CQD)
+    logQM    = log.(y_QM)
+    r_CQD    = logCQD .- logy
+    r_QM     = logQM .- logy
+    yerr = σ
+
+    # ---------------------------------------------------
+    # 1) Data vs models in log-log
+    # ---------------------------------------------------
+    p_data = plot(
+        x, y;
+        yerror = yerr, 
+        seriestype = :scatter,
+        marker=(:circle,:white,3,stroke(:black,0.8)),
+        xscale = :log10,
+        yscale = :log10,
+        label = "Experiment",
+        xlabel = "Coil Current (A)",
+        ylabel = "Peak position (mm)",
+        title = "Data vs Models (log-log space)",
+        legend = :bottomright,
+    )
+    plot!(p_data, x, y_CQD; label="CQD model", line = (:solid,:blue,1.5))
+    plot!(p_data, x, y_QM;  label="QM model",  line =(:dot,:red,2))
+
+    # ---------------------------------------------------
+    # 2) Log residuals vs x
+    # ---------------------------------------------------
+    p_resid = plot(
+        x, r_CQD;
+        seriestype = :scatter,
+        marker = (:circle,5,0.70,:royalblue3, stroke(0.8,:blue4)),
+        xlabel = "Coil Current (A)",
+        ylabel = L"\mathrm{log}(y_{model}) - \mathrm{log}(y_{exp})",
+        title = "Log-space Residuals",
+        label = "CQD residuals",
+        xscale = :log10,
+    )
+    scatter!(p_resid, x, r_QM; label="QM residuals",
+        marker = (:circle,5,0.70,:salmon3, stroke(0.8,:red4)),)
+    hline!(p_resid, [0.0]; c=:black, ls=:dash, label="perfect fit")
+    # Annotate with global metrics
+    txt_CQD = @sprintf "CQD: logRMSE = %.3g, R2_log = %.4f" stats_CQD.logRMSE stats_CQD.R2_log
+    txt_QM  = @sprintf "QM:  logRMSE = %.3g, R2_log = %.4f" stats_QM.logRMSE  stats_QM.R2_log
+    x_annot = 0.6*x[argmin(abs.(x .- median(x)))]  # roughly middle x
+    ymin, ymax = extrema(vcat(r_CQD, r_QM))
+    annotate!(p_resid, (x_annot, 0.8*ymax, Plots.text(txt_CQD, 8)))
+    annotate!(p_resid, (x_annot, 0.8*ymax - 0.1*(ymax-ymin), Plots.text(txt_QM, 8)))
+
+    # ---------------------------------------------------
+    # 3) Histogram of residuals with NMAD / logRMSE
+    # ---------------------------------------------------
+    p_hist = histogram(
+        r_CQD;
+        normalize = true,
+        color=:blue,
+        alpha = 0.4,
+        label = "CQD residuals",
+        xlabel = "log-space residual r",
+        ylabel = "Normalized count",
+        title = "Distribution of log-space residuals",
+    )
+    histogram!(p_hist, r_QM; 
+        normalize = true, 
+        color=:red,
+        alpha = 0.4, 
+        label="QM residuals")
+    vline!(p_hist, [0.0]; c=:black, ls=:dash, lw=1, label="r = 0")
+    # annotate NMAD and logRMSE
+    txt2_CQD = @sprintf "CQD: NMAD = %.3g, logRMSE = %.3g" stats_CQD.NMAD stats_CQD.logRMSE
+    txt2_QM  = @sprintf "QM:  NMAD = %.3g, logRMSE = %.3g" stats_QM.NMAD  stats_QM.logRMSE
+    x_hist_min, x_hist_max = extrema(vcat(r_CQD, r_QM))
+    y_hist_max = Plots.ylims(p_hist)[2]
+    annotate!(p_hist, (-0.6x_hist_min, 0.7y_hist_max, Plots.text(txt2_CQD, 8, :left)))
+    annotate!(p_hist, (-0.6x_hist_min, 0.6y_hist_max, Plots.text(txt2_QM, 8, :left)))
+
+    return p_data, p_resid, p_hist
+end
+
+p1, p2, p3 = make_diagnostic_plots(x_exp, y_exp, y_CQD, y_QM, stats_CQD, stats_QM; σ=σ_exp)
+plot(p1, p2, p3; 
+    layout = (2, 2), 
+    size = (1000, 1000),
+    left_margin=3mm,
+)
