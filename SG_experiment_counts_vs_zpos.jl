@@ -98,67 +98,10 @@ for (i, dir) in enumerate(data_directories)
     Ics[i] = data[:Currents]
 end
 
-function cluster_by_tolerance(Ics; tol=0.08)
-    # Flatten values, dataset ids, and index-in-dataset
-    vals  = Float64[]
-    vidx  = Int[]
-    iidx  = Int[]
 
-    for (j, vec) in enumerate(Ics)
-        for (k, v) in enumerate(vec)
-            push!(vals, v)
-            push!(vidx, j)
-            push!(iidx, k)
-        end
-    end
-
-    # Sort all flattened values
-    p = sortperm(vals)
-    v  = vals[p]
-    g  = vidx[p]
-    idx = iidx[p]
-
-    # Clustering
-    clusters = Vector{Vector{NamedTuple{(:val, :set, :idx), Tuple{Float64,Int,Int}}}}()
-
-    current = [(val=v[1], set=g[1], idx=idx[1])]
-
-    for i in 2:length(v)
-        prev = v[i-1]
-        curr = v[i]
-
-        if abs(curr - prev) ≤ tol * min(curr, prev)
-            push!(current, (val=curr, set=g[i], idx=idx[i]))
-        else
-            push!(clusters, current)
-            current = [(val=curr, set=g[i], idx=idx[i])]
-        end
-    end
-
-    push!(clusters, current)
-
-    for c in clusters
-        sort!(c, by = x -> x.set)
-    end
-
-    # Keep only clusters appearing in ≥2 datasets
-    multi = [c for c in clusters if length(unique(getfield.(c, :set))) ≥ 2]
-
-    return multi
-end
-
-clusters = cluster_by_tolerance(Ics; tol=0.05);
-summaries = [
-    (
-        mean_val = mean(getfield.(c, :val)),
-        std_val  = std(getfield.(c, :val)),
-        currents = getfield.(c, :val),
-        datasets = getfield.(c, :set),
-        indices  = getfield.(c, :idx)
-    )
-    for c in clusters
-];
-for s in summaries
+clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=0.05);
+clusters.raw
+for s in clusters.summary
     println("Value group ≈ $(@sprintf("%1.3f", s.mean_val)) ± $(round(s.std_val;sigdigits=1)) \t appears in datasets: ", s.datasets)
 end
 
@@ -172,7 +115,7 @@ for (i, Ic) in enumerate(Ics)
         label   = "$(data_directories[i])"
     )
 end
-for s in summaries
+for s in clusters.summary
     vline!([s.mean_val], line=(:dash, 0.80, 1, :grey26), label= nothing)
 end
 plot!(plt;
@@ -202,10 +145,10 @@ function get_F1(datadir)
 end
 
 peak_positions_dict = OrderedDict{Tuple{Int,String}, Matrix{Float64}}()
-for i in eachindex(summaries)
-    println("\nSummary $(@sprintf("%1.3f",summaries[i].mean_val))")
+for i in eachindex(clusters.summary)
+    println("\nSummary $(@sprintf("%1.3f",clusters.summary[i].mean_val))")
 
-    for (j, jset) in enumerate(summaries[i].datasets)
+    for (j, jset) in enumerate(clusters.summary[i].datasets)
         datadir = data_directories[jset]
         println("\t data set $(datadir)")
 
@@ -214,7 +157,7 @@ for i in eachindex(summaries)
         F1 = get_F1(datadir)
         nx, nz, nframes, ncurr = size(F1)
 
-        frameidx = summaries[i].indices[j]
+        frameidx = clusters.summary[i].indices[j]
         stack_z     = Vector{Vector{Float64}}(undef, nframes)
         stack_z_bin = Vector{Vector{Float64}}(undef, nframes)
 
@@ -294,7 +237,7 @@ for i in eachindex(summaries)
                 label= L"$(z_{\mathrm{max}}, A_{\mathrm{max}}) = (%$(round(peak_positions[l,1]; sigdigits=5))\mathrm{mm}, %$(round(peak_positions[l,2]; sigdigits=2)))$",
                 )
             plot!(
-                title  = L"$I_{c} = (%$(round.(summaries[i].mean_val,digits=3)) \vert %$(round(summaries[i].currents[j], digits=3))) \mathrm{A}$",
+                title  = L"$I_{c} = (%$(round.(clusters.summary[i].mean_val,digits=3)) \vert %$(round(clusters.summary[i].currents[j], digits=3))) \mathrm{A}$",
                 xlabel = L"$z \ (\mathrm{mm})$",
                 ylabel = "(ON-OFF)/(FLAT-DARK)", 
                 legend=:topleft,
@@ -307,14 +250,14 @@ for i in eachindex(summaries)
     end
 end
 
-for s in 1:length(summaries)
+for s in 1:length(clusters.summary)
     filtered_data = OrderedDict(
         k => copy(v) for (k,v) in peak_positions_dict if k[1] == s
     )
     filtered_label = [k[2] for k in keys(filtered_data)]
     colrs = palette(:darkrainbow,length(filtered_label));
     fig = plot(
-        title = "$(@sprintf("%0.3f",summaries[s].mean_val))A",
+        title = "$(@sprintf("%0.3f",clusters.summary[s].mean_val))A",
         yaxis=(L"$z_{\mathrm{max}} \ (\mathrm{mm})$",:identity),
         xaxis=("Amplitude", :identity),
     )
@@ -328,8 +271,8 @@ for s in 1:length(summaries)
             seriestype=:scatter,
             marker=(:circle,0.75,3,colrs[idx],stroke(2,0.99,colrs[idx]))
         )
-        hline!(fig, [data_results[f_dir].framewise_mm[summaries[s].indices[idx]]],
-            ribbon = data_results[f_dir].δframewise_mm[summaries[s].indices[idx]],
+        hline!(fig, [data_results[f_dir].framewise_mm[clusters.summary[s].indices[idx]]],
+            ribbon = data_results[f_dir].δframewise_mm[clusters.summary[s].indices[idx]],
             line=(:dot, colrs[idx],2),
             fillcolor = colrs[idx],
             fillalpha = 0.1,
@@ -355,7 +298,7 @@ end
 
 # New dictionary: key = s, value = Matrix with all rows concatenated
 peak_amp_by_s = OrderedDict{Int, Matrix{Float64}}()
-for s in 1:length(summaries)
+for s in 1:length(clusters.summary)
 
     filtered_data = OrderedDict(
         k => copy(v) for (k,v) in peak_positions_dict if k[1] == s
@@ -392,7 +335,7 @@ fig = plot3d(
     zlabel = L"$z_{\mathrm{max}}$ (mm)",
     title  = "3D Scatter of All Peak Positions",
     legend = false,
-    xticks = (collect(1:2:39),["$(@sprintf("%1.3f",summaries[i].mean_val))" for i in 1:2:39]),
+    xticks = (collect(1:2:39),["$(@sprintf("%1.3f",clusters.summary[i].mean_val))" for i in 1:2:39]),
     size = (800, 800),  
     xtickfont = font(8),
     ytickfont = font(8),
@@ -419,5 +362,3 @@ annotate!(
     text("Current (A)", 12, :black)   # font size & color
 )
 display(fig)
-
-

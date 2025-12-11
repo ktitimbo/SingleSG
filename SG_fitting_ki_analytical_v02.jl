@@ -493,6 +493,29 @@ table_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","q
 # --- Experiment combined ---
 exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"];
 @info "Experimental data loaded"
+# 1. Fit spline for the experiment data
+data_experiment = Spline1D(
+    exp_avg[:i_smooth], 
+    exp_avg[:z_smooth], 
+    k=3, 
+    bc="extrapolate", 
+    s=0.0, 
+    w = 1 ./ exp_avg[:δz_smooth].^2
+)
+# xq and δxq from grouped data
+xq  = exp_avg[:Ic_grouped][:,1]
+δxq = exp_avg[:Ic_grouped][:,2]
+
+# 2. Spline derivative at xq
+dyq = derivative(data_experiment, xq; nu=1)
+
+# 3. Interpolate δy uncertainty to xq
+err_spline = Spline1D(exp_avg[:i_smooth], exp_avg[:δz_smooth], k=3, bc="extrapolate")
+δy_interp = err_spline.(xq)   # now same length as xq
+
+# 4. Total propagated uncertainty
+δyq = sqrt.( (dyq .* δxq).^2 .+ δy_interp.^2 )
+
 # --------------------------------
 
 nx_bins , nz_bins = 128 , 2
@@ -1283,7 +1306,7 @@ function fit_ki_joint_scaling_fitsubset(
 
     # Unpack experimental current and z_max
     Iexp = data[:,1]
-    yexp = data[:,2]
+    yexp = data[:,3]
 
     N = length(Iexp)
 
@@ -1396,20 +1419,17 @@ function fit_ki_joint_scaling_fitsubset(
     )
 end
 
-
-
-
 i_threshold = 0.025;
 i_start  = searchsortedfirst(exp_avg[:i_smooth],i_threshold);
-data     = hcat(exp_avg[:i_smooth],exp_avg[:z_smooth],exp_avg[:δz_smooth])[i_start:end,:];
+data     = hcat(exp_avg[:i_smooth],0.02*exp_avg[:i_smooth],exp_avg[:z_smooth],exp_avg[:δz_smooth])[i_start:end,:];
 result = fit_ki_joint_scaling_fitsubset(
     data,
     zqm,
     ki_itp,
     0.750,                                  # tail threshold
     (ki_list[ki_start], ki_list[ki_stop]); # bracket
-    n_front = 7,
-    n_back  = 6,
+    n_front = 7*2,
+    n_back  = 6*2,
     w       = 0.50,
     ref_type=:geom,
     # ref_type=:arith,
@@ -1421,12 +1441,12 @@ fig=plot(
 # Scaled magnification
 scaled_mag = result.scale_factor
 data_scaled = copy(data)
-data_scaled[:, 2] ./= scaled_mag
 data_scaled[:, 3] ./= scaled_mag
+data_scaled[:, 4] ./= scaled_mag
 global_mag_factor = scaled_mag*MyExperimentalAnalysis.mag_factor("20250814")[1]
 plot!(fig,
-    data_scaled[:,1],data_scaled[:,2],
-    ribbon = data_scaled[:,3],
+    data_scaled[:,1],data_scaled[:,3],
+    ribbon = data_scaled[:,4],
     label=L"Experimental data (magnif.factor $m = %$(round(global_mag_factor, digits=4))$)",
     line=(:dash,:darkgreen,3),
     fillcolor = :darkgreen,
@@ -1434,7 +1454,7 @@ plot!(fig,
 )
 data_fitting = data[[1:6; (end-5):(end)], :]
 data_scaled_fitting = data_scaled[[1:6; (end-5):(end)], :]
-fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, ki_list, (ki_start,ki_stop))
+fit_scaled   = fit_ki(data_scaled[:,[1,3]], data_scaled_fitting[:,[1,3]], ki_list, (ki_start,ki_stop))
 I_scan = logspace10(i_threshold,1.00; n=101);
 plot!(fig,I_scan, zqm.(I_scan),
     label="Quantum mechanical model",
@@ -1463,8 +1483,117 @@ plot!(fig,
     left_margin=3mm,
 )
 display(fig)
-savefig(fig,joinpath(OUTDIR,"single_SG_comparison.svg"))
-joinpath(OUTDIR,"single_SG_comparison.SVG")
+
+
+# Scattered data
+i_threshold = 0.025;
+i_start  = searchsortedfirst(xq,i_threshold)
+data     = hcat(xq, δxq, data_experiment.(xq), δyq)[i_start:end,:]
+
+fig=plot(    
+    # title = L"Peak position ($F=1$)",
+)
+# Scaled magnification
+scaled_mag = result.scale_factor
+data_scaled = copy(data)
+data_scaled[:, 3] ./= scaled_mag
+data_scaled[:, 4] ./= scaled_mag
+global_mag_factor = scaled_mag*MyExperimentalAnalysis.mag_factor("20250814")[1]
+plot!(fig,
+    data_scaled[:,1],data_scaled[:,3],
+    xerr = data_scaled[:,2],
+    yerr = data_scaled[:,4],
+    label=L"Experimental data (magnif.factor $m = %$(round(global_mag_factor, digits=4))$)",
+    seriestype=:scatter,
+    marker = (:circle,4,:white,stroke(0.5,:black) )
+    # line=(:dash,:darkgreen,3),
+    # fillcolor = :darkgreen,
+    # fillalpha = 0.35,
+)
+I_scan = logspace10(i_threshold,1.00; n=101);
+plot!(fig,I_scan, zqm.(I_scan),
+    label="Existing models",
+    line=(:dash,:blue,1.75)
+)
+plot!(fig,
+    I_scan, ki_itp.(I_scan, Ref(fit_scaled.ki)),
+    label=L"Coquantum dynamics: $k_{i}= \left( %$(round(result.ki_fit, digits=4)) \pm %$(round(result.mse, sigdigits=1)) \right) \times 10^{-6} $",
+    line=(:solid,:red,2),
+    # marker=(:xcross, :blue, 0.2),
+    markerstrokewidth=1
+)
+plot!(fig,
+    xlabel = "Coil Current (A)",
+    ylabel = L"$F=1$ peak position (mm)",
+    xaxis=:log10,
+    yaxis=:log10,
+    labelfontsize=14,
+    tickfontsize=12,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # xlims=(0.010,1.05),
+    size=(900,800),
+    # legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendfontsize=12,
+    left_margin=3mm,
+)
+display(fig)
+savefig(fig,joinpath(OUTDIR,"single_SG_comparison.png"))
+
+
+# vs Gradient
+gradvsI(x) = TheoreticalSimulation.GvsI(x)
+
+fig=plot(    
+    # title = L"Peak position ($F=1$)",
+)
+# Scaled magnification
+scaled_mag = result.scale_factor
+data_scaled = copy(data)
+data_scaled[:, 3] ./= scaled_mag
+data_scaled[:, 4] ./= scaled_mag
+global_mag_factor = scaled_mag*MyExperimentalAnalysis.mag_factor("20250814")[1]
+plot!(fig,
+    gradvsI.(data_scaled[:,1]),data_scaled[:,3],
+    xerr = gradvsI.(data_scaled[:,2]),
+    yerr = data_scaled[:,4],
+    label=L"Experimental data (magnif.factor $m = %$(round(global_mag_factor, digits=4))$)",
+    seriestype=:scatter,
+    marker = (:circle,4,:white,stroke(0.5,:black) )
+    # line=(:dash,:darkgreen,3),
+    # fillcolor = :darkgreen,
+    # fillalpha = 0.35,
+)
+I_scan = logspace10(i_threshold,1.00; n=101);
+plot!(fig,gradvsI.(I_scan), zqm.(I_scan),
+    label="Existing models",
+    line=(:dash,:blue,1.75)
+)
+plot!(fig,
+    gradvsI.(I_scan), ki_itp.(I_scan, Ref(fit_scaled.ki)),
+    label=L"Coquantum dynamics: $k_{i}= \left( %$(round(result.ki_fit, digits=4)) \pm %$(round(result.mse, sigdigits=1)) \right) \times 10^{-6} $",
+    line=(:solid,:red,2),
+    # marker=(:xcross, :blue, 0.2),
+    markerstrokewidth=1
+)
+plot!(fig,
+    xlabel = "Magnetic field gradient (T/m)",
+    ylabel = L"$F=1$ peak position (mm)",
+    xaxis=:log10,
+    yaxis=:log10,
+    labelfontsize=14,
+    tickfontsize=12,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # xlims=(0.010,1.05),
+    size=(900,800),
+    # legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendfontsize=12,
+    left_margin=3mm,
+)
+display(fig)
+savefig(fig,joinpath(OUTDIR,"single_SG_comparison_vsg.svg"))
+savefig(fig,joinpath(OUTDIR,"single_SG_comparison_vsg.png"))
 
 
 
@@ -1479,6 +1608,7 @@ struct FitStats
     BIC::Float64
     NMAD::Float64
 end
+
 
 function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
     @assert length(x) == length(y) == length(ypred)
@@ -1528,11 +1658,11 @@ function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
 end
 
 
-data     = hcat(exp_avg[:i_smooth],exp_avg[:z_smooth],exp_avg[:δz_smooth])[i_start:5:end,:]
+data     = hcat(xq, δxq, data_experiment.(xq), δyq)[i_start:end,:]
 
 x_exp = data[:,1]
-y_exp = data[:,2] ./ scaled_mag
-σ_exp = data[:,3] ./ scaled_mag
+y_exp = data[:,3] ./ scaled_mag
+σ_exp = data[:,4] ./ scaled_mag
 y_CQD = ki_itp.(x_exp, Ref(result.ki_fit))
 y_QM  = zqm.(x_exp) 
 
@@ -1595,7 +1725,7 @@ hl_best = TextHighlighter(
         return false
     end,
     crayon"fg:black bg:#fff7a1"
-)
+);
 
 
 pretty_table(
@@ -1655,8 +1785,8 @@ Returns a tuple of plots: (p_data, p_residuals, p_hist, p_bars).
         title = "Data vs Models (log-log space)",
         legend = :bottomright,
     )
-    plot!(p_data, x, y_CQD; label="CQD model", line = (:solid,:blue,1.5))
-    plot!(p_data, x, y_QM;  label="QM model",  line =(:dot,:red,2))
+    plot!(p_data, x, y_CQD; label="CQD model", line = (:solid,:red,1.5))
+    plot!(p_data, x, y_QM;  label="QM model",  line =(:dot,:blue,2))
 
     # ---------------------------------------------------
     # 2) Log residuals vs x
@@ -1664,7 +1794,7 @@ Returns a tuple of plots: (p_data, p_residuals, p_hist, p_bars).
     p_resid = plot(
         x, r_CQD;
         seriestype = :scatter,
-        marker = (:circle,5,0.70,:royalblue3, stroke(0.8,:blue4)),
+        marker = (:circle,5,0.70,:salmon3, stroke(0.8,:red4)),
         xlabel = "Coil Current (A)",
         ylabel = L"\mathrm{log}(y_{model}) - \mathrm{log}(y_{exp})",
         title = "Log-space Residuals",
@@ -1672,12 +1802,13 @@ Returns a tuple of plots: (p_data, p_residuals, p_hist, p_bars).
         xscale = :log10,
     )
     scatter!(p_resid, x, r_QM; label="QM residuals",
-        marker = (:circle,5,0.70,:salmon3, stroke(0.8,:red4)),)
+        marker = (:circle,5,0.70,:royalblue3, stroke(0.8,:blue4)),
+    )
     hline!(p_resid, [0.0]; c=:black, ls=:dash, label="perfect fit")
     # Annotate with global metrics
     txt_CQD = @sprintf "CQD: logRMSE = %.3g, R2_log = %.4f" stats_CQD.logRMSE stats_CQD.R2_log
     txt_QM  = @sprintf "QM:  logRMSE = %.3g, R2_log = %.4f" stats_QM.logRMSE  stats_QM.R2_log
-    x_annot = 0.6*x[argmin(abs.(x .- median(x)))]  # roughly middle x
+    x_annot = x[argmin(abs.(x .- median(x)))]  # roughly middle x
     ymin, ymax = extrema(vcat(r_CQD, r_QM))
     annotate!(p_resid, (x_annot, 0.8*ymax, Plots.text(txt_CQD, 8)))
     annotate!(p_resid, (x_annot, 0.8*ymax - 0.1*(ymax-ymin), Plots.text(txt_QM, 8)))
@@ -1688,7 +1819,7 @@ Returns a tuple of plots: (p_data, p_residuals, p_hist, p_bars).
     p_hist = histogram(
         r_CQD;
         normalize = true,
-        color=:blue,
+        color=:red,
         alpha = 0.4,
         label = "CQD residuals",
         xlabel = "log-space residual r",
@@ -1697,7 +1828,7 @@ Returns a tuple of plots: (p_data, p_residuals, p_hist, p_bars).
     )
     histogram!(p_hist, r_QM; 
         normalize = true, 
-        color=:red,
+        color=:blue,
         alpha = 0.4, 
         label="QM residuals")
     vline!(p_hist, [0.0]; c=:black, ls=:dash, lw=1, label="r = 0")
