@@ -1849,3 +1849,13 @@ plot(p1, p2, p3;
     size = (1000, 1000),
     left_margin=3mm,
 )
+
+result = [
+    [exp10(p) * x for p in -7:-6 for x in 1.0:0.1:9.9]; # Decades -7 to -6
+    exp10(-5) * (1:0.1:10);                             # Decade -5
+    exp10.(-3:0)                                        # Decades -3 to 0
+]
+
+using Plots
+plot(result,
+    yaxis=:log10)

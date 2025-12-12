@@ -1448,7 +1448,7 @@ module MyExperimentalAnalysis
 
 
         if !weighted
-            # Plain mean over ALL entries (no threshold), as in your original
+            # Plain mean over ALL entries (no threshold)
             N   = length(x)
             μ   = mean(x)
             s   = std(x; corrected=true)
