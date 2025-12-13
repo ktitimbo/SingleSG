@@ -1497,7 +1497,7 @@ module MyExperimentalAnalysis
 
 
     function mag_factor(directory::String)
-        if directory == "20251109"
+        if directory > "20251101"
             # values = (0.996,0.0047)
             values = (1.08,0.03)
         else
