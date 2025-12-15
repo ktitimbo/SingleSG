@@ -488,7 +488,7 @@ nz_set  = sort(unique(getindex.(keys_vec, 2)))
 gw_set  = sort(unique(getindex.(keys_vec, 3)))
 λ0_set  = sort(unique(getindex.(keys_vec, 4)))
 # --- Quantum mechanics data ---
-table_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"];
+table_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_5M","qm_5000000_screen_profiles_table.jld2"))["table"];
 @info "QM data loaded"
 # --- Experiment combined ---
 exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"];
@@ -1301,13 +1301,14 @@ function fit_ki_joint_scaling_fitsubset(
     n_front::Int = 6,
     n_back::Int  = 6,
     w::Float64   = 0.7,
-    ref_type::Symbol = :arith,   # :arith or :geom)
+    ref_type::Symbol = :arith,   # :arith or :geom
+    )
 
     # Unpack experimental current and z_max
-    Iexp = data[:,1]
-    yexp = data[:,3]
+    Iexp = data[:,1];
+    yexp = data[:,3];
 
-    N = length(Iexp)
+    N = length(Iexp);
 
     # ------------------------------
     # 1) Tail region (for scaling)
@@ -1556,7 +1557,7 @@ plot!(fig,
     gradvsI.(data_scaled[:,1]),data_scaled[:,3],
     xerr = gradvsI.(data_scaled[:,2]),
     yerr = data_scaled[:,4],
-    label=L"Experimental data (magnif.factor $m = %$(round(global_mag_factor, digits=4))$)",
+    label=L"Experiment (mag. $m = %$(round(global_mag_factor, digits=4))$)",
     seriestype=:scatter,
     marker = (:circle,4,:white,stroke(0.5,:black) )
     # line=(:dash,:darkgreen,3),
@@ -1668,7 +1669,6 @@ y_QM  = zqm.(x_exp)
 
 stats_CQD = goodness_of_fit(x_exp, y_exp, y_CQD; σ = σ_exp, k = 2)
 stats_QM  = goodness_of_fit(x_exp, y_exp, y_QM;  σ = σ_exp, k = 1)
-
 
 metrics = [
     "logMSE",
@@ -1855,7 +1855,5 @@ result = [
     exp10(-5) * (1:0.1:10);                             # Decade -5
     exp10.(-3:0)                                        # Decades -3 to 0
 ]
-
-using Plots
 plot(result,
     yaxis=:log10)
