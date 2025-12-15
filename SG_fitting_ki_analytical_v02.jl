@@ -1301,8 +1301,7 @@ function fit_ki_joint_scaling_fitsubset(
     n_front::Int = 6,
     n_back::Int  = 6,
     w::Float64   = 0.7,
-    ref_type::Symbol = :arith,   # :arith or :geom
-)
+    ref_type::Symbol = :arith,   # :arith or :geom)
 
     # Unpack experimental current and z_max
     Iexp = data[:,1]
@@ -1539,7 +1538,7 @@ plot!(fig,
 )
 display(fig)
 savefig(fig,joinpath(OUTDIR,"single_SG_comparison.png"))
-
+savefig(fig,joinpath(OUTDIR,"single_SG_comparison.svg"))
 
 # vs Gradient
 gradvsI(x) = TheoreticalSimulation.GvsI(x)
@@ -1583,11 +1582,12 @@ plot!(fig,
     yaxis=:log10,
     labelfontsize=14,
     tickfontsize=12,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    # xlims=(0.010,1.05),
+    xlims=(5,400),
     size=(900,800),
     # legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legend=:topleft,
     legendfontsize=12,
     left_margin=3mm,
 )

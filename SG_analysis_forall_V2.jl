@@ -779,7 +779,6 @@ for (row, (λ0,nz_binning)) in enumerate(Iterators.product(λ0_list, nbins_list)
                     )
     )
 
-
     df_mean = DataFrame(
         Icoil_A                 =  Icoils,
         Icoil_error_A           =  ΔIcoils, 
