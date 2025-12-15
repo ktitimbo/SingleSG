@@ -61,7 +61,7 @@ data_JSF = OrderedDict(
 
 # To be generalized
 data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
-nz_fix, σ_fix, λ0_fix = (2,0.300,0.01)
+nz_fix, σ_fix, λ0_fix = (2,0.200,0.01)
 chosen_qm = data_qm[(nz_fix, σ_fix, λ0_fix)]
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
 zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
@@ -74,18 +74,8 @@ zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)
 #  1.4240360171699535, 1.5814155127000782, 1.6859927244621518, 1.8169193762660025]
 #
 
-function mag_factor(directory::String)
-    if directory == "20251109"
-        values = (0.996,0.0047)
-    else
-        values = (1.1198,0.0061) 
-    end
-    return values
-end
-
-
 parent_folder = joinpath(@__DIR__, "analysis_data");
-data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006","20251109"];
+data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
 
 n_runs = length(data_directories);
 I_all  = Vector{Vector{Float64}}(undef, n_runs);
@@ -244,7 +234,7 @@ m_sets = map(d -> DataReading.collect_fw_map(
 
 # desired values
 selected_bin = 2
-selected_spl = 0.01
+selected_spl = λ0_fix
 
 # exact match (safe for Int; Float uses == here)
 key_run = Vector{Union{Nothing,String}}(undef, length(m_sets))
@@ -369,6 +359,19 @@ println("\nComparison of differente experiments finished!\n\n")
 #######################################################################################################################
 ######################################### AVERAGING ###################################################################
 #######################################################################################################################
+Ics = Vector{Vector{Float64}}(undef, length(data_directories));
+tol_grouping = 0.05
+for (i, dir) in enumerate(data_directories)
+    data = load(joinpath(@__DIR__, dir, "data_processed.jld2"), "data")
+    Ics[i] = data[:Currents]
+end
+clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping);
+clusters.raw
+for s in clusters.summary
+    println("Value group ≈ $(@sprintf("%1.3f", s.mean_val)) ± $(round(s.std_val;sigdigits=1)) \t appears in datasets: ", s.datasets)
+end
+Ic_grouped  = round.([clusters.summary[i].mean_val for i in 1:length(clusters.summary)]; digits=3)
+δIc_grouped = round.([clusters.summary[i].std_val for i in 1:length(clusters.summary)]; sigdigits=1)
 
 
 magnification_factor_ith =  [mag_factor(d)[1] for d in data_directories]
@@ -502,7 +505,7 @@ ysets  = [smf .* t[i:end, col[:y]] for (t, i, smf) in zip(tables, CURRENT_ROW_ST
               (magfac_err .* smf).^2
           )
           for (t, i, smf,magfac_err) in zip(tables, CURRENT_ROW_START, scale_mag_factor, magnification_factor_error_ith)]
-i_sampled_length = 300
+i_sampled_length = 1000
 
 # pick a log-spaced grid across the overall x-range (nice for decades-wide currents)
 xlo = minimum(first.(xsets))
@@ -553,6 +556,10 @@ saveplot(fig, "MC_interpolation")
 # spl = Spline1D(m_sets[1][runs[1]][3][!,"Icoil_A"], m_sets[1][runs[1]][3][!,"F1_z_centroid_mm"]; k=3, s=0.5, bc="extrapolate")   # k=3 cubic; s=0 exact interpolate, s>0 smoothing
 
 using BSplineKit
+i_sampled_length = 2*i_sampled_length
+i_xx = round.(range(threshold,1.000,length=i_sampled_length); digits=5)
+i_xx0 = sort(union(i_xx,Ic_grouped))[3:end]
+i_sampled_length = length(i_xx0)
 
 fig = plot(
     xlabel="Current (A)",
@@ -560,21 +567,20 @@ fig = plot(
     xlims = (10e-3,1.0),
     ylims = (8e-3, 2),
 )
-i_xx = range(10e-3,0.999,length=i_sampled_length)
 z_final = zeros(length(data_directories),i_sampled_length)
-cols = palette(:darkrainbow, length(data_directories))
+cols = palette(:darkrainbow, length(data_directories));
 for i=1:length(data_directories)
     xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
     ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]*scale_mag_factor[i]
     spl = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
-    z_final[i,:] = spl.(i_xx)
+    z_final[i,:] = spl.(i_xx0)
     scatter!(fig,xs, ys,
         label=data_directories[i],
         marker=(:circle, :white,3),
         markerstrokecolor=cols[i],
         markerstrokewidth=1,
         )
-    plot!(fig,i_xx,spl.(i_xx),
+    plot!(fig,i_xx0,spl.(i_xx0),
         label=false,
         line=(cols[i],1))
 end
@@ -589,11 +595,12 @@ yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0
 )
 zf1 = vec(mean(z_final, dims=1))
 δzf1 = vec(std(z_final; dims=1, corrected=true)/sqrt(length(data_directories)))
-plot!(fig, i_xx, zf1,
+hcat(zf1,δzf1)
+plot!(fig, i_xx0, zf1,
     ribbon = δzf1,
     fillalpha=0.40, 
     fillcolor=:gray36, 
-    label="Average",
+    label="Mean",
     line=(:dash,:black,:2))
 display(fig)
 saveplot(fig, "interpolation")
@@ -602,7 +609,6 @@ fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
 )
-i_xx = range(10e-3,0.999,length=i_sampled_length)
 z_final_fit = zeros(length(data_directories),i_sampled_length)
 cols = palette(:darkrainbow, length(data_directories))
 for i=1:length(data_directories)
@@ -611,21 +617,21 @@ for i=1:length(data_directories)
     # δys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"]*scale_mag_factor
     δys = abs.(ys) .* sqrt.( (m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"] ./ m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]).^2 .+ (magnification_factor_error_ith[i]*scale_mag_factor[i]).^2 )
     spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
-    z_final_fit[i,:] = spl.(i_xx)
+    z_final_fit[i,:] = spl.(i_xx0)
     scatter!(fig,xs, ys,
         label=data_directories[i],
         marker=(:circle, :white,3),
         markerstrokecolor=cols[i],
         markerstrokewidth=1,
         )
-    plot!(fig,i_xx,spl.(i_xx),
+    plot!(fig,i_xx0,spl.(i_xx0),
         label=false,
         line=(cols[i],1))
 end
 plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
 display(fig)
 plot!(fig,
-title = "Smoothing cubic spline",
+title = "Fit smoothing cubic spline",
 xaxis=:log10, 
 yaxis=:log10,
 xticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
@@ -636,11 +642,12 @@ ylims = (8e-3, 2),
 display(fig)
 zf1_fit = vec(mean(z_final_fit, dims=1))
 δzf1_fit = vec(std(z_final_fit; dims=1, corrected=true)/sqrt(length(data_directories)))
-plot!(fig, i_xx, zf1_fit,
+hcat(zf1_fit,δzf1_fit)
+plot!(fig,i_xx0, zf1_fit,
     ribbon = δzf1_fit,
     fillalpha=0.40, 
     fillcolor=:gray36, 
-    label="Average",
+    label="Mean",
     line=(:dash,:black,:2))
 display(fig)
 saveplot(fig, "smoothing_interpolation")
@@ -649,13 +656,13 @@ fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
 )
-plot!(fig,i_xx, zf1_fit,
+plot!(fig,i_xx0, zf1_fit,
     ribbon = δzf1_fit,
     fillalpha=0.40, 
     fillcolor=:green, 
     label="Average: smoothing cubic spline",
     line=(:dot,:green,:2))
-plot!(fig, i_xx, zf1,
+plot!(fig, i_xx0, zf1,
     ribbon = δzf1,
     fillalpha=0.40, 
     fillcolor=:dodgerblue, 
@@ -685,13 +692,13 @@ fig = plot(
     xlabel="Magnetic field gradient  (T/m)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
 )
-plot!(fig,TheoreticalSimulation.GvsI(i_xx), zf1_fit,
+plot!(fig,TheoreticalSimulation.GvsI(i_xx0), zf1_fit,
     ribbon = δzf1_fit,
     fillalpha=0.40, 
     fillcolor=:green, 
     label="Average: smoothing cubic spline",
     line=(:dot,:green,:2))
-plot!(fig, TheoreticalSimulation.GvsI(i_xx), zf1,
+plot!(fig, TheoreticalSimulation.GvsI(i_xx0), zf1,
     ribbon = δzf1,
     fillalpha=0.40, 
     fillcolor=:dodgerblue, 
@@ -716,22 +723,27 @@ display(fig)
 saveplot(fig, "g_inter_vs_mc_vs_fit")
 
 
+
 jldsave(joinpath(OUTDIR,"data_averaged_$(selected_bin).jld2"), 
     data=OrderedDict(
-        :nz_bin     => selected_bin,
-        :λ0_spl     => selected_spl,
+        :nz_bin         => selected_bin,
+        :λ0_spl         => selected_spl,
+        :dir            => data_directories,
+        :mag_factor     => hcat(magnification_factor_ith ,magnification_factor_error_ith),
+        :tol_grouping   => tol_grouping,
+        :Ic_grouped     => hcat(Ic_grouped , δIc_grouped),
         # Interpolated data => Mean
-        :i_interp   => i_xx,
-        :z_interp   => zf1,
-        :δz_interp  => δzf1,
+        :i_interp       => i_xx0,
+        :z_interp       => zf1,
+        :δz_interp      => δzf1,
         # Fitting data => Mean
-        :i_smooth   => i_xx,
-        :z_smooth   => zf1_fit,
-        :δz_smooth  => δzf1_fit,
+        :i_smooth       => i_xx0,
+        :z_smooth       => zf1_fit,
+        :δz_smooth      => δzf1_fit,
         # MonteCarlo sampling => Mean
-        :i_mc       => xq,
-        :z_mc       => μ,
-        :δz_mc      => σ
+        :i_mc           => xq,
+        :z_mc           => μ,
+        :δz_mc          => σ
     )
 )
 
@@ -739,3 +751,112 @@ T_END = Dates.now()
 T_RUN = Dates.canonicalize(T_END-T_START)
 println("\nEXPERIMENTS ANALYSIS FINISHED! $(T_RUN)")
 alert("EXPERIMENTS ANALYSIS FINISHED!")
+
+
+using Optim
+
+zQM_itpl = BSplineKit.extrapolate(BSplineKit.interpolate(Ic_qm, zm_qm, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
+# index cutoff
+idx = 8
+
+
+
+# -------------------------------------------------------------
+# 1. Scaling model:   z_scaled = X/s + r
+# -------------------------------------------------------------
+scale_model(X, r, s) = @. X/s + r 
+
+# -------------------------------------------------------------
+# 2. Log-error function with positivity constraints
+# -------------------------------------------------------------
+function log_error(X::Vector, Y::Vector)
+    function f(x)
+        r, s = x
+        s <= 0 && return Inf
+
+        vals = scale_model(X, r, s)
+        any(vals .<= 0) && return Inf  # log safety
+
+        diff = log10.(Y) .- log10.(vals)
+        return sum(diff .^ 2)
+    end
+    return f
+end
+
+# -------------------------------------------------------------
+# 3. Fit (r, s) using Nelder–Mead
+# -------------------------------------------------------------
+function fit_rs(X::Vector, Y::Vector; x0=[0.0, 1.0])
+    f = log_error(X, Y)
+    res = optimize(f, x0, NelderMead())
+    return Optim.minimizer(res) 
+end
+
+# -------------------------------------------------------------
+# Plot (QM vs Experiment)
+# -------------------------------------------------------------
+function plotting_qm_fixed(X::Vector,Y::Vector; idx::Integer = 1, title::String = "title" , yscale::Symbol = :identity)
+    z0_fit, m_fit = fit_rs(X, Y; x0=[0.0, 1.0])
+
+    X_scaled = scale_model(X, z0_fit, m_fit)
+
+    fig1 = plot(Ic_qm, zm_qm,
+        label="Model: QM",
+        line=(:dash,:blue,2));
+    plot!(i_xx0[idx:end], X_scaled,
+        label="Experiment: Scaled ($(@sprintf("%2.2f",m_fit*mean(magnification_factor_ith))), $(@sprintf("%2.2f",1000*z0_fit))μm)",
+        line=(:solid,0.75,2,:red)
+    );
+    plot!(
+        title=title,
+        xaxis = (L"$I_{c} \ (\mathrm{A})$",
+                (10e-3,1),
+                ([1e-3, 1e-2, 1e-1, 1.0], 
+                    [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+                :log10,),
+        yaxis=(L"$z_{\mathrm{max}} \ (\mathrm{mm})$",yscale),
+        legend=:bottomright,
+    );
+    display(fig1)
+
+    fig2 = plot(i_xx0[idx:end], 100 .*( Y ./ X  .- 1),
+        label="Experiment : original",
+        line=(:solid,:red,2)
+    );
+    plot!(i_xx0[idx:end], 100*(Y ./ X_scaled .- 1),
+        label  = "Experiment : scaled",
+        line=(:solid,:dodgerblue4,2),
+        ylabel = "Relative Error (%)",
+        xaxis = (L"$I_{c} \ (\mathrm{A})$",
+                (10e-3,1),
+                ([1e-3, 1e-2, 1e-1, 1.0], 
+                    [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+                :log10,),
+    );
+    hline!([0], line=(:dash,:black,1), label=nothing)
+
+    fig = plot(fig1,fig2,
+        layout=(2,1),
+        size=(800,500),
+        left_margin=3mm,)
+    display(fig)
+
+    return (m_fit = m_fit, z0_fit = z0_fit, fig=fig)
+end
+
+plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:log10)
+plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:identity)
+
+plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:log10)
+plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:identity)
+
+ss = load(joinpath(@__DIR__,"20250820","data_processed.jld2"))
+
+ss["data"]
+ss["data"][:Currents]
+size(ss["data"][:F1ProcessedImages])
+ss["data"][:F1ProcessedImages]
+
+[:,:,30,20]
+
+[:F1_data]

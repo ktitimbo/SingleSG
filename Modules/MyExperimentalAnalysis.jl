@@ -1448,7 +1448,7 @@ module MyExperimentalAnalysis
 
 
         if !weighted
-            # Plain mean over ALL entries (no threshold), as in your original
+            # Plain mean over ALL entries (no threshold)
             N   = length(x)
             μ   = mean(x)
             s   = std(x; corrected=true)
@@ -1495,6 +1495,158 @@ module MyExperimentalAnalysis
         return (mean=μ, sem=sem)
     end
 
+
+    function mag_factor(directory::String)
+        if directory > "20251101"
+            # values = (0.996,0.0047)
+            values = (1.08,0.03)
+        else
+            # values = (1.1198,0.0061) 
+            values = (1.28,0.01) 
+        end
+        return values
+    end
+
+
+    """
+        cluster_by_tolerance(Ics; tol = 0.08)
+
+    Cluster values from multiple datasets when they are numerically close within a
+    relative tolerance. This is useful when several datasets contain floating-point
+    values (for example, peak positions or inferred parameters) and you want to
+    identify common values across datasets.
+
+    # Arguments
+    - `Ics`: A vector of vectors. Each element `Ics[j]` is a dataset containing
+    numerical values.
+    - `tol`: Relative tolerance (default = 0.08). Two values `x` and `y` belong to
+    the same cluster when `abs(x - y) ≤ tol * min(x, y)`.
+
+    A named tuple with two fields:
+
+    ### 1. `raw`
+    A vector of clusters, where each cluster is a vector of named tuples
+
+        (val = Float64, set = Int, idx = Int)
+
+    with:
+    - `val`: the numerical value  
+    - `set`: the dataset index (1-based)  
+    - `idx`: the index of the value inside that dataset (1-based)
+
+    Only clusters that include values from at least two distinct datasets are
+    included in `raw`.
+
+    ### 2. `summary`
+    A vector of summaries, one per cluster in `raw`.  
+    Each summary is a named tuple:
+
+        (
+            mean_val = Float64,
+            std_val  = Float64,
+            currents = Vector{Float64},
+            datasets = Vector{Int},
+            indices  = Vector{Int}
+        )
+
+    Fields:
+    - `mean_val`: mean of the clustered values  
+    - `std_val`: standard deviation of clustered values  
+    - `currents`: all values that form the cluster  
+    - `datasets`: dataset IDs of those values  
+    - `indices`: within-dataset indices of those values  
+
+    This provides a compact, analysis-ready representation of each cluster.
+
+    # Algorithm
+    1. Flatten all values across datasets while recording dataset index (`set`) and
+    within-dataset index (`idx`).
+    2. Sort the flattened values.
+    3. Group consecutive sorted values into clusters if they satisfy the relative
+    tolerance condition.
+    4. Sort each cluster by dataset index.
+    5. Discard clusters appearing in fewer than two datasets.
+    6. Construct both:
+    - the `raw` cluster representation, and
+    - the `summary` representation with aggregated statistics.
+
+    # Example
+        A = [1.00, 1.05, 2.10]
+        B = [0.97, 2.05, 4.00]
+        C = [1.08, 2.00, 3.90]
+
+        out = cluster_by_tolerance([A, B, C]; tol = 0.08)
+
+        out.raw      # vector of clusters
+        out.summary  # vector of summary statistics
+
+    # Notes
+    - Tolerance is relative, scaled by the smaller of the two values.
+    - Complexity is O(N log N) due to sorting.
+    - The function is deterministic for fixed inputs.
+    """
+    function cluster_by_tolerance(Ics; tol=0.08)
+        # Flatten values, dataset ids, and index-in-dataset
+        vals  = Float64[]
+        vidx  = Int[]
+        iidx  = Int[]
+
+        for (j, vec) in enumerate(Ics)
+            for (k, v) in enumerate(vec)
+                push!(vals, v)
+                push!(vidx, j)
+                push!(iidx, k)
+            end
+        end
+
+        # Sort all flattened values
+        p = sortperm(vals)
+        v  = vals[p]
+        g  = vidx[p]
+        idx = iidx[p]
+
+        # Clustering
+        clusters = Vector{Vector{NamedTuple{(:val, :set, :idx), Tuple{Float64,Int,Int}}}}()
+
+        current = [(val=v[1], set=g[1], idx=idx[1])]
+
+        for i in 2:length(v)
+            prev = v[i-1]
+            curr = v[i]
+
+            if abs(curr - prev) ≤ tol * min(curr, prev)
+                push!(current, (val=curr, set=g[i], idx=idx[i]))
+            else
+                push!(clusters, current)
+                current = [(val=curr, set=g[i], idx=idx[i])]
+            end
+        end
+
+        push!(clusters, current)
+
+        for c in clusters
+            sort!(c, by = x -> x.set)
+        end
+
+        # Keep only clusters appearing in ≥2 datasets
+        multi = [c for c in clusters if length(unique(getfield.(c, :set))) ≥ 2]
+
+        summary = [
+        (
+            mean_val = mean(getfield.(c, :val)),
+            std_val  = std(getfield.(c, :val)),
+            currents = getfield.(c, :val),
+            datasets = getfield.(c, :set),
+            indices  = getfield.(c, :idx)
+        )
+        for c in multi
+    ];
+
+        return (raw = multi, summary = summary)
+    end
+
+
+
     # Public API
     export saveplot, 
            compute_weights, 
@@ -1515,6 +1667,7 @@ module MyExperimentalAnalysis
            mean_z_profile,
            extract_profiles,
            plot_profiles,
-           post_threshold_mean
+           post_threshold_mean,
+           mag_factor
 
 end

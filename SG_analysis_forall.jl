@@ -44,15 +44,6 @@ SAVE_FIG = false
 MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
-function mag_factor(directory::String)
-    if directory == "20251109"
-        values = (0.996,0.0047)
-    else
-        values = (1.1198,0.0061) 
-    end
-    return values
-end
-
 # Data Directory
 data_directory      = "20251109" ;
 outfile_raw         = joinpath(data_directory, "data.jld2")

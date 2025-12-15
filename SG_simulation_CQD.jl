@@ -595,7 +595,74 @@ open(joinpath(OUTDIR,"simulation_report.txt"), "w") do io
     write(io, report)
 end
 
-
 println("script $RUN_STAMP has finished!")
 alert("script $RUN_STAMP has finished!")
 
+Ns = 2_800_000
+const INDIR = joinpath("F:\\cqd_simulation_$(1e-6*Ns)m","20251113T102859450","up")
+
+# --- Files ---
+files = sort(filter(f -> isfile(joinpath(INDIR, f)) && endswith(f, ".jld2"),
+               readdir(INDIR)))
+nfiles = length(files)
+
+# --- Parameters ---
+nruns = 10
+induction_coeff = vcat([
+    range(0.01,0.10,length=nruns),
+    range(0.1,1.0,length=nruns),
+    range(1.1,2.0,length=nruns),
+    range(2.1,3.0,length=nruns),
+    range(3.1,4.0,length=nruns),
+    range(4.1,5.0,length=nruns),
+    range(5.1,6.0,length=nruns),
+    range(10,100,length=nruns),
+    [0.001,0.01],
+    collect(range(6.1,10.0,length=4*nruns)),
+    [100.0,1000.0,10000.0]
+] ...)
+nz_bins           = [1,2,4,8];
+gaussian_width_mm = [0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.500 ];
+λ0_raw_list       = [0.005, 0.01, 0.02, 0.03, 0.04, 0.05];
+λ0_spline         = 0.001;
+
+# ----- OUTPUT DICT -----
+Ntot = length(files) * nruns * length(nz_bins) *
+       length(gaussian_width_mm) * length(λ0_raw_list)
+table = OrderedDict{Tuple{Float64,Int, Float64, Float64},
+                    OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
+
+lk = ReentrantLock()
+
+@threads for j in eachindex(files)
+    fname = files[j]
+    ki    = induction_coeff[j]
+    simpath = joinpath(INDIR, fname)
+
+    @info "Processing file $(j)/$(nfiles)" fname=fname ki=ki
+
+    # load once per file
+    data_sim = load(simpath, "screen")
+
+    for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
+        profiles_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
+            data_sim;
+            n_bins      = (64, nz),
+            width_mm    = gw,
+            add_plot    = false,
+            plot_xrange = :all,
+            branch      = :up,
+            λ_raw       = λ0_raw,
+            λ_smooth    = λ0_spline,
+            mode        = :probability
+        )
+
+        lock(lk)
+        table[(ki, nz, gw, λ0_raw)] = profiles_up
+        unlock(lk)
+    end
+end
+@info "Completed populating table"
+jldsave(joinpath(OUTDIR,"cqd_$(Ns)_screen_profiles_table_thread.jld2"), table = table)
+
+println("script $RUN_STAMP has finished!")

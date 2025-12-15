@@ -266,6 +266,7 @@ module TheoreticalSimulation
             fmf_levels, μF_effective, 
             generate_samples, generate_CQDinitial_conditions,
             plot_μeff, plot_SG_geometry, plot_velocity_stats,
-            QM_analyze_profiles_to_dict
+            QM_analyze_profiles_to_dict,
+            CQD_analyze_profiles_to_dict
 
 end
