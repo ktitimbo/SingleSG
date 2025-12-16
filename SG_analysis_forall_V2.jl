@@ -617,6 +617,31 @@ end
 
 # data for comparison
 data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
+data_qm  = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_5M","qm_5000000_screen_profiles_table.jld2"))["table"]
+
+
+# keys(data_qm)
+
+# plot(xlabel="Current (A)")
+# for nb in [1,2,4,8]
+#     for s in [0.065,0.100,0.200,0.300,0.500]
+# plot!([data_qm[(nb,s,0.02)][i][:Icoil] for i=2:47], [data_qm[(nb,0.2,0.01)][i][:z_max_smooth_spline_mm] for i=2:47],ls=:solid)
+# plot!([data_qm[(nb,s,0.02)][i][:Icoil] for i=2:47], [data_qm5[(nb,0.2,0.01)][i][:z_max_smooth_spline_mm] for i=2:47], ls=:dash)
+# end
+# end
+# plot!(xscale=:log10,
+#     yscale=:log10,
+#     legend=:false,
+#     xlims=(0.020,1.05),
+#     ylims=(5e-1,3))
+
+# plot([data_qm[(2,0.2,0.02)][i][:Icoil] for i=2:47],
+#     1e3*([data_qm[(2,0.300,0.05)][i][:z_max_smooth_spline_mm] for i=2:47] .- [data_qm5[(2,0.300,0.05)][i][:z_max_smooth_spline_mm] for i=2:47]),
+#     marker=(:circle,4,:red),
+#     xscale=:log10,
+#     legend=:topleft,
+# )
+
 
 # load experimental data processed
 data = matread(joinpath("Z:\\SingleSternGerlachExperimentData\\experiments",data_directory,"data.mat"))["data"]
@@ -664,7 +689,15 @@ nbins_list  = (2)#(1, 2, 4, 8)
 λ0_list     = (0.01)#(0.001,0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
 const Cell = Union{Missing, String, Int, Float64}
 summary_table = Matrix{Cell}(undef, length(nbins_list)*length(λ0_list), 3);
-for (row, (λ0,nz_binning)) in enumerate(Iterators.product(λ0_list, nbins_list))
+# for (row, (λ0,nz_binning)) in enumerate(Iterators.product(λ0_list, nbins_list))
+    λ0 = λ0_list[1]
+    nz_binning = nbins_list[1]
+    row = 1
+
+    chosen_qm = data_qm[(nz_binning, 0.200, λ0)]
+    Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
+    zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
+
     T_START   = Dates.now()
     RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
     OUTDIR    = joinpath(@__DIR__, "analysis_data", RUN_STAMP);
@@ -796,6 +829,369 @@ for (row, (λ0,nz_binning)) in enumerate(Iterators.product(λ0_list, nbins_list)
     )
     CSV.write(joinpath(OUTDIR, "mean_data.csv"), df_mean);
 
+    hl_Ic = TextHighlighter(
+        (data, i, j) -> data[i, 1] == minimum(data[:, 1]),
+        crayon"fg:white bold bg:dark_gray"
+    );
+    hl_F1 = TextHighlighter(
+            (data, i, j) -> data[i,6]<0,
+            crayon"fg:red bold bg:dark_gray"
+        );
+    hl_F2 = TextHighlighter(
+            (data, i, j) -> data[i,8]<0,
+            crayon"fg:green bold bg:dark_gray"
+        );
+    pretty_table(
+        df_mean;
+        title         = "Mean analysis",
+        formatters    = [fmt__printf("%8.3f", [1]), fmt__printf("%8.5f", 3:9)],
+        alignment     = :c,
+        column_labels  = [
+            ["Current", "Current Error", "F1 z", "F2 z", "Δz", "Centroid F1 z","Centroid F1 z Error","Centroid F2 z", "Centroid F1 z Error"], 
+            ["[A]", "[A]" ,"[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
+        ],
+        table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+        style = TextTableStyle(first_line_column_label = crayon"yellow bold",
+                        column_label  = crayon"yellow",
+                        table_border  = crayon"blue bold",
+                    ),
+        equal_data_column_widths = true,
+        highlighters  = [hl_Ic,hl_F1,hl_F2],
+    )
+
+    fig_01 = plot(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_peak_mm],
+        label=L"$F_{1}$",
+        line=(:solid,:red,2),
+    );
+    plot!(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F2_z_peak_mm],
+        label=L"$F_{2}$",
+        line=(:solid,:blue,2),
+    );
+    plot!(
+        xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+        yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
+        xlims = (1e-3,1.0),
+        title = "Peak position",
+        grid = true,
+        minorgrid = true,
+        gridalpha = 0.5,
+        gridstyle = :dot,
+        minorgridalpha = 0.05,
+        xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        size=(800,600),
+        legend=:topleft,
+        tickfontsize=11,
+        guidefontsize=14,
+        legendfontsize=10,
+    );
+    idx = findlast(<(0), df_mean.Icoil_A)
+    if isnothing(idx) || idx == length(df_mean.Icoil_A)
+        @warn "No valid negative Icoil_A (or no next element) → skipping vspan"
+    else
+        vspan!(
+            [1e-8, abs.(df_mean.Icoil_A[idx + 1]) ],
+            color = :gray,
+            alpha = 0.30,
+            label = "zero"
+        )
+    end
+    plot!(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_peak_mm], fillrange=df_mean[!,:F2_z_peak_mm],
+        fillalpha=0.2,
+        color=:purple,
+        label = false,
+    );
+    hline!([centroid_mean.mean], line=(:dot,:black,2), label="Centroid");
+
+    fig_02 = plot(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_peak_mm] ,
+        label=L"$F_{1}$",
+        line=(:solid,:red,2),
+    );
+    plot!(abs.(df_mean[!,:Icoil_A]), 2*centroid_mean.mean .- df_mean[!,:F2_z_peak_mm],
+        label=L"Centroid Mirrored $F_{2}$",
+        line=(:solid,:blue,2),
+    );
+    plot!(
+        xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+        yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
+        xlims = (1e-3,1.0),
+        title = "Peak position",
+        grid = true,
+        minorgrid = true,
+        gridalpha = 0.5,
+        gridstyle = :dot,
+        minorgridalpha = 0.05,
+        xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        size=(800,600),
+        legend=:topleft,
+        tickfontsize=11,
+        guidefontsize=14,
+        legendfontsize=10,
+    );
+    idx = findlast(<(0), df_mean.Icoil_A)
+    if isnothing(idx) || idx == length(df_mean.Icoil_A)
+        @warn "No valid negative Icoil_A (or no next element) → skipping vspan"
+    else
+        vspan!(
+            [1e-8, abs.(df_mean.Icoil_A[idx + 1])],
+            color = :gray,
+            alpha = 0.30,
+            label = "zero"
+        )
+    end
+    # Fill between y1 and y2
+    plot!(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_peak_mm], fillrange=2*centroid_mean.mean .- df_mean[!,:F2_z_peak_mm],
+        fillalpha=0.2,
+        color=:purple,
+        label = false,
+    );
+    hline!([centroid_mean.mean], line=(:dot,:black,2), label="Centroid");
+
+    fig_03 = plot(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_centroid_mm] ,
+        label=L"$F_{1}$",
+        line=(:solid,:red,2),
+    );
+    plot!(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F2_z_centroid_mm] ,
+        label=L"$F_{2}$",
+        line=(:solid,:blue,2),
+    );
+    plot!(
+        xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+        yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
+        xlims = (1e-3,1.0),
+        title = "Peak position - Centered at Centroid",
+        grid = true,
+        minorgrid = true,
+        gridalpha = 0.5,
+        gridstyle = :dot,
+        minorgridalpha = 0.05,
+        xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        size=(800,600),
+        legend=:topleft,
+        tickfontsize=11,
+        guidefontsize=14,
+        legendfontsize=10,
+    );
+    idx = findlast(<(0), df_mean.Icoil_A)
+    if isnothing(idx) || idx == length(df_mean.Icoil_A)
+        @warn "No valid negative Icoil_A (or no next element) → skipping vspan"
+    else
+        vspan!(
+            [1e-8, abs.(df_mean.Icoil_A[idx + 1]) ],
+            color = :gray,
+            alpha = 0.30,
+            label = "zero"
+        )
+    end
+    # Fill between y1 and y2
+    plot!(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_centroid_mm], fillrange=df_mean[!,:F2_z_centroid_mm],
+        fillalpha=0.2,
+        color=:purple,
+        label = false,
+    );
+
+    fig=plot(fig_01, fig_02, fig_03, 
+    layout=@layout([a ; b ; c]),
+    share=:x,
+    left_margin=2mm,
+    );
+    plot!(fig[1], xlabel="", xformatter=_->"");
+    plot!(fig[2], xlabel="", xformatter=_->"", title = "", top_margin = -9mm);
+    plot!(fig[3], title="", top_margin = -9mm);
+    display(fig)
+    saveplot(fig, "mean_peak_centroid") 
+
+    # Compute absolute values for plotting
+    y = df_mean[!,:F1_z_centroid_mm];
+    y_abs = abs.(y);
+    # Create masks for negative and non-negative values
+    neg_mask = y .< 0;
+    pos_mask = .!neg_mask;
+    fig100=plot(
+        df_mean[pos_mask,:Icoil_A], y_abs[pos_mask]/magnification_factor,
+        xerror = df_mean[pos_mask,:Icoil_error_A],
+        yerror = df_mean[pos_mask,:F1_z_centroid_mm_sem],
+        xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+        yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+        xlims = (0.001,1.0),
+        ylims = (1e-4,2.5),
+        title = "F=1 Peak Position vs Current",
+        label = data_directory,
+        seriestype = :scatter,
+        marker = (:circle, :white, 4),
+        markerstrokecolor = :black,
+        markerstrokewidth = 2,
+        legend = :bottomright,
+        grid = true,
+        minorgrid = true,
+        gridalpha = 0.5,
+        gridstyle = :dot,
+        minorgridalpha = 0.05,
+        xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        yticks = :log10,
+        framestyle = :box,
+        size=(800,600),
+        tickfontsize=11,
+        guidefontsize=14,
+        legendfontsize=10,
+    ) ;
+    plot!(df_mean[neg_mask,:Icoil_A], y_abs[neg_mask]/magnification_factor, 
+        xerror = df_mean[neg_mask,:Icoil_error_A],
+        yerror = df_mean[neg_mask,:F1_z_centroid_mm_sem],
+        label=false, 
+        seriestype=:scatter,
+        marker = (:xcross, :orangered2, 4),
+        markerstrokecolor = :orangered2,
+        markerstrokewidth = 2,
+    );
+    hspan!([1e-6,1000*nz_binning* exp_pixelsize_z], color=:gray, alpha=0.30, label="Effective pixel size" )
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
+    );
+    # saveplot(fig100, "mean_100")
+
+    fig101=plot(
+        df_mean[pos_mask,:Icoil_A], y_abs[pos_mask]/magnification_factor,
+        xerror = df_mean[pos_mask,:Icoil_error_A],
+        yerror = df_mean[pos_mask,:F1_z_centroid_mm_sem],
+        xaxis = (L"$I_{c} \ (\mathrm{A})$"),
+        yaxis = (L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$"),
+        title = "F=1 Peak Position vs Current",
+        label = data_directory,
+        seriestype = :scatter,
+        marker = (:circle, :white, 4),
+        markerstrokecolor = :black,
+        markerstrokewidth = 2,
+        legend = :bottomright,
+        grid = true,
+        minorgrid = true,
+        gridalpha = 0.5,
+        gridstyle = :dot,
+        minorgridalpha = 0.05,
+        framestyle = :box,
+        size=(800,600),
+        tickfontsize=11,
+        guidefontsize=14,
+        legendfontsize=10,
+    ) ;
+    plot!(df_mean[neg_mask,:Icoil_A], y_abs[neg_mask]/magnification_factor,
+        xerror = df_mean[neg_mask,:Icoil_error_A],
+        yerror = df_mean[neg_mask,:F1_z_centroid_mm_sem],
+        label=false, 
+        seriestype=:scatter,
+        marker = (:xcross, :orangered2, 4),
+        markerstrokecolor = :orangered2,
+        markerstrokewidth = 2,
+    );
+    hspan!([1e-6,1000*nz_binning* exp_pixelsize_z], color=:gray, alpha=0.30, label="Effective pixel size" )
+    plot!(Ic_QM_sim, zm_QM_sim,
+        line=(:dash,:darkgreen,2.5),
+        label="Analytic QM"    ,
+    );
+    # saveplot(fig101, "mean_101")
+
+    fig1 = plot(fig100, fig101,
+        layout=(1,2),
+        size=(1000,400),
+        left_margin=8mm,
+        bottom_margin=5mm,
+    )
+    saveplot(fig1, "mean_01")
+
+
+
+    # ==================================================================== #
+    # -------- Peak position for each acquired frame profile ------------- #
+
+    f1_z_mm , f1_z_sem_mm  = [mean(zf1_perframe[i]) for i=1:nI]  , sqrt.( [std(zf1_perframe[i]; corrected=true)./sqrt.(length(zf1_perframe[i])) for i=1:nI].^2 .+ z_mm_error^2 );
+    f2_z_mm , f2_z_sem_mm  = [mean(zf2_perframe[i]) for i=1:nI] , sqrt.( [std(zf2_perframe[i]; corrected=true)./sqrt.(length(zf2_perframe[i])) for i=1:nI].^2 .+ z_mm_error^2 );
+    data_centroid_fw       = 0.5 * (f1_z_mm .+ f2_z_mm)[1:end-5]
+    data_centroid_fw_error = (0.5 * sqrt.(f1_z_sem_mm.^2 + f2_z_sem_mm.^2) / 2 )[1:end-5]
+    # centroid_fw = mean(data_centroid_fw, Weights(nI-1:-1:0)) 
+    # centroid_std_err = std(data_centroid_fw, Weights(nI-1:-1:0); corrected=false) / sqrt(nI)
+    centroid_fw = post_threshold_mean(data_centroid_fw, Icoils[1:end-5], data_centroid_fw_error; 
+                        threshold=0.010,
+                        half_life=7, # in samples
+                        eps=1e-6,
+                        weighted=true)
+
+    fig = plot(Icoils[1:end-5], data_centroid_fw, 
+        xerror=ΔIcoils,
+        yerror= data_centroid_fw_error,
+        label=false,
+        color=:purple,
+        marker=(:circle,3),
+        markerstrokecolor=:purple,
+        line=(:solid,1),
+        xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
+        xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                    [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        xlim=(1e-3,1),
+        yaxis = L"$z_{0} \ (\mathrm{mm})$",
+        title="Per-frame - Centroid",
+        legend=:topleft,
+    )
+    hline!([centroid_fw.mean], label=L"Centroid $z=%$(round(centroid_fw.mean,digits=3))$mm")
+    hspan!([centroid_fw.mean - centroid_fw.sem, centroid_fw.mean + centroid_fw.sem], color=:orangered, alpha=0.30, label=L"Error = $\pm%$(round(centroid_fw.sem,digits=3))$mm")
+
+
+    df_fw = DataFrame(
+        Icoil_A             = Icoils,
+        Icoil_error_A       = ΔIcoils,
+
+        F1_z_peak_mm        = f1_z_mm , 
+        F1_z_peak_se_mm     = f1_z_sem_mm , 
+
+        F2_z_peak_mm        = f2_z_mm , 
+        F2_z_peak_se_mm     = f2_z_sem_mm ,
+
+        Δz_mm               = f2_z_mm  .- f1_z_mm ,
+        Δz_se_mm            = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2 ),
+
+        F1_z_centroid_mm    = -( f1_z_mm .- centroid_fw.mean ), 
+        F1_z_centroid_se_mm = sqrt.( (f1_z_sem_mm).^2 .+ (centroid_fw.sem).^2 ),
+        F2_z_centroid_mm    = f2_z_mm .- centroid_fw.mean, 
+        F2_z_centroid_se_mm = sqrt.( (f2_z_sem_mm).^2 .+ (centroid_fw.sem).^2 ),
+    )
+    CSV.write(joinpath(OUTDIR, "fw_data.csv"), df_mean);
+
+    hl_Ic = TextHighlighter(
+            (data, i, j) -> data[i, 1] == minimum(data[:, 1]),
+            crayon"fg:white bold bg:dark_gray"
+        );
+    hl_F1 = TextHighlighter(
+            (data, i, j) -> data[i,9]<0,
+            crayon"fg:red bold bg:dark_gray"
+        );
+    hl_F2 = TextHighlighter(
+            (data, i, j) -> data[i,11]<0,
+            crayon"fg:green bold bg:dark_gray"
+        );
+    pretty_table(
+        df_fw;
+        title         = "Framewise Analysis",
+        formatters    = [fmt__printf("%8.3f",[1]), fmt__printf("%8.5f",2:6)],
+        alignment     = :c,
+        column_labels = [
+            ["Current", "Current Error", "F1 z", "Std.Err.",  "F2 z", "Std.Err.", "Δz", "Std.Err.", "Centroid F1 z", "Std.Err.", "Centroid F2 z", "Std.Err."], 
+            ["[mA]", "[mA]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
+        ],
+        table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+        style = TextTableStyle(first_line_column_label = crayon"yellow bold",
+                        column_label  = crayon"yellow",
+                        table_border  = crayon"blue bold",
+        ),
+        equal_data_column_widths = true,
+        highlighters  = [hl_Ic,hl_F1,hl_F2],
+    )
+
+
+
+
     # ==================================================================== #
 
 
@@ -813,7 +1209,7 @@ for (row, (λ0,nz_binning)) in enumerate(Iterators.product(λ0_list, nbins_list)
     )
     GC.gc()
 
-end
+# end
 
 
 
@@ -826,440 +1222,15 @@ end
 
 
 
-hl_Ic = TextHighlighter(
-        (data, i, j) -> data[i, 1] == minimum(data[:, 1]),
-        crayon"fg:white bold bg:dark_gray"
-    );
-hl_F1 = TextHighlighter(
-        (data, i, j) -> data[i,6]<0,
-        crayon"fg:red bold bg:dark_gray"
-    );
-hl_F2 = TextHighlighter(
-        (data, i, j) -> data[i,8]<0,
-        crayon"fg:green bold bg:dark_gray"
-    );
-pretty_table(
-    df_mean;
-    title         = "Mean analysis",
-    formatters    = [fmt__printf("%8.3f", [1]), fmt__printf("%8.5f", 3:9)],
-    alignment     = :c,
-    column_labels  = [
-        ["Current", "Current Error", "F1 z", "F2 z", "Δz", "Centroid F1 z","Centroid F1 z Error","Centroid F2 z", "Centroid F1 z Error"], 
-        ["[A]", "[A]" ,"[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
-    ],
-    table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-    style = TextTableStyle(first_line_column_label = crayon"yellow bold",
-                    column_label  = crayon"yellow",
-                    table_border  = crayon"blue bold",
-                ),
-    equal_data_column_widths = true,
-    highlighters  = [hl_Ic,hl_F1,hl_F2],
-)
-
-fig_01 = plot(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_peak_mm],
-    label=L"$F_{1}$",
-    line=(:solid,:red,2),
-);
-plot!(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F2_z_peak_mm],
-    label=L"$F_{2}$",
-    line=(:solid,:blue,2),
-);
-plot!(
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
-    xlims = (1e-3,1.0),
-    title = "Peak position",
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-            [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    size=(800,600),
-    legend=:topleft,
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-);
-idx = findlast(<(0), df_mean.Icoil_A)
-if isnothing(idx) || idx == length(df_mean.Icoil_A)
-    @warn "No valid negative Icoil_A (or no next element) → skipping vspan"
-else
-    vspan!(
-        [1e-8, abs.(df_mean.Icoil_A[idx + 1]) ],
-        color = :gray,
-        alpha = 0.30,
-        label = "zero"
-    )
-end
-plot!(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_peak_mm], fillrange=df_mean[!,:F2_z_peak_mm],
-    fillalpha=0.2,
-    color=:purple,
-    label = false,
-);
-hline!([centroid_mean.mean], line=(:dot,:black,2), label="Centroid");
-
-fig_02 = plot(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_peak_mm] ,
-    label=L"$F_{1}$",
-    line=(:solid,:red,2),
-);
-plot!(abs.(df_mean[!,:Icoil_A]), 2*centroid_mean.mean .- df_mean[!,:F2_z_peak_mm],
-    label=L"Centroid Mirrored $F_{2}$",
-    line=(:solid,:blue,2),
-);
-plot!(
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
-    xlims = (1e-3,1.0),
-    title = "Peak position",
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-            [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    size=(800,600),
-    legend=:topleft,
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-);
-idx = findlast(<(0), df_mean.Icoil_A)
-if isnothing(idx) || idx == length(df_mean.Icoil_A)
-    @warn "No valid negative Icoil_A (or no next element) → skipping vspan"
-else
-    vspan!(
-        [1e-8, abs.(df_mean.Icoil_A[idx + 1])],
-        color = :gray,
-        alpha = 0.30,
-        label = "zero"
-    )
-end
-# Fill between y1 and y2
-plot!(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_peak_mm], fillrange=2*centroid_mean.mean .- df_mean[!,:F2_z_peak_mm],
-    fillalpha=0.2,
-    color=:purple,
-    label = false,
-);
-hline!([centroid_mean.mean], line=(:dot,:black,2), label="Centroid");
-
-fig_03 = plot(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_centroid_mm] ,
-    label=L"$F_{1}$",
-    line=(:solid,:red,2),
-);
-plot!(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F2_z_centroid_mm] ,
-    label=L"$F_{2}$",
-    line=(:solid,:blue,2),
-);
-plot!(
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
-    xlims = (1e-3,1.0),
-    title = "Peak position - Centered at Centroid",
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-            [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    size=(800,600),
-    legend=:topleft,
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-);
-idx = findlast(<(0), df_mean.Icoil_A)
-if isnothing(idx) || idx == length(df_mean.Icoil_A)
-    @warn "No valid negative Icoil_A (or no next element) → skipping vspan"
-else
-    vspan!(
-        [1e-8, abs.(df_mean.Icoil_A[idx + 1]) ],
-        color = :gray,
-        alpha = 0.30,
-        label = "zero"
-    )
-end
-# Fill between y1 and y2
-plot!(abs.(df_mean[!,:Icoil_A]), df_mean[!,:F1_z_centroid_mm], fillrange=df_mean[!,:F2_z_centroid_mm],
-    fillalpha=0.2,
-    color=:purple,
-    label = false,
-);
-
-fig=plot(fig_01, fig_02, fig_03, 
-layout=@layout([a ; b ; c]),
-share=:x,
-left_margin=2mm,
-);
-plot!(fig[1], xlabel="", xformatter=_->"");
-plot!(fig[2], xlabel="", xformatter=_->"", title = "", top_margin = -9mm);
-plot!(fig[3], title="", top_margin = -9mm);
-display(fig)
-saveplot(fig, "mean_peak_centroid") 
-
-
-fig000=plot(
-    df_mean[!,:Icoil_A], abs.(df_mean[!,:F1_z_centroid_mm])/magnification_factor,
-    xerror = df_mean[!,:Icoil_error_A],
-    yerror = df_mean[!,:F1_z_centroid_mm_sem],
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
-    xlims = (0.001,1.0),
-    ylims = (1e-4,2.5),
-    title = "F=1 Peak Position vs Current",
-    label = data_directory,
-    seriestype = :scatter,
-    marker = (:circle, :white, 4),
-    markerstrokecolor = :black,
-    markerstrokewidth = 2,
-    legend = :bottomright,
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-            [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = :log10,
-    framestyle = :box,
-    size=(800,600),
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-) 
-hspan!([1e-6,1000*nz_binning* exp_pixelsize_z], color=:gray, alpha=0.30, label="Effective pixel size" )
-plot!(Ic_QM_sim, zm_QM_sim,
-    line=(:dash,:darkgreen,2.5),
-    label="Analytic QM"    ,
-)
-saveplot(fig000, "mean_000")
-
-fig001=plot(
-    df_mean[!,:Icoil_A], abs.(df_mean[!,:F1_z_centroid_mm])/magnification_factor,
-    xerror = df_mean[!,:Icoil_error_A],
-    yerror = df_mean[!,:F1_z_centroid_mm_sem],
-    xaxis = (L"$I_{c} \ (\mathrm{A})$"),
-    yaxis = (L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$"),
-    title = "F=1 Peak Position vs Current",
-    label = data_directory,
-    seriestype = :scatter,
-    marker = (:circle, :white, 4),
-    markerstrokecolor = :black,
-    markerstrokewidth = 2,
-    legend = :bottomright,
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    framestyle = :box,
-    size=(800,600),
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-) 
-hspan!([1e-6,1000*nz_binning* exp_pixelsize_z], color=:gray, alpha=0.30, label="Effective pixel size")
-plot!(Ic_QM_sim, zm_QM_sim,
-    line=(:dash,:darkgreen,2.5),
-    label="Analytic QM"    ,
-)
-# saveplot(fig001, "mean_001")
-
-fig0 = plot(fig000, fig001,
-    layout=(1,2),
-    size=(1000,400),
-    left_margin=8mm,
-    bottom_margin=5mm,
-)
-saveplot(fig0, "mean_00")
-
-
-# Compute absolute values for plotting
-y = df_mean[!,:F1_z_centroid_mm];
-y_abs = abs.(y);
-# Create masks for negative and non-negative values
-neg_mask = y .< 0;
-pos_mask = .!neg_mask;
-fig100=plot(
-    df_mean[pos_mask,:Icoil_A], y_abs[pos_mask]/magnification_factor,
-    xerror = df_mean[pos_mask,:Icoil_error_A],
-    yerror = df_mean[pos_mask,:F1_z_centroid_mm_sem],
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-    yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
-    xlims = (0.001,1.0),
-    ylims = (1e-4,2.5),
-    title = "F=1 Peak Position vs Current",
-    label = data_directory,
-    seriestype = :scatter,
-    marker = (:circle, :white, 4),
-    markerstrokecolor = :black,
-    markerstrokewidth = 2,
-    legend = :bottomright,
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-            [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = :log10,
-    framestyle = :box,
-    size=(800,600),
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-) ;
-plot!(df_mean[neg_mask,:Icoil_A], y_abs[neg_mask]/magnification_factor, 
-    xerror = df_mean[neg_mask,:Icoil_error_A],
-    yerror = df_mean[neg_mask,:F1_z_centroid_mm_sem],
-    label=false, 
-    seriestype=:scatter,
-    marker = (:xcross, :orangered2, 4),
-    markerstrokecolor = :orangered2,
-    markerstrokewidth = 2,
-);
-hspan!([1e-6,1000*nz_binning* exp_pixelsize_z], color=:gray, alpha=0.30, label="Effective pixel size" )
-plot!(Ic_QM_sim, zm_QM_sim,
-    line=(:dash,:darkgreen,2.5),
-    label="Analytic QM"    ,
-);
-# saveplot(fig100, "mean_100")
-
-fig101=plot(
-    df_mean[pos_mask,:Icoil_A], y_abs[pos_mask]/magnification_factor,
-    xerror = df_mean[pos_mask,:Icoil_error_A],
-    yerror = df_mean[pos_mask,:F1_z_centroid_mm_sem],
-    xaxis = (L"$I_{c} \ (\mathrm{A})$"),
-    yaxis = (L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$"),
-    title = "F=1 Peak Position vs Current",
-    label = data_directory,
-    seriestype = :scatter,
-    marker = (:circle, :white, 4),
-    markerstrokecolor = :black,
-    markerstrokewidth = 2,
-    legend = :bottomright,
-    grid = true,
-    minorgrid = true,
-    gridalpha = 0.5,
-    gridstyle = :dot,
-    minorgridalpha = 0.05,
-    framestyle = :box,
-    size=(800,600),
-    tickfontsize=11,
-    guidefontsize=14,
-    legendfontsize=10,
-) ;
-plot!(df_mean[neg_mask,:Icoil_A], y_abs[neg_mask]/magnification_factor,
-    xerror = df_mean[neg_mask,:Icoil_error_A],
-    yerror = df_mean[neg_mask,:F1_z_centroid_mm_sem],
-    label=false, 
-    seriestype=:scatter,
-    marker = (:xcross, :orangered2, 4),
-    markerstrokecolor = :orangered2,
-    markerstrokewidth = 2,
-);
-hspan!([1e-6,1000*nz_binning* exp_pixelsize_z], color=:gray, alpha=0.30, label="Effective pixel size" )
-plot!(Ic_QM_sim, zm_QM_sim,
-    line=(:dash,:darkgreen,2.5),
-    label="Analytic QM"    ,
-);
-# saveplot(fig101, "mean_101")
-
-fig1 = plot(fig100, fig101,
-    layout=(1,2),
-    size=(1000,400),
-    left_margin=8mm,
-    bottom_margin=5mm,
-)
-saveplot(fig1, "mean_01")
 
 
 
 
-f1_z_mm , f1_z_sem_mm  = [mean(zf1_perframe[i]) for i=1:nI]  , sqrt.( [std(zf1_perframe[i]; corrected=true)./sqrt.(length(zf1_perframe[i])) for i=1:nI].^2 .+ z_mm_error^2 );
-f2_z_mm , f2_z_sem_mm  = [mean(zf2_perframe[i]) for i=1:nI] , sqrt.( [std(zf2_perframe[i]; corrected=true)./sqrt.(length(zf2_perframe[i])) for i=1:nI].^2 .+ z_mm_error^2 );
-data_centroid_fw       = 0.5 * (f1_z_mm .+ f2_z_mm)[1:end-5]
-data_centroid_fw_error = (0.5 * sqrt.(f1_z_sem_mm.^2 + f2_z_sem_mm.^2) / 2 )[1:end-5]
-# centroid_fw = mean(data_centroid_fw, Weights(nI-1:-1:0)) 
-# centroid_std_err = std(data_centroid_fw, Weights(nI-1:-1:0); corrected=false) / sqrt(nI)
-centroid_fw = post_threshold_mean(data_centroid_fw, Icoils[1:end-5], data_centroid_fw_error; 
-                    threshold=0.000,
-                    half_life=7, # in samples
-                    eps=1e-6,
-                    weighted=true)
-
-fig = plot(Icoils[1:end-5], data_centroid_fw, 
-    # xerror=ΔIcoils,
-    yerror= data_centroid_fw_error,
-    label=false,
-    color=:purple,
-    marker=(:circle,3),
-    markerstrokecolor=:purple,
-    line=(:solid,1),
-    xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
-    xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-                [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlim=(1e-3,1),
-    yaxis = L"$z_{0} \ (\mathrm{mm})$",
-    title="Per-frame - Centroid",
-    legend=:topleft,
-)
-hline!([centroid_fw.mean], label=L"Centroid $z=%$(round(centroid_fw.mean,digits=3))$mm")
-hspan!([centroid_fw.mean - centroid_fw.sem, centroid_fw.mean + centroid_fw.sem], color=:orangered, alpha=0.30, label=L"Error = $\pm%$(round(centroid_fw.sem,digits=3))$mm")
 
 
-df_fw = DataFrame(
-    Icoil_A             = Icoils,
-    Icoil_error_A       = Icoils*0.02,
-
-    F1_z_peak_mm        = f1_z_mm , 
-    F1_z_peak_se_mm     = f1_z_sem_mm , 
-
-    F2_z_peak_mm        = f2_z_mm , 
-    F2_z_peak_se_mm     = f2_z_sem_mm ,
-
-    Δz_mm               = f2_z_mm  .- f1_z_mm ,
-    Δz_se_mm            = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2 ),
-
-    F1_z_centroid_mm    = -( f1_z_mm .- centroid_fw.mean ), 
-    F1_z_centroid_se_mm = sqrt.( (f1_z_sem_mm).^2 .+ (centroid_fw.sem).^2 ),
-    F2_z_centroid_mm    = f2_z_mm .- centroid_fw.mean, 
-    F2_z_centroid_se_mm = sqrt.( (f2_z_sem_mm).^2 .+ (centroid_fw.sem).^2 ),
-)
 
 
-hl_Ic = TextHighlighter(
-        (data, i, j) -> data[i, 1] == minimum(data[:, 1]),
-        crayon"fg:white bold bg:dark_gray"
-    );
-hl_F1 = TextHighlighter(
-        (data, i, j) -> data[i,9]<0,
-        crayon"fg:red bold bg:dark_gray"
-    );
-hl_F2 = TextHighlighter(
-        (data, i, j) -> data[i,11]<0,
-        crayon"fg:green bold bg:dark_gray"
-    );
-pretty_table(
-    df_fw;
-    title         = "Framewise Analysis",
-    formatters    = [fmt__printf("%8.3f",[1]), fmt__printf("%8.5f",2:6)],
-    alignment     = :c,
-    column_labels = [
-        ["Current", "Current Error", "F1 z", "Std.Err.",  "F2 z", "Std.Err.", "Δz", "Std.Err.", "Centroid F1 z", "Std.Err.", "Centroid F2 z", "Std.Err."], 
-        ["[mA]", "[mA]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
-    ],
-    table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-    style = TextTableStyle(first_line_column_label = crayon"yellow bold",
-                    column_label  = crayon"yellow",
-                    table_border  = crayon"blue bold",
-    ),
-    equal_data_column_widths = true,
-    highlighters  = [hl_Ic,hl_F1,hl_F2],
-)
+
 
 
 fig_01 = plot(df_fw[!,:Icoil_A], df_fw[!,:F2_z_peak_mm],
