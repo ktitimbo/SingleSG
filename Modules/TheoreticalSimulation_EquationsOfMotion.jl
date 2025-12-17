@@ -124,7 +124,7 @@ Numerical notes
     else # t > tf3 # Travel to the Screen
         τ_SG = default_y_SG / v0y
         Eτ = exp(-2*kω*τ_SG)
-        z = z0 + v0z*t + 0.5*acc_0*( (t-tf2)^2 - (t-tf3)^2) + acc_0/kω*τ_SG * ( log(cosθ2) + v0y/default_y_SG*log(cosθ2+Eτ*sinθ2)*(t-tf3) ) + 0.5*acc_0/kω^2*( polylogarithm(2,-Eτ*tanθ2) - polylogarithm(2,-tanθ2) )
+        z = z0 + v0z*t + acc_0*τ_SG*(t-tf2-0.5*τ_SG) + acc_0/kω*τ_SG * ( log(cosθ2) + v0y/default_y_SG*log(cosθ2+Eτ*sinθ2)*(t-tf3) ) + 0.5*acc_0/kω^2*( polylogarithm(2,-Eτ*tanθ2) - polylogarithm(2,-tanθ2) )
         vz = v0z + acc_0*τ_SG + acc_0/kω*log(cosθ2 + Eτ*sinθ2)
     end
 
@@ -238,7 +238,7 @@ Numerical notes:
         polylog_SG = polylogarithm(2, -exp_SG * tanθ2)
         log_term = log(cosθ2 + exp_SG * sinθ2)
 
-        return z0 + v0z*t + 0.5*acc_z*( Δt2^2 - Δt3^2 ) + acc_z / kω * τ_SG * (log_cos2 + log_term * Δt3 / τ_SG) + 0.5 * acc_z / kω^2 * (polylog_SG - polylog_0)
+        return z0 + v0z*t + acc_z*τ_SG*( t-tf2-0.5*τ_SG ) + acc_z / kω * τ_SG * (log_cos2 + log_term * Δt3 / τ_SG) + 0.5 * acc_z / kω^2 * (polylog_SG - polylog_0)
     end
 end
 
