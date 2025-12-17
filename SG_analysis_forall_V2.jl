@@ -616,7 +616,7 @@ end
 # --------------------------------------------------- #
 
 # data for comparison
-data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
+# data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
 data_qm  = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_5M","qm_5000000_screen_profiles_table.jld2"))["table"]
 
 
