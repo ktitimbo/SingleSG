@@ -1557,7 +1557,7 @@ plot!(fig,
     gradvsI.(data_scaled[:,1]),data_scaled[:,3],
     xerr = gradvsI.(data_scaled[:,2]),
     yerr = data_scaled[:,4],
-    label=L"Experiment (mag. $m = %$(round(global_mag_factor, digits=4))$)",
+    label=L"Experiment (mag. $m = %$(round(global_mag_factor, digits=1))$)",
     seriestype=:scatter,
     marker = (:circle,4,:white,stroke(0.5,:black) )
     # line=(:dash,:darkgreen,3),
@@ -1571,7 +1571,8 @@ plot!(fig,gradvsI.(I_scan), zqm.(I_scan),
 )
 plot!(fig,
     gradvsI.(I_scan), ki_itp.(I_scan, Ref(fit_scaled.ki)),
-    label=L"Coquantum dynamics: $k_{i}= \left( %$(round(result.ki_fit, digits=4)) \pm %$(round(result.mse, sigdigits=1)) \right) \times 10^{-6} $",
+    # label=L"Coquantum dynamics: $k_{i}= \left( %$(round(result.ki_fit, digits=4)) \pm %$(round(result.mse, sigdigits=1)) \right) \times 10^{-6} $",
+    label=L"Coquantum dynamics: $k_{i}=  %$(round(result.ki_fit, digits=2)) \times 10^{-6} $",
     line=(:solid,:red,2),
     # marker=(:xcross, :blue, 0.2),
     markerstrokewidth=1
