@@ -525,6 +525,7 @@ fallback is used.
 ```julia
 code = CQD_cavity_crash(μG, B0, x0, y0, z0, vx, vy, vz, θe, θn, kx, p, ygrid, 1e-9)
 code == 0x00 || @info "Collision code = (code)"
+``` 
 """
 function CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
                          x0::Float64, y0::Float64, z0::Float64,
@@ -544,6 +545,9 @@ function CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
     Ld     = (default_y_SGToScreen)::Float64
     Ltot   = (y_in + Lsg + Ld)::Float64
     R2tube = (default_R_tube * default_R_tube)::Float64
+    Lcirc  = (default_y_SGToAperture)::Float64
+    Lapert = (y_in+Lsg+Lcirc)::Float64
+    R2circ = (default_c_aperture * default_c_aperture)::Float64
 
     # Kinematics
     cqd_sign = sign(θn-θe) 
@@ -600,6 +604,10 @@ function CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
         (z - z_magnet_edge(x))   >=  eps && return 0x01 # 1 top
         (z - z_magnet_trench(x)) <= -eps && return 0x02 # 2 bottom
     end
+
+    # Circular aperture
+    x_aper = muladd(Lapert,α,x0)
+    z_aper = muladd(Lapert,γ,z0) + 
 
     # --- Screen check (only if cavity was clear) ---
     Esg      = exp(scale_a*Lsg)
