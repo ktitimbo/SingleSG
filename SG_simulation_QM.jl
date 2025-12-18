@@ -55,8 +55,8 @@ HOSTNAME = gethostname();
 @info "Running on host" HOSTNAME=HOSTNAME
 # Random seeds
 base_seed_set = 145;
-# rng_set = MersenneTwister(base_seed_set)
-rng_set = TaskLocalRNG();
+rng_set = MersenneTwister(base_seed_set)
+# rng_set = TaskLocalRNG();
 # Custom modules
 include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
@@ -182,11 +182,11 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 1_000 ; 
+const Nss = 6_000_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
-gaussian_width_mm = 0.065
+gaussian_width_mm = 0.200
 λ0_raw            = 0.01
 λ0_spline         = 0.001
 
@@ -361,7 +361,7 @@ plot!(fig,I_exp[2:end],z_exp[2:end],
 plot!(fig,xaxis=:log10,
     yaxis=:log10,
     xlims=(0.8e-3,2),
-    ylims=(0.8e-3,2),
+    ylims=(0.8e-4,2),
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
             [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
@@ -520,7 +520,7 @@ anim = @animate for j in iter
     r_at_screen = Matrix{Float64}(undef, size(data_set, 1), 3);
     for i in axes(data_set,1)
         v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG+y_SGToScreen) ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
+        r , _ = TheoreticalSimulation.QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
         r_at_screen[i,:] = r
     end
     xs_e = 1e3 .* r_at_screen[:,1]; # mm
@@ -672,9 +672,13 @@ end
 println("script $RUN_STAMP has finished!")
 alert("script $RUN_STAMP has finished!")
 
+GC.gc()
+@info "Memory cleaned after QM data acquired"
+println("Free memory: $(Sys.free_memory() / 1e9) GB")   
 
-Ns = 3_000_000
-const OUTDIR = joinpath(@__DIR__,"simulation_data","quantum_simulation_$(Int(1e-6*Ns))m")
+
+Ns = 6_000_000
+const OUTDIR = joinpath(@__DIR__,"simulation_data","quantum_simulation_$(Int(1e-6*Ns))M")
 data_exists = isfile(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))
 
 if !data_exists
@@ -682,7 +686,7 @@ if !data_exists
 
     dataQM = load(joinpath(OUTDIR,"qm_$(Ns)_valid_particles_data.jld2"))["data"]
     @time alive_screen = OrderedDict(
-                :Icoils => dataQM[:Icoils], 
+                :Icoils => dataQM[:Icoils],
                 :levels => dataQM[:levels], 
                 :data   => TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen));
     jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"), alive = alive_screen)
@@ -810,7 +814,6 @@ else
         label=false);
         annotate!(figd, xpos, ypos,  text("SG exit", 10, :black, :bold, :center, "Helvetica") );
 
-
         # Circular Aperture : Post-SG
         r_at_aperture = Matrix{Float64}(undef, size(data_set, 1), 3);
         for i in axes(data_set,1)
@@ -849,7 +852,7 @@ else
         r_at_screen = Matrix{Float64}(undef, size(data_set, 1), 3);
         for i in axes(data_set,1)
             v0y = data_set[i,5]
-            r , _ = TheoreticalSimulation.QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SlitToSG+y_SGToScreen) ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
+            r , _ = TheoreticalSimulation.QM_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) ./ v0y,Icoils[j],f,mf,data_set[i,1:3],data_set[i,4:6], K39_params)
             r_at_screen[i,:] = r
         end
         xs_e = 1e3 .* r_at_screen[:,1]; # mm
@@ -872,7 +875,6 @@ else
         label=false);
         annotate!(fige, xpos, ypos,  text("Screen", 10, :black, :bold, :center, "Helvetica") )
 
-
         fig = plot(figa,figb,figc,figd,figf,fige,
         layout=(6,1),
         suptitle = L"$I_{0} = %$(Int(1000*Icoils[j]))\,\mathrm{mA}$",
@@ -892,16 +894,19 @@ else
     # gif(anim, gif_path, fps=2)  # adjust fps
     @info "Saved GIF" gif_path ;
     anim = nothing
+    GC.gc()
 
-
-    nx_bins = 64 ;
+    nx_bins = 128 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
-    gaussian_width_mm = [0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.500 ];  # try different gaussian widths
-    λ0_raw_list       = [0.005, 0.01, 0.02, 0.03, 0.04, 0.05];
+    gaussian_width_mm = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
+    λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
 
+
+    # ============================== F=1 manifold ==============================
+    println("QM approach : analyzing screen profiles for F=1 manifold")
     # three-dimensional dictionary keyed by (nz, gw, λ0_raw)
-    table = OrderedDict{Tuple{Int, Float64, Float64},
+    table_f1 = OrderedDict{Tuple{Int, Float64, Float64},
                         OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
     @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
         println("Profiles F=$(K39_params.Ispin-0.5), for nz_bin=$nz, Gaussian-convolution σ=$(Int(1e3*gw))μm, SplineFit smoothing factor λ₀=$(λ0_raw)")
@@ -910,10 +915,9 @@ else
             manifold=:F_bottom, n_bins=(nx_bins, nz), width_mm=gw,
             add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth=λ0_spline, mode=:probability
         )
-        table[(nz, gw, λ0_raw)] = profiles_bottom_loop
+        table_f1[(nz, gw, λ0_raw)] = profiles_bottom_loop
     end
-    jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_profiles_table.jld2"), table = table)
-
+    jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_profiles_f1_table.jld2"), table = table_f1)
 
     clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list) )
     fig = plot(
@@ -926,9 +930,9 @@ else
         for gw in gaussian_width_mm
             nz_idx = 1
             for nz in nz_bins
-                zvals = [table[(nz, gw, λ0_raw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                zvals = [table_f1[(nz, gw, λ0_raw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
                 label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0_raw)$"
-                plot!(Icoils[2:end], zvals[2:end],
+                plot!(Icoils[2:end], abs.(zvals[2:end]),
                     line = (line_styles[nz_idx], clrs[color_idx], 2),
                     label = label)
                 nz_idx      += 1
@@ -946,13 +950,72 @@ else
         yticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
         size = (850, 650),
         rightmargin = 5mm,
-        legend = :outerbottom,
+        legend = :outerright,
         legend_columns = length(nz_bins),
     )
     display(fig)
-    savefig(fig, joinpath(OUTDIR, "qm_profiles_table_comparison_w_n.$(FIG_EXT)"))
+    savefig(fig, joinpath(OUTDIR, "qm_profiles_f1_table_comparison_w_n.$(FIG_EXT)"))
+    table_f1 = nothing
+    GC.gc()
 
+    # ============================== F=2 manifold ==============================
+    println("QM approach : analyzing screen profiles for F=2 manifold")
+    # three-dimensional dictionary keyed by (nz, gw, λ0_raw)
+    table_f2 = OrderedDict{Tuple{Int, Float64, Float64},
+                        OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
+    @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
+        println("Profiles F=$(K39_params.Ispin-0.5), for nz_bin=$nz, Gaussian-convolution σ=$(Int(1e3*gw))μm, SplineFit smoothing factor λ₀=$(λ0_raw)")
+        profiles_bottom_loop = QM_analyze_profiles_to_dict(
+            alive_screen, K39_params;
+            manifold=:F_top, n_bins=(nx_bins, nz), width_mm=gw,
+            add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth=λ0_spline, mode=:probability
+        )
+        table_f2[(nz, gw, λ0_raw)] = profiles_bottom_loop
+    end
+    jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_profiles_f2_table.jld2"), table = table_f2)
 
+    clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list) )
+    fig = plot(
+        xlabel = "Currents (A)",
+        ylabel = L"$z_{\mathrm{max}}$ (mm)",
+    )
+    local color_idx = 1
+    line_styles = [:solid, :dash, :dot, :dashdot]
+    for λ0_raw in λ0_raw_list
+        for gw in gaussian_width_mm
+            nz_idx = 1
+            for nz in nz_bins
+                zvals = [table_f2[(nz, gw, λ0_raw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0_raw)$"
+                plot!(Icoils[2:end], abs.(zvals[2:end]),
+                    line = (line_styles[nz_idx], clrs[color_idx], 2),
+                    label = label)
+                nz_idx      += 1
+                color_idx   += 1
+            end
+        end
+    end
+    display(fig)
+    plot!(
+        xaxis = :log10,
+        yaxis = :log10,
+        xlims = (8e-3, 2),
+        ylims = (8e-3, 2),
+        xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        yticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        size = (850, 650),
+        rightmargin = 5mm,
+        legend = :outerright,
+        legend_columns = length(nz_bins),
+    )
+    display(fig)
+    savefig(fig, joinpath(OUTDIR, "qm_profiles_f2_table_comparison_w_n.$(FIG_EXT)"))
+    table_f2 = nothing
+
+    #########################################################################################
+    GC.gc()
+    @info "Memory cleaned after processing QM data"
+    println("Free memory: $(Sys.free_memory() / 1e9) GB") 
     #########################################################################################
     T_END = Dates.now()
     T_RUN = Dates.canonicalize(T_END-T_START)
