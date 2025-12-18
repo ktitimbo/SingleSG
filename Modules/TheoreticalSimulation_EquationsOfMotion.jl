@@ -124,7 +124,7 @@ Numerical notes
     else # t > tf3 # Travel to the Screen
         τ_SG = default_y_SG / v0y
         Eτ = exp(-2*kω*τ_SG)
-        z = z0 + v0z*t + acc_0*τ_SG*(t-tf2-0.5*τ_SG) + acc_0/kω*τ_SG * ( log(cosθ2) + v0y/default_y_SG*log(cosθ2+Eτ*sinθ2)*(t-tf3) ) + 0.5*acc_0/kω^2*( polylogarithm(2,-Eτ*tanθ2) - polylogarithm(2,-tanθ2) )
+        z = z0 + v0z*t + acc_0*τ_SG*(t-tf2-0.5*τ_SG) + acc_0/kω*τ_SG * ( log(cosθ2) + inv(τ_SG)*log(cosθ2+Eτ*sinθ2)*(t-tf3) ) + 0.5*acc_0/kω^2*( polylogarithm(2,-Eτ*tanθ2) - polylogarithm(2,-tanθ2) )
         vz = v0z + acc_0*τ_SG + acc_0/kω*log(cosθ2 + Eτ*sinθ2)
     end
 
@@ -525,9 +525,8 @@ fallback is used.
 ```julia
 code = CQD_cavity_crash(μG, B0, x0, y0, z0, vx, vy, vz, θe, θn, kx, p, ygrid, 1e-9)
 code == 0x00 || @info "Collision code = (code)"
-``` 
 """
-function CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
+@inline function CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
                          x0::Float64, y0::Float64, z0::Float64,
                          v0x::Float64, v0y::Float64, v0z::Float64,
                          θe::Float64, θn::Float64,
@@ -545,8 +544,8 @@ function CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
     Ld     = (default_y_SGToScreen)::Float64
     Ltot   = (y_in + Lsg + Ld)::Float64
     R2tube = (default_R_tube * default_R_tube)::Float64
-    Lcirc  = (default_y_SGToAperture)::Float64
-    Lapert = (y_in+Lsg+Lcirc)::Float64
+    LA     = (default_y_SGToAperture)::Float64
+    Lapert = (y_in+Lsg+LA)::Float64
     R2circ = (default_c_aperture * default_c_aperture)::Float64
 
     # Kinematics
@@ -561,7 +560,7 @@ function CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
     # precompute θe-terms robustly
     s, c     = sincos(0.5 * θe)        # θe_half
     sinθ2    = s * s
-    cosθ2    = c * c
+    cosθ2    = max(c*c, 1.0e-21)
     tanθ2    = sinθ2 / cosθ2
     logcosθ2 = log(cosθ2)
     PL_tanθ2 = polylogarithm(2, -tanθ2)  # loop-invariant
@@ -579,12 +578,17 @@ function CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
             Δy = y - y_in
             x  = muladd(α, y,  x0)           # or α*dy + x0
             z  = muladd(γ, y,  z0) + κ*(Δy*Δy)*cos(θe)
-            (z - z_magnet_edge(x))   >=  eps && return 0x01
-            (z - z_magnet_trench(x)) <= -eps && return 0x02
+            (z - z_magnet_edge(x))   >=  eps && return UInt8(0x01)
+            (z - z_magnet_trench(x)) <= -eps && return UInt8(0x02)
         end
+
+        x_aper = muladd(Lapert, α, x0)
+        z_aper = muladd(Lapert, γ, z0) + κ*(Lsg*(Lsg + 2.0*LA))*cos(θe)
+        (muladd(x_aper, x_aper, z_aper*z_aper) >= R2circ) && return UInt8(0x04)
+
         x_screen = muladd(Ltot, α, x0)
         z_screen = muladd(Ltot, γ, z0) + κ*(Lsg*(Lsg + 2.0*Ld))*cos(θe)
-        return (muladd(x_screen, x_screen, z_screen*z_screen) >= R2tube) ? 0x03 : 0x00
+        return (muladd(x_screen, x_screen, z_screen*z_screen) >= R2tube) ? UInt8(0x03) : UInt8(0x00)
     end
 
     # ---- kω ≠ 0 path ----
@@ -601,18 +605,21 @@ function CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
         z  = muladd(γ,y,z0) + κ*Δy*Δy + A*logcosθ2*Δy + B*(polylogarithm(2,-EΔ*tanθ2) - PL_tanθ2 )
 
         # Crash if above ceiling or below trench (with tolerance)
-        (z - z_magnet_edge(x))   >=  eps && return 0x01 # 1 top
-        (z - z_magnet_trench(x)) <= -eps && return 0x02 # 2 bottom
+        (z - z_magnet_edge(x))   >=  eps && return UInt8(0x01) # 1 top
+        (z - z_magnet_trench(x)) <= -eps && return UInt8(0x02) # 2 bottom
     end
 
-    # Circular aperture
-    x_aper = muladd(Lapert,α,x0)
-    z_aper = muladd(Lapert,γ,z0) + 
-
-    # --- Screen check (only if cavity was clear) ---
     Esg      = exp(scale_a*Lsg)
+    Bpolylog = B*(polylogarithm(2, -Esg*tanθ2) - PL_tanθ2)
+
+    # ------ Circular aperture -----
+    x_aper = muladd(Lapert,α,x0)
+    z_aper = muladd(Lapert,γ,z0) + κ*(Lsg*Lsg + 2*Lsg*LA) + A*Lsg*(logcosθ2+(LA/Lsg)*log(cosθ2+Esg*sinθ2)) + Bpolylog
+    (muladd(x_aper, x_aper, z_aper*z_aper) >= R2circ) && return UInt8(0x04) # 4 circular aperture
+
+    # ----- Screen check -----
     x_screen = muladd(Ltot,α,x0) 
-    z_screen = muladd(Ltot,γ,z0) + κ*(Lsg*Lsg + 2*Lsg*Ld) + A*Lsg*(logcosθ2+(Ld/Lsg)*log(cosθ2+Esg*sinθ2)) + B*(polylogarithm(2, -Esg*tanθ2) - PL_tanθ2)
+    z_screen = muladd(Ltot,γ,z0) + κ*(Lsg*Lsg + 2*Lsg*Ld) + A*Lsg*(logcosθ2+(Ld/Lsg)*log(cosθ2+Esg*sinθ2)) + Bpolylog
     return (muladd(x_screen, x_screen, z_screen*z_screen) >= R2tube) ? UInt8(0x03) : UInt8(0x00) # 3 tubes
 end
 
@@ -1077,8 +1084,8 @@ and 0 if neither happens, for y ∈ [y_in, y_in + default_y_SG].
     Ld     = (default_y_SGToScreen)::Float64
     Ltot   = (y_in + Lsg + Ld)::Float64
     R2tube = (default_R_tube * default_R_tube)::Float64
-    Lcirc  = (default_y_SGToAperture)::Float64
-    Lapert = (y_in+Lsg+Lcirc)::Float64
+    LA  = (default_y_SGToAperture)::Float64
+    Lapert = (y_in+Lsg+LA)::Float64
     R2circ = (default_c_aperture * default_c_aperture)::Float64
 
     # Kinematics
@@ -1103,7 +1110,7 @@ and 0 if neither happens, for y ∈ [y_in, y_in + default_y_SG].
 
     # Circular aperture
     x_aper = x0 + v0x * inv_vy * Lapert
-    z_aper = z0 + v0z * inv_vy * Lapert + κ * Lsg * (Lsg+2*Lcirc)
+    z_aper = z0 + v0z * inv_vy * Lapert + κ * Lsg * (Lsg+2*LA)
     (x_aper*x_aper + z_aper*z_aper >= R2circ ) && return 0x04 # 4 circular aperture
  
     # --- Screen check (only if cavity was clear) ---

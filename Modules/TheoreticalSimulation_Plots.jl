@@ -117,7 +117,7 @@ function plot_SG_geometry(filename::AbstractString)
     fig = plot(
         xlabel = L"$x \ (\mathrm{mm})$",
         xlim = (-8, 8), xticks = -8:2:8,
-        ylabel = L"$y \ (\mathrm{mm})$",
+        ylabel = L"$z \ (\mathrm{mm})$",
         ylim = (-3, 7), yticks = -3:1:7,
         aspect_ratio = :equal,
         legend = :bottomright,

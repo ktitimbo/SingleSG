@@ -657,12 +657,13 @@ Returns an `OrderedDict{K, Matrix{Float64}}` containing only columns `1:(flagcol
 - `OrderedDict{K, Matrix{Float64}}` with filtered rows and columns before `flagcol`.
 """
 function CQD_select_flagged(initial_by_current::OrderedDict{K, Matrix{Float64}},which::Symbol; flagcol::Integer=12)  where {K<:Integer}
-    flagset = which === :screen     ? (0,)      :
-              which === :crash_SG   ? (1, 2)    :
-              which === :crash_tube ? (3,)      :
-              which === :crash      ? (1,2,3)   :
-              which === :all        ? (0,1,2,3) :
-          error("which must be :screen, :crash_SG, :crash_tube, :crash, or :all")
+    flagset = which === :screen     ? (0,)        :
+              which === :crash_SG   ? (1, 2)      :
+              which === :crash_tube ? (3,)        :
+              which === :crash_aper ? (4,)        :
+              which === :crash      ? (1,2,3,4)   :
+              which === :all        ? (0,1,2,3,4) :
+          error("which must be :screen, :crash_SG, :crash_tube, :cras_aper, :crash, or :all")
 
     out = OrderedDict{K, Matrix{Float64}}()
     s = Set(flagset)
@@ -673,13 +674,15 @@ function CQD_select_flagged(initial_by_current::OrderedDict{K, Matrix{Float64}},
         @views col = M[:, flagcol]
 
         # keep rows where flag ∈ flagset (works for 1, 2, or 3 values)
-        keep = findall(in.(col, Ref(s)))
+        # keep = findall(in.(col, Ref(s)))
+        keep = findall(f -> f in s, col)
 
         out[idx] = M[keep, 1:flagcol-1]   # copy rows into a dense Matrix
     end
 
     return out
 end
+
 
 function CQD_travelling_particles_summary(Ixs, particles, branch::Symbol)
     # Normalize branch label for display
@@ -691,14 +694,16 @@ function CQD_travelling_particles_summary(Ixs, particles, branch::Symbol)
         if eltype(col) <: Integer
             pass = count(==(0),  col); top = count(==(1), col)
             bot  = count(==(2),  col); tub = count(==(3), col)
+            aper = count(==(4),  col);
         else
             pass = count(==(0.0), col); top = count(==(1.0), col)
             bot  = count(==(2.0), col); tub = count(==(3.0), col)
+            aper = count(==(4.0), col);
         end
-        return (pass=pass, top=top, bot=bot, tub=tub)
+        return (pass=pass, top=top, bot=bot, tub=tub, aper=aper)
     end
 
-    data = Matrix{Any}(undef, length(Ixs), 7)
+    data = Matrix{Any}(undef, length(Ixs), 8)
 
     for i in eachindex(Ixs)
         I0 = Float64(Ixs[i])
@@ -708,22 +713,22 @@ function CQD_travelling_particles_summary(Ixs, particles, branch::Symbol)
         M   = mat isa AbstractMatrix ? mat : mat[1]
 
         c   = counts_from_M(M)
-        tot = c.pass + c.top + c.bot + c.tub
+        tot = c.pass + c.top + c.bot + c.tub + c.aper
         passp = tot == 0 ? 0.0 : 100.0 * c.pass / tot
-        lossp = tot == 0 ? 0.0 : 100.0 * (c.top + c.bot + c.tub) / tot
+        lossp = tot == 0 ? 0.0 : 100.0 * (c.top + c.bot + c.tub + c.aper) / tot
 
         # First column is a string label → use Matrix{Any}
         
-        data[i, :] = [c.pass, c.top, c.bot, c.tub, tot, passp, lossp]
+        data[i, :] = [c.pass, c.top, c.bot, c.aper, c.tub, tot, passp, lossp]
 
 
     end
 
         pretty_table(
         data;
-        column_labels               = ["Pass","Top","Bottom","Tube","Total","Pass %","Loss %"],
+        column_labels               = ["Pass","Top","Bottom","Aperture","Tube","Total","Pass %","Loss %"],
         title                       = "CQD PARTICLE TRAJECTORIES STATISTICS ($(uppercase(string(branch))))",
-        formatters                  = [fmt__printf("%d", 1:5), fmt__printf("%5.1f", 6:7)],
+        formatters                  = [fmt__printf("%d", 1:6), fmt__printf("%5.1f", 7:8)],
         alignment                   = :c,
         table_format                = TextTableFormat(borders = text_table_borders__unicode_rounded),
         style                       = TextTableStyle(first_line_column_label = crayon"yellow bold",
