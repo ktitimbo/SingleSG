@@ -354,102 +354,6 @@ function travelling_particles_summary(Ixs, q_numbers, particles)
     return nothing
 end
 
-
-"""
-    select_flagged(initial_by_current, which::Symbol; flagcol::Int=10)
-        -> OrderedDict{Int8, Vector{Matrix{Float64}}}
-
-Filter particle matrices by the flag stored in column `flagcol` (default `10`),
-returning a **new** dictionary with the same keys and number of levels but with
-**only the rows** whose flag matches the requested category. Rows are **copied**
-(dense matrices), not views.
-
-!!! note
-    The returned matrices **exclude** the flag column and any columns to its
-    right: only columns `1:flagcol-1` are kept.
-
-## Categories
-- `:screen`      → keep rows with flag == 0
-- `:crash_SG`    → keep rows with flag ∈ {1, 2}
-- `:crash_tube`  → keep rows with flag == 3
-- `:crash`       → keep rows with flag ∈ {1, 2, 3}
-- `:all`         → keep rows with flag ∈ {0, 1, 2, 3}
-
-## Arguments
-- `initial_by_current::OrderedDict{Int8, Vector{Matrix{Float64}}}`:
-  For each current (key `Int8`), a vector of per-level `N×D` matrices (typically `D ≥ flagcol`).
-- `which::Symbol`: one of `:screen`, `:crash_SG`, `:crash_tube`, `:crash`, `:all`.
-- `flagcol::Int=10`: 1-based column index holding the flag (must satisfy `1 ≤ flagcol ≤ D`).
-
-## Returns
-`OrderedDict{Int8, Vector{Matrix{Float64}}}` with the same keys and number of
-levels. Each matrix contains only the **kept rows** and columns `1:flagcol-1`.
-If no rows match for a given level, its matrix will be `0×(flagcol-1)`.
-
-## Notes
-- Works even if flags are stored as floating-point values (e.g., `0.0`, `1.0`),
-  since equality like `0 == 0.0` holds in Julia.
-- All outputs are fresh copies (dense `Matrix{Float64}`), so later mutations
-  won’t affect the input matrices.
-
-## Example
-```julia
-only_screen = select_flagged(particles_trajectories, :screen)      # flag == 0
-only_crash  = select_flagged(particles_trajectories, :crash)       # flags 1,2,3
-all_flags   = select_flagged(particles_trajectories, :all)         # flags 0–3
-
-# Access rows for current key 1, level 3 (columns 1:flagcol-1 are kept)
-only_screen[1][3]
-
-"""
-function select_flagged(initial_by_current::OrderedDict{K, Vector{Matrix{Float64}}},which::Symbol; flagcol::Integer=10) where {K<:Integer}
-    flagset = which === :screen     ? (0,)          :
-              which === :crash_SG   ? (1, 2)        :
-              which === :crash_tube ? (3,)          :
-              which === :crash_aper ? (4,)          :
-              which === :crash      ? (1,2,3,4)     :
-              which === :all        ? (0,1,2,3,4)   : 
-          error("which must be :screen, :crash_SG, :crash_tube, :cras_aper, :crash, or :all")
-
-    flagset_set = Set(flagset)
-    out = OrderedDict{Int8, Vector{Matrix{Float64}}}()
-
-    for (idx, mats) in initial_by_current
-        nlevels = length(mats)
-        v = Vector{Matrix{Float64}}(undef, nlevels)
-
-        @inbounds for k in 1:nlevels
-            M = mats[k]
-            @assert 1 ≤ flagcol ≤ size(M,2) "flagcol out of bounds"
-            @views col =  M[:, flagcol]
-            nrows, ncols = size(M, 1), flagcol - 1
-
-            nkeep = 0
-            buf = Matrix{Float64}(undef,nrows,ncols)
-
-            @inbounds @simd for i in 1:nrows
-                f = col[i]
-                if f in flagset_set
-                    nkeep +=1
-                    @views buf[nkeep,:] .= M[i, 1:ncols]
-                end
-            end
-
-            v[k] =@view buf[1:nkeep,:]
-            # keep rows where flag ∈ flagset (works for 1, 2, or 3 values)
-            # keep = findall(in.(col, Ref(flagset)))
-            # Alternatively (avoids building index vector):
-            # mask = in.(col, Ref(flagset))
-            # v[k] = M[mask, :]
-            # v[k] = M[keep, 1:flagcol-1]   # copy rows into a dense Matrix
-        end
-
-        out[idx] = v
-    end
-
-    return out
-end
-
 # Global buffer pool (per size)
 const _select_flagged_pool = Dict{Tuple{Int,Int}, Matrix{Float64}}()
 
@@ -671,13 +575,14 @@ function CQD_select_flagged(initial_by_current::OrderedDict{K, Matrix{Float64}},
     @inbounds for (idx, M) in initial_by_current
         @assert 1 ≤ flagcol ≤ size(M, 2) "flagcol out of bounds (got $flagcol, size=$(size(M)))"
         
+        nrows = size(M,1)
+        ncols = flagcol - 1
         @views col = M[:, flagcol]
 
         # keep rows where flag ∈ flagset (works for 1, 2, or 3 values)
-        # keep = findall(in.(col, Ref(s)))
         keep = findall(f -> f in s, col)
 
-        out[idx] = M[keep, 1:flagcol-1]   # copy rows into a dense Matrix
+        out[idx] = M[keep, 1:ncols]   # copy rows into a dense Matrix
     end
 
     return out
