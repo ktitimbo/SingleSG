@@ -526,7 +526,6 @@ for (i,ki) in enumerate(kis)
     temp_mm_dw = nothing
     GC.gc()
 end
-
 jldsave( joinpath(OUTDIR, "cqd_$(Nss)_kis.jld2"), 
         data=OrderedDict(
             :Icoils     => Icoils,
@@ -624,8 +623,8 @@ open(joinpath(OUTDIR,"simulation_report.txt"), "w") do io
     write(io, report)
 end
 
-println("script $RUN_STAMP has finished!")
-alert("script $RUN_STAMP has finished!")
+println("DATA COLLECTED : script $RUN_STAMP has finished!")
+
 
 ################################################################################################
 ################################################################################################
@@ -643,7 +642,7 @@ gaussian_width_mm   = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200,
 
 # Total combinations (diagnostic only)
 Ntot = length(induction_coeff) * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-@info "Profiles analyzed" Ntot
+@info "Total profiles" Ntot
 
 
 # =========================================================
@@ -692,7 +691,10 @@ jldsave(
     joinpath(OUTDIR, "cqd_$(Ns)_screen_profiles_up_table_thread.jld2"),
     table = table_up
 )
-
+table_up = nothing
+GC.gc()
+@info "Memory cleaned after processing CQD up data"
+println("Free memory: $(Sys.free_memory() / 1e9) GB") 
 
 # =========================================================
 # ======================== DW ==============================
@@ -741,6 +743,65 @@ jldsave(
     joinpath(OUTDIR, "cqd_$(Ns)_screen_profiles_dw_table_thread.jld2"),
     table = table_dw
 )
+table_dw = nothing
+GC.gc()
+@info "Memory cleaned after processing CQD down data"
+println("Free memory: $(Sys.free_memory() / 1e9) GB") 
 
 
-println("script $RUN_STAMP has finished!")
+######################################################################
+T_END = Dates.now()
+T_RUN = Dates.canonicalize(T_END-T_START)
+report = """
+***************************************************
+EXPERIMENT
+    Single Stern–Gerlach Experiment
+    atom                    : $(atom)
+    Output directory        : $(OUTDIR)
+    RUN_STAMP               : $(RUN_STAMP)
+
+CAMERA FEATURES
+    Number of pixels        : $(nx_pixels) × $(nz_pixels)
+    Pixel size              : $(1e6*cam_pixelsize) μm
+
+SETUP FEATURES
+    Temperature             : $(T_K)
+    Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
+    Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
+    Post-SG aperture radius : $(1e3*R_aper)mm
+    Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
+    Slit → SG magnet        : $(1e3*y_SlitToSG)mm
+    SG magnet               : $(1e3*y_SG)mm
+    SG magnet → Screen      : $(1e3*y_SGToScreen)mm
+    SG magnet → Aperture    : $(1e3*y_SGToAperture)mm
+    Tube radius             : $(1e3*R_tube)mm
+
+SIMULATION INFORMATION
+    Number of atoms         : $(Ns)
+    Binning (nx,nz)         : ($(nx_bins),$(nz_bins))
+    Gaussian width (mm)     : $(gaussian_width_mm)
+    Smoothing raw           : $(λ0_raw_list)
+    Smoothing spline        : $(λ0_spline)
+    Currents (A)            : $(round.(Icoils,sigdigits=3))
+    No. of currents         : $(nI)
+
+CODE
+    Code name               : $(PROGRAM_FILE)
+    Start date              : $(T_START)
+    End data                : $(T_END)
+    Run time                : $(T_RUN)
+    Hostname                : $(HOSTNAME)
+
+***************************************************
+"""
+# Print to terminal
+println(report)
+
+# Save to file
+open(joinpath(OUTDIR,"simcqd_report.txt"), "w") do io
+    write(io, report)
+end
+
+
+println("DATA ANALYZED : script $RUN_STAMP has finished!")
+alert("script $RUN_STAMP has finished!")
