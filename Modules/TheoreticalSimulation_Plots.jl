@@ -270,5 +270,5 @@ function plot_velocity_stats(alive::Matrix{Float64}, title::String, filename::St
     display(fig)
     savefig(fig, joinpath(OUTDIR,"$(filename).$(FIG_EXT)"))
 
-    return fig
+    return nothing
 end
