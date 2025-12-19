@@ -182,7 +182,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 800 ; 
+const Nss = 8000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -321,7 +321,7 @@ anim = nothing
 
 
 # ATOMS PROPAGATION
-r = 1:4:nI;
+r = 1:1:nI;
 iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
 anim = @animate for j in iter
     data_set = CQD_up_screen[:data][j]
@@ -335,6 +335,15 @@ anim = @animate for j in iter
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
         xticks = -1.0:0.25:1.0, yticks = -50:25:50,
     );
+    # Text position
+    xpos, ypos = -0.75, 35
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.15, 7   # adjust width and height
+    plot!(figa, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(figa, xpos, ypos,  text("Furnace", 10, :black, :bold, :center, "Helvetica") )
 
     # Slit
     r_at_slit = Matrix{Float64}(undef, size(data_set, 1), 3);
@@ -353,6 +362,15 @@ anim = @animate for j in iter
         xlims=(-4,4),
         ylims=(-200,200),
     ) ;
+    # Text position
+    xpos, ypos = -3.5, 150
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.4, 20   # adjust width and height
+    plot!(figb, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(figb, xpos, ypos,  text("Slit", 10, :black, :bold, :center, "Helvetica") );
 
     # SG entrance
     r_at_SG_entrance = Matrix{Float64}(undef, size(data_set, 1), 3);
@@ -370,6 +388,15 @@ anim = @animate for j in iter
         xticks = -4.0:0.50:4.0, yticks = -1000:100:1000,
         xlims=(-4,4), ylims=(-250,250),
     );
+    # Text position
+    xpos, ypos = -3.0, 180
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.8, 30   # adjust width and height
+    plot!(figc, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(figc, xpos, ypos,  text("SG entrance", 10, :black, :bold, :center, "Helvetica") );
 
     # SG exit
     r_at_SG_exit = Matrix{Float64}(undef, size(data_set, 1), 3);
@@ -389,6 +416,49 @@ anim = @animate for j in iter
     )
     x_magnet = 1e-3*range(-1.0,1.0,length=1000)
     plot!(figd,1e3*x_magnet,1e6*TheoreticalSimulation.z_magnet_edge.(x_magnet),line=(:dash,:black,2),label=false)
+    # Text position
+    xpos, ypos = -3.0, 700
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.6, 160   # adjust width and height
+    plot!(figd, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(figd, xpos, ypos,  text("SG exit", 10, :black, :bold, :center, "Helvetica") );
+
+    # Circular Aperture : Post-SG
+    r_at_aperture = Matrix{Float64}(undef, size(data_set, 1), 3);
+    for i in axes(data_set,1)
+        v0y = data_set[i,5]
+        r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToAperture) ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
+        r_at_aperture[i,:] = r
+    end
+    xs_d = 1e3 .* r_at_aperture[:,1]; # mm
+    zs_d = 1e6 .* r_at_aperture[:,3]; # μm
+    figf = histogram2d(xs_d, zs_d;
+        bins = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d)),
+        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
+        xticks = -4.0:0.50:4.0, yticks = -1000:500:3000,
+        xlims=(-4,4), ylims=(-300,3000),
+    );
+    # center and radius (in mm)
+    xc, zc_mm = 0.0, 0.0
+    R_mm = 1e3*R_aper
+    θ = range(0, 2π, length=361)
+    x_circ = xc .+ R_mm .* cos.(θ)                 # mm
+    z_circ = (zc_mm*1000) .+ (1000R_mm) .* sin.(θ) # μm  (convert mm→μm)
+    plot!(figf, x_circ, z_circ;
+      linestyle=:dash, lw=2, color=:gray, legend=false);
+    # Text position
+    xpos, ypos = -3.0, 2400
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.7, 270   # adjust width and height
+    plot!(figf, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(figf, xpos, ypos,  text("⊚ Aperture", 10, :black, :bold, :center, "Helvetica") );
 
     # Screen
     r_at_screen = Matrix{Float64}(undef, size(data_set, 1), 3);
@@ -406,9 +476,18 @@ anim = @animate for j in iter
         ylims=(-1,17.5),
         # xticks = -4.0:0.50:4.0, yticks = -1250:50:1250,
     );
+    # Text position
+    xpos, ypos = -4.0, 14
+    # Draw a small white rectangle behind the text
+    dx, dy = 0.9, 0.9   # adjust width and height
+    plot!(fige, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                  [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+      color=:white, opacity=0.65, linealpha=0,
+      label=false);
+    annotate!(fige, xpos, ypos,  text("Screen", 10, :black, :bold, :center, "Helvetica") )
 
-    fig = plot(figa,figb,figc,figd,fige,
-    layout=(5,1),
+    fig = plot(figa,figb,figc,figd,figf,fige,
+    layout=(6,1),
     suptitle = L"$I_{0} = %$(Int(1000*Icoils[j]))\,\mathrm{mA}$",
     size=(750,800),
     right_margin=2mm,
@@ -418,13 +497,13 @@ anim = @animate for j in iter
     plot!(fig[2], xlabel="", bottom_margin=-3mm),
     plot!(fig[3], xlabel="", bottom_margin=-3mm),
     plot!(fig[4], xlabel="", bottom_margin=-3mm),
+    plot!(fig[5], xlabel="", bottom_margin=-3mm),
     display(fig)
 end
 gif_path = joinpath(OUTDIR, "CQD_time_evolution.gif");
 gif(anim, gif_path, fps=2)  # adjust fps
 @info "Saved GIF" gif_path ;
 anim = nothing
-
 
 fig = plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)") 
 plot!(I_exp[2:end],z_exp[2:end],
@@ -466,11 +545,12 @@ savefig(fig, joinpath(OUTDIR,"CQD_results_comparison.$FIG_EXT"))
 
 kis = round.([
     [exp10(p) * x for p in -8:-8 for x in 1.0:1:9]; 
-    # [exp10(p) * x for p in -7:-7 for x in 1.0:1:9]; 
-    # [exp10(p) * x for p in -6:-6 for x in 1.0:0.1:9.9]; 
+    [exp10(p) * x for p in -7:-7 for x in 1.0:1:9]; 
+    [exp10(p) * x for p in -6:-6 for x in 1.0:0.1:9.9]; 
     ## exp10(-5) * (1:0.1:10);
-    # exp10.(-5:-1)
+    exp10.(-5:-1)
 ];sigdigits=4)
+@info "Number of ki sampled" length(kis)
 
 fig=scatter(2*ones(length(kis)), kis,
     marker=(:circle,2,:white,stroke(:red,1)),
@@ -478,8 +558,11 @@ fig=scatter(2*ones(length(kis)), kis,
 scatter!(xlims=(1.5,2.5),
 xticks=nothing,
 yscale=:log10,
-yticks = ([1e-9,1e-8,1e-7,1e-6,1e-5,1e-4,1e-3, 1e-2, 1e-1, 1.0], 
-        [L"10^{-9}", L"10^{-8}", L"10^{-7}", L"10^{-6}",L"10^{-5}", L"10^{-4}",L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),)
+yticks = ([1e-8,1e-7,1e-6,1e-5,1e-4,1e-3, 1e-2, 1e-1, 1.0], 
+        [L"10^{-8}", L"10^{-7}", L"10^{-6}",L"10^{-5}", L"10^{-4}",L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+size=(300,600),
+left_margin=3mm,
+legend=:outerbottom)
 display(fig)
 
 dta_ki_up = zeros(length(kis),length(Icoils));
@@ -631,7 +714,7 @@ println("DATA COLLECTED : script $RUN_STAMP has finished!")
 # =======================
 # Global parameters
 # =======================
-Ns = 2_800_000
+Ns = Nss
 
 induction_coeff     = 1e6 .* kis
 nz_bins             = [1, 2, 4, 8]
