@@ -182,7 +182,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 8000 ; 
+const Nss = 800_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -244,7 +244,7 @@ jldsave(
     :mmdw       => mm_dw
     ) 
 )
-                                                                 
+
 # Profiles : up and down
 anim = @animate for j in eachindex(Icoils)
     fig = plot(
@@ -321,139 +321,189 @@ anim = nothing
 
 
 # ATOMS PROPAGATION
-r = 1:1:nI;
+r = 1:2:nI;
 iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
+# =========================
+# Precompute geometry overlays (constant)
+# =========================
+x_magnet    = 1e-3 .* range(-1.0, 1.0, length=1000);  # m
+z_edge_um   = 1e6 .* TheoreticalSimulation.z_magnet_edge.(x_magnet); # μm
+x_magnet_mm = 1e3 .* x_magnet;                      # mm
+
+# Aperture circle (drawn on the "aperture" panel)
+xc_mm, zc_um = 0.0, 0.0;
+R_mm = 1e3 * R_aper;
+θ = range(0, 2π, length=361);
+x_circ_mm = xc_mm .+ R_mm .* cos.(θ);
+z_circ_um = zc_um .+ (1e3*R_mm) .* sin.(θ); # mm -> μm
+
+# =========================
+# Precompute stage distances (so per-particle you only divide by v0y)
+# =========================
+y_furn   = 0.0 ;
+y_slit   = y_FurnaceToSlit ;
+y_sg_in  = y_FurnaceToSlit + y_SlitToSG ;
+y_sg_out = y_sg_in + y_SG ;
+y_aper   = y_sg_out + y_SGToAperture ;
+y_scr    = y_sg_out + y_SGToScreen ;
+
 anim = @animate for j in iter
     data_set = CQD_up_screen[:data][j]
+    n = size(data_set, 1)
     
-    #Furnace
-    xs_a = 1e3 .* data_set[:,1]; # mm
-    zs_a = 1e6 .* data_set[:,3]; # μm
+    # --- preallocate arrays for histograms (store already scaled units) ---
+    xs_a = Vector{Float64}(undef, n)  # furnace x (mm)
+    zs_a = Vector{Float64}(undef, n)  # furnace z (μm)
+
+    xs_b = Vector{Float64}(undef, n)  # slit x (mm)
+    zs_b = Vector{Float64}(undef, n)  # slit z (μm)
+
+    xs_c = Vector{Float64}(undef, n)  # SG entrance x (mm)
+    zs_c = Vector{Float64}(undef, n)  # SG entrance z (μm)
+
+    xs_d = Vector{Float64}(undef, n)  # SG exit x (mm)
+    zs_d = Vector{Float64}(undef, n)  # SG exit z (μm)
+
+    xs_f = Vector{Float64}(undef, n)  # aperture x (mm)
+    zs_f = Vector{Float64}(undef, n)  # aperture z (μm)
+
+    xs_e = Vector{Float64}(undef, n)  # screen x (mm)
+    zs_e = Vector{Float64}(undef, n)  # screen z (mm)
+
+
+    # --- one pass: compute all stages for each selected particle ---
+    @inbounds for i in 1:n
+        # initial conditions
+        x0  = data_set[i,1]; y0  = data_set[i,2]; z0  = data_set[i,3]
+        v0x = data_set[i,4]; v0y = data_set[i,5]; v0z = data_set[i,6]
+        θe  = data_set[i,7]; ϕe  = data_set[i,8]
+
+        # Furnace (just the initial plane)
+        xs_a[i] = 1e3 * x0
+        zs_a[i] = 1e6 * z0
+
+        # Propagation times (divide once per stage)
+        τ_slit  = y_slit / v0y
+        τ_sgin  = y_sg_in / v0y
+        τ_sgout = y_sg_out / v0y
+        τ_aper  = y_aper / v0y
+        τ_scr   = y_scr  / v0y
+
+        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_slit,  Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, ki, K39_params)
+        xs_b[i] = 1e3 * r[1]
+        zs_b[i] = 1e6 * r[3]
+
+        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_sgin,  Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, ki, K39_params)
+        xs_c[i] = 1e3 * r[1]
+        zs_c[i] = 1e6 * r[3]
+
+        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_sgout, Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, ki, K39_params)
+        xs_d[i] = 1e3 * r[1]
+        zs_d[i] = 1e6 * r[3]
+
+        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_aper,  Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, ki, K39_params)
+        xs_f[i] = 1e3 * r[1]
+        zs_f[i] = 1e6 * r[3]
+
+        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_scr,   Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, ki, K39_params)
+        xs_e[i] = 1e3 * r[1]
+        zs_e[i] = 1e3 * r[3]  # mm
+    end
+
+
+    bins_furn  = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a))
+    bins_slit  = (FreedmanDiaconisBins(xs_b), FreedmanDiaconisBins(zs_b))
+    bins_sgin  = (FreedmanDiaconisBins(xs_c), FreedmanDiaconisBins(zs_c))
+    bins_sgout = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d))
+    bins_aper  = (FreedmanDiaconisBins(xs_f), FreedmanDiaconisBins(zs_f))
+    bins_scr   = (FreedmanDiaconisBins(xs_e), FreedmanDiaconisBins(zs_e))
+
+
+    # --- Furnace panel ---
     figa = histogram2d(xs_a, zs_a;
-        bins = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        bins = bins_furn,
+        show_empty_bins = true, color = :plasma, normalize = :pdf,
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
         xticks = -1.0:0.25:1.0, yticks = -50:25:50,
     );
     # Text position
-    xpos, ypos = -0.75, 35
+    xpos, ypos = -0.75, 35;
     # Draw a small white rectangle behind the text
-    dx, dy = 0.15, 7   # adjust width and height
+    dx, dy = 0.15, 7 ;  # adjust width and height
     plot!(figa, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
                   [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
       color=:white, opacity=0.65, linealpha=0,
       label=false);
-    annotate!(figa, xpos, ypos,  text("Furnace", 10, :black, :bold, :center, "Helvetica") )
+    annotate!(figa, xpos, ypos,  text("Furnace", 10, :black, :bold, :center, "Helvetica") );
 
-    # Slit
-    r_at_slit = Matrix{Float64}(undef, size(data_set, 1), 3);
-    for i in axes(data_set,1)
-        v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.CQD_EqOfMotion(y_FurnaceToSlit ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
-        r_at_slit[i,:] = r
-    end
-    xs_b = 1e3 .* r_at_slit[:,1]; # mm
-    zs_b = 1e6 .* r_at_slit[:,3]; # μm
+    # --- Slit panel ---
     figb = histogram2d(xs_b, zs_b;
-        bins = (FreedmanDiaconisBins(xs_b), FreedmanDiaconisBins(zs_b)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        bins = bins_slit,
+        show_empty_bins = true, color = :plasma, normalize = :pdf,
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
         xticks = -4.0:0.50:4.0, yticks = -200:50:200,
-        xlims=(-4,4),
-        ylims=(-200,200),
-    ) ;
+        xlims = (-4, 4), ylims = (-200, 200),
+    );
     # Text position
-    xpos, ypos = -3.5, 150
+    xpos, ypos = -3.5, 150;
     # Draw a small white rectangle behind the text
-    dx, dy = 0.4, 20   # adjust width and height
+    dx, dy = 0.4, 20;   # adjust width and height
     plot!(figb, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
                   [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
       color=:white, opacity=0.65, linealpha=0,
       label=false);
     annotate!(figb, xpos, ypos,  text("Slit", 10, :black, :bold, :center, "Helvetica") );
 
-    # SG entrance
-    r_at_SG_entrance = Matrix{Float64}(undef, size(data_set, 1), 3);
-    for i in axes(data_set,1)
-        v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG) ./ v0y , Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
-        r_at_SG_entrance[i,:] = r
-    end
-    xs_c = 1e3 .* r_at_SG_entrance[:,1]; # mm
-    zs_c = 1e6 .* r_at_SG_entrance[:,3]; # μm
+    # --- SG entrance panel ---
     figc = histogram2d(xs_c, zs_c;
-        bins = (FreedmanDiaconisBins(xs_c), FreedmanDiaconisBins(zs_c)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        bins = bins_sgin,
+        show_empty_bins = true, color = :plasma, normalize = :pdf,
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
         xticks = -4.0:0.50:4.0, yticks = -1000:100:1000,
-        xlims=(-4,4), ylims=(-250,250),
+        xlims = (-4, 4), ylims = (-250, 250),
     );
     # Text position
-    xpos, ypos = -3.0, 180
+    xpos, ypos = -3.0, 180;
     # Draw a small white rectangle behind the text
-    dx, dy = 0.8, 30   # adjust width and height
+    dx, dy = 0.8, 30;  # adjust width and height
     plot!(figc, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
                   [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
       color=:white, opacity=0.65, linealpha=0,
       label=false);
     annotate!(figc, xpos, ypos,  text("SG entrance", 10, :black, :bold, :center, "Helvetica") );
 
-    # SG exit
-    r_at_SG_exit = Matrix{Float64}(undef, size(data_set, 1), 3);
-    for i in axes(data_set,1)
-        v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SG) ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
-        r_at_SG_exit[i,:] = r
-    end
-    xs_d = 1e3 .* r_at_SG_exit[:,1]; # mm
-    zs_d = 1e6 .* r_at_SG_exit[:,3]; # μm
+    # --- SG exit panel ---
     figd = histogram2d(xs_d, zs_d;
-        bins = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        bins = bins_sgout,
+        show_empty_bins = true, color = :plasma, normalize = :pdf,
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
         xticks = -4.0:0.50:4.0, yticks = -1000:200:1000,
-        xlims=(-4,4), ylims=(-300,1000),
-    )
-    x_magnet = 1e-3*range(-1.0,1.0,length=1000)
-    plot!(figd,1e3*x_magnet,1e6*TheoreticalSimulation.z_magnet_edge.(x_magnet),line=(:dash,:black,2),label=false)
+        xlims = (-4, 4), ylims = (-300, 1000),
+    );
+    plot!(figd, x_magnet_mm, z_edge_um, line = (:dash, :black, 2), label=false)
     # Text position
-    xpos, ypos = -3.0, 700
+    xpos, ypos = -3.0, 700;
     # Draw a small white rectangle behind the text
-    dx, dy = 0.6, 160   # adjust width and height
+    dx, dy = 0.6, 160 ;  # adjust width and height
     plot!(figd, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
                   [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
       color=:white, opacity=0.65, linealpha=0,
       label=false);
     annotate!(figd, xpos, ypos,  text("SG exit", 10, :black, :bold, :center, "Helvetica") );
 
-    # Circular Aperture : Post-SG
-    r_at_aperture = Matrix{Float64}(undef, size(data_set, 1), 3);
-    for i in axes(data_set,1)
-        v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToAperture) ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
-        r_at_aperture[i,:] = r
-    end
-    xs_d = 1e3 .* r_at_aperture[:,1]; # mm
-    zs_d = 1e6 .* r_at_aperture[:,3]; # μm
-    figf = histogram2d(xs_d, zs_d;
-        bins = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
+    # --- Aperture panel ---
+    figf = histogram2d(xs_f, zs_f;
+        bins = bins_aper,
+        show_empty_bins = true, color = :plasma, normalize = :pdf,
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{\mu m})$",
         xticks = -4.0:0.50:4.0, yticks = -1000:500:3000,
-        xlims=(-4,4), ylims=(-300,3000),
+        xlims = (-4, 4), ylims = (-300, 3000),
     );
-    # center and radius (in mm)
-    xc, zc_mm = 0.0, 0.0
-    R_mm = 1e3*R_aper
-    θ = range(0, 2π, length=361)
-    x_circ = xc .+ R_mm .* cos.(θ)                 # mm
-    z_circ = (zc_mm*1000) .+ (1000R_mm) .* sin.(θ) # μm  (convert mm→μm)
-    plot!(figf, x_circ, z_circ;
-      linestyle=:dash, lw=2, color=:gray, legend=false);
+    plot!(figf, x_circ_mm, z_circ_um; linestyle=:dash, lw=2, color=:gray, legend=false);
     # Text position
-    xpos, ypos = -3.0, 2400
+    xpos, ypos = -3.0, 2400;
     # Draw a small white rectangle behind the text
-    dx, dy = 0.7, 270   # adjust width and height
+    dx, dy = 0.7, 270;   # adjust width and height
     plot!(figf, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
                   [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
       color=:white, opacity=0.65, linealpha=0,
@@ -461,30 +511,22 @@ anim = @animate for j in iter
     annotate!(figf, xpos, ypos,  text("⊚ Aperture", 10, :black, :bold, :center, "Helvetica") );
 
     # Screen
-    r_at_screen = Matrix{Float64}(undef, size(data_set, 1), 3);
-    for i in axes(data_set,1)
-        v0y = data_set[i,5]
-        r , _ = TheoreticalSimulation.CQD_EqOfMotion((y_FurnaceToSlit+y_SlitToSG+y_SG+y_SGToScreen) ./ v0y, Icoils[j], μₑ, data_set[i,1:3], data_set[i,4:6], data_set[i,7], data_set[i,8], ki, K39_params)
-        r_at_screen[i,:] = r
-    end
-    xs_e = 1e3 .* r_at_screen[:,1]; # mm
-    zs_e = 1e3 .* r_at_screen[:,3]; # μm
+    # --- Screen panel ---
     fige = histogram2d(xs_e, zs_e;
-        bins = (FreedmanDiaconisBins(xs_e), FreedmanDiaconisBins(zs_e)),
-        show_empty_bins = true, color = :plasma, normalize=:pdf,
+        bins = bins_scr,
+        show_empty_bins = true, color = :plasma, normalize = :pdf,
         xlabel = L"$x \ (\mathrm{mm})$", ylabel = L"$z \ (\mathrm{mm})$",
-        ylims=(-1,17.5),
-        # xticks = -4.0:0.50:4.0, yticks = -1250:50:1250,
+        ylims = (-1, 17.5),
     );
     # Text position
-    xpos, ypos = -4.0, 14
+    xpos, ypos = -4.0, 14;
     # Draw a small white rectangle behind the text
-    dx, dy = 0.9, 0.9   # adjust width and height
+    dx, dy = 0.9, 0.9;   # adjust width and height
     plot!(fige, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
                   [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
       color=:white, opacity=0.65, linealpha=0,
       label=false);
-    annotate!(fige, xpos, ypos,  text("Screen", 10, :black, :bold, :center, "Helvetica") )
+    annotate!(fige, xpos, ypos,  text("Screen", 10, :black, :bold, :center, "Helvetica") );
 
     fig = plot(figa,figb,figc,figd,figf,fige,
     layout=(6,1),
@@ -492,12 +534,12 @@ anim = @animate for j in iter
     size=(750,800),
     right_margin=2mm,
     bottom_margin=-2mm,
-    )
-    plot!(fig[1], xlabel="", bottom_margin=-3mm),
-    plot!(fig[2], xlabel="", bottom_margin=-3mm),
-    plot!(fig[3], xlabel="", bottom_margin=-3mm),
-    plot!(fig[4], xlabel="", bottom_margin=-3mm),
-    plot!(fig[5], xlabel="", bottom_margin=-3mm),
+    );
+    plot!(fig[1], xlabel="", bottom_margin=-3mm);
+    plot!(fig[2], xlabel="", bottom_margin=-3mm);
+    plot!(fig[3], xlabel="", bottom_margin=-3mm);
+    plot!(fig[4], xlabel="", bottom_margin=-3mm);
+    plot!(fig[5], xlabel="", bottom_margin=-3mm);
     display(fig)
 end
 gif_path = joinpath(OUTDIR, "CQD_time_evolution.gif");
