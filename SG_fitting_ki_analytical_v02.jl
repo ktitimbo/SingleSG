@@ -488,7 +488,7 @@ nz_set  = sort(unique(getindex.(keys_vec, 2)))
 gw_set  = sort(unique(getindex.(keys_vec, 3)))
 λ0_set  = sort(unique(getindex.(keys_vec, 4)))
 # --- Quantum mechanics data ---
-table_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_5M","qm_5000000_screen_profiles_table.jld2"))["table"];
+table_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_6M","qm_6000000_screen_profiles_f1_table.jld2"))["table"];
 @info "QM data loaded"
 # --- Experiment combined ---
 exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"];
@@ -1161,7 +1161,7 @@ for wanted_data_dir in wanted_data_dirs
         zmm_cqd    = z_mm_ki,
         Ic_QM      = Ic_QM,
         zmax_QM    = zmax_QM,
-        axis_scale = :loglog,
+        axis_scale = :identity,
         data_label = wanted_data_dir,
     )
     display(fig)
@@ -1187,7 +1187,7 @@ for wanted_data_dir in wanted_data_dirs
         p          = p,
         scale_exp  = true,
         data_label = wanted_data_dir,
-        axis_scale = :loglog,
+        axis_scale = :identity,
     )
     display(fig)
 
