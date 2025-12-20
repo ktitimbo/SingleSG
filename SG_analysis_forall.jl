@@ -45,7 +45,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20251109" ;
+data_directory      = "20250814" ;
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
 
@@ -95,7 +95,7 @@ data_JSF = OrderedDict(
     [0.0409, 0.0566, 0.0830, 0.1015, 0.1478, 0.1758, 0.2409, 0.3203, 0.4388, 0.5433, 0.6423, 0.8394, 1.1267, 1.5288], #CQD
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
-data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
+data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_6M","qm_6000000_screen_profiles_f1_table.jld2"))["table"]
 
 # Importing data
 if !isfile(outfile_processed) # check if the processed images exists
@@ -140,9 +140,9 @@ data_processed = load(outfile_processed)["data"]
 
 # Binning for the analysis
 nbins_list  = (1, 2, 4, 8)
-λ0_list     = (0.01, 0.02, 0.03, 0.04, 0.05)
+λ0_list     = (0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
 const Cell = Union{Missing, String, Int, Float64}
-summary_table = Matrix{Cell}(undef, 20, 3);
+summary_table = Matrix{Cell}(undef, length(nbins_list)*length(λ0_list), 3);
 for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     T_START   = Dates.now()
     RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
