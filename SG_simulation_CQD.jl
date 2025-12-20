@@ -352,23 +352,12 @@ anim = @animate for j in iter
     n = size(data_set, 1)
     
     # --- preallocate arrays for histograms (store already scaled units) ---
-    xs_a = Vector{Float64}(undef, n)  # furnace x (mm)
-    zs_a = Vector{Float64}(undef, n)  # furnace z (μm)
-
-    xs_b = Vector{Float64}(undef, n)  # slit x (mm)
-    zs_b = Vector{Float64}(undef, n)  # slit z (μm)
-
-    xs_c = Vector{Float64}(undef, n)  # SG entrance x (mm)
-    zs_c = Vector{Float64}(undef, n)  # SG entrance z (μm)
-
-    xs_d = Vector{Float64}(undef, n)  # SG exit x (mm)
-    zs_d = Vector{Float64}(undef, n)  # SG exit z (μm)
-
-    xs_f = Vector{Float64}(undef, n)  # aperture x (mm)
-    zs_f = Vector{Float64}(undef, n)  # aperture z (μm)
-
-    xs_e = Vector{Float64}(undef, n)  # screen x (mm)
-    zs_e = Vector{Float64}(undef, n)  # screen z (mm)
+    xs_a = Vector{Float64}(undef, n); zs_a = Vector{Float64}(undef, n)  # furnace (mm, μm)
+    xs_b = Vector{Float64}(undef, n); zs_b = Vector{Float64}(undef, n)  # slit (mm, μm)
+    xs_c = Vector{Float64}(undef, n); zs_c = Vector{Float64}(undef, n)  # SG in (mm, μm)
+    xs_d = Vector{Float64}(undef, n); zs_d = Vector{Float64}(undef, n)  # SG out (mm, μm)
+    xs_f = Vector{Float64}(undef, n); zs_f = Vector{Float64}(undef, n)  # aperture (mm, μm)
+    xs_e = Vector{Float64}(undef, n); zs_e = Vector{Float64}(undef, n)  # screen (mm, mm)
 
 
     # --- one pass: compute all stages for each selected particle ---
