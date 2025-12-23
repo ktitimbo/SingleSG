@@ -60,8 +60,8 @@ data_JSF = OrderedDict(
 );
 
 # To be generalized
-data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
-nz_fix, σ_fix, λ0_fix = (2,0.200,0.01)
+data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_6M","qm_6000000_screen_profiles_f1_table.jld2"))["table"]
+nz_fix, σ_fix, λ0_fix = (2,0.250,0.01)
 chosen_qm = data_qm[(nz_fix, σ_fix, λ0_fix)]
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
 zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
