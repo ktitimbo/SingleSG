@@ -45,7 +45,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20251002" ;
+data_directory      = "20251006" ;
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
 
@@ -152,9 +152,9 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     MyExperimentalAnalysis.OUTDIR   = OUTDIR;
     summary_table[row,:] = Cell[RUN_STAMP, n_bins, λ0]
 
-    chosen_qm = data_qm[(n_bins, 0.150, λ0)]
-    Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
-    zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
+    chosen_qm = data_qm[(n_bins, 0.200, λ0)]
+    Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][3:end]
+    zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][3:end]
 
     # position
     z_mm        = 1e3 .* pixel_positions(z_pixels, n_bins, exp_pixelsize_z)
