@@ -519,7 +519,7 @@ err_spline = Spline1D(exp_avg[:i_smooth], exp_avg[:δz_smooth], k=3, bc="extrapo
 # --------------------------------
 
 nx_bins , nz_bins = 128 , 2
-gaussian_width_mm = 0.200
+gaussian_width_mm = 0.250
 λ0_raw            = 0.01
 λ0_spline         = 0.001
 
