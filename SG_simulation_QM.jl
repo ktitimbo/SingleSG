@@ -702,7 +702,7 @@ else
 
 
     # ATOMS PROPAGATION
-    r = 1:3:nI;
+    r = 1:1:nI;
     iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
     lvl = 5 #Int(4*K39_params.Ispin+2)
     f,mf=quantum_numbers[lvl]
