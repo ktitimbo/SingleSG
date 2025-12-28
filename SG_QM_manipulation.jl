@@ -181,4 +181,13 @@ display(fig)
 
 data_qm_profiles = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_6M","qm_6000000_screen_profiles.jld2"),"profiles")
 
-load(joinpath("Y:\\SingleSternGerlach\\simulations\\quantum_simulation_6M\\qm_6000000_screen_data.jld2"))
+joinpath("Y:\\SingleSternGerlach\\simulations\\quantum_simulation_6M\\qm_6000000_screen_data.jld2")
+
+data_i0 = jldopen("Y:\\SingleSternGerlach\\simulations\\quantum_simulation_6M\\qm_6000000_screen_data.jld2", "r") do f
+    f["alive"][:data][1]
+end
+
+
+jldopen("Y:\\SingleSternGerlach\\simulations\\quantum_simulation_6M\\qm_6000000_screen_data.jld2","r") do f
+    println(typeof(f["alive"]))
+end
