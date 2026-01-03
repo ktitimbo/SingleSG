@@ -182,7 +182,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 6_500_000 ; 
+const Nss = 7_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -218,10 +218,31 @@ end
                                 K39_params
 );
 TheoreticalSimulation.travelling_particles_summary(Icoils, quantum_numbers, particles_trajectories)
-jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => fmf_levels(K39_params), :data => particles_trajectories))
+jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => quantum_numbers , :data => particles_trajectories))
 
-alive_screen = OrderedDict(:Icoils=>Icoils, :levels => fmf_levels(K39_params), :data => TheoreticalSimulation.QM_select_flagged(particles_trajectories,:screen ));
+data_alive_screen = TheoreticalSimulation.QM_select_flagged(particles_trajectories,:screen);
+alive_screen = OrderedDict(:Icoils=>Icoils, :levels => quantum_numbers , :data => data_alive_screen);
 jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), alive = alive_screen)
+
+############### data saved in block format for easier access ###############
+jldopen(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), "w") do file
+    file["meta/Icoils"] = Icoils
+    file["meta/levels"] = quantum_numbers 
+    for i in 1:nI
+        file["screen/I$(i)"] = data_alive_screen[i]  
+    end
+end
+############################################################################
+# fname = joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2")
+#  jldopen(fname, "r") do file
+#         file["screen/i1"]  
+# end
+# jldopen(fname, "r") do f
+#     println("top:   ", collect(keys(f)))
+#     println("meta:  ", collect(keys(f["meta"])))
+#     println("screen:", collect(keys(f["screen"])))
+# end
+
 
 # clean memory
 crossing_slit           = nothing
@@ -229,7 +250,8 @@ particles_flag          = nothing
 particles_trajectories  = nothing
 GC.gc()
 @info "Memory cleaned after QM data acquired"
-@show Sys.free_memory()
+@info "Free system memory $(round(Sys.free_memory() / 1024^3,digits=1)) GiB"
+
 
 println("Profiles F=$(K39_params.Ispin+0.5)")
 profiles_top = QM_analyze_profiles_to_dict(alive_screen, K39_params;
@@ -606,7 +628,7 @@ plot!(fig,
             [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     size=(850,650),
     rightmargin=5mm,
-    legend=:outerbottom,
+    legend=:outerright,
     legend_columns = 4,)
 display(fig)
 savefig(fig,joinpath(OUTDIR,"qm_comparison_w_n.$(FIG_EXT)"))
@@ -671,9 +693,9 @@ alert("script $RUN_STAMP has finished!")
 
 GC.gc()
 @info "Memory cleaned after QM data acquired"
-println("Free memory: $(Sys.free_memory() / 1e9) GB")   
+println("Free memory: $(Sys.free_memory() / (1024)^3) GiB")
 
-Ns = 6_000_000
+Ns = 7_000_000
 const OUTDIR = joinpath(@__DIR__,"simulation_data","quantum_simulation_$(Int(1e-6*Ns))M")
 data_exists = isfile(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))
 
@@ -702,7 +724,7 @@ else
 
 
     # ATOMS PROPAGATION
-    r = 1:1:nI;
+    r = 1:3:nI;
     iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
     lvl = 5 #Int(4*K39_params.Ispin+2)
     f,mf=quantum_numbers[lvl]
