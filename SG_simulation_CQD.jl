@@ -745,24 +745,24 @@ println("DATA COLLECTED : script $RUN_STAMP has finished!")
 # =======================
 # Global parameters
 # =======================
-Ns = Nss
+Ns = 6_000_000
 
 induction_coeff     = 1e6 .* kis
 nz_bins             = [1, 2, 4, 8]
 gaussian_width_mm   = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200,
-                       0.250, 0.300, 0.350, 0.400, 0.450, 0.500]
-λ0_raw_list         = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]
+                       0.250, 0.300, 0.350, 0.400, 0.450, 0.500]; # try different gaussian widths
+λ0_raw_list         = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
 λ0_spline           = 0.001
 
 # Total combinations (diagnostic only)
 Ntot = length(induction_coeff) * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
 @info "Total profiles" Ntot
 
-
 # =========================================================
 # ======================== UP =============================
 # =========================================================
-const INDIR_up = joinpath(OUTDIR,"up")
+# const INDIR_up = joinpath(OUTDIR,"up")
+const INDIR_up = joinpath("Y:\\SingleSternGerlach\\simulations\\cqd_simulation_6M","up")
 # --- Files ---
 files = sort(filter(f -> isfile(joinpath(INDIR_up, f)) && endswith(f, ".jld2"),
                readdir(INDIR_up)))
@@ -772,9 +772,10 @@ nfiles = length(files)
 table_up = OrderedDict{Tuple{Float64,Int, Float64, Float64},
                     OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
 lk = ReentrantLock()
+
 @threads for j in eachindex(files)
     fname   = files[j]
-    ki      = induction_coeff[j]
+    ki      = round.(induction_coeff[j];sigdigits=3)
     simpath = joinpath(INDIR_up, fname)
 
     @info "[UP] Processing file $(j)/$(nfiles)" fname=fname ki=ki
@@ -808,12 +809,13 @@ jldsave(
 table_up = nothing
 GC.gc()
 @info "Memory cleaned after processing CQD up data"
-println("Free memory: $(Sys.free_memory() / 1e9) GB") 
+println("Free memory: $(Sys.free_memory() / (1024)^3) GiB") 
 
 # =========================================================
 # ======================== DW ==============================
 # =========================================================
 const INDIR_dw = joinpath(OUTDIR,"dw")
+const INDIR_dw = joinpath("Z:\\SingleSternGerlachExperimentData\\simulation_data\\cqd_simulation_6M","dw")
 # --- Files ---
 files = sort(filter(f -> isfile(joinpath(INDIR_dw, f)) && endswith(f, ".jld2"),
                readdir(INDIR_dw)))
@@ -860,7 +862,7 @@ jldsave(
 table_dw = nothing
 GC.gc()
 @info "Memory cleaned after processing CQD down data"
-println("Free memory: $(Sys.free_memory() / 1e9) GB") 
+println("Free memory: $(Sys.free_memory() / (1024)^3) GiB") 
 
 
 ######################################################################
