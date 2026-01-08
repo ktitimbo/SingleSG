@@ -772,7 +772,6 @@ nfiles = length(files)
 table_up = OrderedDict{Tuple{Float64,Int, Float64, Float64},
                     OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
 lk = ReentrantLock()
-
 @threads for j in eachindex(files)
     fname   = files[j]
     ki      = round.(induction_coeff[j];sigdigits=3)
@@ -784,6 +783,7 @@ lk = ReentrantLock()
     data_sim = load(simpath, "screen")
 
     for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
+        @info "[UP]" ki=ki nz=nz gw=gw λ0=λ0_raw 
         profiles_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
             data_sim;
             n_bins      = (64, nz),
@@ -837,6 +837,7 @@ lk = ReentrantLock()
     data_sim = load(simpath, "screen")
 
     for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
+        @info "[DOWN]" ki=ki nz=nz gw=gw λ0=λ0_raw 
         profiles_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
             data_sim;
             n_bins      = (64, nz),
