@@ -756,13 +756,14 @@ gaussian_width_mm   = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200,
 
 # Total combinations (diagnostic only)
 Ntot = length(induction_coeff) * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-@info "Total profiles" Ntot
+@info "Total profiles : Nfiles × Nnz × Nσ × Nλ0 × Nλs " Ntot
 
 # =========================================================
 # ======================== UP =============================
 # =========================================================
 # const INDIR_up = joinpath(OUTDIR,"up")
-const INDIR_up = joinpath("Y:\\SingleSternGerlach\\simulations\\cqd_simulation_6M","up")
+# const INDIR_up = joinpath("Y:\\SingleSternGerlach\\simulations\\cqd_simulation_6M","up")
+const INDIR_up = joinpath("/Volumes/My Passport/SternGerlach/cqd_simulation_6M","up")
 # --- Files ---
 files = sort(filter(f -> isfile(joinpath(INDIR_up, f)) && endswith(f, ".jld2"),
                readdir(INDIR_up)))
@@ -783,7 +784,7 @@ lk = ReentrantLock()
     data_sim = load(simpath, "screen")
 
     for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-        @info "[UP]" ki=ki nz=nz gw=gw λ0=λ0_raw 
+        # @info "[UP]" ki=ki nz=nz gw=gw λ0=λ0_raw 
         profiles_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
             data_sim;
             n_bins      = (64, nz),
@@ -814,8 +815,9 @@ println("Free memory: $(Sys.free_memory() / (1024)^3) GiB")
 # =========================================================
 # ======================== DW ==============================
 # =========================================================
-const INDIR_dw = joinpath(OUTDIR,"dw")
-const INDIR_dw = joinpath("Z:\\SingleSternGerlachExperimentData\\simulation_data\\cqd_simulation_6M","dw")
+# const INDIR_dw = joinpath(OUTDIR,"dw")
+# const INDIR_dw = joinpath("Z:\\SingleSternGerlachExperimentData\\simulation_data\\cqd_simulation_6M","dw")
+const INDIR_dw = joinpath("/Volumes/My Passport/SternGerlach/cqd_simulation_6M","dw")
 # --- Files ---
 files = sort(filter(f -> isfile(joinpath(INDIR_dw, f)) && endswith(f, ".jld2"),
                readdir(INDIR_dw)))
@@ -828,16 +830,18 @@ table_dw = OrderedDict{Tuple{Float64,Int, Float64, Float64},
 lk = ReentrantLock()
 @threads for j in eachindex(files)
     fname   = files[j]
-    ki      = induction_coeff[j]
+    ki      = round(induction_coeff[j];sigdigits=3)
     simpath = joinpath(INDIR_dw, fname)
 
     @info "Processing file $(j)/$(nfiles)" fname=fname ki=ki
 
     # load once per file
-    data_sim = load(simpath, "screen")
+    @time data_sim = load(simpath, "screen")
+
+    local_dw = OrderedDict{Tuple{Float64,Int, Float64, Float64},
+                    OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
 
     for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-        @info "[DOWN]" ki=ki nz=nz gw=gw λ0=λ0_raw 
         profiles_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
             data_sim;
             n_bins      = (64, nz),
@@ -850,9 +854,11 @@ lk = ReentrantLock()
             mode        = :probability
         )
 
-        lock(lk) do
-            table_dw[(ki, nz, gw, λ0_raw)] = profiles_dw
-        end
+        local_dw[(ki, nz, gw, λ0_raw)] = profiles_dw
+
+    end
+    lock(lk) do
+        merge!(table_dw, local_dw)
     end
 end
 @info "Completed DOWN table"
