@@ -225,7 +225,7 @@ alive_screen = OrderedDict(:Icoils=>Icoils, :levels => quantum_numbers , :data =
 jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), alive = alive_screen)
 
 ############### data saved in block format for easier access ###############
-jldopen(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), "w") do file
+jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
     file["meta/Icoils"] = Icoils
     file["meta/levels"] = quantum_numbers 
     for i in 1:nI
@@ -724,7 +724,7 @@ else
 
 
     # ATOMS PROPAGATION
-    r = 1:3:nI;
+    r = 1:1:nI;
     iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
     lvl = 5 #Int(4*K39_params.Ispin+2)
     f,mf=quantum_numbers[lvl]
