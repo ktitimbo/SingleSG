@@ -448,86 +448,74 @@ function keypath(branch::Symbol, ki::Float64, nz::Int, gw::Float64, λ0_raw::Flo
            "/lam=" * fmt(λ0_raw)
 end
 
-
 # Simulated currents
-Icoils_cqd = [0.00,
-            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
-            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
-            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
-            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
-            0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
+Icoils = [0.00,
+        0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
+        0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
+        0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
+        0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
+        0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
 ];
-nI_sim = length(Icoils_cqd);
-
-nruns= 10;
-induction_coeff = 1e-6 * [
-    # 20251113T102859450
-    range(0.01,0.10,length=nruns),
-    range(0.1,1.0,length=nruns),
-    range(1.1,2.0,length=nruns),
-    range(2.1,3.0,length=nruns),
-    range(3.1,4.0,length=nruns),
-    range(4.1,5.0,length=nruns),
-    range(5.1,6.0,length=nruns),
-    range(10,100,length=nruns),
-    # 20251116T164054691
-    [0.001,0.01],
-    # 20251117T200727431
-    range(6.1,10.0,length=4*nruns),
-    [100.0,1000.0,10000.0]
-
-]
-ki_list = round.(1e6*vcat(induction_coeff...), sigdigits=2)
-groups = Dict{Any, Vector{Int}}();
-for (i, v) in pairs(ki_list)
-    push!(get!(groups, v, Int[]), i)
-end
-filter!(kv -> length(kv[2]) > 1, groups);
-to_remove = sort!(vcat([idxs[2:end] for idxs in values(groups)]...), rev=true)
-for i in to_remove
-    deleteat!(ki_list, i)
-end
-sort!(ki_list);
-n_ki = length(ki_list)
-
-# --- CoQuantum Dynamics ---
-table_cqd =load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.8m","cqd_2800000_screen_profiles_table_thread.jld2"),"table");
-@info "CQD data loaded"
-keys_vec = collect(keys(table_cqd)) ; # Vector of tuples
-ki_set  = sort(unique(first.(keys_vec)))
-nz_set  = sort(unique(getindex.(keys_vec, 2)))
-gw_set  = sort(unique(getindex.(keys_vec, 3)))
-λ0_set  = sort(unique(getindex.(keys_vec, 4)))
-
-
-table_cqd_path = joinpath(@__DIR__,"simulation_data","cqd_simulation_6M", "cqd_6000000_up_profiles_bykey.jld2")
-jldopen(table_cqd_path, "r") do file
-    meta = file["meta"]
-    ks   = collect(keys(meta))[1:5]
-
-    w = maximum(length.(ks))   # width for alignment
-
-    for k in ks
-        println(rpad(k, w), " = ", round.(meta[k], digits=3))
-    end
-end
-
-
-data_cqd = jldopen(table_cqd_path, "r") do file
-    file[keypath(:up,1.6,2,0.200,0.01)]
-end
-
-
-
-plot(Icoils_cqd[2:47],[data_cqd[v][:z_max_smooth_spline_mm] for v=2:47])
-plot!(Icoils_cqd[2:47],[table_cqd[(1.6,2,0.200,0.01)][v][:z_max_smooth_spline_mm] for v=2:47])
-plot!(yscale=:log10, xscale=:log10,)
-
+nI = length(Icoils);
 
 
 # --- Quantum mechanics data ---
-table_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_6M","qm_6000000_screen_profiles_f1_table.jld2"))["table"];
+table_qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_7M","qm_7000000_screen_profiles_f1_table.jld2");
+table_qm      = load(table_qm_path)["table"];
 @info "QM data loaded"
+qm_meta = let
+    keys_qm = collect(keys(table_qm))  # make it an indexable Vector of tuples
+
+    nz_qm = sort(unique(getindex.(keys_qm, 1)))
+    gw_qm = sort(unique(getindex.(keys_qm, 2)))
+    λ0_qm = sort(unique(getindex.(keys_qm, 3)))
+
+    # --- pretty print aligned ---
+    labels = ["nz_qm", "gw_qm", "λ0_qm"]
+    w = maximum(length.(labels))
+
+    println(rpad("nz_qm", w), " = ", nz_qm)
+    println(rpad("gw_qm", w), " = ", gw_qm)
+    println(rpad("λ0_qm", w), " = ", λ0_qm)
+
+    # --- return renamed container ---
+    OrderedDict(
+        :nz => nz_qm,
+        :gw => gw_qm,
+        :λ0 => λ0_qm,
+        :λs => 0.001
+    )
+end
+
+# --- CoQuantum Dynamics ---
+table_cqd_path = joinpath(@__DIR__,"simulation_data","cqd_simulation_6M", "cqd_6000000_up_profiles_bykey.jld2")
+cqd_meta = jldopen(table_cqd_path, "r") do file
+    meta = file["meta"]
+
+    # mapping: original key (String) → new Symbol
+    rename = OrderedDict(
+        "induction_coeff"   => :ki,
+        "nz_bins"           => :nz,
+        "gaussian_width_mm" => :gw,
+        "λ0_raw_list"       => :λ0,
+        "λ0_spline"         => :λs,
+    )
+
+    # alignment width (use original names for printing)
+    w = maximum(length.(keys(rename)))
+
+    out = OrderedDict{Symbol,Any}()
+
+    for (k_old, k_new) in rename
+        val = round.(meta[k_old], digits=3)
+
+        println(rpad(k_old, w), " = ", val)
+
+        out[k_new] = val
+    end
+    out;
+end
+
 # --- Experiment combined ---
 exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"];
 @info "Experimental data loaded"
@@ -543,18 +531,216 @@ data_experiment = Spline1D(
 # xq and δxq from grouped data
 xq  = exp_avg[:Ic_grouped][:,1]
 δxq = exp_avg[:Ic_grouped][:,2]
-
 # 2. Spline derivative at xq
 dyq = derivative(data_experiment, xq; nu=1)
-
 # 3. Interpolate δy uncertainty to xq
 err_spline = Spline1D(exp_avg[:i_smooth], exp_avg[:δz_smooth], k=3, bc="extrapolate")
 δy_interp = err_spline.(xq)   # now same length as xq
-
 # 4. Total propagated uncertainty
 δyq = sqrt.( (dyq .* δxq).^2 .+ δy_interp.^2 )
-
 # --------------------------------
+
+# --------------- General parameters ---------------
+meta_nz = Int.(intersect(qm_meta[:nz],cqd_meta[:nz]))
+meta_σw = intersect(qm_meta[:gw],cqd_meta[:gw])
+meta_λ0 = intersect(qm_meta[:λ0],cqd_meta[:λ0])
+n_ki = length(cqd_meta[:ki])
+
+
+nx_bins , nz_bins = 128 , 2
+gaussian_width_mm = 0.200
+λ0_raw            = 0.01
+λ0_spline         = 0.001
+
+# --- sanity checks ---
+@assert nz_bins in meta_nz "nz_bins = $nz_bins not in common nz set: $meta_nz"
+@assert gaussian_width_mm in meta_σw "gaussian_width_mm = $gaussian_width_mm not in common gw set: $meta_σw"
+@assert λ0_raw in meta_λ0 "λ0_raw = $λ0_raw not in common λ0 set: $meta_λ0"
+
+# ------------------------------------------------------------
+data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)];
+Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)];
+zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)];
+zqm = Spline1D(Ic_QM,zmax_QM,k=3);
+# ------------------------------------------------------------
+z_up_ki = Matrix{Float64}(undef, nI, n_ki);
+for (i,ki) in enumerate(cqd_meta[:ki])
+    println("\t($(@sprintf("%03d", i))/$(n_ki)) Running ki=$(@sprintf("%2.1e",1e-6*ki))")
+    data_up = jldopen(table_cqd_path, "r") do file
+        file[keypath(:up,ki,nz_bins,gaussian_width_mm,λ0_raw)]
+    end
+    z_up_ki[:,i] = [data_up[v][:z_max_smooth_spline_mm] for v in 1:nI]
+
+end
+
+fig = plot(xlabel="Current (A)",
+    ylabel=L"Peak position ($F=1$)")
+i_begin = 2
+i_end   = nI
+cls = palette(:darkrainbow,113);
+for (i,ki) in enumerate(cqd_meta[:ki])
+    plot!(fig, Icoils[i_begin : i_end], z_up_ki[i_begin : i_end,i], 
+    label = L"$k_{i}=%$(ki)\times 10^{-6}$",
+    line=(cls[i],:solid,1))
+end
+plot!(fig,
+    legend=:outerright,
+    legend_columns = 2,
+    legendfontsize = 5,
+    foreground_color_legend = nothing,
+    xscale=:log10,
+    yscale=:log10,
+    size=(1000,600),
+    left_margin = 3mm,
+    bottom_margin = 3mm)
+display(fig)
+
+
+color_list = palette(:darkrainbow, n_ki);
+fig = plot(xlabel="Current (A)",
+    ylabel=L"$z_{\mathrm{max}}$ (mm)",
+    )
+for (i,ki) in enumerate(cqd_meta[:ki])
+        plot!(fig,Icoils[2:end], z_mm_ki[2:end,i],
+            label = L"$k_{i}=%$(round(ki, sigdigits=2))\times 10^{-6}$",
+            line=(:solid,color_list[i]),
+        )
+end
+plot!(Icoils[3:end],zmax_QM[3:end],
+    label="QM",
+    line=(:dashdot,:black,2),)
+plot!(fig, exp_avg[:i_smooth], exp_avg[:z_smooth],
+    ribbon=exp_avg[:δz_smooth],
+    color=:gold,
+    label="Combined experiments",
+    line=(:solid,:gold,3),
+    fillalpha=0.3,)
+plot!(fig, 
+    size=(1350,850),
+    xaxis=:log10, 
+    yaxis=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+        [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+        [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerright,
+    # legend_title = L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendtitlefontsize = 8,
+    legend_columns = 2,
+    legendfontsize=7,
+    left_margin=6mm,
+    bottom_margin=5mm,
+    foreground_color_legend=nothing)
+annotate!(fig, 1e-2,1, text(L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(Int(1e3*gaussian_width_mm))\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",:black,12))
+display(fig)
+
+fig = plot_cqd_vs_qm(z_mm_ki, zmax_QM, Icoils, cqd_meta[:ki]);
+display(fig)
+
+# Interpolated kᵢ surface
+ki_start , ki_stop = 1 , 113 #length(ki_sim)
+println("Interpolation in the induction term goes from $(cqd_meta[:ki][ki_start])×10⁻⁶ to $(round(cqd_meta[:ki][ki_stop]*1e-6, sigdigits=2))")
+ki_itp = Spline2D(Icoils, cqd_meta[:ki][ki_start:ki_stop], z_mm_ki[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+
+ki_itp
+
+
+cqd_meta[:ki][1]
+
+
+
+
+
+
+
+
+
+
+data_cqd = jldopen(table_cqd_path, "r") do file
+    file[keypath(:up,1.6,nz_bins,gaussian_width_mm,λ0_raw)]
+end
+
+data_cqd
+
+
+cqd_meta
+
+jldopen(table_cqd_path, "r") do file 
+    meta = file["meta"] 
+    ks = collect(keys(meta))[1:5] 
+    w = maximum(length.(ks)) # width for alignment 
+    for k in ks 
+        println(rpad(k, w), " = ", round.(meta[k], digits=3)) 
+    end 
+end
+
+
+fig=plot(
+    title=L"CQD ($k_{i}=1.6\times 10^{-6}$, $n_{z}=2$, $\lambda_{0}=0.01$)",
+    xlabel="Current (A)",
+    ylabel=L"$F=1$ Peak position (mm)")
+for (i,σw) in enumerate([0.001,0.01,0.065,0.1,0.15,0.2,0.25,0.30,0.35,0.4,0.45,0.50])
+    data_cqd = jldopen(table_cqd_path, "r") do file
+        file[keypath(:up,1.6,2,σw,0.01)]
+    end
+    plot!(fig,Icoils_cqd[2:end],[data_cqd[v][:z_max_smooth_spline_mm] for v=2:nI_sim],
+    label=L"$\sigma_{w}=%$(Int(1e3*σw))\mathrm{\mu m}$",
+    line=(palette(:darkrainbow,12)[i],1))
+    display(fig)
+end
+plot!(fig,xscale=:log10,
+    yscale=:log10,
+    legend_columns=2,
+    legend=:bottomright)
+display(fig)
+
+data_cqd = jldopen(table_cqd_path, "r") do file
+    file[keypath(:up,1.6,2,0.3,0.01)]
+end
+plot(Icoils_cqd[2:47],[data_cqd[v][:z_max_smooth_spline_mm] for v=2:47], label="6M")
+plot!(Icoils_cqd[2:47],[table_cqd[(1.6,2,0.300,0.01)][v][:z_max_smooth_spline_mm] for v=2:47],label="2.8M")
+plot!(yscale=:log10, xscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+        [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+        [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+)
+
+1e3*([data_cqd[v][:z_max_smooth_spline_mm] for v=1:47] .- [table_cqd[(1.6,2,0.300,0.01)][v][:z_max_smooth_spline_mm] for v=1:47])
+
+
+nz = 2
+ki = 2.0
+for (i,σw) in enumerate([0.001,0.01,0.065,0.1,0.15,0.2,0.25,0.30,0.35,0.4,0.45,0.50])
+    fig=plot(
+        title=L"($k_{i}=%$(ki)\times 10^{-6}$, $n_{z}=%$(nz)$, $\lambda_{0}=0.01$)",
+        xlabel="Current (A)",
+        ylabel=L"$F=1$ Peak position (mm)")
+    data_cqd = jldopen(table_cqd_path, "r") do file
+        file[keypath(:up,ki,nz,σw,0.01)]
+    end
+    plot!(fig,Icoils_cqd[2:end],[data_cqd[v][:z_max_smooth_spline_mm] for v=2:nI_sim],
+        label="CQD",
+        line=(palette(:darkrainbow,12)[i],1.5))
+    plot!(fig,[table_qm[(nz,σw,0.01)][v][:Icoil] for v=8:nI_sim], [table_qm[(nz,σw,0.01)][v][:z_max_smooth_spline_mm] for v=8:nI_sim],
+        line=(palette(:rainbow,12)[i],:dash,1),
+        label="QM")
+    display(fig)
+    plot!(fig,
+        xscale=:log10,
+        yscale=:log10,
+        xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+            [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+            [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        legend_title = L"$\sigma_{w}=%$(Int(1e3*σw))\mathrm{\mu m}$",
+        legend_columns=1,
+        legend=:bottomright)
+    display(fig)
+end
+
+
+
 
 nx_bins , nz_bins = 128 , 2
 gaussian_width_mm = 0.250

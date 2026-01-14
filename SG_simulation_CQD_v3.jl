@@ -754,8 +754,8 @@ gaussian_width_mm   = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0
 λ0_spline           = 0.001
 
 # Total combinations (diagnostic only)
-Ntot = length(induction_coeff) * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-@info "Total profiles : Nfiles × Nnz × Nσ × Nλ0 × Nλs " Ntot
+Ntot = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
+@info "Total combinations : Nnz × Nσ × Nλ0 × Nλs " Ntot
 
 # ---------- precompute param grid ----------
 params = [(nz, gw, λ0_raw)
@@ -801,6 +801,10 @@ ki_initial, ki_final = 1, 113
 nfiles = length(files)
 @assert nfiles == length(induction_coeff) "Mismatch: files vs induction_coeff"
 
+# Total combinations
+Ntot = nfiles * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
+@info "Total profiles to compute : Nfiles × Nnz × Nσ × Nλ0 × Nλs " Ntot
+
 # ---------- output file + metadata ----------
 outjld = joinpath(OUTDIR, "cqd_$(Ns)_up_profiles_$(ki_initial)_$(ki_final)_bykey.jld2")
 
@@ -809,7 +813,7 @@ jldopen(outjld, "w") do f
     f["/meta/gaussian_width_mm"] = gaussian_width_mm
     f["/meta/λ0_raw_list"]       = λ0_raw_list
     f["/meta/λ0_spline"]         = λ0_spline
-    f["/meta/induction_coeff"]   = induction_coeff
+    f["/meta/induction_coeff"]   = kis
     f["/meta/files"]             = files
 end
 
@@ -898,6 +902,10 @@ files = [
 nfiles = length(files)
 # @assert nfiles == length(induction_coeff) "Mismatch: files vs induction_coeff"
 
+# Total combinations
+Ntot = nfiles * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
+@info "Total profiles to compute : Nfiles × Nnz × Nσ × Nλ0 × Nλs " Ntot
+
 # ---------- output file + metadata ----------
 outjld = joinpath(OUTDIR, "cqd_$(Ns)_dw_profiles_$(ki_initial)_$(ki_final)_bykey.jld2")
 
@@ -906,7 +914,7 @@ jldopen(outjld, "w") do f
     f["/meta/gaussian_width_mm"] = gaussian_width_mm
     f["/meta/λ0_raw_list"]       = λ0_raw_list
     f["/meta/λ0_spline"]         = λ0_spline
-    f["/meta/induction_coeff"]   = induction_coeff
+    f["/meta/induction_coeff"]   = kis
     f["/meta/files"]             = files
 end
 
