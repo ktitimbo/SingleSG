@@ -99,10 +99,13 @@ function fit_ki(data_org, selected_points, ki_list, ki_range)
     """
     ki_start, ki_stop = ki_range
 
+    Ic_fit = selected_points[:, 1]
+    z_fit  = selected_points[:, 3]
+
     # # --- log-space loss (used ONLY for fitting) ---
     loss_log(ki) = begin
-        z_pred = ki_itp.(selected_points[:, 1], Ref(ki))
-        mean(abs2, log10.(z_pred) .- log10.(selected_points[:, 2]))
+        z_pred = ki_itp.(Ic_fit, Ref(ki))
+        mean(abs2, log10.(z_pred) .- log10.(z_fit))
     end
 
     # 1D optimization over ki
@@ -113,15 +116,16 @@ function fit_ki(data_org, selected_points, ki_list, ki_range)
     k_fit = Optim.minimizer(fit_param)
 
     # --- linear-space error (reported) ---
-    z_pred_sel = ki_itp.(selected_points[:, 1], Ref(k_fit))
-    z_obs_sel  = selected_points[:, 2]
+    z_pred_sel = ki_itp.(Ic_fit, Ref(k_fit))
+    z_obs_sel  = z_fit
 
     mse_lin  = mean(abs2, z_pred_sel .- z_obs_sel)
     rmse_lin = sqrt(mse_lin)   # same units as z (e.g. mm)
 
     # predictions for the full data set
-    pred = ki_itp.(data_org[:, 1], Ref(k_fit))
-    y    = data_org[:, 2]
+    Ic = data_org[:, 1]
+    pred = ki_itp.(Ic, Ref(k_fit))
+    y    = data_org[:, 3]
     coef_r2 = 1 - sum(abs2, pred .- y) / sum(abs2, y .- mean(y))
 
     return (ki = k_fit, ki_err = rmse_lin, r2_coeff = coef_r2)
@@ -446,7 +450,7 @@ function compare_datasets(x_ref::AbstractVector, # current
     return (CQD = R_B, QM = R_C)
 end
 
-function plot_cqd_vs_qm(zmm_cqd, zmax_QM, Icurrent, ki_list;
+function plot_cqd_vs_qm(ZCQD, ZQM, Icurrent, ki_list;
         idx_top = [1, 2, 3, 12],
         idx_bottom = [-1, -2, -3, -4],
         palette_name = :rainbow
@@ -460,10 +464,10 @@ function plot_cqd_vs_qm(zmm_cqd, zmax_QM, Icurrent, ki_list;
     figa = plot()
     for (j, idx) in enumerate(idx_top)
         idx2 = idx > 0 ? idx : length(Icurrent) + idx + 1  # allow negatives
-        plot!(figa, zmm_cqd[idx2, :],
+        plot!(figa, ZCQD[idx2, :],
             label = "CQD $(1000*Icurrent[idx2]) mA",
             line = (:solid, cls[j], 2))
-        hline!(figa, abs.([zmax_QM[idx2]]),
+        hline!(figa, abs.([ZQM[idx2]]),
             label = "QM",
             line = (:dash, cls[j], 1.5))
     end
@@ -490,10 +494,10 @@ function plot_cqd_vs_qm(zmm_cqd, zmax_QM, Icurrent, ki_list;
     figb = plot()
     for (j, idx) in enumerate(idx_bottom)
         idx2 = idx > 0 ? idx : length(Icurrent) + idx + 1
-        plot!(figb, zmm_cqd[idx2, :],
+        plot!(figb, ZCQD[idx2, :],
             label = "CQD $(1000*Icurrent[idx2]) mA",
             line = (:solid, cls[j], 2))
-        hline!(figb, abs.([zmax_QM[idx2]]),
+        hline!(figb, abs.([ZQM[idx2]]),
             label = "QM",
             line = (:dash, cls[j], 1.5))
     end
@@ -940,9 +944,8 @@ i_start = searchsortedfirst(exp_avg[:i_smooth], i_threshold)
 # Currents used for scan/plotting of fitted curves (log-spaced)
 I_scan = logspace10(i_threshold, 1.00; n = 101)
 
-# Build a convenient N×3 array: [I, z, δz] and keep only I ≥ i_threshold
-data = hcat(exp_avg[:i_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :]
-data4 = hcat(exp_avg[:i_smooth],0.02*exp_avg[:i_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :]
+# Build a convenient N×4 array: [I, δI, z, δz] and keep only I ≥ i_threshold
+data = hcat(exp_avg[:i_smooth],0.02*exp_avg[:i_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :]
 # -----------------------------------------------------------------------------
 # 2) Choose which rows to use for the kᵢ fit
 #
@@ -968,7 +971,7 @@ n_front  = 30
 n_back   = 200
 
 low_range  = 1:n_front ;
-high_range = (1+size(data, 1) - n_back):size(data, 1);
+high_range = (size(data, 1) - n_back + 1):size(data, 1);
 
 @assert last(low_range) ≤ size(data,1)
 @assert first(high_range) ≥ 1
@@ -1019,14 +1022,14 @@ end
 n_tail = 200  # number of tail points used for scaling
 
 @printf "For the scaling of the experimental data, we use the current range = %.3f A – %.3f A \n" first(last(data[:, 1], n_tail)) last(last(data[:, 1], n_tail))
-yexp = last(data[:, 2], n_tail)              # experimental z-values (tail)
+yexp = last(data[:, 3], n_tail)              # experimental z-values (tail)
 ythe = last(zqm.(data[:, 1]), n_tail)        # QM reference z-values at same currents
 scaled_mag = dot(yexp, yexp) / dot(yexp, ythe)
 
 # Apply scaling to both z and δz to preserve relative uncertainties
 data_scaled = copy(data)
-data_scaled[:, 2] ./= scaled_mag
 data_scaled[:, 3] ./= scaled_mag
+data_scaled[:, 4] ./= scaled_mag
 
 @printf "The re-scaling factor of the experimental data with respect to Quantum Mechanics is %.3f" scaled_mag
 
@@ -1042,14 +1045,8 @@ data_scaled_fitting = data_scaled[fit_ki_idx, :];
 fit_original = fit_ki(data, data_fitting, cqd_meta[:ki], (ki_start,ki_stop))
 fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, cqd_meta[:ki], (ki_start,ki_stop))
 
-# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-data_scaled4 = copy(data4)
-data_scaled4[:, 3] ./= scaled_mag
-data_scaled4[:, 4] ./= scaled_mag
-data_fitting4       = data4[fit_ki_idx, :];
-data_scaled_fitting4 = data_scaled4[fit_ki_idx, :];
-fit_ki_with_error(ki_itp, data_scaled_fitting4;bounds=(cqd_meta[:ki][ki_start], cqd_meta[:ki][ki_stop]),)
-fit_ki_with_error(ki_itp, data_fitting4;bounds=(cqd_meta[:ki][ki_start], cqd_meta[:ki][ki_stop]),)
+fit_ki_with_error(ki_itp, data_scaled_fitting; bounds=(cqd_meta[:ki][ki_start], cqd_meta[:ki][ki_stop]),)
+fit_ki_with_error(ki_itp, data_fitting; bounds=(cqd_meta[:ki][ki_start], cqd_meta[:ki][ki_stop]),)
 # =============================================================================
 # Plot: QM reference + experimental data (original & scaled) + best-fit CQD curves
 #
@@ -1067,11 +1064,10 @@ fit_ki_with_error(ki_itp, data_fitting4;bounds=(cqd_meta[:ki][ki_start], cqd_met
 # -----------------------------------------------------------------------------
 # 1) QM reference curve
 # -----------------------------------------------------------------------------
-I_qm = data[:, 1]
-z_qm = zqm.(I_qm)
-m_qm = log_mask(I_qm, z_qm)
+z_qm = zqm.(I_scan)
+m_qm = log_mask(I_scan, z_qm)
 fig = plot(
-    I_qm[m_qm], z_qm[m_qm];
+    I_scan[m_qm], z_qm[m_qm];
     label = "Quantum mechanics",
     line  = (:solid, :red, 1.75),
 )
@@ -1079,7 +1075,7 @@ fig = plot(
 # 2) Combined experimental data (subsampled points for clarity)
 # -----------------------------------------------------------------------------
 I_exp  = data[1:2:end, 1]
-z_exp  = data[1:2:end, 2]
+z_exp  = data[1:2:end, 3]
 m_exp  = log_mask(I_exp, z_exp)
 plot!(
     fig,
@@ -1094,8 +1090,8 @@ plot!(
 # 3) Scaled experimental curve + uncertainty ribbon
 # -----------------------------------------------------------------------------
 I_s  = data_scaled[:, 1]
-z_s  = data_scaled[:, 2]
-dz_s = data_scaled[:, 3]
+z_s  = data_scaled[:, 3]
+dz_s = data_scaled[:, 4]
 m_s  = log_mask(I_s, z_s) .& isfinite.(dz_s) .& (dz_s .>= 0)
 plot!(
     fig,
@@ -1176,11 +1172,11 @@ display(fig)
 # A) Scaled data diagnostics
 # -----------------------------------------------------------------------------
 println("Re-scaled data")
-compare_datasets(data_scaled[:,1], data_scaled[:,2], ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)), zqm.(data_scaled[:,1]); plot_errors=true);
-fig1 = plot(data_scaled[:,1], relerr(zqm.(data_scaled[:,1]) , data_scaled[:,2]),
+compare_datasets(data_scaled[:,1], data_scaled[:,3], ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)), zqm.(data_scaled[:,1]); plot_errors=true);
+fig1 = plot(data_scaled[:,1], relerr(zqm.(data_scaled[:,1]) , data_scaled[:,3]),
     label="QM",
     line=(:solid,:red,2));
-plot!(data_scaled[:,1], relerr(ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)) , data_scaled[:,2]),
+plot!(data_scaled[:,1], relerr(ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)) , data_scaled[:,3]),
     label=L"CQD ($k_{i}=%$(round(fit_scaled.ki,sigdigits=4)) \times10^{-6}$)",
     line=(:solid,:blue,2));
 plot!(
@@ -1204,8 +1200,8 @@ plot!(
 )
 
 df_scaled = DataFrame(hcat(data_scaled[:,1],
-    relerr(zqm.(data_scaled[:,1]) , data_scaled[:,2]),
-    relerr(ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)) , data_scaled[:,2])
+    relerr(zqm.(data_scaled[:,1]) , data_scaled[:,3]),
+    relerr(ki_itp.(data_scaled[:,1], Ref(fit_scaled.ki)) , data_scaled[:,3])
 ),
 [:Ic, :eQM, :eCQD]
 )
@@ -1215,11 +1211,11 @@ CSV.write(joinpath(OUTDIR,"rel_error_scaled.csv"),df_scaled)
 # B) Original data diagnostics
 # -----------------------------------------------------------------------------
 println("Original data")
-compare_datasets(data[:,1], data[:,2], ki_itp.(data[:,1], Ref(fit_original.ki)), zqm.(data[:,1]); plot_errors=true);
-fig2=plot(data[:,1], relerr(zqm.(data[:,1]) , data[:,2]) ,
+compare_datasets(data[:,1], data[:,3], ki_itp.(data[:,1], Ref(fit_original.ki)), zqm.(data[:,1]); plot_errors=true);
+fig2=plot(data[:,1], relerr(zqm.(data[:,1]) , data[:,3]) ,
     label="QM",
     line=(:solid,:red,2))
-plot!(data[:,1], relerr(ki_itp.(data[:,1], Ref(fit_original.ki)) , data[:,2]) ,
+plot!(data[:,1], relerr(ki_itp.(data[:,1], Ref(fit_original.ki)) , data[:,3]) ,
     label=L"CQD ($k_{i}=%$(round(fit_original.ki,sigdigits=4)) \times10^{-6}$)",
     line=(:solid,:blue,2))
 plot!(
@@ -1243,8 +1239,8 @@ plot!(
 )
 
 df_orig = DataFrame(hcat(data[:,1],
-    relerr(zqm.(data[:,1]) , data[:,2]) ,
-    relerr(ki_itp.(data[:,1], Ref(fit_original.ki)) , data[:,2]) 
+    relerr(zqm.(data[:,1]) , data[:,3]) ,
+    relerr(ki_itp.(data[:,1], Ref(fit_original.ki)) , data[:,3]) 
 ),
 [:Ic, :eQM, :eCQD]
 )
@@ -1272,35 +1268,50 @@ function plot_zmax_vs_current(
         p = 1.0,
         scale_exp = false,
         axis_scale = :loglog,   # :linear, :loglog, :semilogx, :semilogy
-        figsize = (850,600)
+        figsize = (850, 600),
+        warn_drop = true,
     )
+
     """
         plot_zmax_vs_current(data_exp, ki_list; Icurrent, zmm_cqd, zmax_QM,
-                            data_label="experiment", p=1.0, scale_exp=false,
-                            axis_scale=:loglog, figsize=(850,600))
+                             data_label="experiment", p=1.0, scale_exp=false,
+                             axis_scale=:loglog, figsize=(850,600), warn_drop=true)
 
     Plot `z_max` vs coil current for:
-    - A family of CQD curves `zmm_cqd[:, i]` (one per `ki_list[i]`)
-    - Experimental data with uncertainty ribbon
-    - QM reference curve
+      - CQD curves (one per `ki_list[i]`)
+      - Experimental data with uncertainty ribbon
+      - QM reference curve
 
-    Inputs
-    - `data_exp` : DataFrame with at least columns `:Ic`, `:z`, `:δz`
-    - `ki_list`  : vector of induction coefficients (used only for labels/colors)
+    Masking behavior (always applied, independent of axis_scale):
+      - Points are removed if x or y is non-finite (NaN/Inf)
+      - Points are removed if x ≤ 0 or y ≤ 0
+      This makes the function safe for log plotting without manual slicing.
 
-    Keywords
-    - `Icurrent` : vector of currents corresponding to the QM and CQD rows (same length as `zmm_cqd[:,1]`)
-    - `zmm_cqd`  : matrix (nI × n_ki) of CQD `z_max` values in mm
-    - `zmax_QM`  : vector of QM `z_max` values (mm)
-    - `data_label` : label used for the experimental curve
-    - `p` / `scale_exp` : if `scale_exp=true`, plot `z/p` and `δz/p` (useful for magnification scaling)
-    - `axis_scale` : one of `:linear`, `:loglog`, `:semilogx`, `:semilogy`
-    - `figsize` : plot size tuple
-
-    Notes
-    - This function currently skips the first CQD/QM point(s) (`[2:end]`) to avoid issues
-    with log axes when I=0 or z≤0.
+    Notes:
+      - Each CQD curve is masked independently (curve-by-curve).
+      - Experimental and QM curves are also masked independently.
     """
+
+    # --- checks ---
+    @assert size(zmm_cqd, 1) == length(Icurrent) "zmm_cqd must have size (length(Icurrent), n_ki)"
+    @assert length(zmax_QM)  == length(Icurrent) "zmax_QM must match length(Icurrent)"
+    @assert size(zmm_cqd, 2) >= length(ki_list)  "zmm_cqd must have ≥ length(ki_list) columns"
+
+    # --- Axis scaling ---
+    if axis_scale == :loglog
+        xscale = :log10
+        yscale = :log10
+    elseif axis_scale == :semilogx
+        xscale = :log10
+        yscale = :identity
+    elseif axis_scale == :semilogy
+        xscale = :identity
+        yscale = :log10
+    else
+        xscale = :identity
+        yscale = :identity
+    end
+
     # Colors
     color_list = palette(:darkrainbow, length(ki_list))
 
@@ -1311,53 +1322,59 @@ function plot_zmax_vs_current(
         legend = :outerright,
     )
 
-    # --- CQD curves ---
-    for i in eachindex(ki_list)
+    # -------------------------------------------------------------------------
+    # CQD curves: each curve gets its own mask (ALWAYS requiring x>0 and y>0)
+    # -------------------------------------------------------------------------
+    for (j, ki) in enumerate(ki_list)
+        x = Icurrent
+        y = view(zmm_cqd, :, j)
+
+        maskcqd = log_mask(x,y)
+
         plot!(
             fig,
-            Icurrent[2:end],
-            zmm_cqd[2:end, i],
-            label = L"$k_{i}=%$(round(ki_list[i], sigdigits=3))\times 10^{-6}$",
-            line = (:solid, color_list[i]),
+            x[maskcqd],
+            y[maskcqd],
+            label = L"$k_{i}=%$(round(ki, sigdigits=3))\times 10^{-6}$",
+            line  = (:solid, color_list[j]),
         )
     end
 
-    # --- Experimental data ---
-    z_exp   = scale_exp ? data_exp[!, :z] ./ p   : data_exp[!, :z]
-    dz_exp  = scale_exp ? data_exp[!, :δz] ./ p  : data_exp[!, :δz]
+    # -------------------------------------------------------------------------
+    # Experimental data: own mask, also requiring x>0 and y>0
+    # -------------------------------------------------------------------------
+    I_exp  = data_exp[!, :Ic]
+    z_exp  = scale_exp ? data_exp[!, :z]  ./ p : data_exp[!, :z]
+    dz_exp = scale_exp ? data_exp[!, :δz] ./ p : data_exp[!, :δz]
+
+    mask_exp = log_mask(I_exp,z_exp)
 
     plot!(
         fig,
-        data_exp[!, :Ic],
-        z_exp,
-        ribbon = dz_exp,
-        line = (:black, :dash, 2),
+        I_exp[mask_exp],
+        z_exp[mask_exp],
+        ribbon    = dz_exp[mask_exp],
+        line      = (:black, :dash, 2),
         fillalpha = 0.25,
         fillcolor = :gray13,
-        label = data_label,
+        label     = data_label,
     )
 
-    # --- QM curve ---
+    # -------------------------------------------------------------------------
+    # QM curve: own mask, requiring x>0 and y>0 (use Icurrent, not global Icoils)
+    # -------------------------------------------------------------------------
+    xQ = Icurrent
+    yQ = zmax_QM
+
+    mask_qm = log_mask(xQ,yQ)
+
     plot!(
         fig,
-        Icoils[2:end],
-        zmax_QM[2:end],
+        xQ[mask_qm],
+        yQ[mask_qm],
         label = "QM",
-        line = (:dashdot, :magenta, 3),
+        line  = (:dashdot, :magenta, 3),
     )
-
-    # --- Axis scaling ---
-    xscale = :identity
-    yscale = :identity
-
-    if axis_scale == :loglog
-        xscale = :log10
-        yscale = :log10
-    elseif axis_scale == :semilogx
-        xscale = :log10
-    elseif axis_scale == :semilogy
-        yscale = :log10
-    end
 
     # --- Layout ---
     plot!(
@@ -1514,52 +1531,42 @@ end
 function plot_full_ki_fit(
         data_exp, data_fitting,
         p0,p, 
-        k_fit, mse;
+        k_fit, loss_scaled;
         wanted_data_dir,
         wanted_binning,
         wanted_smooth,
         ki_itp,
-        out,
-        Ic_QM,
-        zmax_QM,
+        zqm,
+        out
     )
     """
-        plot_full_ki_fit(data_exp, data_fitting, p0, p, k_fit, mse;
-                        wanted_data_dir, wanted_binning, wanted_smooth,
-                        ki_itp, out, Ic_QM, zmax_QM)
-
-    Generate a summary plot showing:
-    - Raw experimental data with y-error bars
-    - Subset of points used for fitting (unscaled)
-    - Best-fit CQD curve (unscaled) + confidence interval band from `out.ci`
-    - Scaled experimental data with y-error bars (z/p)
-    - Subset of points used for fitting (scaled)
-    - Best-fit CQD curve corresponding to the scaled fit (`k_fit`)
-    - QM reference curve
+    Summary plot (log–log) showing:
+      - Raw experimental data with y-error bars
+      - Subset used for fitting (raw)
+      - CQD best-fit (unscaled) + CI band from `out.ci`
+      - Scaled experimental data (divide by `p`) with y-error bars
+      - Subset used for fitting (scaled)
+      - CQD best-fit for scaled fit (`k_fit`)
+      - QM reference curve `zqm(I)`
 
     Inputs
-    - `data_exp`      : DataFrame with columns :Ic, :z, :δz
-    - `data_fitting`  : numeric matrix with columns (I, ..., z, δz) used in fit
-    - `p0`            : original magnification (or base scale factor)
-    - `p`             : scaling factor applied to z and δz in this plot
-    - `k_fit`         : best-fit kᵢ for scaled data
-    - `mse`           : (currently) a fit quality metric returned by your fitter (often log-MSE)
+      - data_exp     : DataFrame with columns :Ic, :z, :δz
+      - data_fitting : Matrix with columns [I, δI, z, δz] (your convention)
+      - p0, p        : magnification factors (annotation only; scaling uses p)
+      - k_fit        : best-fit kᵢ for scaled fit
+      - loss_scaled  : fit loss value for scaled fit (NOT an uncertainty)
 
     Keywords
-    - `out`           : output NamedTuple from fit_ki_with_error (expects fields k_hat, k_err, ci, ...)
-    - `ki_itp`        : interpolant (I, ki) -> z_pred
-    - `Ic_QM,zmax_QM` : QM curve
-    - `wanted_*`      : strings/values for labels
-
-    Notes
-    - This plot uses log-log axes and therefore expects positive I and z.
+      - ki_itp : (I, ki) -> z_CQD
+      - zqm    : I -> z_QM
+      - out    : output from fit_ki_with_error (expects k_hat, k_err, ci)
     """
 
     # --- Scale the data using p ---
     data_fitting_scaled = copy(data_fitting)
     data_fitting_scaled[:, end-1:end] ./= p   # scale last two columns
 
-    I_scan = logspace10(10e-3, 1.00; n=30);
+    Iscan = logspace10(10e-3, 1.00; n=201);
     # --- Main figure ---
     fig = plot(
         size = (850,600),
@@ -1592,14 +1599,17 @@ function plot_full_ki_fit(
     )
 
     # --- Confidence interval band (unscaled) ---
+    z_lo = ki_itp.(Iscan, Ref(out.ci[1]))
+    z_hi = ki_itp.(Iscan, Ref(out.ci[2]))
+    mb   = log_mask(Iscan, z_lo) .& log_mask(Iscan, z_hi)
     plot!(
         fig,
-        I_scan,
-        ki_itp.(I_scan, Ref(out.ci[2])),
+        Iscan[mb],
+        z_hi[mb],
         color = :royalblue1,
         label = false,
         linewidth = 0,
-        fillrange = ki_itp.(I_scan, Ref(out.ci[1])),
+        fillrange = z_lo[mb],
         fillcolor = :royalblue1,
         fillalpha = 0.35,
     )
@@ -1607,8 +1617,8 @@ function plot_full_ki_fit(
     # --- Best-fit curve (unscaled) ---
     plot!(
         fig,
-        I_scan,
-        ki_itp.(I_scan, Ref(out.k_hat)),
+        Iscan,
+        ki_itp.(Iscan, Ref(out.k_hat)),
         label = L"$k_{i}= \left( %$(round(out.k_hat, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
         line = (:solid, :blue, 2),
         marker = (:xcross, :blue, 1),
@@ -1643,9 +1653,9 @@ function plot_full_ki_fit(
     # --- Best-fit curve for scaled data ---
     plot!(
         fig,
-        I_scan,
-        ki_itp.(I_scan, Ref(k_fit)),
-        label = L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(mse, digits=4)) \right) \times 10^{-6} $",
+        Iscan,
+        ki_itp.(Iscan, Ref(k_fit)),
+        label = L"$k_{i}= \left( %$(round(k_fit, digits=4)) \pm %$(round(loss_scaled, sigdigits=1)) \right) \times 10^{-6} $",
         line = (:solid, :seagreen, 2.2),
         marker = (:xcross, :seagreen, 1),
     )
@@ -1665,9 +1675,12 @@ function plot_full_ki_fit(
     )
 
     # --- QM curve ---
+    xQ = Iscan
+    yQ=zqm.(Iscan)
+    maskQ=log_mask(xQ,yQ)
     plot!(
         fig,
-        Ic_QM[2:end], zmax_QM[2:end],
+        xQ[maskQ], yQ[maskQ],
         label = "QM",
         line = (:dashdot, :black, 2),
     )
@@ -1829,9 +1842,8 @@ for wanted_data_dir in wanted_data_dirs
         wanted_binning  = wanted_binning,
         wanted_smooth   = wanted_smooth,
         ki_itp          = ki_itp,
+        zqm             = zqm,
         out             = out,
-        Ic_QM           = Icoils,
-        zmax_QM         = zmax_QM,
     )
     display(fig)
 
