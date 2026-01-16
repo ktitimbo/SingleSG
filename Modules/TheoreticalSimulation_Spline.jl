@@ -43,7 +43,7 @@ prominent local maxima of the fitted curve.
 - Peak heights can be obtained as `S.(positions)` if needed.
 
 # Example
-```julia
+julia
 pos, S = max_of_bspline_positions(z, y; λ0=0.005, order=4, n_peaks=2)
 heights = S.(pos)
 
@@ -181,7 +181,7 @@ A `NamedTuple` with fields:
   if `width_mm ≤ 0`, or if `default_camera_pixel_size` is not defined.
 
 # Example
-```julia
+julia
 res = analyze_screen_profile(0.125, hits_mm;
     manifold=:F_top, nx_bins=1, nz_bins=4,
     width_mm=0.15, λ_raw=0.01, λ_smooth=1e-3, add_plot=true)
@@ -388,7 +388,7 @@ stores the peak summaries in a nested dictionary keyed by the dataset index `i`.
   `manifold` is a non-numeric symbol not equal to `:F_top`/`:F_bottom`.
 
 # Example
-```julia
+julia
 out = QM_analyze_profiles_to_dict(run_data, atom_params;
     manifold=:F_top, n_bins=(1,4), width_mm=0.15,
     add_plot=true, plot_xrange=:right, λ_raw=0.01, λ_smooth=1e-3)
