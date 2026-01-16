@@ -208,7 +208,7 @@ end
 
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
-ki = 1.62e-6;
+ki = 1.6e-6;
 @time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
 @time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQD_up_particles_flag, K39_params);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
 @time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_DOWN, ki, K39_params; y_length=5001,verbose=true);
@@ -1039,3 +1039,228 @@ end
 
 println("DATA ANALYZED : script $RUN_STAMP has finished!")
 alert("script $RUN_STAMP has finished!")
+
+
+# using JLD2
+
+# # --- helper: delete+write (since JLD2 won't overwrite datasets by default) ---
+# function jld_overwrite!(f, path::AbstractString, value)
+#     if haskey(f, path)
+#         delete!(f, path)
+#     end
+#     f[path] = value
+#     return nothing
+# end
+
+# # --- helper: extract kis from stored keypaths under /up/ki=<...>e-6/... ---
+# function collect_kis_from_file(path::AbstractString)::Vector{Float64}
+#     kis = Float64[]
+#     jldopen(path, "r") do fin
+#         for k in keys(fin)
+#             s = String(k)
+#             startswith(s, "/up/ki=") || continue
+
+#             # parse the substring between "/up/ki=" and "e-6/"
+#             m = match(r"^/up/ki=([^/]+)e-6/", s)
+#             m === nothing && continue
+
+#             ki_scaled = parse(Float64, m.captures[1])  # this is the number before "e-6"
+#             push!(kis, ki_scaled * 1e-6)               # convert to kis
+#         end
+#     end
+#     return kis
+# end
+
+# function merge_up_outputs_streaming(out1::AbstractString,
+#                                     out2::AbstractString,
+#                                     outmerged::AbstractString;
+#                                     overwrite_from_out2::Bool = true)
+
+#     # -------------------------------
+#     # 1) Build updated kis = union
+#     # -------------------------------
+#     kis1 = collect_kis_from_file(out1)
+#     kis2 = collect_kis_from_file(out2)
+
+#     kis_new = sort!(unique!(round.(vcat(kis1, kis2); sigdigits=4)))
+
+#     # -------------------------------
+#     # 2) Create fresh output file
+#     # -------------------------------
+#     jldopen(outmerged, "w") do _ end
+
+#     # -------------------------------
+#     # 3) Copy META (ignore /meta/progress), update /meta/induction_coeff
+#     #    Rule: use meta from out1 as the base (except induction_coeff)
+#     # -------------------------------
+#     jldopen(out1, "r") do fin1
+#         jldopen(outmerged, "r+") do fout
+#             # keep these meta entries (and ignore progress)
+#             for k in keys(fin1)
+#                 s = String(k)
+#                 startswith(s, "/meta/") || continue
+#                 startswith(s, "/meta/progress/") && continue
+#                 s == "/meta/induction_coeff" && continue  # we'll replace
+
+#                 fout[s] = fin1[k]  # one dataset at a time
+#             end
+
+#             # set updated induction coeff
+#             jld_overwrite!(fout, "/meta/induction_coeff", kis_new)
+#         end
+#     end
+
+#     # -------------------------------
+#     # 4) Copy all /up datasets from out1 into merged
+#     # -------------------------------
+#     jldopen(out1, "r") do fin1
+#         jldopen(outmerged, "r+") do fout
+#             for k in keys(fin1)
+#                 s = String(k)
+#                 startswith(s, "/up/") || continue
+#                 # write as-is
+#                 fout[s] = fin1[k]
+#             end
+#         end
+#     end
+
+#     # -------------------------------
+#     # 5) Copy all /up datasets from out2 into merged (overwrite if exists)
+#     # -------------------------------
+#     jldopen(out2, "r") do fin2
+#         jldopen(outmerged, "r+") do fout
+#             for k in keys(fin2)
+#                 s = String(k)
+#                 startswith(s, "/up/") || continue
+
+#                 if overwrite_from_out2
+#                     jld_overwrite!(fout, s, fin2[k])
+#                 else
+#                     # if you ever want "skip if present"
+#                     haskey(fout, s) || (fout[s] = fin2[k])
+#                 end
+#             end
+#         end
+#     end
+
+#     return outmerged
+# end
+
+
+# outmerged = merge_up_outputs_streaming("output1.jld2", "output2.jld2", "merged_up.jld2")
+# @info "Merged file written" outmerged
+
+
+# function count_up_overlaps(out1, out2)
+#     s1 = Set{String}()
+#     jldopen(out1, "r") do f
+#         for k in keys(f)
+#             s = String(k)
+#             startswith(s, "/up/") && push!(s1, s)
+#         end
+#     end
+#     c = 0
+#     jldopen(out2, "r") do f
+#         for k in keys(f)
+#             s = String(k)
+#             startswith(s, "/up/") && (c += (s in s1))
+#         end
+#     end
+#     return c
+# end
+
+
+
+
+# using JLD2
+
+# # delete+write helper (JLD2 won't overwrite datasets by default)
+# function jld_overwrite!(f, path::AbstractString, value)
+#     if haskey(f, path)
+#         delete!(f, path)
+#     end
+#     f[path] = value
+#     return nothing
+# end
+
+# """
+#     merge_branch_outputs_streaming(out1, out2, outmerged; branch=:up)
+
+# Merge two JLD2 outputs produced by the same pipeline, for a given `branch` (e.g. `:up` or `:dw`).
+
+# Behavior:
+# - Copies `/meta/*` from `out1` into `outmerged`, except ignores `/meta/progress/*`.
+# - Sets `/meta/induction_coeff` to the union of both files' `/meta/induction_coeff` (rounded to sigdigits=4).
+# - Adds `/meta/merged_from` containing `[out1, out2]` and the `branch`.
+# - Copies all datasets under `/<branch>/` from `out1`, then from `out2` overwriting overlaps (so `out2` wins).
+# - Streaming: copies dataset-by-dataset (does not load whole files at once).
+# """
+# function merge_branch_outputs_streaming(out1::AbstractString,
+#                                        out2::AbstractString,
+#                                        outmerged::AbstractString;
+#                                        branch::Symbol = :up)
+
+#     bprefix = "/" * String(branch) * "/"   # "/up/" or "/dw/"
+
+#     # ---- union kis from meta (fast; no path parsing) ----
+#     kis1 = jldopen(out1, "r") do f
+#         f["/meta/induction_coeff"]
+#     end
+#     kis2 = jldopen(out2, "r") do f
+#         f["/meta/induction_coeff"]
+#     end
+#     kis_new = sort!(unique!(round.(vcat(kis1, kis2); sigdigits=4)))
+
+#     # ---- create/overwrite merged file ----
+#     jldopen(outmerged, "w") do _ end
+
+#     # ---- write META (from out1), ignoring /meta/progress, updating induction_coeff + merged_from ----
+#     jldopen(out1, "r") do fin1
+#         jldopen(outmerged, "r+") do fout
+#             for k in keys(fin1)
+#                 s = String(k)
+#                 startswith(s, "/meta/") || continue
+#                 startswith(s, "/meta/progress/") && continue
+#                 (s == "/meta/induction_coeff") && continue
+#                 (s == "/meta/merged_from") && continue
+#                 fout[s] = fin1[k]
+#             end
+
+#             jld_overwrite!(fout, "/meta/induction_coeff", kis_new)
+
+#             merged_from = Dict(
+#                 "branch" => String(branch),
+#                 "sources" => [String(out1), String(out2)]
+#             )
+#             jld_overwrite!(fout, "/meta/merged_from", merged_from)
+#         end
+#     end
+
+#     # ---- copy branch datasets from out1 ----
+#     jldopen(out1, "r") do fin1
+#         jldopen(outmerged, "r+") do fout
+#             for k in keys(fin1)
+#                 s = String(k)
+#                 startswith(s, bprefix) || continue
+#                 fout[s] = fin1[k]
+#             end
+#         end
+#     end
+
+#     # ---- copy branch datasets from out2 (overwrite) ----
+#     jldopen(out2, "r") do fin2
+#         jldopen(outmerged, "r+") do fout
+#             for k in keys(fin2)
+#                 s = String(k)
+#                 startswith(s, bprefix) || continue
+#                 jld_overwrite!(fout, s, fin2[k])  # out2 wins
+#             end
+#         end
+#     end
+
+#     return outmerged
+# end
+
+
+# merge_branch_outputs_streaming("out1_up.jld2", "out2_up.jld2", "merged_up.jld2"; branch=:up)
+# merge_branch_outputs_streaming("out1_dw.jld2", "out2_dw.jld2", "merged_dw.jld2"; branch=:dw)
