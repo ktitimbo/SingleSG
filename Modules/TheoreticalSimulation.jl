@@ -127,6 +127,21 @@ module TheoreticalSimulation
         return PolyLog.reli2(z)
     end
 
+    const _PI2_OVER_6 = (pi*pi) / 6.0
+
+    @inline function li2_negexp(x::Float64)::Float64
+        # Returns Li₂(-exp(x)) robustly for any real x without forming exp(x) when x is large positive.
+        # For x > 0: Li₂(-e^x) = -x^2/2 - π^2/6 - Li₂(-e^{-x})
+        if x > 0.0
+            exm = exp(-x)  # safe (in (0,1])
+            return muladd(-0.5, x*x, -_PI2_OVER_6 - polylogarithm(2, -exm))
+        else
+            ex  = exp(x)   # safe (<= 1)
+            return polylogarithm(2, -ex)
+        end
+    end
+
+
     """
         For BSplineKit fitting, compute weights for the B-spline fit.
         Compute uniform weights scaled by (1 - λ0). Returns an array of the same size as `x_array`.
