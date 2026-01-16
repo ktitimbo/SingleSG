@@ -580,17 +580,16 @@ and a simplified analytic path is used.
 ---
 
 ### Example
-code = CQD_cavity_crash(
-    μG, B0,
-    x0, y0, z0,
-    vx, vy, vz,
-    θe, θn,
-    kx, p,
-    ygrid,
-    1e-9
-)
-
-code == 0x00 || @info "Collision code = $(code)"
+# code = CQD_cavity_crash(
+#     μG, B0,
+#     x0, y0, z0,
+#     vx, vy, vz,
+#     θe, θn,
+#     kx, p,
+#     ygrid,
+#     1e-9
+# )
+# code == 0x00 || @info "Collision code = code"
 """
 @inline function CQD_cavity_crash(
     μG_ix::Float64, B0_ix::Float64,
