@@ -47,7 +47,7 @@ Codes (`UInt8`):
   - The inner kernel `QM_cavity_crash` is called positionally (no kwargs).
 
 # Example
-```julia
+julia
 Ix    = collect(range(-20.0, 20.0; length=5))
 init_particles = randn(10_000, 6) .* [1e-3, 0.10, 1e-3, 1e-3, 100.0, 1e-3]'
 out   = QM_flag_travelling_particles(Ix, init_particles, K39_params;
@@ -281,7 +281,7 @@ When `Total == 0`, both percentages are shown as `0.0`.
   PrettyTables v3 formatters/highlighters directly).
 
 # Example
-```julia
+julia
 Ixs = [0.10, 0.20]
 q_numbers = [(2, 1), (2, 0)]
 M1 = rand(1_000, 10); M1[:,10] .= rand([0,1,2,3], size(M1,1))
@@ -465,7 +465,7 @@ function CQD_flag_travelling_particles(Ix, init_particles, kx::Float64, p::AtomP
             θe  = init_particles[j, 7]::Float64
             θn  = init_particles[j, 8]::Float64
 
-            codes[j] = CQD_cavity_crash(μG,B0,x0,y0,z0,v0x,v0y,v0z,θe,θn,kx,p,ygrid,0.0)
+            codes[j] = CQD_cavity_crash(μG,B0,x0,y0,z0,v0x,v0y,v0z,θe,θn,kx,p,ygrid,1e-18)
         end
 
         results[idx] = codes
