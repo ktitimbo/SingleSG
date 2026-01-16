@@ -4,6 +4,16 @@
 # Co-Quantum Dynamics
 ########################################################################################################################################
 
+@inline function log_cos_sin_exp(t::Float64, cosθ2::Float64, sinθ2::Float64)::Float64
+    # Returns log(cosθ2 + sinθ2*exp(t)) robustly without overflow for large +t.
+    # If t>0: log(c + s e^t) = t + log(s + c e^{-t})
+    if t > 0.0
+        return t + log(sinθ2 + cosθ2*exp(-t))
+    else
+        return log(cosθ2 + sinθ2*exp(t))
+    end
+end
+
 # CQD Equations of motion
 """
     CQD_EqOfMotion(t, Ix, μ, r0, v0, θe, θn, kx, p) -> (r, v)
@@ -417,8 +427,9 @@ end
 
 @inline function CQD_screen_x_z_vz(
     x0::Float64, z0::Float64, v0x::Float64, v0y::Float64, v0z::Float64,
-    θe::Float64, acc::Float64, kw::Float64, 
-    Lsg::Float64, Ld::Float64, Ltot::Float64, ΔL::Float64)::NTuple{3,Float64}
+    θe::Float64, acc::Float64, kw::Float64,
+    Lsg::Float64, Ld::Float64, Ltot::Float64, ΔL::Float64
+)::NTuple{3,Float64}
 
     @assert v0y != 0.0 "v0y must be nonzero"
 
@@ -428,44 +439,61 @@ end
     τ_SG    = Lsg * inv_vy
     α       = v0x * inv_vy
     γ       = v0z * inv_vy
-    κ       = 0.5 * acc * inv_vy2 
-    
+    κ       = 0.5 * acc * inv_vy2
+
     # --- Angle precompute (stable near extremes) ---
-    s, c  = sincos(0.5 * θe)
-    sin2  = s*s
-    cos2  = max(c*c, eps(Float64))
-    tan2  = sin2 / cos2
+    s, c    = sincos(0.5 * θe)
+    sin2    = s*s
+    cos2    = max(c*c, 1.0e-21)
+    tan2    = sin2 / cos2
     logcos2 = log(cos2)
-    PL_tan2 = polylogarithm(2, -tan2)
+
+    # Stable reference value Li₂(-tan²) using log form
+    logtan   = log(tan2)
+    PL_tan2  = li2_negexp(logtan)
 
     # --- Screen x is purely kinematic ---
     x = muladd(Ltot, α, x0)
 
+    # exponent t = -2*kw*τ_SG (used everywhere)
+    # Esg = exp(t), with t = -2*kw*τ_SG
+    t = -2.0 * kw * τ_SG
+
     # Small-kw guard (smooth CQD→QM limit)
-    if abs(kw * τ_SG) < 1e-12
-        z  = muladd(Ltot, γ, z0) + κ * ΔL*cos(θe)
-        vz = muladd(acc*cos(θe), τ_SG, v0z)
+    # (keep your threshold; it’s cheap and avoids 1/kw blowups)
+    if iszero(kw) || abs(t) < 1e-12
+        cθ = cos(θe)
+        z  = muladd(Ltot, γ, z0) + κ * ΔL * cθ
+        vz = muladd(acc*cθ, τ_SG, v0z)
         return (x, z, vz)
     end
-  
+
     # --- CQD corrections ---
     inv_kw  = 1.0 / kw
     inv_kw2 = inv_kw * inv_kw
     A       = acc * inv_kw * inv_vy
     B       = 0.5 * acc * inv_kw2
-    Esg    = exp(-2.0 * kw * τ_SG)
+
+    # Stable log(cos2 + sin2*exp(t)) without forming exp(+big)
+    logterm = log_cos_sin_exp(t, cos2, sin2)
+
+    # Stable dilog: Li₂(-exp(logtan + t)) - Li₂(-exp(logtan))
+    li2diff = li2_negexp(logtan + t) - PL_tan2
 
     # --- Screen z with time dependent projection ---
-    z =  muladd(Ltot, γ, z0) + κ * ΔL + A*Lsg*(logcos2+Ld/Lsg*log(cos2+Esg*sin2)) + B*(polylogarithm(2, -Esg * tan2) - PL_tan2)
+    z = muladd(Ltot, γ, z0) +
+        κ * ΔL +
+        A * Lsg * (logcos2 + (Ld/Lsg) * logterm) +
+        B * li2diff
 
-    # CQD exit velocity (stable; dimensions m/s)
-    vz = muladd(acc,τ_SG,v0z) + acc*inv_kw*log(cos2 + Esg * sin2)
+    # --- CQD exit velocity ---
+    # Your original: v0z + acc*τ_SG + acc/kw * log(cos2 + Esg*sin2)
+    vz = muladd(acc, τ_SG, v0z) + acc * inv_kw * logterm
 
     return (x, z, vz)
 end
 
-
- """
+"""
     CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
                      x0::Float64, y0::Float64, z0::Float64,
                      v0x::Float64, v0y::Float64, v0z::Float64,
@@ -475,153 +503,209 @@ end
                      ygrid::AbstractVector{Float64},
                      eps::Float64) -> UInt8
 
-Trace a particle through the SG cavity under the Continuous Quantum Dynamics (CQD) model
-and report whether it collides with the **top edge**, **bottom trench**, or clears the cavity
-but **misses the exit tube** at the screen.
+Trace a particle through the Stern–Gerlach (SG) cavity under the
+**Continuous Quantum Dynamics (CQD)** model and report whether it collides
+with the **top edge**, **bottom trench**, or clears the cavity but
+**misses the exit tube** at the screen.
 
-The trajectory is evaluated along the longitudinal grid `ygrid` (lab-frame y positions).
-Transverse coordinates are computed analytically:
+The trajectory is evaluated along the longitudinal grid `ygrid`
+(lab-frame absolute y positions). Transverse coordinates `(x(y), z(y))`
+are computed analytically from the CQD equations of motion.
 
-The CQD correction uses
-`kω = sign(θn - θe) * kx * ωL`, with `ωL = |γₑ * B0_ix|`,
-and the closed-form dilogarithm term `polylogarithm(2, ·)`; if `kω == 0`, a constant-acceleration
-fallback is used.
+The CQD correction is controlled by
 
-# Arguments
-- `μG_ix`: Magnetic force coefficient (e.g., μ ∂B/∂z for this current setting).
-- `B0_ix`: Field magnitude scale for this setting (used in ωL).
-- `x0, y0, z0`: Initial position at the entrance reference (consistent units with geometry).
+`kω = sign(θn − θe) * kx * ωL`,  with  `ωL = |γₑ * B0_ix|`,
+
+and includes closed-form logarithmic and dilogarithmic contributions.
+These terms are evaluated using **overflow-safe identities** for
+`Li₂(-exp(x))` and `log(cos² + sin²·exp(x))`, so the function remains
+numerically stable for both signs and arbitrarily large magnitudes of `kω`
+without altering the underlying physics.
+
+If `kω == 0`, the motion reduces to a constant-acceleration trajectory
+and a simplified analytic path is used.
+
+---
+
+### Arguments
+- `μG_ix`: Magnetic force coefficient (e.g. `μ ∂B/∂z`) for the given current.
+- `B0_ix`: Magnetic field magnitude scale for this setting (used to form `ωL`).
+- `x0, y0, z0`: Initial position at the entrance reference (units consistent
+  with the geometry).
 - `v0x, v0y, v0z`: Initial velocity components; **`v0y` must be nonzero**.
 - `θe, θn`: Electronic and nuclear spin angles (radians).
-- `kx`: Spatial modulation wavenumber.
-- `p`: `AtomParams` (must provide mass `M`).
-- `ygrid`: Monotonically increasing absolute y-positions spanning the cavity and beyond.
+- `kx`: Spatial modulation wavenumber of the CQD correction.
+- `p`: `AtomParams` instance (must provide atomic mass `M`).
+- `ygrid`: Monotonically increasing **absolute** y-positions spanning the cavity
+  and downstream regions.
 - `eps`: Tolerance for wall-contact tests.
 
-# Returns
-`UInt8` code:
-- `0x00` — no collision, exits within tube
-- `0x01` — collision with top edge inside cavity
-- `0x02` — collision with bottom trench inside cavity
-- `0x03` — clears cavity but misses the exit tube at the screen
+---
 
-# Assumptions
-- The wall profiles `z_magnet_edge(x)` and `z_magnet_trench(x)` are defined, pure, and return `Float64`.
-- Geometry constants `default_y_*`, `default_R_tube`, and `γₑ` exist and share consistent units
-  with positions/velocities.
-- `ygrid` is in the **lab frame** (absolute y). Linear terms use `y - y0`; cavity terms use `y - y_in`.
+### Returns
+`UInt8` collision code:
+- `0x00` — no collision, exits within the tube
+- `0x01` — collision with the top edge inside the cavity
+- `0x02` — collision with the bottom trench inside the cavity
+- `0x03` — clears the cavity but misses the exit tube at the screen
+- `0x04` — blocked by the circular aperture
 
-# Numerical notes
-- Uses fused multiply-add (`muladd`) for accuracy and speed; loop is allocation-free for
-  `Vector{Float64}`/`AbstractVector{Float64}` inputs and pure wall functions.
-- Near `θe ≈ π`, `cos(θe/2) → 0` can cause `log(cos²(θe/2))`/`tan²(θe/2)` to blow up; clamp if needed.
-- If `kω == 0`, the fallback path is used. *(This implementation multiplies the κ terms by `cos(θe)` in
-  that branch—verify this factor matches your physical model.)*
+---
 
-# Throws
+### Assumptions
+- Wall profiles `z_magnet_edge(x)` and `z_magnet_trench(x)` are defined,
+  pure functions returning `Float64`.
+- Geometry constants `default_y_*`, `default_R_tube`, `default_c_aperture`,
+  and `γₑ` exist and share consistent units with positions and velocities.
+- `ygrid` is in the **lab frame** (absolute y); linear terms use `y - y0`,
+  while cavity-specific terms use `y - y_in`.
+
+---
+
+### Numerical notes
+- The implementation is **allocation-free** and suitable for execution
+  millions of times inside tight loops.
+- All exponentials are evaluated in a numerically stable form; no
+  `exp(+large)` calls occur, so overflow is avoided even for large
+  `|kω|` or long cavities.
+- Fused multiply-add (`muladd`) is used where beneficial for accuracy and speed.
+- Near `θe ≈ π`, `cos²(θe/2) → 0`; the implementation clamps this quantity
+  internally to avoid singular logs while preserving physical behavior.
+
+---
+
+### Throws
 - `AssertionError` if `v0y == 0`.
 
-# Example
-```julia
-code = CQD_cavity_crash(μG, B0, x0, y0, z0, vx, vy, vz, θe, θn, kx, p, ygrid, 1e-9)
-code == 0x00 || @info "Collision code = (code)"
+---
+
+### Example
+code = CQD_cavity_crash(
+    μG, B0,
+    x0, y0, z0,
+    vx, vy, vz,
+    θe, θn,
+    kx, p,
+    ygrid,
+    1e-9
+)
+
+code == 0x00 || @info "Collision code = $(code)"
 """
-@inline function CQD_cavity_crash(μG_ix::Float64, B0_ix::Float64,
-                         x0::Float64, y0::Float64, z0::Float64,
-                         v0x::Float64, v0y::Float64, v0z::Float64,
-                         θe::Float64, θn::Float64,
-                         kx::Float64,
-                         p::AtomParams,
-                         ygrid::AbstractVector{Float64},
-                         eps::Float64
-                         )::UInt8
+@inline function CQD_cavity_crash(
+    μG_ix::Float64, B0_ix::Float64,
+    x0::Float64, y0::Float64, z0::Float64,
+    v0x::Float64, v0y::Float64, v0z::Float64,
+    θe::Float64, θn::Float64,
+    kx::Float64,
+    p::AtomParams,
+    ygrid::AbstractVector{Float64},
+    eps::Float64
+)::UInt8
 
-    @assert v0y != 0 "v0y must be nonzero"
+    @assert v0y != 0.0 "v0y must be nonzero"
 
-    # Cavity y-span
+    # ---- geometry (leave as you had it; these are scalars) ----
     y_in   = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
     Lsg    = (default_y_SG)::Float64
     Ld     = (default_y_SGToScreen)::Float64
     Ltot   = (y_in + Lsg + Ld)::Float64
     R2tube = (default_R_tube * default_R_tube)::Float64
     LA     = (default_y_SGToAperture)::Float64
-    Lapert = (y_in+Lsg+LA)::Float64
+    Lapert = (y_in + Lsg + LA)::Float64
     R2circ = (default_c_aperture * default_c_aperture)::Float64
 
-    # Kinematics
-    cqd_sign = sign(θn-θe) 
+    # ---- kinematics ----
+    cqd_sign = sign(θn - θe)
     ωL       = abs(γₑ * B0_ix)
-    acc_0    = μG_ix/p.M
-    kω       = cqd_sign*kx*ωL
+    acc_0    = μG_ix / p.M
+    kω       = cqd_sign * kx * ωL
 
     inv_v0y  = 1.0 / v0y
     inv_v0y2 = inv_v0y * inv_v0y
 
-    # precompute θe-terms robustly
-    s, c     = sincos(0.5 * θe)        # θe_half
+    # ---- θe terms (all scalar) ----
+    s, c     = sincos(0.5 * θe)
     sinθ2    = s * s
-    cosθ2    = max(c*c, 1.0e-21)
+    cosθ2    = max(c*c, 1.0e-21)   # avoid log(0) & div by 0
     tanθ2    = sinθ2 / cosθ2
     logcosθ2 = log(cosθ2)
-    PL_tanθ2 = polylogarithm(2, -tanθ2)  # loop-invariant
-    
-    # hoist constants
+
+    # Precompute Li₂(-tan²) in a stable way too:
+    logtan   = log(tanθ2)
+    PL_tanθ2 = li2_negexp(logtan)
+
+    # ---- hoisted constants ----
     α        = v0x * inv_v0y
     γ        = v0z * inv_v0y
-    κ        = 0.5 * acc_0 * inv_v0y2      
-    scale_a  = -2.0 * kω * inv_v0y         # exponent scale for exp()
+    κ        = 0.5 * acc_0 * inv_v0y2
+    scale_a  = -2.0 * kω * inv_v0y   # so exp_arg = scale_a * Δy
 
-    # Guard the kω = 0 case
-    if kω == 0.0
+    # ---- kω = 0 special case ----
+    if iszero(kω)
+        cθe = cos(θe)
         @inbounds for i in eachindex(ygrid)
             y  = ygrid[i] - y0
             Δy = y - y_in
-            x  = muladd(α, y,  x0)           # or α*dy + x0
-            z  = muladd(γ, y,  z0) + κ*(Δy*Δy)*cos(θe)
+            x  = muladd(α, y, x0)
+            z  = muladd(γ, y, z0) + κ*(Δy*Δy)*cθe
             (z - z_magnet_edge(x))   >=  eps && return UInt8(0x01)
             (z - z_magnet_trench(x)) <= -eps && return UInt8(0x02)
         end
 
         x_aper = muladd(Lapert, α, x0)
-        z_aper = muladd(Lapert, γ, z0) + κ*(Lsg*(Lsg + 2.0*LA))*cos(θe)
+        z_aper = muladd(Lapert, γ, z0) + κ*(Lsg*(Lsg + 2.0*LA))*cθe
         (muladd(x_aper, x_aper, z_aper*z_aper) >= R2circ) && return UInt8(0x04)
 
         x_screen = muladd(Ltot, α, x0)
-        z_screen = muladd(Ltot, γ, z0) + κ*(Lsg*(Lsg + 2.0*Ld))*cos(θe)
+        z_screen = muladd(Ltot, γ, z0) + κ*(Lsg*(Lsg + 2.0*Ld))*cθe
         return (muladd(x_screen, x_screen, z_screen*z_screen) >= R2tube) ? UInt8(0x03) : UInt8(0x00)
     end
 
     # ---- kω ≠ 0 path ----
-    inv_kω   = 1.0/kω
+    inv_kω   = 1.0 / kω
     inv_kω2  = inv_kω * inv_kω
-    A        = acc_0 * inv_kω * inv_v0y    # multiplies first CQD term
-    B        = 0.5 * acc_0 * inv_kω2       # multiplies dilog difference
+    A        = acc_0 * inv_kω  * inv_v0y     # ~ 1/kω
+    B        = 0.5  * acc_0 * inv_kω2        # ~ 1/kω^2
+
     @inbounds for i in eachindex(ygrid)
         y  = ygrid[i] - y0
         Δy = y - y_in
-        EΔ = exp(scale_a * Δy)
+        exp_arg = scale_a * Δy
 
-        x  = muladd(α,y,x0)
-        z  = muladd(γ,y,z0) + κ*Δy*Δy + A*logcosθ2*Δy + B*(polylogarithm(2,-EΔ*tanθ2) - PL_tanθ2 )
+        # Stable: Li₂(-exp(logtan + exp_arg))
+        li2term = li2_negexp(logtan + exp_arg) - PL_tanθ2
 
-        # Crash if above ceiling or below trench (with tolerance)
-        (z - z_magnet_edge(x))   >=  eps && return UInt8(0x01) # 1 top
-        (z - z_magnet_trench(x)) <= -eps && return UInt8(0x02) # 2 bottom
+        x  = muladd(α, y, x0)
+        z  = muladd(γ, y, z0) + κ*(Δy*Δy) + A*logcosθ2*Δy + B*li2term
+
+        (z - z_magnet_edge(x))   >=  eps && return UInt8(0x01)
+        (z - z_magnet_trench(x)) <= -eps && return UInt8(0x02)
     end
 
-    Esg      = exp(scale_a*Lsg)
-    Bpolylog = B*(polylogarithm(2, -Esg*tanθ2) - PL_tanθ2)
+    # ---- end-of-SG terms (avoid exp overflow) ----
+    t_sg     = scale_a * Lsg
+    Bpolylog = B*(li2_negexp(logtan + t_sg) - PL_tanθ2)
+    logterm  = log_cos_sin_exp(t_sg, cosθ2, sinθ2)
 
     # ------ Circular aperture -----
-    x_aper = muladd(Lapert,α,x0)
-    z_aper = muladd(Lapert,γ,z0) + κ*(Lsg*Lsg + 2*Lsg*LA) + A*Lsg*(logcosθ2+(LA/Lsg)*log(cosθ2+Esg*sinθ2)) + Bpolylog
-    (muladd(x_aper, x_aper, z_aper*z_aper) >= R2circ) && return UInt8(0x04) # 4 circular aperture
+    x_aper = muladd(Lapert, α, x0)
+    z_aper = muladd(Lapert, γ, z0) +
+             κ*(Lsg*Lsg + 2.0*Lsg*LA) +
+             A*Lsg*(logcosθ2 + (LA/Lsg)*logterm) +
+             Bpolylog
+    (muladd(x_aper, x_aper, z_aper*z_aper) >= R2circ) && return UInt8(0x04)
 
-    # ----- Screen check -----
-    x_screen = muladd(Ltot,α,x0) 
-    z_screen = muladd(Ltot,γ,z0) + κ*(Lsg*Lsg + 2*Lsg*Ld) + A*Lsg*(logcosθ2+(Ld/Lsg)*log(cosθ2+Esg*sinθ2)) + Bpolylog
-    return (muladd(x_screen, x_screen, z_screen*z_screen) >= R2tube) ? UInt8(0x03) : UInt8(0x00) # 3 tubes
+    # ------ Screen check -----
+    x_screen = muladd(Ltot, α, x0)
+    z_screen = muladd(Ltot, γ, z0) +
+               κ*(Lsg*Lsg + 2.0*Lsg*Ld) +
+               A*Lsg*(logcosθ2 + (Ld/Lsg)*logterm) +
+               Bpolylog
+
+    return (muladd(x_screen, x_screen, z_screen*z_screen) >= R2tube) ? UInt8(0x03) : UInt8(0x00)
 end
+
 
 
 
