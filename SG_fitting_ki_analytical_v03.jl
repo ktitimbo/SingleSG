@@ -677,12 +677,14 @@ err_spline = Spline1D(exp_avg[:i_smooth], exp_avg[:δz_smooth], k=3, bc="extrapo
 data_exp_scattered = hcat(xq,δxq,data_experiment.(xq),δyq);
 pretty_table(data_exp_scattered;
         alignment     = :c,
+        title         = @sprintf("EXPERIMENTAL DATA (scattered)"),
         column_labels = ["Ic (A)","δIc (A)", "z (mm)", "δz (mm)"],
         formatters    = ([fmt__printf("%1.3f", [1]),fmt__printf("%1.4f", [2]),fmt__printf("%1.3f", 3:4)]),
         style         = TextTableStyle(
                         first_line_column_label = crayon"yellow bold",
                         table_border  = crayon"blue bold",
                         column_label  = crayon"yellow bold",
+                        title = crayon"bold red"
                         ),
         table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
         equal_data_column_widths= true,)
@@ -938,14 +940,27 @@ display(fit_figs)
 #   Low currents can be noisier, and log-space fitting becomes sensitive to any
 #   near-zero / unstable values. We therefore start from a minimum current.
 # -----------------------------------------------------------------------------
-i_threshold = 0.025
-i_start = searchsortedfirst(exp_avg[:i_smooth], i_threshold)
+i_threshold = 0.025 ; 
+i_start = searchsortedfirst(exp_avg[:i_smooth], i_threshold) ;
 
 # Currents used for scan/plotting of fitted curves (log-spaced)
-I_scan = logspace10(i_threshold, 1.00; n = 101)
+I_scan = logspace10(i_threshold, 1.00; n = 501);
 
 # Build a convenient N×4 array: [I, δI, z, δz] and keep only I ≥ i_threshold
-data = hcat(exp_avg[:i_smooth],0.02*exp_avg[:i_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :]
+data = hcat(exp_avg[:i_smooth],0.02*exp_avg[:i_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :];
+pretty_table(data;
+        alignment     = :c,
+        title         = @sprintf("EXPERIMENTAL DATA (continuous)"),
+        column_labels = ["Ic (A)","δIc (A)", "z (mm)", "δz (mm)"],
+        formatters    = ([fmt__printf("%1.4f", [1]),fmt__printf("%1.4f", [2]),fmt__printf("%1.4f", [3]),fmt__printf("%1.3f", [4])]),
+        style         = TextTableStyle(
+                        first_line_column_label = crayon"yellow bold",
+                        table_border  = crayon"blue bold",
+                        column_label  = crayon"yellow bold",
+                        title = crayon"bold red"
+                        ),
+        table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+        equal_data_column_widths= true,)
 # -----------------------------------------------------------------------------
 # 2) Choose which rows to use for the kᵢ fit
 #
@@ -1027,9 +1042,9 @@ ythe = last(zqm.(data[:, 1]), n_tail)        # QM reference z-values at same cur
 scaled_mag = dot(yexp, yexp) / dot(yexp, ythe)
 
 # Apply scaling to both z and δz to preserve relative uncertainties
-data_scaled = copy(data)
-data_scaled[:, 3] ./= scaled_mag
-data_scaled[:, 4] ./= scaled_mag
+data_scaled = copy(data);
+data_scaled[:, 3] ./= scaled_mag;
+data_scaled[:, 4] ./= scaled_mag;
 
 @printf "The re-scaling factor of the experimental data with respect to Quantum Mechanics is %.3f" scaled_mag
 
@@ -1045,8 +1060,8 @@ data_scaled_fitting = data_scaled[fit_ki_idx, :];
 fit_original = fit_ki(data, data_fitting, cqd_meta[:ki], (ki_start,ki_stop))
 fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, cqd_meta[:ki], (ki_start,ki_stop))
 
-fit_ki_with_error(ki_itp, data_scaled_fitting; bounds=(cqd_meta[:ki][ki_start], cqd_meta[:ki][ki_stop]),)
 fit_ki_with_error(ki_itp, data_fitting; bounds=(cqd_meta[:ki][ki_start], cqd_meta[:ki][ki_stop]),)
+fit_ki_with_error(ki_itp, data_scaled_fitting; bounds=(cqd_meta[:ki][ki_start], cqd_meta[:ki][ki_stop]),)
 # =============================================================================
 # Plot: QM reference + experimental data (original & scaled) + best-fit CQD curves
 #
@@ -1064,8 +1079,8 @@ fit_ki_with_error(ki_itp, data_fitting; bounds=(cqd_meta[:ki][ki_start], cqd_met
 # -----------------------------------------------------------------------------
 # 1) QM reference curve
 # -----------------------------------------------------------------------------
-z_qm = zqm.(I_scan)
-m_qm = log_mask(I_scan, z_qm)
+z_qm = zqm.(I_scan);
+m_qm = log_mask(I_scan, z_qm);
 fig = plot(
     I_scan[m_qm], z_qm[m_qm];
     label = "Quantum mechanics",
@@ -1074,9 +1089,9 @@ fig = plot(
 # -----------------------------------------------------------------------------
 # 2) Combined experimental data (subsampled points for clarity)
 # -----------------------------------------------------------------------------
-I_exp  = data[1:2:end, 1]
-z_exp  = data[1:2:end, 3]
-m_exp  = log_mask(I_exp, z_exp)
+I_exp  = data[1:2:end, 1];
+z_exp  = data[1:2:end, 3];
+m_exp  = log_mask(I_exp, z_exp);
 plot!(
     fig,
     I_exp[m_exp], z_exp[m_exp];
@@ -1089,9 +1104,9 @@ plot!(
 # -----------------------------------------------------------------------------
 # 3) Scaled experimental curve + uncertainty ribbon
 # -----------------------------------------------------------------------------
-I_s  = data_scaled[:, 1]
-z_s  = data_scaled[:, 3]
-dz_s = data_scaled[:, 4]
+I_s  = data_scaled[:, 1];
+z_s  = data_scaled[:, 3];
+dz_s = data_scaled[:, 4];
 m_s  = log_mask(I_s, z_s) .& isfinite.(dz_s) .& (dz_s .>= 0)
 plot!(
     fig,
@@ -1105,8 +1120,8 @@ plot!(
 # -----------------------------------------------------------------------------
 # 4) Best-fit CQD curve (fit to original experimental data)
 # -----------------------------------------------------------------------------
-z_fit_orig = ki_itp.(I_scan, Ref(fit_original.ki))
-m_orig = log_mask(I_scan, z_fit_orig)
+z_fit_orig = ki_itp.(I_scan, Ref(fit_original.ki));
+m_orig = log_mask(I_scan, z_fit_orig);
 plot!(
     fig,
     I_scan[m_orig], z_fit_orig[m_orig];
@@ -1118,8 +1133,8 @@ plot!(
 # -----------------------------------------------------------------------------
 # 5) Best-fit CQD curve (fit to scaled experimental data)
 # -----------------------------------------------------------------------------
-z_fit_scaled = ki_itp.(I_scan, Ref(fit_scaled.ki))
-m_scaled = log_mask(I_scan, z_fit_scaled)
+z_fit_scaled = ki_itp.(I_scan, Ref(fit_scaled.ki));
+m_scaled = log_mask(I_scan, z_fit_scaled);
 plot!(
     fig,
     I_scan[m_scaled], z_fit_scaled[m_scaled];
@@ -1269,7 +1284,6 @@ function plot_zmax_vs_current(
         scale_exp = false,
         axis_scale = :loglog,   # :linear, :loglog, :semilogx, :semilogy
         figsize = (850, 600),
-        warn_drop = true,
     )
 
     """
@@ -1329,12 +1343,12 @@ function plot_zmax_vs_current(
         x = Icurrent
         y = view(zmm_cqd, :, j)
 
-        maskcqd = log_mask(x,y)
+        mask_cqd = log_mask(x,y)
 
         plot!(
             fig,
-            x[maskcqd],
-            y[maskcqd],
+            x[mask_cqd],
+            y[mask_cqd],
             label = L"$k_{i}=%$(round(ki, sigdigits=3))\times 10^{-6}$",
             line  = (:solid, color_list[j]),
         )
@@ -1877,7 +1891,7 @@ function fit_ki_joint_scaling_fitsubset(
     Inputs
     ------
     data :: AbstractMatrix{<:Real}
-        N×3 (or wider) array. The function uses:
+        N×4 (or wider) array. The function uses:
             - `data[:,1]` : Iexp  experimental current (A)
             - `data[:,3]` : yexp  experimental z_max (mm)
         (Any other columns are ignored here.)
@@ -2124,8 +2138,8 @@ data_scaled_fitting = data_scaled[fit_ki_idx, :]
 #    - Here we report a linear-space error (if your fit_ki returns RMSE in mm)
 # -----------------------------------------------------------------------------
 fit_scaled = fit_ki(
-    data_scaled[:, [1, 3]],            # full dataset for R² (I,z)
-    data_scaled_fitting[:, [1, 3]],    # fitting subset for the loss
+    data_scaled,            # full dataset for R² (I,z)
+    data_scaled_fitting,    # fitting subset for the loss
     cqd_meta[:ki],
     (ki_start, ki_stop),
 )
@@ -2187,7 +2201,7 @@ display(fig)
 # -------------------------------------------------------------------------
 # 1) Prepare scattered experimental points (from spline + propagated errors)
 # -------------------------------------------------------------------------
-i_start = searchsortedfirst(xq, i_threshold)
+i_start = searchsortedfirst(data_exp_scattered[:,1], i_threshold)
 # columns: I, δI, z, δz
 data = data_exp_scattered[i_start:end, :]
 
@@ -2197,7 +2211,6 @@ data = data_exp_scattered[i_start:end, :]
 data_scaled = copy(data)
 data_scaled[:, 3] ./= scaled_mag
 data_scaled[:, 4] ./= scaled_mag
-
 
 fig=plot(    
     # title = L"Peak position ($F=1$)",
@@ -2249,10 +2262,6 @@ gradvsI(x) = TheoreticalSimulation.GvsI(x)
 fig=plot(    
     # title = L"Peak position ($F=1$)",
 )
-# Scaled magnification
-data_scaled = copy(data)
-data_scaled[:, 3] ./= scaled_mag
-data_scaled[:, 4] ./= scaled_mag
 plot!(fig,
     gradvsI.(data_scaled[:,1]),data_scaled[:,3],
     xerr = gradvsI.(data_scaled[:,2]),
