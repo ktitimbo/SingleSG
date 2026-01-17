@@ -182,7 +182,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 80_000 ; 
+const Nss = 8_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -208,11 +208,11 @@ end
 
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
-ki = 1.6e-6;
-@time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, ki, K39_params; y_length=5001,verbose=true);
-@time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_UP, CQD_up_particles_flag, K39_params);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
-@time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_DOWN, ki, K39_params; y_length=5001,verbose=true);
-@time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, ki, data_DOWN, CQD_dw_particles_flag, K39_params);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+kI = 1.6e-6;
+@time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, kI, K39_params; y_length=5001,verbose=true);
+@time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, kI, data_UP, CQD_up_particles_flag, K39_params);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+@time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_DOWN, kI, K39_params; y_length=5001,verbose=true);
+@time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, kI, data_DOWN, CQD_dw_particles_flag, K39_params);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
 
 TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
 TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_dw_particles_trajectories, :down)
@@ -239,7 +239,7 @@ jldsave(
     :nz_bins    => nz_bins,
     :gauss_w    => gaussian_width_mm,
     :smothing   => (λ0_raw,λ0_spline),
-    :ki         => ki,
+    :ki         => kI,
     :mmup       => mm_up,
     :mmdw       => mm_dw
     ) 
@@ -248,7 +248,7 @@ jldsave(
 # Profiles : up and down
 anim = @animate for j in eachindex(Icoils)
     fig = plot(
-        title=L"CQD profiles : $k_i = %$(round(1e6*ki, sigdigits=2))\times 10^{-6}$",
+        title=L"CQD profiles : $k_i = %$(round(1e6*kI, sigdigits=2))\times 10^{-6}$",
         legend=:topleft,
         legendtitle=L"$I_{0}=%$(Icoils[j])\mathrm{A}$",
         legendtitlefontsize=8,
@@ -288,7 +288,7 @@ anim = @animate for j in 1:4:length(Icoils)
         ylabel="Intensity (au)",
         yformatter = val -> string(round(val * 1e4, digits = 2)),)
     plot!(mm_up[j][:z_profile][:,1],mm_up[j][:z_profile][:,3],
-        label=L"CQD UP $k_{i}=%$(round(1e6*ki,sigdigits=2))\times 10^{-6}$",
+        label=L"CQD UP $k_{i}=%$(round(1e6*kI,sigdigits=2))\times 10^{-6}$",
         line=(:solid,:maroon3,1),
         marker=(:circle,:white,2),
         markerstrokecolor=:maroon3,
@@ -297,7 +297,7 @@ anim = @animate for j in 1:4:length(Icoils)
         line=(:maroon3,0.5), 
         label=L"$z_{\mathrm{max}}=%$(round(mm_up[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
     plot!(mm_dw[j][:z_profile][:,1],mm_dw[j][:z_profile][:,3],
-        label=L"CQD DOWN $k_{i}=%$(round(1e6*ki,sigdigits=2))\times 10^{-6}$",
+        label=L"CQD DOWN $k_{i}=%$(round(1e6*kI,sigdigits=2))\times 10^{-6}$",
         line=(:solid,:darkcyan,1),
         marker=(:circle,:white,2),
         markerstrokecolor=:darkcyan,
@@ -378,23 +378,23 @@ anim = @animate for j in iter
         τ_aper  = y_aper / v0y
         τ_scr   = y_scr  / v0y
 
-        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_slit,  Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, ki, K39_params)
+        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_slit,  Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, kI, K39_params)
         xs_b[i] = 1e3 * r[1]
         zs_b[i] = 1e6 * r[3]
 
-        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_sgin,  Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, ki, K39_params)
+        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_sgin,  Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, kI, K39_params)
         xs_c[i] = 1e3 * r[1]
         zs_c[i] = 1e6 * r[3]
 
-        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_sgout, Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, ki, K39_params)
+        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_sgout, Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, kI, K39_params)
         xs_d[i] = 1e3 * r[1]
         zs_d[i] = 1e6 * r[3]
 
-        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_aper,  Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, ki, K39_params)
+        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_aper,  Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, kI, K39_params)
         xs_f[i] = 1e3 * r[1]
         zs_f[i] = 1e6 * r[3]
 
-        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_scr,   Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, ki, K39_params)
+        r, _ = TheoreticalSimulation.CQD_EqOfMotion(τ_scr,   Icoils[j], μₑ, [x0,y0,z0], [v0x,v0y,v0z], θe, ϕe, kI, K39_params)
         xs_e[i] = 1e3 * r[1]
         zs_e[i] = 1e3 * r[3]  # mm
     end
@@ -546,7 +546,7 @@ plot!(I_exp[2:end],z_exp[2:end],
     )
 Isim_start_idx = findall(>=(0.010), Icoils)[1]
 plot!(fig,Icoils[Isim_start_idx:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][Isim_start_idx:end],
-    label=L"CQD: $k_{i}=%$(1e6*ki)\times 10^{-6}$",
+    label=L"CQD: $k_{i}=%$(1e6*kI)\times 10^{-6}$",
     line=(:solid,:red,2))
 plot!(fig,xaxis=:log10,
     yaxis=:log10,
@@ -786,9 +786,9 @@ end
 # =========================================================
 # ======================== UP =============================
 # =========================================================
-# const INDIR_up = joinpath(OUTDIR,"up")
+const INDIR_up = joinpath(OUTDIR,"up")
 # const INDIR_up = joinpath("Z:\\SingleSternGerlachExperimentData\\simulation_data\\cqd_simulation_6M","up")
-const INDIR_up = joinpath("/Volumes/My Passport/SternGerlach/cqd_simulation_6M","up")
+# const INDIR_up = joinpath("/Volumes/My Passport/SternGerlach/cqd_simulation_6M","up")
 # const INDIR_up = joinpath(dirname(OUTDIR),"cqd","up")
 # --- Files ---
 files = sort(filter(f -> isfile(joinpath(INDIR_up, f)) && endswith(f, ".jld2"),
@@ -887,10 +887,10 @@ end
 # =========================================================
 # ======================== DW =============================
 # =========================================================
-# const INDIR_dw = joinpath(OUTDIR,"dw")
+const INDIR_dw = joinpath(OUTDIR,"dw")
 # const INDIR_dw = joinpath("Z:\\SingleSternGerlachExperimentData\\simulation_data\\cqd_simulation_6M","dw")
 # const INDIR_dw = joinpath("/Volumes/My Passport/SternGerlach/cqd_simulation_6M","dw")
-const INDIR_dw = joinpath(dirname(OUTDIR),"cqd","dw")
+# const INDIR_dw = joinpath(dirname(OUTDIR),"cqd","dw")
 # --- Files ---
 files = sort(filter(f -> isfile(joinpath(INDIR_dw, f)) && endswith(f, ".jld2"),
                readdir(INDIR_dw)))
