@@ -50,6 +50,79 @@ include("./Modules/TheoreticalSimulation.jl");
 include("./Modules/DataReading.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
 
+function keypath(branch::Symbol, ki::Float64, nz::Int, gw::Float64, λ0_raw::Float64)
+    fmt(x) = @sprintf("%.12g", x)  # safer than %.6g to reduce collisions
+    return "/" * String(branch) *
+           "/ki=" * fmt(ki) *"e-6" *
+           "/nz=" * string(nz) *
+           "/gw=" * fmt(gw) *
+           "/lam=" * fmt(λ0_raw)
+end
+
+"""
+Compute per-particle fluorescence weights for a laser sheet.
+
+Inputs:
+- vz, vy: arrays (m/s) at detection (same length)
+- λ: wavelength (m), e.g. 770e-9 for K D1
+- Γν: natural FWHM linewidth in Hz, e.g. 5.956e6
+- δlaser: laser detuning from unshifted resonance in Hz
+- s0: saturation parameter (dimensionless). If unknown, treat as a tunable parameter.
+- Δy: sheet thickness in m (50e-6)
+Returns:
+- weights w (arbitrary units)
+"""
+function doppler_weights(vz::AbstractVector, vy::AbstractVector;
+    λ::Float64 = 770e-9,
+    Γν::Float64 = 5.956e6,
+    δlaser::Float64 = 0.0,
+    s0::Float64 = 30.3,
+    Δy::Float64 = 50e-6)
+
+    N = length(vz)
+    length(vy) == N || error("vz and vy must have same length")
+
+    w = Vector{Float64}(undef, N)
+
+    @inbounds for i in 1:N
+        # Detuning seen by particle i (Hz)
+        Δ = δlaser - vz[i]/λ
+
+        # Lorentzian factor (dimensionless)
+        denom = 1 + s0 + (2*Δ/Γν)^2
+
+        # Scattering rate ∝ s0/denom (prefactor cancels if you normalize)
+        R = s0 / denom
+
+        # Transit time in sheet
+        τ = Δy / vy[i]
+
+        w[i] = R * τ
+    end
+
+    return w
+end
+
+"""
+Build Doppler-corrected image as a weighted 2D histogram.
+
+coords_u, coords_v: arrays defining image coordinates (e.g. xf, yf) at detector
+weights: per-particle weights (same length)
+edges_u, edges_v: bin edges (ranges)
+"""
+function weighted_image(coords_u, coords_v, w, edges_u, edges_v; norm_mode::Symbol= :probability)
+    if norm_mode === :none
+        h = fit(Histogram, (coords_u, coords_v), weights(w), (edges_u, edges_v))                    # raw counts (no normalization)
+    elseif norm_mode in (:probability, :pdf, :density)
+        h = normalize(fit(Histogram, (coords_u, coords_v), weights(w), (edges_u, edges_v)); mode=norm_mode)
+    else
+        throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $norm_mode"))
+    end
+    return h
+end
+
+cam_pixelsize = 6.5e-6 ;  # Physical pixel size of camera [m]
+
 # Coil currents
 Icoils = [0.00,
             0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
@@ -58,7 +131,221 @@ Icoils = [0.00,
             0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
             0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
 ];
-nI = length(Icoils);
+nI = length(Icoils)
+
+nx_bins, nz_bins = 64, 2 ;
+gaussian_width_mm = 0.200;
+λ0_raw            = 0.01;
+λ0_spline         = 0.001;
+ki_idx = 27;
+Ic_idx = 1;
+norm_type = :none
+
+
+data_CQD_up  = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_6M","cqd_6000000_ki0$(ki_idx)_up_screen.jld2"),"screen")[:data]
+data = data_CQD_up[Ic_idx]
+
+xf = 1e3* view(data,:,9)
+zf = 1e3* view(data,:,10)
+
+vxf = view(data,:,4)
+vyf = view(data,:,5)
+vzf =view(data,:,11)
+
+table_cqd_path = joinpath(@__DIR__,
+    "simulation_data",
+    "cqd_simulation_6M",
+    "cqd_6000000_up_profiles_bykey.jld2");
+cqd_meta = jldopen(table_cqd_path, "r") do file
+    meta = file["meta"]
+
+    # mapping: original key (String) → new Symbol
+    rename = OrderedDict(
+        "induction_coeff"   => :ki,
+        "nz_bins"           => :nz,
+        "gaussian_width_mm" => :gw,
+        "λ0_raw_list"       => :λ0,
+        "λ0_spline"         => :λs,
+    )
+
+    # alignment width (use original names for printing)
+    w = maximum(length.(keys(rename)))
+
+    out = OrderedDict{Symbol,Any}()
+
+    for (k_old, k_new) in rename
+        val = round.(meta[k_old], digits=3)
+
+        # println(rpad(k_old, w), " = ", val)
+
+        out[k_new] = val
+    end
+    out;
+end
+ki = cqd_meta[:ki][ki_idx]
+
+data_CQD_up_profiles = jldopen(table_cqd_path, "r") do file
+    file[keypath(:up,ki,nz_bins,gaussian_width_mm,λ0_raw)]
+end
+
+# Fixed analysis limits
+xlim = (-8.0, 8.0)
+zlim = (-12.5, 12.5)
+xmin, xmax = xlim
+zmin, zmax = zlim
+
+# Bin size in mm (default_camera_pixel_size is assumed global in meters)
+x_bin_size = 1e3 * nx_bins * cam_pixelsize
+z_bin_size = 1e3 * nz_bins * cam_pixelsize
+
+# --------------------------------------------------------
+# X edges: force symmetric centers around 0
+# --------------------------------------------------------
+x_half_range = max(abs(xmin), abs(xmax))
+kx = max(1, ceil(Int, x_half_range / x_bin_size))
+centers_x = collect((-kx:kx) .* x_bin_size)
+edges_x = collect((-(kx + 0.5)) * x_bin_size : x_bin_size : ((kx + 0.5) * x_bin_size))
+
+# --------------------------------------------------------
+# Z edges: force symmetric centers around 0
+# --------------------------------------------------------
+z_half_range = max(abs(zmin), abs(zmax))
+kz = max(1, ceil(Int, z_half_range / z_bin_size))
+centers_z = collect((-kz:kz) .* z_bin_size)
+edges_z = collect((-(kz + 0.5)) * z_bin_size : z_bin_size : ((kz + 0.5) * z_bin_size))
+
+if norm_type === :none
+    h = fit(Histogram, (xf, zf), (edges_x, edges_z))                    # raw counts (no normalization)
+elseif norm_type in (:probability, :pdf, :density)
+    h = normalize(fit(Histogram, (xf, zf), (edges_x, edges_z)); mode=norm_type)
+else
+    throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $norm_type"))
+end
+
+counts = h.weights  # size: (length(centers_x), length(centers_z))
+
+# heatmap(
+#     centers_x,
+#     centers_z,
+#     counts';
+#     colormap = :viridis,
+#     xlabel = "x (mm)",
+#     ylabel = "z (mm)",
+#     xlims = (-8,8),
+#     ylims = (-3,12),
+#     aspect_ratio = :equal,
+#     colorbar = true
+# )
+
+# z-profile = mean over x bins
+z_profile_raw = vec(mean(counts, dims = 1))
+z_max_raw_mm = centers_z[argmax(z_profile_raw)]
+z_max_raw_spline_mm, Sfit_raw = TheoreticalSimulation.max_of_bspline_positions(centers_z,z_profile_raw;λ0=λ0_raw)
+
+# 1) Choose laser detuning (Hz). You can set δlaser = 0 or optimize it later.
+δlaser = 60e6
+# 2) s0: saturation parameter (dimensionless)
+s0 = 0.9
+# 3) Compute Doppler weights
+w = doppler_weights(vzf, vyf; Γν=5.956e6, δlaser=δlaser, s0=s0)
+
+img = weighted_image(xf, zf, w./ sum(w), edges_x, edges_z; norm_mode = norm_type)
+# img.weights is your Doppler-corrected image intensity array
+
+counts_doppler = img.weights
+# heatmap(
+#     centers_x,
+#     centers_z,
+#     counts_doppler';
+#     colormap = :viridis,
+#     xlabel = "x (mm)",
+#     ylabel = "z (mm)",
+#     xlims = (-8,8),
+#     ylims = (-3,12),
+#     aspect_ratio = :equal,
+#     colorbar = true
+# )
+
+
+# z-profile = mean over x bins
+z_profile_raw_doppler = vec(mean(counts_doppler, dims = 1))
+z_max_raw_mm_doppler = centers_z[argmax(z_profile_raw_doppler)]
+z_max_raw_spline_mm_doppler, Sfit_raw_doppler = TheoreticalSimulation.max_of_bspline_positions(centers_z,z_profile_raw_doppler;λ0=0.005)
+
+plot(xlabel=L"$z$ (mm)")
+plot!(centers_z,z_profile_raw, label="Raw profile",
+    xlims=(-2,10))
+plot!(centers_z,z_profile_raw_doppler, label="Doppler correction")
+plot!(data_CQD_up_profiles[Ic_idx][:z_profile][:,1],
+    data_CQD_up_profiles[Ic_idx][:z_profile][:,3], label="Smoothing")
+
+2+2
+
+
+
+fig = plot(xlabel=L"$z$ (mm)")
+for δlaser in -6:6
+w = doppler_weights(vzf, vyf; Γν=5.956e6, δlaser=1e6*δlaser, s0=s0)
+img = weighted_image(xf, zf, w ./ sum(w), edges_x, edges_z; norm_mode = norm_type)
+counts_doppler = img.weights
+z_profile_raw_doppler = vec(mean(counts_doppler, dims = 1))
+plot!(fig,centers_z,z_profile_raw_doppler, label=L"$\delta_{L}=%$(δlaser)$MHz")
+end
+plot!(xlims=(-2,+2))
+display(fig)
+
+
+
+
+
+mean(vzf/770e-9)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data_CQD
+
+ki_l = round.(1e6*[
+    [exp10(p) * x for p in -8:-8 for x in 1.0:1:9]; 
+    [exp10(p) * x for p in -7:-7 for x in 1.0:1:9]; 
+    [exp10(p) * x for p in -6:-6 for x in 1.0:0.1:9.9]; 
+    ## exp10(-5) * (1:0.1:10);
+    exp10.(-5:-1)
+];sigdigits=4)
+
+
+
+jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
+    file["meta/Icoils"] = Icoils
+    file["meta/levels"] = quantum_numbers 
+    for i in 1:nI
+        file["screen/I$(i)"] = data_alive_screen[i]  
+    end
+end
+
+
+
+
+
+
 
 table_old     = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3M","qm_3000000_screen_profiles_table.jld2"))["table"];
 table_qm_f1   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_6M","qm_6000000_screen_profiles_f1_table.jld2"))["table"];
