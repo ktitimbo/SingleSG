@@ -185,7 +185,7 @@ nI = length(Icoils);
 const Nss = 8_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
-nx_bins , nz_bins = 32 , 2
+nx_bins , nz_bins = 64 , 2
 gaussian_width_mm = 0.200
 λ0_raw            = 0.01
 λ0_spline         = 0.001
