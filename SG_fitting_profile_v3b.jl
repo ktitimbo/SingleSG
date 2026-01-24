@@ -660,7 +660,7 @@ end
 
 
 # Select experimental data
-wanted_data_dir = "20250919" ;
+wanted_data_dir = "20251006" ;
 wanted_binning  = 2 ; 
 wanted_smooth   = 0.01 ;
 
@@ -695,7 +695,7 @@ nI = length(Ic_sampled)
 STEP        = 26 ;
 THRESH_A    = 0.020 ;
 n_start = findall(>(THRESH_A), Ic_sampled)[1]
-P_DEGREE    = 3 ;
+P_DEGREE    = 5 ;
 ncols_bg    = P_DEGREE + 1 ;
 
 chosen_currents_idx = sort(unique([
@@ -705,6 +705,8 @@ chosen_currents_idx = sort(unique([
         lastindex(Ic_sampled)
         ]
 ));
+
+chosen_currents_idx = [1]
 
 println("Target currents in A: (", 
         join(map(x -> @sprintf("%.3f", x), Ic_sampled[chosen_currents_idx]), ", "),
