@@ -1,8 +1,8 @@
 # Simulation of atom trajectories in the Stern–Gerlach experiment
-# Manipulation of quantum simulations
+# Manipulation of data
 # Kelvin Titimbo
 # California Institute of Technology
-# December 2025
+# January 2026
 
 using Plots; gr()
 Plots.default(
@@ -60,48 +60,70 @@ function keypath(branch::Symbol, ki::Float64, nz::Int, gw::Float64, λ0_raw::Flo
 end
 
 """
-Compute per-particle fluorescence weights for a laser sheet.
+Compute per-particle fluorescence weights for a laser sheet,
+including Doppler shift, saturation, and transit-time effects.
 
-Inputs:
-- vz, vy: arrays (m/s) at detection (same length)
-- λ: wavelength (m), e.g. 770e-9 for K D1
-- Γν: natural FWHM linewidth in Hz, e.g. 5.956e6
-- δlaser: laser detuning from unshifted resonance in Hz
-- s0: saturation parameter (dimensionless). If unknown, treat as a tunable parameter.
-- Δy: sheet thickness in m (50e-6)
+Arguments:
+- vz, vy :: velocity components at detection (m/s)
+- branch :: :up or :dw
+    :up → Doppler detuning Δ = δlaser + vz/λ
+    :dw → Doppler detuning Δ = δlaser - vz/λ
+Keyword options:
+- λ        :: laser wavelength (m)
+- Γν       :: natural linewidth FWHM (Hz)
+- δlaser   :: laser detuning from unshifted resonance (Hz)
+- s0       :: effective saturation parameter
+- Δy       :: laser sheet thickness (m)
+- normalize :: if true, normalize weights to sum(w)=1
+
 Returns:
-- weights w (arbitrary units)
+- w :: vector of fluorescence weights
 """
-function doppler_weights(vz::AbstractVector, vy::AbstractVector;
+function doppler_weights(
+    vz::AbstractVector,
+    vy::AbstractVector;
+    branch::Symbol = :up,
     λ::Float64 = 770e-9,
     Γν::Float64 = 5.956e6,
     δlaser::Float64 = 0.0,
     s0::Float64 = 30.3,
-    Δy::Float64 = 50e-6)
+    Δy::Float64 = 50e-6,
+    normalize::Bool = false)
 
     N = length(vz)
     length(vy) == N || error("vz and vy must have same length")
 
+    # Determine Doppler sign from branch
+    doppler_sign = branch === :up  ? +1 :
+                   branch === :dw  ? -1 :
+                   error("branch must be :up or :dw (got $branch)")
+
     w = Vector{Float64}(undef, N)
 
     @inbounds for i in 1:N
-        # Detuning seen by particle i (Hz)
-        Δ = δlaser - vz[i]/λ
+        # Total detuning seen by atom i (Hz)
+        Δ = δlaser + doppler_sign * vz[i] / λ
 
-        # Lorentzian factor (dimensionless)
-        denom = 1 + s0 + (2*Δ/Γν)^2
-
-        # Scattering rate ∝ s0/denom (prefactor cancels if you normalize)
+        # Steady-state Lorentzian factor (OBE result)
+        denom = 1 + s0 + (2 * Δ / Γν)^2
         R = s0 / denom
 
-        # Transit time in sheet
+        # Transit time through the laser sheet
         τ = Δy / vy[i]
 
-        w[i] = R * τ
+        # Weight ∝ number of scattered photons
+        w[i] = Γν * R * τ
+    end
+
+    if normalize
+        s = sum(w)
+        s > 0 || error("Sum of Doppler weights is zero")
+        w ./= s
     end
 
     return w
 end
+
 
 """
 Build Doppler-corrected image as a weighted 2D histogram.
@@ -138,19 +160,182 @@ gaussian_width_mm = 0.200;
 λ0_raw            = 0.01;
 λ0_spline         = 0.001;
 ki_idx = 27;
-Ic_idx = 1;
-norm_type = :none
+Ic_idx = 47;
+norm_type = :none ;
+@info "Electric current associated to the simulation $(Int(1000*Icoils[Ic_idx]))mA"
 
+# Fixed analysis limits
+xlim = (-8.0, 8.0);
+zlim = (-12.5, 12.5);
+xmin, xmax = xlim ;
+zmin, zmax = zlim ;
 
-data_CQD_up  = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_6M","cqd_6000000_ki0$(ki_idx)_up_screen.jld2"),"screen")[:data]
-data = data_CQD_up[Ic_idx]
+# Bin size in mm (default_camera_pixel_size is assumed global in meters)
+x_bin_size = 1e3 * nx_bins * cam_pixelsize ;
+z_bin_size = 1e3 * nz_bins * cam_pixelsize ;
 
-xf = 1e3* view(data,:,9)
-zf = 1e3* view(data,:,10)
+# --------------------------------------------------------
+# X edges: force symmetric centers around 0
+# --------------------------------------------------------
+x_half_range = max(abs(xmin), abs(xmax)) ;
+kx = max(1, ceil(Int, x_half_range / x_bin_size)) ;
+centers_x = collect((-kx:kx) .* x_bin_size) ;
+edges_x = collect((-(kx + 0.5)) * x_bin_size : x_bin_size : ((kx + 0.5) * x_bin_size)) ;
 
-vxf = view(data,:,4)
-vyf = view(data,:,5)
-vzf =view(data,:,11)
+# --------------------------------------------------------
+# Z edges: force symmetric centers around 0
+# --------------------------------------------------------
+z_half_range = max(abs(zmin), abs(zmax));
+kz = max(1, ceil(Int, z_half_range / z_bin_size));
+centers_z = collect((-kz:kz) .* z_bin_size);
+edges_z = collect((-(kz + 0.5)) * z_bin_size : z_bin_size : ((kz + 0.5) * z_bin_size));
+
+# ===================================================
+# ++++++++++++++++++++ EXPERIMENT +++++++++++++++++++
+# ===================================================
+exp_path = joinpath(@__DIR__,"20250919");
+exp_data = load(joinpath(exp_path,"data_processed.jld2"),"data");
+Ic_idx_exp = 26 ;
+@info "Electric current chosen from the experimental data $(round(1000*exp_data[:Currents][Ic_idx_exp]; sigdigits=4))mA"
+
+exp_image = mean(exp_data[:F1ProcessedImages], dims=(3)) |> x -> dropdims(x, dims=(3));
+exp_image = exp_image[:,:,Ic_idx_exp];
+exp_size = size(exp_image);
+exp_x = 1e3*TheoreticalSimulation.pixel_coordinates(2160, 4, cam_pixelsize);
+exp_z = 1e3*TheoreticalSimulation.pixel_coordinates(2560, 1, cam_pixelsize);
+
+exp_result = DataReading.find_report_data(
+    joinpath(@__DIR__, "analysis_data");
+    wanted_data_dir = "20250919",
+    wanted_binning  = 1,
+    wanted_smooth   = 0.01,
+);
+exp_profile = vec(mean(exp_image, dims=1));
+exp_z = exp_z .- exp_result[:fw_centroid_mm][1];
+
+img_exp = heatmap(
+    exp_x,
+    exp_z,
+    exp_image',
+    colormap = :viridis,
+    title = "Experiment",
+    xlabel = "x (mm)",
+    ylabel = "z (mm)",
+    xlims = extrema(exp_x),
+    ylims = extrema(exp_z),
+    aspect_ratio = :equal,
+    colorbar = true
+);
+
+img_exp_prof = plot(exp_z, exp_profile,
+    label="Experimental profile",
+    seriestype=:scatter,
+    marker=(:circle,2,:white),
+    markerstrokecolor=:gray23,
+    xlabel=L"$z$ (mm)",
+    xlims=zlim,
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+
+# ===================================================
+# ++++++++++++++++++++ QM DATA ++++++++++++++++++++++
+# ===================================================
+qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_7M","qm_screen_data.jld2");
+qm_data = jldopen(qm_path, "r") do file
+        file["screen"]["i$(Ic_idx)"]
+end
+qm_data = vcat([qm_data[lv]  for lv=6:8]...);
+
+xf_qm = 1e3* view(qm_data,:,7);
+zf_qm = 1e3* view(qm_data,:,8);
+
+vxf_qm = view(qm_data,:,4);
+vyf_qm = view(qm_data,:,5);
+vzf_qm = view(qm_data,:,9);
+
+if norm_type === :none
+    h_qm = fit(Histogram, (xf_qm, zf_qm), (edges_x, edges_z))                    # raw counts (no normalization)
+elseif norm_type in (:probability, :pdf, :density)
+    h_qm = normalize(fit(Histogram, (xf_qm, zf_qm), (edges_x, edges_z)); mode=norm_type)
+else
+    throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $norm_type"))
+end
+
+counts_qm = h_qm.weights ; # size: (length(centers_x), length(centers_z))
+
+qm_profile = vec(mean(counts_qm, dims=1));
+z_max_qm_mm = centers_z[argmax(qm_profile)];
+z_max_qm_spline_mm, Sfit_qm = TheoreticalSimulation.max_of_bspline_positions(centers_z,qm_profile;λ0=λ0_raw);
+
+img_qm = heatmap(
+    centers_x,
+    centers_z,
+    counts_qm';
+    colormap = :viridis,
+    title = "Quantum Mechanis",
+    xlabel = "x (mm)",
+    ylabel = "z (mm)",
+    xlims = (-8,8),
+    ylims = (-3,12),
+    aspect_ratio = :equal,
+    colorbar = true
+);
+
+img_qm_prof = plot(centers_z, qm_profile,
+    label="Quantum mechanics",
+    xlabel=L"$z$ (mm)",
+    line=(:solid,2,:blue),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+
+table_qm_path = joinpath(@__DIR__,
+    "simulation_data",
+    "qm_simulation_7M",
+    "qm_7000000_screen_profiles_f1_table.jld2");
+table_qm      = load(table_qm_path)["table"];
+@info "QM data loaded"
+qm_meta = let
+    keys_qm = collect(keys(table_qm))  # make it an indexable Vector of tuples
+
+    nz_qm = sort(unique(getindex.(keys_qm, 1)))
+    gw_qm = sort(unique(getindex.(keys_qm, 2)))
+    λ0_qm = sort(unique(getindex.(keys_qm, 3)))
+
+    # --- pretty print aligned ---
+    labels = ["nz_qm", "gw_qm", "λ0_qm"]
+    w = maximum(length.(labels))
+
+    # println(rpad("nz_qm", w), " = ", nz_qm);
+    # println(rpad("gw_qm", w), " = ", gw_qm);
+    # println(rpad("λ0_qm", w), " = ", λ0_qm);
+
+    # --- return renamed container ---
+    OrderedDict(
+        :nz => nz_qm,
+        :gw => gw_qm,
+        :λ0 => λ0_qm,
+        :λs => 0.001
+    );
+end    
+data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)];
+Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)];
+zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)];
+# ===================================================
+# +++++++++++++++++++++ CQD DATA ++++++++++++++++++++
+# ===================================================
+data_CQD_up  = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_6M","cqd_6000000_ki0$(ki_idx)_up_screen.jld2"),"screen")[:data];
+data_cqd = data_CQD_up[Ic_idx];
+
+xf_cqd = 1e3* view(data_cqd,:,9);
+zf_cqd = 1e3* view(data_cqd,:,10);
+
+vxf_cqd = view(data_cqd,:,4);
+vyf_cqd = view(data_cqd,:,5);
+vzf_cqd =view(data_cqd,:,11);
 
 table_cqd_path = joinpath(@__DIR__,
     "simulation_data",
@@ -182,125 +367,419 @@ cqd_meta = jldopen(table_cqd_path, "r") do file
     end
     out;
 end
-ki = cqd_meta[:ki][ki_idx]
+ki = cqd_meta[:ki][ki_idx];
+@info "Induction term kᵢ=$(ki)×10⁻⁶ "
 
-data_CQD_up_profiles = jldopen(table_cqd_path, "r") do file
+data_CQD_up_zmax = jldopen(table_cqd_path, "r") do file
     file[keypath(:up,ki,nz_bins,gaussian_width_mm,λ0_raw)]
 end
-
-# Fixed analysis limits
-xlim = (-8.0, 8.0)
-zlim = (-12.5, 12.5)
-xmin, xmax = xlim
-zmin, zmax = zlim
-
-# Bin size in mm (default_camera_pixel_size is assumed global in meters)
-x_bin_size = 1e3 * nx_bins * cam_pixelsize
-z_bin_size = 1e3 * nz_bins * cam_pixelsize
-
-# --------------------------------------------------------
-# X edges: force symmetric centers around 0
-# --------------------------------------------------------
-x_half_range = max(abs(xmin), abs(xmax))
-kx = max(1, ceil(Int, x_half_range / x_bin_size))
-centers_x = collect((-kx:kx) .* x_bin_size)
-edges_x = collect((-(kx + 0.5)) * x_bin_size : x_bin_size : ((kx + 0.5) * x_bin_size))
-
-# --------------------------------------------------------
-# Z edges: force symmetric centers around 0
-# --------------------------------------------------------
-z_half_range = max(abs(zmin), abs(zmax))
-kz = max(1, ceil(Int, z_half_range / z_bin_size))
-centers_z = collect((-kz:kz) .* z_bin_size)
-edges_z = collect((-(kz + 0.5)) * z_bin_size : z_bin_size : ((kz + 0.5) * z_bin_size))
+Ic_CQD   = [data_CQD_up_zmax[idx][:Icoil] for idx=1:nI];
+zmax_CQD = [data_CQD_up_zmax[idx][:z_max_smooth_spline_mm] for idx=1:nI];
 
 if norm_type === :none
-    h = fit(Histogram, (xf, zf), (edges_x, edges_z))                    # raw counts (no normalization)
+    h_cqd = fit(Histogram, (xf_cqd, zf_cqd), (edges_x, edges_z));     # raw counts (no normalization)
 elseif norm_type in (:probability, :pdf, :density)
-    h = normalize(fit(Histogram, (xf, zf), (edges_x, edges_z)); mode=norm_type)
+    h_cqd = normalize(fit(Histogram, (xf_cqd, zf_cqd), (edges_x, edges_z)); mode=norm_type);
 else
     throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $norm_type"))
 end
 
-counts = h.weights  # size: (length(centers_x), length(centers_z))
+counts_cqd = h_cqd.weights ; # size: (length(centers_x), length(centers_z))
+cqd_profile = vec(mean(counts_cqd, dims=1));
+z_max_cqd_mm = centers_z[argmax(cqd_profile)];
+z_max_cqd_spline_mm, Sfit_cqd = TheoreticalSimulation.max_of_bspline_positions(centers_z,cqd_profile;λ0=λ0_raw);
 
-# heatmap(
-#     centers_x,
-#     centers_z,
-#     counts';
-#     colormap = :viridis,
-#     xlabel = "x (mm)",
-#     ylabel = "z (mm)",
-#     xlims = (-8,8),
-#     ylims = (-3,12),
-#     aspect_ratio = :equal,
-#     colorbar = true
-# )
+img_cqd = heatmap(
+    centers_x,
+    centers_z,
+    counts_cqd';
+    colormap = :viridis,
+    title="CoQuantum",
+    xlabel = "x (mm)",
+    ylabel = "z (mm)",
+    xlims = (-8,8),
+    ylims = (-3,12),
+    aspect_ratio = :equal,
+    colorbar = true
+);
 
-# z-profile = mean over x bins
-z_profile_raw = vec(mean(counts, dims = 1))
-z_max_raw_mm = centers_z[argmax(z_profile_raw)]
-z_max_raw_spline_mm, Sfit_raw = TheoreticalSimulation.max_of_bspline_positions(centers_z,z_profile_raw;λ0=λ0_raw)
+img_cqd_prof = plot(centers_z, cqd_profile,
+    label=L"CQD ($k_{i}=%$(ki)\times 10^{-6}$)",
+    xlabel=L"$z$ (mm)",
+    line=(:solid,2,:red),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+
+# ======================================================================================================
+# ======================================================================================================
+
+plot(img_exp, img_exp_prof, img_qm, img_qm_prof, img_cqd, img_cqd_prof, 
+    layout=(3,2),
+    suptitle = "Original",
+    left_margin=10mm,
+    size=(1000,1400)
+)
+
+
+# ======================================================================================================
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# ======================================================================================================
 
 # 1) Choose laser detuning (Hz). You can set δlaser = 0 or optimize it later.
-δlaser = 60e6
+δlaser = -5e6 ;
 # 2) s0: saturation parameter (dimensionless)
-s0 = 0.9
+s0 = 2.75 ;
 # 3) Compute Doppler weights
-w = doppler_weights(vzf, vyf; Γν=5.956e6, δlaser=δlaser, s0=s0)
+w_cqd = doppler_weights(vzf_cqd, vyf_cqd; branch=:up, Γν=5.956e6, δlaser=δlaser, s0=s0, normalize = true);
+w_qm = doppler_weights(vzf_qm, vyf_qm; branch=:up, Γν=5.956e6, δlaser=δlaser, s0=s0, normalize = true);
 
-img = weighted_image(xf, zf, w./ sum(w), edges_x, edges_z; norm_mode = norm_type)
+img_cqd = weighted_image(xf_cqd, zf_cqd, w_cqd, edges_x, edges_z; norm_mode = norm_type);
+img_qm = weighted_image(xf_qm, zf_qm, w_qm, edges_x, edges_z; norm_mode = norm_type);
+
 # img.weights is your Doppler-corrected image intensity array
+counts_cqd_doppler = img_cqd.weights;
+counts_qm_doppler = img_qm.weights;
 
-counts_doppler = img.weights
-# heatmap(
-#     centers_x,
-#     centers_z,
-#     counts_doppler';
-#     colormap = :viridis,
-#     xlabel = "x (mm)",
-#     ylabel = "z (mm)",
-#     xlims = (-8,8),
-#     ylims = (-3,12),
-#     aspect_ratio = :equal,
-#     colorbar = true
-# )
+# z-profile 
+z_profile_cqd_doppler = vec(mean(counts_cqd_doppler, dims = 1));
+z_max_cqd_mm_doppler = centers_z[argmax(z_profile_cqd_doppler)];
+z_max_cqd_spline_mm_doppler, Sfit_cqd_doppler = TheoreticalSimulation.max_of_bspline_positions(centers_z,z_profile_cqd_doppler;λ0=λ0_raw );
+
+z_profile_qm_doppler = vec(mean(counts_qm_doppler, dims = 1));
+z_max_qm_mm_doppler = centers_z[argmax(z_profile_qm_doppler)];
+z_max_qm_spline_mm_doppler, Sfit_qm_doppler = TheoreticalSimulation.max_of_bspline_positions(centers_z,z_profile_qm_doppler;λ0=λ0_raw );
+
+img_qm_doppler = heatmap(
+    centers_x,
+    centers_z,
+    counts_qm_doppler';
+    colormap = :viridis,
+    title = "Quantum Mechanis",
+    xlabel = "x (mm)",
+    ylabel = "z (mm)",
+    xlims = (-8,8),
+    ylims = (-3,12),
+    aspect_ratio = :equal,
+    colorbar = true
+);
+
+img_qm_prof_doppler = plot(centers_z, z_profile_qm_doppler,
+    label="Quantum mechanics",
+    xlabel=L"$z$ (mm)",
+    line=(:solid,2,:blue),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+
+img_cqd_doppler = heatmap(
+    centers_x,
+    centers_z,
+    counts_cqd_doppler';
+    colormap = :viridis,
+    title="CoQuantum",
+    xlabel = "x (mm)",
+    ylabel = "z (mm)",
+    xlims = (-8,8),
+    ylims = (-3,12),
+    aspect_ratio = :equal,
+    colorbar = true
+);
+
+img_cqd_prof_doppler = plot(centers_z, z_profile_cqd_doppler,
+    label=L"CQD ($k_{i}=%$(ki)\times 10^{-6}$)",
+    xlabel=L"$z$ (mm)",
+    line=(:solid,2,:red),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+
+plot(img_exp, img_exp_prof, img_qm_doppler, img_qm_prof_doppler, img_cqd_doppler, img_cqd_prof_doppler, 
+suptitle=L"Doppler: $\delta_{L}=%$(round(δlaser/1e6,sigdigits=4))$MHz, $s_{0}=%$(s0)$",
+layout=(3,2),
+left_margin=10mm,
+size=(1000,1400))
 
 
-# z-profile = mean over x bins
-z_profile_raw_doppler = vec(mean(counts_doppler, dims = 1))
-z_max_raw_mm_doppler = centers_z[argmax(z_profile_raw_doppler)]
-z_max_raw_spline_mm_doppler, Sfit_raw_doppler = TheoreticalSimulation.max_of_bspline_positions(centers_z,z_profile_raw_doppler;λ0=0.005)
 
-plot(xlabel=L"$z$ (mm)")
-plot!(centers_z,z_profile_raw, label="Raw profile",
-    xlims=(-2,10))
-plot!(centers_z,z_profile_raw_doppler, label="Doppler correction")
-plot!(data_CQD_up_profiles[Ic_idx][:z_profile][:,1],
-    data_CQD_up_profiles[Ic_idx][:z_profile][:,3], label="Smoothing")
+fig1 = plot(exp_z[1:10:end], exp_profile[1:10:end]/maximum(exp_profile),
+    title = L"$\delta_{L}=%$(round(δlaser/1e6,sigdigits=4))$MHz, $s_{0}=%$(s0)$",
+    label="Experimental profile",
+    seriestype=:scatter,
+    marker=(:circle,2,:white),
+    markerstrokecolor=:gray23,
+    xlabel=L"$z$ (mm)",
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+plot!(centers_z, qm_profile/maximum(qm_profile),
+    label="Quantum mechanics",
+    xlabel=L"$z$ (mm)",
+    line=(:solid,2,:blue),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+plot!(centers_z, z_profile_qm_doppler/maximum(z_profile_qm_doppler),
+    label="Quantum mechanics + Doppler",
+    xlabel=L"$z$ (mm)",
+    line=(:dash,2,:purple3),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+plot!(data_qm[Ic_idx][:z_profile][:,1],data_qm[Ic_idx][:z_profile][:,2]/maximum(data_qm[Ic_idx][:z_profile][:,2]),
+    label="Gaussian smoothing",
+    line=(:orangered2,1,:dot)
+);
 
-2+2
+fig2 = plot(exp_z[1:10:end], exp_profile[1:10:end]/maximum(exp_profile),
+    title = L"$\delta_{L}=%$(round(δlaser/1e6,sigdigits=4))$MHz, $s_{0}=%$(s0)$",
+    label="Experimental profile",
+    seriestype=:scatter,
+    marker=(:circle,2,:white),
+    markerstrokecolor=:gray23,
+    xlabel=L"$z$ (mm)",
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+plot!(centers_z, cqd_profile/maximum(cqd_profile),
+    label=L"CQD ($k_{i}=%$(ki)\times 10^{-6}$)",
+    xlabel=L"$z$ (mm)",
+    line=(:solid,2,:red),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+plot!(centers_z, z_profile_cqd_doppler/maximum(z_profile_cqd_doppler),
+    label=L"CQD ($k_{i}=%$(ki)\times 10^{-6}$) + Doppler",
+    xlabel=L"$z$ (mm)",
+    line=(:dash,2,:seagreen4),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+);
+plot!(data_CQD_up_zmax[Ic_idx][:z_profile][:,1],data_CQD_up_zmax[Ic_idx][:z_profile][:,2]/maximum(data_CQD_up_zmax[Ic_idx][:z_profile][:,2]),
+    label="Gaussian smoothing",
+    line=(:green2,1,:dot)
+);
+
+plot(fig1,fig2,
+layout = (2,1),
+size=(600,1000),
+left_margin = 5mm,
+)
 
 
 
-fig = plot(xlabel=L"$z$ (mm)")
-for δlaser in -6:6
-w = doppler_weights(vzf, vyf; Γν=5.956e6, δlaser=1e6*δlaser, s0=s0)
-img = weighted_image(xf, zf, w ./ sum(w), edges_x, edges_z; norm_mode = norm_type)
-counts_doppler = img.weights
-z_profile_raw_doppler = vec(mean(counts_doppler, dims = 1))
-plot!(fig,centers_z,z_profile_raw_doppler, label=L"$\delta_{L}=%$(δlaser)$MHz")
+fig = plot(xlabel=L"$z$ (mm)");
+Laser_detuning = collect(range(-15,15,11));
+cols_i = palette(:darkrainbow,length(Laser_detuning));
+Γ_K39 = 5.956e6 ;
+s0 = 2.75 ;
+# plot!(fig,centers_z,cqd_profile, label="CQD profile",
+#     line=(:dash,2,:black));
+for (i,δlaser) in enumerate(Laser_detuning)
+    w = doppler_weights(vzf_cqd, vyf_cqd; branch=:up, Γν=Γ_K39, δlaser=1e6*δlaser, s0=s0, normalize=false)
+    img = weighted_image(xf_cqd, zf_cqd, w , edges_x, edges_z; norm_mode = norm_type)
+    counts_doppler = img.weights
+    z_profile_doppler = vec(mean(counts_doppler, dims = 1))
+    plot!(fig,
+        centers_z,z_profile_doppler, 
+        label=L"$\delta_{L}=%$(round(δlaser, sigdigits=3))$MHz",
+        line = (:solid,1.2, cols_i[i]))
 end
-plot!(xlims=(-2,+2))
+plot!(fig,xlims=(-1.5,+8.5),
+    legend_columns=1,
+    legend=:outerright,
+    foreground_color_legend=nothing);
+plot!(fig, title = L"$\Gamma = %$(round(Γ_K39/1e6; sigdigits=4))\mathrm{MHz}$ | $s_{0}=%$(s0)$");
 display(fig)
 
 
+# ======================================================================================================
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# ======================================================================================================
+
+out_qm = OrderedDict{Int, Tuple{Matrix{Float64}, Vector{Float64}}}();
+for (idx,ic) in enumerate(Icoils)
+    @info "Current " ic ; 
+    qm_data = jldopen(qm_path, "r") do file
+            file["screen"]["i$(idx)"]
+    end
+    qm_data = vcat([qm_data[lv]  for lv=6:8]...)
+
+    xf_qm = 1e3* view(qm_data,:,7)
+    zf_qm = 1e3* view(qm_data,:,8)
+
+    vxf_qm = view(qm_data,:,4)
+    vyf_qm = view(qm_data,:,5)
+    vzf_qm = view(qm_data,:,9)
+
+    if norm_type === :none
+        h_qm = fit(Histogram, (xf_qm, zf_qm), (edges_x, edges_z))                    # raw counts (no normalization)
+    elseif norm_type in (:probability, :pdf, :density)
+        h_qm = normalize(fit(Histogram, (xf_qm, zf_qm), (edges_x, edges_z)); mode=norm_type)
+    else
+        throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $norm_type"))
+    end
+
+    counts_qm = h_qm.weights ; # size: (length(centers_x), length(centers_z))
+    qm_profile = vec(mean(counts_qm, dims=1))
+    z_max_qm_mm = centers_z[argmax(qm_profile)];
+    z_max_qm_spline_mm, Sfit_qm = TheoreticalSimulation.max_of_bspline_positions(centers_z,qm_profile;λ0=λ0_raw);
+
+    w_qm = doppler_weights(vzf_qm, vyf_qm; branch=:up, Γν=5.956e6, δlaser=δlaser, s0=s0, normalize = true)
+    img_qm = weighted_image(xf_qm, zf_qm, w_qm, edges_x, edges_z; norm_mode = norm_type)
+    counts_qm_doppler = img_qm.weights
+    z_profile_qm_doppler = vec(mean(counts_qm_doppler, dims = 1))
+    z_max_qm_mm_doppler = centers_z[argmax(z_profile_qm_doppler)]
+    z_max_qm_spline_mm_doppler, Sfit_qm_doppler = TheoreticalSimulation.max_of_bspline_positions(centers_z,z_profile_qm_doppler;λ0=λ0_raw )
+
+    z_hist = hcat(centers_z, qm_profile, z_profile_qm_doppler)
+    z_hist_max = [z_max_qm_mm, z_max_qm_spline_mm[1] , z_max_qm_spline_mm_doppler[1] ]
+
+    # ✅ STORE RESULT
+    out_qm[idx] = (z_hist, z_hist_max)
+
+end
+
+exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"];
+@info "Experimental data loaded"
+# 1. Fit spline for the experiment data
+data_experiment = Spline1D(
+    exp_avg[:i_smooth], 
+    exp_avg[:z_smooth], 
+    k=3, 
+    bc="extrapolate", 
+    s=0.0, 
+    w = 1 ./ exp_avg[:δz_smooth].^2
+);
+# xq and δxq from grouped data
+xq  = exp_avg[:Ic_grouped][:,1];
+δxq = exp_avg[:Ic_grouped][:,2];
+# 2. Spline derivative at xq : 
+# Evaluate derivative dz/dI at the grouped current points xq.
+# This is needed to propagate δI into δz via slope*δI.
+dyq = derivative(data_experiment, xq; nu=1);
+# 3. Interpolate δy uncertainty to xq
+err_spline = Spline1D(exp_avg[:i_smooth], exp_avg[:δz_smooth], k=3, bc="extrapolate");
+δy_interp = err_spline.(xq);   # # σ_z at xq
+# 4. Total propagated uncertainty σ_total = sqrt( (dz/dI * σ_I)^2 + σ_z(I)^2 )
+δyq = sqrt.( (dyq .* δxq).^2 .+ δy_interp.^2 );
+# Pack into a convenient table:
+# columns = [I, δI, z_spline(I), σ_total]
+data_exp_scattered = hcat(xq,δxq,data_experiment.(xq),δyq);
+pretty_table(data_exp_scattered;
+        alignment     = :c,
+        title         = @sprintf("EXPERIMENTAL DATA (scattered)"),
+        column_labels = ["Ic (A)","δIc (A)", "z (mm)", "δz (mm)"],
+        formatters    = ([fmt__printf("%1.3f", [1]),fmt__printf("%1.4f", [2]),fmt__printf("%1.3f", 3:4)]),
+        style         = TextTableStyle(
+                        first_line_column_label = crayon"yellow bold",
+                        table_border  = crayon"blue bold",
+                        column_label  = crayon"yellow bold",
+                        title = crayon"bold red"
+                        ),
+        table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+        equal_data_column_widths= true,
+);
 
 
 
-mean(vzf/770e-9)
+out_cqd = OrderedDict{Int, Tuple{Matrix{Float64}, Vector{Float64}}}();
+for (idx,ic) in enumerate(Icoils)
+    @info "Current " ic ; 
+    data_cqd = data_CQD_up[idx]
+
+    xf_cqd = 1e3* view(data_cqd,:,9)
+    zf_cqd = 1e3* view(data_cqd,:,10)
+
+    vxf_cqd = view(data_cqd,:,4)
+    vyf_cqd = view(data_cqd,:,5)
+    vzf_cqd =view(data_cqd,:,11)
+
+    if norm_type === :none
+        h_cqd = fit(Histogram, (xf_cqd, zf_cqd), (edges_x, edges_z))                    # raw counts (no normalization)
+    elseif norm_type in (:probability, :pdf, :density)
+        h_cqd = normalize(fit(Histogram, (xf_cqd, zf_cqd), (edges_x, edges_z)); mode=norm_type)
+    else
+        throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $norm_type"))
+    end
+
+    counts_cqd = h_cqd.weights ; # size: (length(centers_x), length(centers_z))
+    cqd_profile = vec(mean(counts_cqd, dims=1))
+    z_max_cqd_mm = centers_z[argmax(cqd_profile)];
+    z_max_cqd_spline_mm, Sfit_cqd = TheoreticalSimulation.max_of_bspline_positions(centers_z,cqd_profile;λ0=λ0_raw);
+
+    w_cqd = doppler_weights(vzf_cqd, vyf_cqd; branch=:up, Γν=5.956e6, δlaser=δlaser, s0=s0, normalize = true)
+    img_cqd = weighted_image(xf_cqd, zf_cqd, w_cqd, edges_x, edges_z; norm_mode = norm_type)
+    counts_cqd_doppler = img_cqd.weights
+    z_profile_cqd_doppler = vec(mean(counts_cqd_doppler, dims = 1))
+    z_max_cqd_mm_doppler = centers_z[argmax(z_profile_cqd_doppler)]
+    z_max_cqd_spline_mm_doppler, Sfit_cqd_doppler = TheoreticalSimulation.max_of_bspline_positions(centers_z,z_profile_cqd_doppler;λ0=λ0_raw )
+
+    z_hist = hcat(centers_z, cqd_profile, z_profile_cqd_doppler)
+    z_hist_max = [z_max_cqd_mm, z_max_cqd_spline_mm[1] , z_max_cqd_spline_mm_doppler[1] ]
+
+    # ✅ STORE RESULT
+    out_cqd[idx] = (z_hist, z_hist_max)
+end
 
 
+plot(data_exp_scattered[12:end,1], data_exp_scattered[12:end,3]/0.93,
+    seriestype=:scatter,
+    marker=(:circle, 4, :white),
+    markerstrokecolor =:black,
+    markerstrokewidth=2,
+    label="Combined Experiment");
+plot!(Icoils[15:end], [out_qm[idx][2][2] for idx=15:nI],
+    label="QM",
+    line=(:darkred,1.8,:solid)
+);
+plot!(Icoils[15:end], zmax_QM[15:end],
+    line=(:red,1,:dash),
+    label=L"QM+Smoothing ($\sigma_{w} = %$(Int(1e3*gaussian_width_mm))\mathrm{\mu m}$)"
+);
+plot!(Icoils[15:end], [out_qm[idx][2][3] for idx=15:nI],
+    line=(:orangered,1.2,:dot),
+    label=L"QM+Doppler ($\delta_{L}=%$(round(1e-6*δlaser;sigdigits=4))$ MHz)"
+);
+plot!(Icoils[15:end], [out_cqd[idx][2][2] for idx=15:nI],
+    line=(:navyblue,1.8,:solid),
+    label="CQD"
+);
+plot!(Icoils[15:end], zmax_CQD[15:end],
+    line=(:blue,1,:dash),
+    label=L"CQD+Smoothing ($\sigma_{w} = %$(Int(1e3*gaussian_width_mm))\mathrm{\mu m}$)"
+);
+plot!(Icoils[15:end], [out_cqd[idx][2][3] for idx=15:nI],
+    line=(:purple2,1.2,:dot),
+    label=L"CQD+Doppler ($\delta_{L}=%$(round(1e-6*δlaser;sigdigits=4))$ MHz)"
+);
+plot!(
+    xlabel="Current (A)",
+    ylabel=L"$z_{max}$ (mm)",
+    xscale=:log10,
+    yscale=:log10,
+    xlims=(0.015,1.05),
+    xticks = ([1e-1, 1.0], [L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:bottomright,
+    foreground_color_legend = nothing,
+)
+
+
+    mean(vzf/770e-9)
+
+[out_qm[idx][2][3] for idx=12:nI]
 
 
 
