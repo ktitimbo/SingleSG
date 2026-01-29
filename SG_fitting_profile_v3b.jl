@@ -316,8 +316,7 @@ function fit_pdf_joint(
     w_fixed::Real = w0,                  # used if w_mode == :fixed
     A_fixed::Real = A0,                  # used if A_mode == :fixed
     progress_every::Int=25,
-    rcond::Real=1e-12, ridge::Real=0.0,
-)
+    rcond::Real=1e-12, ridge::Real=0.0,)
     M = length(z_list)
     @assert length(y_list) == M == length(pdf_th_list) == length(Q_list) ==
             length(R_list) == length(μ_list) == length(σ_list)
@@ -657,10 +656,15 @@ function fit_pdf_joint(
     return fit_data, fit_params, param_se, modelfun, model_on_z, meta, extras
 end
 
-
+# --- Column headers ---
+const _sub = Dict( # map ASCII digits to Unicode subscripts
+    '0'=>'₀','1'=>'₁','2'=>'₂','3'=>'₃','4'=>'₄',
+    '5'=>'₅','6'=>'₆','7'=>'₇','8'=>'₈','9'=>'₉','-'=>'₋'
+);
+sub(k::Integer) = join((_sub[c] for c in string(k)));  # "12" -> "₁₂"
 
 # Select experimental data
-wanted_data_dir = "20251006" ;
+wanted_data_dir = "20250814" ;
 wanted_binning  = 2 ; 
 wanted_smooth   = 0.01 ;
 
@@ -698,14 +702,13 @@ n_start = findall(>(THRESH_A), Ic_sampled)[1]
 P_DEGREE    = 5 ;
 ncols_bg    = P_DEGREE + 1 ;
 
-chosen_currents_idx = sort(unique([
-        # firstindex(Ic_sampled);
-        # @view(findall(>(THRESH_A), Ic_sampled)[1:STEP:end]);
-        @view(findall(>(THRESH_A), Ic_sampled)[end-2:end]);
-        lastindex(Ic_sampled)
-        ]
-));
-
+# chosen_currents_idx = sort(unique([
+#         # firstindex(Ic_sampled);
+#         # @view(findall(>(THRESH_A), Ic_sampled)[1:STEP:end]);
+#         @view(findall(>(THRESH_A), Ic_sampled)[end-2:end]);
+#         lastindex(Ic_sampled)
+#         ]
+# ));
 chosen_currents_idx = [1]
 
 println("Target currents in A: (", 
@@ -727,12 +730,6 @@ z_theory = collect(range(-range_z,range_z,length=nrange_z));
 
 rl   = length(chosen_currents_idx) ;
 cols = palette(:darkrainbow, rl);
-# --- Column headers ---
-const _sub = Dict( # map ASCII digits to Unicode subscripts
-    '0'=>'₀','1'=>'₁','2'=>'₂','3'=>'₃','4'=>'₄',
-    '5'=>'₅','6'=>'₆','7'=>'₇','8'=>'₈','9'=>'₉','-'=>'₋'
-);
-sub(k::Integer) = join((_sub[c] for c in string(k)));  # "12" -> "₁₂"
 
 hdr_top = Any[
     "Residuals",
@@ -773,7 +770,6 @@ for (j,i_idx) in enumerate(chosen_currents_idx)
     pdf_th_list[j] = normalize_vec(pdf_theory; by = norm_mode)
 end
 
-
 #########################################################################################################
 # (1) w = :global & A = :global & Pn =:per_profile
 #########################################################################################################
@@ -787,7 +783,6 @@ for i=1:rl
     fit_poly = bg_function(z_theory,fit_params.c[i])
     c_poly_coeffs[i] = [fit_poly[dg] for dg in 0:P_DEGREE]
 end
-c_poly_coeffs
 
 w_fit = fit_params.w
 A_fit = fit_params.A
