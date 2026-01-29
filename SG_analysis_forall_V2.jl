@@ -50,7 +50,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20251207" ;
+data_directory      = "20250814" ;
 
 # STERN–GERLACH EXPERIMENT SETUP
 # Camera and pixel geometry : intrinsic properties
@@ -629,15 +629,15 @@ Icoils[1] = 1.0e-6
 nI = length(Icoils)
 ΔIcoils = vec(data["AmmeterRange_mA"])/1000*0.015
 
-@time data_f1 = extract_all_profiles(data, "F1ProcessedImages", nI, z_pixels; nz_bin=1);
-@time data_f2 = extract_all_profiles(data, "F2ProcessedImages", nI, z_pixels; nz_bin=1);
+@time data_exp_f1 = extract_all_profiles(data, "F1ProcessedImages", nI, z_pixels; nz_bin=1);
+@time data_exp_f2 = extract_all_profiles(data, "F2ProcessedImages", nI, z_pixels; nz_bin=1);
 
 for j = 1:nI
     fig = plot()
-    colors = palette(:darkrainbow,data_f1[j].nf);
-    for i=1:5:data_f1[j].nf
-        plot!(data_f1[j].z_profiles[i,:],
-            ribbon=data_f1[j].z_errors[i,:],
+    colors = palette(:darkrainbow,data_exp_f1[j].nf);
+    for i=1:5:data_exp_f1[j].nf
+        plot!(data_exp_f1[j].z_profiles[i,:],
+            ribbon=data_exp_f1[j].z_errors[i,:],
             color=colors[i],
             label=nothing,)
     end
@@ -650,8 +650,8 @@ end
 fig = plot(legend=:outerright,)
 colors = palette(:darkrainbow,nI);
 for j = 1:nI
-    plot!(data_f1[j].mean_profile,
-        ribbon=data_f1[j].total_error,
+    plot!(data_exp_f1[j].mean_profile,
+        ribbon=data_exp_f1[j].total_error,
         color=colors[j],
         label=L"$I_{c} =%$(round(Icoils[j];digits=3))\mathrm{A}$",)
     plot!(
