@@ -616,35 +616,13 @@ end
 # --------------------------------------------------- #
 
 # data for comparison
-# data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_profiles_table.jld2"))["table"]
-data_qm  = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_5M","qm_5000000_screen_profiles_table.jld2"))["table"]
-
-
-# keys(data_qm)
-
-# plot(xlabel="Current (A)")
-# for nb in [1,2,4,8]
-#     for s in [0.065,0.100,0.200,0.300,0.500]
-# plot!([data_qm[(nb,s,0.02)][i][:Icoil] for i=2:47], [data_qm[(nb,0.2,0.01)][i][:z_max_smooth_spline_mm] for i=2:47],ls=:solid)
-# plot!([data_qm[(nb,s,0.02)][i][:Icoil] for i=2:47], [data_qm5[(nb,0.2,0.01)][i][:z_max_smooth_spline_mm] for i=2:47], ls=:dash)
-# end
-# end
-# plot!(xscale=:log10,
-#     yscale=:log10,
-#     legend=:false,
-#     xlims=(0.020,1.05),
-#     ylims=(5e-1,3))
-
-# plot([data_qm[(2,0.2,0.02)][i][:Icoil] for i=2:47],
-#     1e3*([data_qm[(2,0.300,0.05)][i][:z_max_smooth_spline_mm] for i=2:47] .- [data_qm5[(2,0.300,0.05)][i][:z_max_smooth_spline_mm] for i=2:47]),
-#     marker=(:circle,4,:red),
-#     xscale=:log10,
-#     legend=:topleft,
-# )
-
+data_qm  = load(joinpath(@__DIR__,"simulation_data","qm_simulation_7M","qm_7000000_screen_profiles_f1_table.jld2"))["table"]
+unique(first.(keys(data_qm)))
+unique(getindex.(keys(data_qm),2))
+unique(last.(keys(data_qm)))
 
 # load experimental data processed
-data = matread(joinpath("Z:\\SingleSternGerlachExperimentData\\experiments",data_directory,"data.mat"))["data"]
+data = matread(joinpath("W:\\SternGerlach\\experiments",data_directory,"data.mat"))["data"]
 
 Icoils = vec(data["Current_mA"])/1000
 Icoils[1] = 1.0e-6
@@ -685,14 +663,14 @@ display(fig)
 
 
 # iterative parameters
-nbins_list  = (2)#(1, 2, 4, 8)
-λ0_list     = (0.01)#(0.001,0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
+nbins_list  = (1, 2, 4, 8)
+λ0_list     = (0.001,0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
 const Cell = Union{Missing, String, Int, Float64}
 summary_table = Matrix{Cell}(undef, length(nbins_list)*length(λ0_list), 3);
-# for (row, (λ0,nz_binning)) in enumerate(Iterators.product(λ0_list, nbins_list))
-    λ0 = λ0_list[1]
-    nz_binning = nbins_list[1]
-    row = 1
+for (row, (λ0,nz_binning)) in enumerate(Iterators.product(λ0_list, nbins_list))
+    # λ0 = λ0_list[1]
+    # nz_binning = nbins_list[1]
+    # row = 1
 
     chosen_qm = data_qm[(nz_binning, 0.200, λ0)]
     Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
@@ -1535,7 +1513,7 @@ summary_table = Matrix{Cell}(undef, length(nbins_list)*length(λ0_list), 3);
     )
     GC.gc()
 
-# end
+end
 
 
 
