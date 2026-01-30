@@ -702,14 +702,13 @@ n_start = findall(>(THRESH_A), Ic_sampled)[1]
 P_DEGREE    = 5 ;
 ncols_bg    = P_DEGREE + 1 ;
 
-# chosen_currents_idx = sort(unique([
-#         # firstindex(Ic_sampled);
-#         # @view(findall(>(THRESH_A), Ic_sampled)[1:STEP:end]);
-#         @view(findall(>(THRESH_A), Ic_sampled)[end-2:end]);
-#         lastindex(Ic_sampled)
-#         ]
-# ));
-chosen_currents_idx = [1]
+chosen_currents_idx = sort(unique([
+        # firstindex(Ic_sampled);
+        # @view(findall(>(THRESH_A), Ic_sampled)[1:STEP:end]);
+        @view(findall(>(THRESH_A), Ic_sampled)[end-2:end]);
+        lastindex(Ic_sampled)
+        ]
+));
 
 println("Target currents in A: (", 
         join(map(x -> @sprintf("%.3f", x), Ic_sampled[chosen_currents_idx]), ", "),
