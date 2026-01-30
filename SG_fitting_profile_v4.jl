@@ -443,17 +443,158 @@ All three vectors must have the same length `M`.
 
 The function returns a 7-tuple:
 
-julia
-(
-    fit_data,
-    fit_params,
-    param_se,
-    modelfun,
-    model_on_z,
-    meta,
-    extras,
-)
-""" 
+    (fit_data, fit_params, param_se, modelfun, model_on_z, meta, extras)
+
+---
+
+### 1. `fit_data`
+
+**Type:** `LsqFit.LsqFitResult`
+
+Raw result from `LsqFit.curve_fit`, containing:
+
+- packed parameter vector
+- residuals
+- Jacobian
+- convergence diagnostics
+
+Useful for advanced inspection and diagnostics.
+
+---
+
+### 2. `fit_params`
+
+**Type:** NamedTuple
+
+    (w = ŵ, A = Â, c = ĉ)
+
+- `ŵ` — fitted Gaussian widths  
+  (scalar or vector depending on `w_mode`)
+
+- `Â` — fitted amplitudes  
+  (scalar or vector depending on `A_mode`)
+
+- `ĉ` — polynomial coefficients (monomial/Horner form)  
+  Vector of length `M`, each of length `n+1`
+
+These are the primary physical fit parameters.
+
+---
+
+### 3. `param_se`
+
+**Type:** NamedTuple
+
+    (δw = δw, δA = δA, δc = se_c)
+
+Standard errors of the fitted parameters:
+
+- `δw` — uncertainty of widths
+- `δA` — uncertainty of amplitudes
+- `δc` — per-profile uncertainties of polynomial coefficients
+
+Derived from a robust covariance estimate.
+
+---
+
+### 4. `modelfun`
+
+**Type:** Function
+
+    (i, zz) -> Vector
+
+Evaluates the fitted model for profile `i` on grid `zz`.
+
+Example:
+
+    yfit = modelfun(2, z_new)
+
+Useful for plotting and interpolation.
+
+---
+
+### 5. `model_on_z`
+
+**Type:** `Vector{Vector}`
+
+Model evaluated on the original grids:
+
+    model_on_z[i] == modelfun(i, z_list[i])
+
+Useful for residual analysis and plotting.
+
+---
+
+### 6. `meta`
+
+**Type:** NamedTuple
+
+Contains diagnostic information:
+
+    (evals, best_probe, w_mode, A_mode, d_mode)
+
+- `evals` — number of model evaluations
+- `best_probe` — best sampled RSS and parameters
+- `*_mode` — modes used
+
+Used for logging and reproducibility.
+
+---
+
+### 7. `extras`
+
+**Type:** NamedTuple
+
+Contains advanced/internal information:
+
+- `d` — orthonormal-basis polynomial coefficients
+- `cov_all` — full covariance matrix
+- `cov_d` — per-profile covariance in d-space
+- `cov_c` — per-profile covariance in c-space
+- `d_ranges` — parameter packing ranges
+- `idx_*` — indices in packed parameter vector
+
+Intended for debugging and advanced uncertainty propagation.
+
+---
+
+## Example
+
+    fit_data, fit_params, param_se, modelfun, model_on_z, meta, extras =
+        fit_pdf_joint(
+            z_list,
+            y_list,
+            pdf_list;
+            n = 3,
+            Q_list = Qs,
+            R_list = Rs,
+            μ_list = μs,
+            σ_list = σs,
+            w0 = 0.02,
+            w_mode = :global,
+            A_mode = :per_profile,
+            d_mode = :per_profile,
+        )
+
+    # Access fitted widths
+    fit_params.w
+
+    # Evaluate model
+    yfit = modelfun(1, z_list[1])
+
+---
+
+## Notes
+
+- All arrays in `*_list` must have consistent ordering.
+- The orthonormal basis representation improves numerical stability
+  for high-order backgrounds.
+- Using `:global` modes reduces parameter count and improves robustness
+  when profiles are strongly correlated.
+- For large problems, setting `progress_every > 0` helps monitor convergence.
+
+"""
+
 function fit_pdf_joint(
     z_list::Vector{<:AbstractVector},
     y_list::Vector{<:AbstractVector},
