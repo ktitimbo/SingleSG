@@ -1493,12 +1493,7 @@ for (row, (λ0,nz_binning)) in enumerate(Iterators.product(λ0_list, nbins_list)
     saveplot(fig,"fw_01")
 
 
-
-
-
     # ==================================================================== #
-
-
 
     pretty_table(summary_table;
         title         = data_directory,
