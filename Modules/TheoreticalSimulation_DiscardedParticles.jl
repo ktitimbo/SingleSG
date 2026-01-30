@@ -92,7 +92,7 @@ function QM_flag_travelling_particles(Ix, init_particles, p::AtomParams;
             lock(print_lock); 
             try
                 # println("Analyzing I₀ = $(round(i0, sigdigits=5)) A \t (levels = $nlevels)")
-                @printf "[%02d/%d]\tAnalyzing I₀ = %.3f A \t (levels = %d)\n" c ncurrents i0 nlevels
+                @printf "[%02d/%02d]\tAnalyzing I₀ = %.3f A \t (levels = %d)\n" c ncurrents i0 nlevels
             finally
                 unlock(print_lock)
             end
