@@ -173,23 +173,23 @@ z_exp  = avg_data[:z_smooth];
 
 # Coil currents
 Icoils = [0.00,
-            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
-            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
-            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
-            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
-            0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
+            # 0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
+            # 0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
+            # 0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
+            # 0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
+            # 0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,
+            1.00
 ];
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 7_000 ; 
+const Nss = 500_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
-gaussian_width_mm = 0.200
+gaussian_width_mm = 0.250
 λ0_raw            = 0.01
 λ0_spline         = 0.001
-
 
 # Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
