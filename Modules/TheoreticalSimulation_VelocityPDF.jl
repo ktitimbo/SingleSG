@@ -110,7 +110,7 @@ A vector with `length(zd)` giving the (unnormalized) profile at each `zd`.
 - Asserts `pdf ∈ (:point, :finite)` and basic input sanity.
 
 # Example
-```julia
+julia
 zd = range(-12.5e-3, 12.5e-3; length=20_001)
 μ    = μB_eff           # your effective moment (J/T)
 grad = GvsI(I0)        # dB/dz for current I0 (T/m)
