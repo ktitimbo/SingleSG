@@ -844,7 +844,7 @@ both `z(t)` and `v_z(t)`.
 - Only `z` accelerates inside the SG; `x,y` are ballistic and unused here.
 
 # Example
-```julia
+julia
 z = QM_EqOfMotion_z(0.012, 0.65, 2, 2, [0.0,0.0,0.0], [5.0,800.0,0.0], p)
 """
 @inline function QM_EqOfMotion_z(t,Ix::Float64,f,mf,r0::AbstractVector{<:Real},v0::AbstractVector{<:Real}, p::AtomParams)
