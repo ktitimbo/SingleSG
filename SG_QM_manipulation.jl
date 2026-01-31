@@ -783,11 +783,265 @@ plot!(
 
 
 
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Dr. Ku has asked about the separation between the two branches at the circular aperture
+# 20260126
+atom        = "39K"  ;
+## PHYSICAL CONSTANTS from NIST
+# RSU : Relative Standard Uncertainty
+const kb    = 1.380649e-23 ;       # Boltzmann constant (J/K)
+const ħ     = 6.62607015e-34/2π ;  # Reduced Planck constant (J s)
+const μ₀    = 1.25663706127e-6;    # Vacuum permeability (Tm/A)
+const μB    = 9.2740100657e-24 ;   # Bohr magneton (J/T)
+const γₑ    = -1.76085962784e11 ;  # Electron gyromagnetic ratio  (1/sT). Relative Standard Uncertainty = 3.0e-10
+const μₑ    = 9.2847646917e-24 ;   # Electron magnetic moment (J/T). RSU = 3.0e-10
+const Sspin = 1/2 ;                # Electron spin
+const gₑ    = -2.00231930436092 ;  # Electron g-factor
+# atom_info       = AtomicSpecies.atoms(atom);
+K39_params = TheoreticalSimulation.AtomParams(atom); # [R μn γn Ispin Ahfs M ] 
+# Furnace
+T_K = 273.15 + 205 ; # Furnace temperature (K)
+# Furnace aperture
+const x_furnace = 2.0e-3 ;
+const z_furnace = 100e-6 ;
+# Slit : Pre SG
+const x_slit  = 4.0e-3 ;
+const z_slit  = 300e-6 ;
+# Circular Aperture : Post SG
+const R_aper            = 5.8e-3/2 ;
+const y_SGToAperture    = 42.0e-3 ;   
+# Propagation distances
+const y_FurnaceToSlit = 224.0e-3 ;
+const y_SlitToSG      = 44.0e-3 ;
+const y_SG            = 7.0e-2 ;
+const y_SGToScreen    = 32.0e-2 ;
+# Connecting pipes
+const R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
+
+R_mm = 1e3 * R_aper
+θcirc = range(0, 2π, length=361)
+x_circ_mm = R_mm .* cos.(θcirc)    # mm
+z_circ_um = R_mm .* sin.(θcirc)    # mm
+
+effusion_params = TheoreticalSimulation.BeamEffusionParams(x_furnace,z_furnace,x_slit,z_slit,y_FurnaceToSlit,T_K,K39_params);
+quantum_numbers = TheoreticalSimulation.fmf_levels(K39_params);
+y_aper   = y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToAperture
+
+
+Ic_idx = 47 ; 
+@info "Current chosen Ic = $(Icoils[Ic_idx])A"
+qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_7M","qm_screen_data.jld2");
+
+levels_up = 1:4
+levels_dw = 6:8
+
+Ic = Icoils[Ic_idx]
+mm = 1e3
+λ0_raw = 0.000001
+
+xs_up, zs_up, xs_dw, zs_dw = jldopen(qm_path, "r") do file
+    screen = file["screen"]["i$(Ic_idx)"]
+
+    n_atoms_up = sum(size(screen[lvl], 1) for lvl in levels_up)
+    n_atoms_dw = sum(size(screen[lvl], 1) for lvl in levels_dw)
+
+    xs_dw = Vector{Float64}(undef, n_atoms_dw)
+    zs_dw = Vector{Float64}(undef, n_atoms_dw)
+    xs_up = Vector{Float64}(undef, n_atoms_up)
+    zs_up = Vector{Float64}(undef, n_atoms_up)
+
+    k = 0
+    @inbounds for lvl in levels_up
+        data_lvl = screen[lvl]
+        f, mf = quantum_numbers[lvl]
+        @info "F=$(Int(f)) and mF=$(Int(mf))"
+        n = size(data_lvl, 1)
+
+        for j in 1:n
+            k += 1
+            v0y = data_lvl[j, 5]
+            τ_aper = y_aper / v0y
+
+            rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(
+                τ_aper, Ic, f, mf,
+                @view(data_lvl[j, 1:3]),
+                @view(data_lvl[j, 4:6]),
+                K39_params
+            )
+
+            xs_up[k] = mm * rtmp[1]
+            zs_up[k] = mm * rtmp[3]
+        end
+    end
+
+    k = 0
+    @inbounds for lvl in levels_dw
+        data_lvl = screen[lvl]
+        f, mf = quantum_numbers[lvl]
+        @info "F=$(Int(f)) and mF=$(Int(mf))"
+        n = size(data_lvl, 1)
+
+        for j in 1:n
+            k += 1
+            v0y = data_lvl[j, 5]
+            τ_aper = y_aper / v0y
+
+            rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(
+                τ_aper, Ic, f, mf,
+                @view(data_lvl[j, 1:3]),
+                @view(data_lvl[j, 4:6]),
+                K39_params
+            )
+
+            xs_dw[k] = mm * rtmp[1]
+            zs_dw[k] = mm * rtmp[3]
+        end
+    end
+
+    # return arrays from the do-block if you want them outside:
+    return xs_up, zs_up, xs_dw, zs_dw
+end
+
+bins_aper_up  = (TheoreticalSimulation.FreedmanDiaconisBins(xs_up), TheoreticalSimulation.FreedmanDiaconisBins(zs_up))
+# Aperture
+fig_up = histogram2d(xs_up, zs_up;
+    bins=bins_aper_up, show_empty_bins=true, color=:plasma, normalize=:pdf,
+    xlabel=L"$x \ (\mathrm{mm})$", ylabel=L"$z \ (\mathrm{\mu m})$",
+    # xticks=-4.0:0.50:4.0, yticks=-1000:500:3000,
+    xlims=(-3.5,3.5), ylims=(-3.5,3.5),
+    aspect_ratio=:equal
+)
+plot!(fig_up, x_circ_mm, z_circ_um, line=(:dash,:gray,2), label=false)
+xpos, ypos = -2.5, +3.2; dx, dy = 0.9, 0.3
+plot!(fig_up, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                    [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+        color=:white, opacity=0.65, linealpha=0, label=false)
+annotate!(fig_up, xpos, ypos, text("⊚ Aperture", 10, :black, :bold, :center, "Helvetica"))
+
+
+bins_aper_dw  = (TheoreticalSimulation.FreedmanDiaconisBins(xs_dw), TheoreticalSimulation.FreedmanDiaconisBins(zs_dw))
+# Aperture
+fig_dw = histogram2d(xs_dw, zs_dw;
+    bins=bins_aper_dw, show_empty_bins=true, color=:plasma, normalize=:pdf,
+    xlabel=L"$x \ (\mathrm{mm})$", ylabel=L"$z \ (\mathrm{mm})$",
+    # xticks=-4.0:0.50:4.0, yticks=-1000:500:3000,
+    xlims=(-3.5,3.5), ylims=(-3.5,3.5),
+    aspect_ratio=:equal
+)
+plot!(fig_dw, x_circ_mm, z_circ_um, line=(:dash,:gray,2), label=false)
+xpos, ypos = -2.5, +3.2; dx, dy = 0.9, 0.3
+plot!(fig_dw, Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                    [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+        color=:white, opacity=0.65, linealpha=0, label=false)
+annotate!(fig_dw, xpos, ypos, text("⊚ Aperture", 10, :black, :bold, :center, "Helvetica"))
+
+
+xs_all = vcat(xs_up,xs_dw);
+zs_all = vcat(zs_up,zs_dw);
+bins_aper_all  = (TheoreticalSimulation.FreedmanDiaconisBins(xs_all), TheoreticalSimulation.FreedmanDiaconisBins(zs_all))
+histogram2d(xs_all, zs_all;
+    bins=bins_aper_all, show_empty_bins=true, color=:plasma, normalize=:pdf,
+    xlabel=L"$x \ (\mathrm{mm})$", ylabel=L"$z \ (\mathrm{mm})$",
+    # xticks=-4.0:0.50:4.0, yticks=-1000:500:3000,
+    xlims=(-3.5,3.5), ylims=(-3.5,3.5),
+    aspect_ratio=:equal
+)
+plot!(x_circ_mm, z_circ_um, line=(:dash,:gray,2), label=false)
+xpos, ypos = -2.5, +3.2; dx, dy = 0.9, 0.3
+plot!(Shape([xpos-dx, xpos+dx, xpos+dx, xpos-dx],
+                    [ypos-dy, ypos-dy, ypos+dy, ypos+dy]),
+        color=:white, opacity=0.65, linealpha=0, label=false)
+annotate!(xpos, ypos, text("⊚ Aperture", 10, :black, :bold, :center, "Helvetica"))
+
+
+# Fixed analysis limits
+xlim = (-3.0, 3.0);
+zlim = (-3.0, 3.0);
+xlim = (-8.0, 8.0);
+zlim = (-12.5, 12.5);
+xmin, xmax = xlim ;
+zmin, zmax = zlim ;
+
+# Bin size in mm (default_camera_pixel_size is assumed global in meters)
+x_bin_size = 1e3 * 4 * cam_pixelsize ;
+z_bin_size = 1e3 * 2 * cam_pixelsize ;
+
+# --------------------------------------------------------
+# X edges: force symmetric centers around 0
+# --------------------------------------------------------
+x_half_range = max(abs(xmin), abs(xmax)) ;
+kx = max(1, ceil(Int, x_half_range / x_bin_size)) ;
+centers_x = collect((-kx:kx) .* x_bin_size) ;
+edges_x = collect((-(kx + 0.5)) * x_bin_size : x_bin_size : ((kx + 0.5) * x_bin_size)) ;
+
+# --------------------------------------------------------
+# Z edges: force symmetric centers around 0
+# --------------------------------------------------------
+z_half_range = max(abs(zmin), abs(zmax));
+kz = max(1, ceil(Int, z_half_range / z_bin_size));
+centers_z = collect((-kz:kz) .* z_bin_size);
+edges_z = collect((-(kz + 0.5)) * z_bin_size : z_bin_size : ((kz + 0.5) * z_bin_size));
+
+h_qm_f1 = fit(Histogram, (xs_dw, zs_dw), (edges_x, edges_z))
+h_qm_f2 = fit(Histogram, (xs_up, zs_up), (edges_x, edges_z))
+
+counts_qm_f1 = h_qm_f1.weights ; # size: (length(centers_x), length(centers_z))
+qm_profile_f1 = vec(mean(counts_qm_f1, dims=1));
+z_max_qm_mm_f1 = centers_z[argmax(qm_profile_f1)]
+z_max_qm_spline_mm_f1, Sfit_qm_f1 = TheoreticalSimulation.max_of_bspline_positions(centers_z,qm_profile_f1;λ0=λ0_raw)
+
+counts_qm_f2 = h_qm_f2.weights ; # size: (length(centers_x), length(centers_z))
+qm_profile_f2 = vec(mean(counts_qm_f2, dims=1));
+z_max_qm_mm_f2 = centers_z[argmax(qm_profile_f2)]
+z_max_qm_spline_mm_f2, Sfit_qm_f2 = TheoreticalSimulation.max_of_bspline_positions(centers_z,qm_profile_f2;λ0=λ0_raw)
+
+
+img_qm_prof = plot(centers_z, qm_profile_f1,
+    title=L"$z$–profile at the circular aperture",
+    label=L"QM ($F=1$)",
+    xlabel=L"$z$ (mm)",
+    line=(:solid,2,:red),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+    xlims=(-4,4),
+    xticks=-4:1:4,
+)
+vline!(img_qm_prof, [z_max_qm_spline_mm_f1[1]], label= L"$z_{max}= %$(round(z_max_qm_spline_mm_f1[1];sigdigits=3))\mathrm{mm}$", line=(:dash, 1, :red))
+plot!(img_qm_prof,centers_z, qm_profile_f2,
+    label=L"QM ($F=2$, $m_{F}=2,1,0,-1$)",
+    line=(:solid,2,:blue))
+vline!(img_qm_prof, [z_max_qm_spline_mm_f2[1]], label= L"$z_{max}= %$(round(z_max_qm_spline_mm_f2[1];sigdigits=3))\mathrm{mm}$", line=(:dash, 1, :blue))
+
+
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Suleyman : experiment = trapezoid + blurring function
+# by deconvolution we can access the blurring function
+# 20260128
 
 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+z_max_qm_spline_mm
 
 
 
