@@ -173,21 +173,21 @@ z_exp  = avg_data[:z_smooth];
 
 # Coil currents
 Icoils = [0.00,
-            # 0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
-            # 0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
-            # 0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
-            # 0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
-            # 0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,
+            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
+            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
+            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
+            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
+            0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,
             1.00
 ];
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 500_000 ; 
+const Nss = 5_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
-gaussian_width_mm = 0.250
+gaussian_width_mm = 0.270
 λ0_raw            = 0.01
 λ0_spline         = 0.001
 
@@ -628,7 +628,7 @@ plot!(fig,
             [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     size=(850,650),
     rightmargin=5mm,
-    legend=:outerright,
+    legend=:outerbottom,
     legend_columns = 4,)
 display(fig)
 savefig(fig,joinpath(OUTDIR,"qm_comparison_w_n.$(FIG_EXT)"))
@@ -696,7 +696,8 @@ GC.gc()
 println("Free memory: $(Sys.free_memory() / (1024)^3) GiB")
 
 Ns = 7_000_000
-const OUTDIR = joinpath(@__DIR__,"simulation_data","quantum_simulation_$(Int(1e-6*Ns))M")
+# const OUTDIR = joinpath(@__DIR__,"simulation_data","quantum_simulation_$(Int(1e-6*Ns))M")
+const OUTDIR = joinpath("W://SternGerlach//quantum_simulation_7M")
 data_exists = isfile(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))
 
 if !data_exists
@@ -915,7 +916,8 @@ else
 
     nx_bins = 128 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
-    gaussian_width_mm = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
+    # gaussian_width_mm = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
+    gaussian_width_mm = [0.250, 0.270, 0.300 ];  # try different gaussian widths
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
 
