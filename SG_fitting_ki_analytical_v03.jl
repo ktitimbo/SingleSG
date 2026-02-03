@@ -713,7 +713,7 @@ n_ki    = length(cqd_meta[:ki]);
 
 # ---- chosen working point for this run ----
 nx_bins , nz_bins = 128 , 2;
-gaussian_width_mm = 0.200;
+gaussian_width_mm = 0.300;
 λ0_raw            = 0.01;
 λ0_spline         = 0.001;
 @info "Selected parameters" nx_bins=nx_bins nz_bins=nz_bins gw=gaussian_width_mm λ0_raw=λ0_raw λ0_spline=λ0_spline
