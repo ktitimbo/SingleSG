@@ -60,6 +60,7 @@ rng_set = MersenneTwister(base_seed_set)
 # Custom modules
 include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
+include("./Modules/JLD2_MyTools.jl")
 include("./Modules/TheoreticalSimulation.jl");
 using .TheoreticalSimulation;
 TheoreticalSimulation.SAVE_FIG = SAVE_FIG;
@@ -182,7 +183,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 8_000 ; 
+const Nss = 1_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 64 , 2
@@ -208,7 +209,7 @@ end
 
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
-kI = 1.6e-6;
+kI = 1.60e-6;
 @time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, kI, K39_params; y_length=5001,verbose=true);
 @time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, kI, data_UP, CQD_up_particles_flag, K39_params);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
 @time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_DOWN, kI, K39_params; y_length=5001,verbose=true);
@@ -238,7 +239,7 @@ jldsave(
     profile = OrderedDict(
     :nz_bins    => nz_bins,
     :gauss_w    => gaussian_width_mm,
-    :smothing   => (λ0_raw,λ0_spline),
+    :smoothing   => (λ0_raw,λ0_spline),
     :ki         => kI,
     :mmup       => mm_up,
     :mmdw       => mm_dw
@@ -281,8 +282,8 @@ gif(anim, gif_path, fps=2)  # adjust fps
 anim = nothing
 
 # Profiles COMPARISON : different contributions 
-anim = @animate for j in 1:4:length(Icoils)
-    isodd(j) || continue        # keep only every other
+anim = @animate for j in 1:nI
+    # isodd(j) || continue        # keep only every other
     fig = plot(title=L"$I_{0}=%$(Int(1e3*Icoils[j]))\mathrm{mA}$",
         xlabel=L"$z$ (mm)",
         ylabel="Intensity (au)",
@@ -546,7 +547,7 @@ plot!(I_exp[2:end],z_exp[2:end],
     )
 Isim_start_idx = findall(>=(0.010), Icoils)[1]
 plot!(fig,Icoils[Isim_start_idx:end], [mm_up[v][:z_max_smooth_spline_mm] for v in 1:nI][Isim_start_idx:end],
-    label=L"CQD: $k_{i}=%$(1e6*kI)\times 10^{-6}$",
+    label=L"CQD: $k_{i}=%$(round(1e6*kI; sigdigits=3))\times 10^{-6}$",
     line=(:solid,:red,2))
 plot!(fig,xaxis=:log10,
     yaxis=:log10,
@@ -567,9 +568,11 @@ kis = round.([
     [exp10(p) * x for p in -8:-8 for x in 1.0:1:9]; 
     [exp10(p) * x for p in -7:-7 for x in 1.0:1:9]; 
     [exp10(p) * x for p in -6:-6 for x in 1.0:0.1:9.9]; 
-    ## exp10(-5) * (1:0.1:10);
-    exp10.(-5:-1)
+    [exp10(p) * x for p in -5:-5 for x in 1.0:1:9]; 
+    exp10.(-4:0)
 ];sigdigits=4)
+kis = unique(round.([x * exp10(p) for p in -6:-6 for x in 1.0:0.1:5.0];sigdigits=4))
+kis = unique(round.([x * exp10(p) for p in -6:-6 for x in 1.0:0.1:3.0];sigdigits=4))
 @info "Number of ki sampled" length(kis)
 
 fig=scatter(2*ones(length(kis)), kis,
@@ -657,6 +660,7 @@ for i in eachindex(kis)
     line=(cls[i],1))
 end
 plot!(fig, 
+    size=(1200,800),
     xaxis=:log10,
     yaxis=:log10,
     xlims=(8e-3,2),
@@ -668,7 +672,8 @@ plot!(fig,
     legend=:outerright,
     legend_columns=3,
     background_color_legend=nothing,
-    foreground_color_legend=nothing)
+    foreground_color_legend=nothing
+)
 display(fig)
 savefig(fig, joinpath(OUTDIR,"cqd_$(Nss)_kis_comparison.$(FIG_EXT)"))
 
@@ -734,23 +739,28 @@ println("DATA COLLECTED : script $RUN_STAMP has finished!")
 # =======================
 # Global parameters
 # =======================
-Ns = 6_000_000
+Ns = Nss
 
-kis = round.([
-    [exp10(p) * x for p in -8:-8 for x in 1.0:1:9]; 
-    [exp10(p) * x for p in -7:-7 for x in 1.0:1:9]; 
-    [exp10(p) * x for p in -6:-6 for x in 1.0:0.1:9.9]; 
-    ## exp10(-5) * (1:0.1:10);
-    exp10.(-5:-1)
-];sigdigits=4)
+# kis = round.([
+#     [exp10(p) * x for p in -8:-8 for x in 1.0:1:9]; 
+#     [exp10(p) * x for p in -7:-7 for x in 1.0:1:9]; 
+#     [exp10(p) * x for p in -6:-6 for x in 1.0:0.1:9.9]; 
+#     ## exp10(-5) * (1:0.1:10);
+#     exp10.(-5:-1)
+# ];sigdigits=4)
 @info "Number of ki sampled" length(kis)
 
 
 induction_coeff     = 1e6 .* kis
-nx_bins             = 64 # fixed nx bins
+nx_bins             = 32 # fixed nx bins
 nz_bins             = [1, 2, 4]
-gaussian_width_mm   = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.350, 0.400, 0.450, 0.500]; # try different gaussian widths
+gaussian_width_mm   = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.270, 0.300, 0.350, 0.400, 0.450, 0.500]; # try different gaussian widths
 λ0_raw_list         = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
+λ0_spline           = 0.001
+
+nz_bins             = [ 2]
+gaussian_width_mm   = [0.250, 0.270]; # try different gaussian widths
+λ0_raw_list         = [0.001, 0.02]; # try different smoothing factors for raw data
 λ0_spline           = 0.001
 
 # Total combinations (diagnostic only)
@@ -763,26 +773,6 @@ params = [(nz, gw, λ0_raw)
           for gw in gaussian_width_mm
           for λ0_raw in λ0_raw_list]
 
-# ---------- helpers for hierarchical keys ----------
-fmt(x) = @sprintf("%.12g", x)  # safer than %.6g to reduce collisions
-
-function keypath(branch::Symbol, ki::Float64, nz::Int, gw::Float64, λ0_raw::Float64)
-    return "/" * String(branch) *
-           "/ki=" * fmt(ki) *"e-6" *
-           "/nz=" * string(nz) *
-           "/gw=" * fmt(gw) *
-           "/lam=" * fmt(λ0_raw)
-end
-
-# JLD2 doesn't overwrite datasets by default; delete first.
-function jld_overwrite!(f, path::AbstractString, value)
-    if haskey(f, path)
-        delete!(f, path)
-    end
-    f[path] = value
-    return nothing
-end
-
 # =========================================================
 # ======================== UP =============================
 # =========================================================
@@ -793,7 +783,7 @@ const INDIR_up = joinpath(OUTDIR,"up")
 # --- Files ---
 files = sort(filter(f -> isfile(joinpath(INDIR_up, f)) && endswith(f, ".jld2"),
                readdir(INDIR_up)))
-ki_initial, ki_final = 1, 113
+ki_initial, ki_final = 1, length(kis)
 # files = [
 #     @sprintf("cqd_%6d_ki%03d_up_screen.jld2", Ns, ki)
 #     for ki in ki_initial:ki_final
@@ -862,7 +852,7 @@ end
                 profiles_up = pair.second
 
                 ki2, nz, gw, λ0_raw = k
-                label_path = keypath(:up, ki2, nz, gw, λ0_raw)
+                label_path = JLD2_MyTools.make_keypath_cqd(:up, ki2, nz, gw, λ0_raw)
 
                 # resume-friendly
                 if !haskey(f, label_path)
@@ -872,9 +862,9 @@ end
         end
 
     # progress markers (overwrite safely)
-    jld_overwrite!(f, "/meta/progress/last_completed_j", j)
-    jld_overwrite!(f, "/meta/progress/last_completed_file", fname)
-    jld_overwrite!(f, "/meta/progress/last_completed_ki", ki)
+    JLD2_MyTools.jld_overwrite!(f, "/meta/progress/last_completed_j", j)
+    JLD2_MyTools.jld_overwrite!(f, "/meta/progress/last_completed_file", fname)
+    JLD2_MyTools.jld_overwrite!(f, "/meta/progress/last_completed_ki", ki)
     end
     end
 
@@ -894,11 +884,11 @@ const INDIR_dw = joinpath(OUTDIR,"dw")
 # --- Files ---
 files = sort(filter(f -> isfile(joinpath(INDIR_dw, f)) && endswith(f, ".jld2"),
                readdir(INDIR_dw)))
-ki_initial, ki_final = 1, 60
-files = [
-    @sprintf("cqd_%6d_ki%03d_dw_screen.jld2",Ns, ki)
-    for ki in ki_initial:ki_final
-]
+ki_initial, ki_final = 1, length(kis)
+# files = [
+#     @sprintf("cqd_%6d_ki%03d_dw_screen.jld2",Ns, ki)
+#     for ki in ki_initial:ki_final
+# ]
 nfiles = length(files)
 # @assert nfiles == length(induction_coeff) "Mismatch: files vs induction_coeff"
 
@@ -962,7 +952,7 @@ end
                 profiles_dw = pair.second
 
                 ki2, nz, gw, λ0_raw = k
-                label_path = keypath(:dw, ki2, nz, gw, λ0_raw)
+                label_path = JLD2_MyTools.make_keypath_cqd(:dw, ki2, nz, gw, λ0_raw)
 
                 # resume-friendly
                 if !haskey(f, label_path)
@@ -972,9 +962,9 @@ end
         end
 
     # progress markers (overwrite safely)
-    jld_overwrite!(f, "/meta/progress/last_completed_j", j)
-    jld_overwrite!(f, "/meta/progress/last_completed_file", fname)
-    jld_overwrite!(f, "/meta/progress/last_completed_ki", ki)
+    JLD2_MyTools.jld_overwrite!(f, "/meta/progress/last_completed_j", j)
+    JLD2_MyTools.jld_overwrite!(f, "/meta/progress/last_completed_file", fname)
+    JLD2_MyTools.jld_overwrite!(f, "/meta/progress/last_completed_ki", ki)
     end
 
     data_sim = nothing
@@ -1042,15 +1032,6 @@ alert("script $RUN_STAMP has finished!")
 
 
 # using JLD2
-
-# # --- helper: delete+write (since JLD2 won't overwrite datasets by default) ---
-# function jld_overwrite!(f, path::AbstractString, value)
-#     if haskey(f, path)
-#         delete!(f, path)
-#     end
-#     f[path] = value
-#     return nothing
-# end
 
 # # --- helper: extract kis from stored keypaths under /up/ki=<...>e-6/... ---
 # function collect_kis_from_file(path::AbstractString)::Vector{Float64}
