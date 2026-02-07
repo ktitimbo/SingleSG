@@ -914,7 +914,7 @@ else
     anim = nothing
     GC.gc()
 
-    nx_bins = 128 ;
+    nx_bins = 32 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
     # gaussian_width_mm = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
     gaussian_width_mm = [0.250, 0.270, 0.300 ];  # try different gaussian widths
@@ -1090,3 +1090,57 @@ else
 
     println("script $RUN_STAMP has finished!")
 end
+
+# In case of merging
+# path_1 = joinpath("W://SternGerlach//quantum_simulation_7M","qm_7000000_screen_profiles_f2_table.jld2")
+# path_2 = joinpath("W://SternGerlach//quantum_simulation_7M","qm_7000000_screen_profiles_f2_table_run2.jld2")
+
+# qm1 = load(path_1,"table")
+# qm2 = load(path_2,"table")
+
+# for (k, v2) in qm2
+#     if haskey(qm1, k)
+#         @warn "Key already exists in qm1; keeping qm1" k
+#     else
+#         qm1[k] = v2
+#     end
+# end
+
+# # Sort keys (lexicographic: Int -> Float -> Float)
+# sorted_keys = sort(collect(keys(qm1)))
+
+# # Rebuild OrderedDict in sorted order
+# qm_sorted = OrderedDict{keytype(qm1), valtype(qm1)}()
+
+# for k in sorted_keys
+#     qm_sorted[k] = qm1[k]
+# end
+
+# jldsave(joinpath(OUTDIR,"qm_$(7000000)_screen_profiles_f2_table.jld2"), table = qm_sorted)
+
+# function make_keypath(nz::Int, σw::Float64, λ0::Float64)
+
+#     fmt = Printf.Format("%.3f")
+
+#     σw_str = Printf.format(fmt, σw)
+#     λ0_str = Printf.format(fmt, λ0)
+
+#     return "table/nz=$(nz)/σw=$(σw_str)/λ0=$(λ0_str)"
+# end
+
+# outpath = joinpath(OUTDIR, "qm_screen_profiles_f2_table.jld2")
+# jldopen(outpath, "w") do file
+#     ks = collect(keys(qm_sorted))
+#     # meta (use your naming, but note: your example swapped names)
+#     file["meta/nz"] = sort(unique(getindex.(ks, 1)))
+#     file["meta/σw"] = sort(unique(getindex.(ks, 2)))
+#     file["meta/λ0"] = sort(unique(getindex.(ks, 3)))
+#     # store each key separately
+#     for (nz, σw, λ0) in ks
+#         file[make_keypath(nz, σw, λ0)] = qm_sorted[(nz, σw, λ0)]
+#     end
+# end
+
+# testdata= jldopen(outpath,"r") do file
+#     file[make_keypath(2,0.27,0.01)]
+# end
