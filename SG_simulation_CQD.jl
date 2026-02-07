@@ -787,7 +787,7 @@ lk = ReentrantLock()
         # @info "[UP]" ki=ki nz=nz gw=gw λ0=λ0_raw 
         profiles_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
             data_sim;
-            n_bins      = (64, nz),
+            n_bins      = (nx_bins, nz),
             width_mm    = gw,
             add_plot    = false,
             plot_xrange = :all,
@@ -844,7 +844,7 @@ lk = ReentrantLock()
     for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
         profiles_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
             data_sim;
-            n_bins      = (64, nz),
+            n_bins      = (nx_bins, nz),
             width_mm    = gw,
             add_plot    = false,
             plot_xrange = :all,
