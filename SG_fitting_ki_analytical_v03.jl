@@ -9,6 +9,7 @@ Plots.default(
     show=true, dpi=600, fontfamily="Computer Modern", 
     grid=true, minorgrid=true, framestyle=:box, widen=true,
 )
+FIG_EXT = "png"   # could be "pdf", "svg", etc.
 using Plots.PlotMeasures
 # Aesthetics and output formatting
 using Colors, ColorSchemes
@@ -44,6 +45,7 @@ hostname = gethostname();
 include("./Modules/TheoreticalSimulation.jl");
 include("./Modules/DataReading.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
+include("./Modules/JLD2_MyTools.jl");
 
 logspace10(lo, hi; n=50) = 10.0 .^ range(log10(lo), log10(hi); length=n)
 
@@ -132,173 +134,167 @@ function fit_ki(data_org, selected_points, ki_list, ki_range)
 end
 
 function fit_ki_with_error(itp, data;
-                           bounds::Tuple{<:Real,<:Real},
-                           conf::Real=0.95,
-                           weights::Union{Nothing,AbstractVector}=nothing,
-                           h::Union{Nothing,Real}=nothing)
-    """
-        fit_ki_with_error(itp, data; bounds, conf=0.95, weights=nothing, h=nothing)
+    bounds::Tuple{<:Real,<:Real},
+    conf::Real = 0.95,
+    use_Zse::Bool = false,
+    profile::Bool = true,
+    profile_grid::Int = 400)
+    I  = collect(Float64, data[:, 1])
+    Z  = collect(Float64, data[:, 3])
+    σZ = collect(Float64, data[:, 4])   # only used if use_Zse=true
 
-    Fit a single parameter `ki` by minimizing the (optionally weighted) mean squared error
-    in **log10 space** between the model prediction and measurements:
+    # Valid mask (log requires Z>0; σZ>0 if used)
+    m0 = isfinite.(I) .& isfinite.(Z) .& (Z .> 0)
+    if use_Zse
+        m0 .&= isfinite.(σZ) .& (σZ .> 0)
+    end
+    I, Z, σZ = I[m0], Z[m0], σZ[m0]
 
-        r_i(ki) = log10(itp(I_i, ki)) - log10(Z_i)
+    # weights in log10 space: Var(log10 Z) ≈ (σZ/(Z ln10))^2
+    w = use_Zse ? ((Z .* log(10.0)) ./ σZ) .^ 2 : ones(length(I))
 
-    Then estimate an approximate standard error for `ki` using a local linearization
-    of the residuals around the optimum `k̂`, via a finite-difference Jacobian dr/dki.
+    ki_min, ki_max = float(bounds[1]), float(bounds[2])
 
-    Arguments
-    - `itp`    : callable model/interpolant such that `itp(I, ki) -> z_pred` (broadcastable)
-    - `data`   : array/table with at least:
-                * column 1: `I`  (currents)
-                * column 3: `Z`  (measured peak positions; must be > 0 for log10)
-                (Note: this matches your code using `data[:,3]`.)
-    - `bounds` : `(ki_min, ki_max)` search interval for bounded 1D optimization (required)
-
-    Keywords
-    - `conf`     : confidence level for the interval (default 0.95)
-    - `weights`  : optional per-point weights applied in log-space loss
-                  (if provided, must match length of data rows)
-    - `h`        : finite-difference step for ∂r/∂ki; if omitted, chosen automatically
-
-    Returns
-    NamedTuple with fields:
-    - `k_hat`     : best-fit `ki`
-    - `k_err`     : half-width of the (approx.) `conf` confidence interval (t * SE)
-    - `se`        : standard error estimate for `k_hat`
-    - `ci`        : confidence interval `(low, high)` at level `conf`
-    - `rss`       : weighted residual sum of squares in log-space at optimum
-    - `sigma2`    : estimated residual variance (rss / dof)
-    - `dof`       : degrees of freedom (n_used - 1)
-    - `n_used`    : number of points used after filtering invalid values
-    - `converged` : optimizer convergence flag
-    - `result`    : Optim.jl result object
-    """
-
-    # -----------------------------
-    # 1) Unpack the relevant columns
-    # -----------------------------
-    I = collect(Float64, data[:, 1])   # currents
-    Z = collect(Float64, data[:, 3])   # measured peaks (note: col 3 by convention here)
-
-    # -----------------------------------------------------------
-    # 2) Filter invalid points (log10 requires Z > 0 and finite)
-    # -----------------------------------------------------------
-    mask0 = isfinite.(I) .& isfinite.(Z) .& (Z .> 0)
-    I, Z = I[mask0], Z[mask0]
-
-    # -----------------------------------------------------------
-    # 3) Prepare weights (or default to uniform)
-    #    Weights are applied to squared log-residuals.
-    # -----------------------------------------------------------
-    w = weights === nothing ? ones(length(I)) : collect(weights)[mask0]
-    @assert length(w) == length(I) "weights length must match number of valid points"
-
-    # -----------------------------------------------------------
-    # 4) Define the objective function:
-    #    weighted mean of squared residuals in log10 space.
-    # -----------------------------------------------------------
+    # RSS objective in log10 space
     function loss(ki)
         zpred = itp.(I, Ref(ki))
-        r = log10.(zpred) .- log10.(Z)
-
-        # If interpolation produces NaNs/Infs at some points, drop them
-        m = isfinite.(r)
-        r = r[m]; ww = w[m]
-
-        return mean(ww .* (r .^ 2))
-        # Note: this is a weighted *mean* (not normalized by sum(w)).
-        # If you want normalized weighted MSE: sum(ww .* r.^2) / sum(ww).
+        m = isfinite.(zpred) .& (zpred .> 0)
+        any(m) || return Inf
+        r  = log10.(zpred[m]) .- log10.(Z[m])
+        ww = w[m]
+        sum(ww .* (r .^ 2))
     end
 
-    # ----------------------------------------
-    # 5) Solve bounded 1D minimization for ki
-    # ----------------------------------------
-    ki_min, ki_max = float(bounds[1]), float(bounds[2])
     res = optimize(loss, ki_min, ki_max, Brent())
     k̂  = Optim.minimizer(res)
 
-    # ---------------------------------------------------
-    # 6) Compute residuals at the optimum and re-filter
-    #    (keeps I, Z, w aligned with usable residuals).
-    # ---------------------------------------------------
-    ẑ   = itp.(I, Ref(k̂))
-    r    = log10.(ẑ) .- log10.(Z)
-    mres = isfinite.(r)
-    r, I, Z, w = r[mres], I[mres], Z[mres], w[mres]
+    # residuals at optimum (define RSS0 consistently)
+    ẑ = itp.(I, Ref(k̂))
+    m = isfinite.(ẑ) .& (ẑ .> 0)
+    Zu, wu = Z[m], w[m]
+    r0 = log10.(ẑ[m]) .- log10.(Zu)
 
-    # For a single-parameter fit, degrees of freedom = n - 1
-    n = length(r)
     p = 1
+    n = length(r0)
     @assert n > p "Not enough valid points to estimate uncertainty"
 
-    # --------------------------------------------------------------------
-    # 7) Estimate the Jacobian dr/dki using a central finite difference
-    #    We choose a step size that is:
-    #      - relative to |k̂| (≈ cbrt(eps)*|k̂|)
-    #      - with an absolute minimum floor
-    #      - reduced if k̂ is too close to the bounds
-    # --------------------------------------------------------------------
-    fd_step(k̂, lo, hi; rel=cbrt(eps(Float64)), absmin=1e-12) = begin
-        h = max(absmin, rel * abs(k̂))
-        if isfinite(lo) && isfinite(hi)
-            room = min(k̂ - lo, hi - k̂)
-            h = room > 0 ? min(h, 0.5 * room) : absmin
-        end
-        h
+    RSS0 = sum(wu .* (r0 .^ 2))
+    dof  = n - p
+    σ²   = RSS0 / dof
+
+    # finite-difference step (always computed)
+    fd_step(k, lo, hi; rel=cbrt(eps(Float64)), absmin=1e-12) = begin
+        hh = max(absmin, rel * max(abs(k), 1.0))
+        room = min(k - lo, hi - k)
+        room > 0 ? min(hh, 0.5 * room) : absmin
     end
+    h₀ = fd_step(k̂, ki_min, ki_max)
 
-    h₀ = isnothing(h) ? fd_step(k̂, ki_min, ki_max) : float(h)
+    # derivative dr/dk (central diff, common-valid points)
+    z⁺ = itp.(I[m], Ref(k̂ + h₀))
+    z⁻ = itp.(I[m], Ref(k̂ - h₀))
+    mJ = isfinite.(z⁺) .& isfinite.(z⁻) .& (z⁺ .> 0) .& (z⁻ .> 0)
+    @assert count(mJ) > p "Not enough valid points after derivative filtering"
 
-    # Evaluate residuals at k̂ ± h₀
-    z⁺ = itp.(I, Ref(k̂ + h₀))
-    z⁻ = itp.(I, Ref(k̂ - h₀))
-    r⁺ = log10.(z⁺) .- log10.(Z)
-    r⁻ = log10.(z⁻) .- log10.(Z)
+    Zu2 = Zu[mJ]
+    w2  = wu[mJ]
+    rJ  = r0[mJ]
 
-    # Keep only points where both sides are finite (safe central difference)
-    mJ   = isfinite.(r⁺) .& isfinite.(r⁻)
-    r, w = r[mJ], w[mJ]
+    r⁺ = log10.(z⁺[mJ]) .- log10.(Zu2)
+    r⁻ = log10.(z⁻[mJ]) .- log10.(Zu2)
+    drdk = (r⁺ .- r⁻) ./ (2h₀)
 
-    # Central difference derivative
-    drdk = (r⁺[mJ] .- r⁻[mJ]) ./ (2h₀)
-
-    n_used = length(r)
-    @assert n_used > p "Not enough valid points after derivative filtering"
-
-    # --------------------------------------------------------------------
-    # 8) Standard error estimate from weighted least squares linearization:
-    #    Var(k̂) ≈ σ² / (J'J), with J = dr/dk (scalar parameter).
-    # --------------------------------------------------------------------
-    RSS = sum(w .* (r .^ 2))         # weighted residual sum of squares
-    dof = n_used - p                 # degrees of freedom
-    σ²  = RSS / dof                  # residual variance estimate
-
-    # J'J for scalar parameter with weights: sum( (sqrt(w_i)*J_i)^2 )
-    SJJ = sum((sqrt.(w) .* drdk) .^ 2)
-
-    # Standard error of k̂
+    # SE from linearization: Var(k̂) ≈ σ² / (J'WJ)
+    SJJ = sum(w2 .* (drdk .^ 2))
     se  = sqrt(σ² / SJJ)
 
-    # --------------------------------------------------------------------
-    # 9) Confidence interval using Student-t critical value
-    # --------------------------------------------------------------------
     tcrit = quantile(TDist(dof), 0.5 + conf/2)
-    ci    = (k̂ - tcrit*se, k̂ + tcrit*se)
+    k_err = tcrit * se
+    ci_t  = (k̂ - k_err, k̂ + k_err)
+
+    # R² in log10 space (weighted)
+    y  = log10.(Zu2)
+    ŷ  = log10.(ẑ[m][mJ])
+    ȳw = sum(w2 .* y) / sum(w2)
+    TSS = sum(w2 .* (y .- ȳw).^2)
+    R2  = TSS > 0 ? 1 - sum(w2 .* (y .- ŷ).^2) / TSS : NaN
+
+    # Profile interval: ΔRSS = χ²(1,conf) if weighted; else scale by σ²
+    ci_profile = nothing
+    Δtarget = profile ? quantile(Chisq(1), conf) : nothing
+    Δrss = nothing
+    profile_note = nothing
+
+    if profile
+        if use_Zse
+            Δrss = Δtarget
+        else
+            profile_note = :profile_interval_scaled_for_unweighted
+            Δrss = σ² * Δtarget
+        end
+        target = RSS0 + Δrss
+
+        function bracket_side(dir::Int)
+            grid = range(k̂, dir > 0 ? ki_max : ki_min; length=profile_grid)
+            prevk = first(grid)
+            prevL = loss(prevk)
+            for k in Iterators.drop(grid, 1)
+                L = loss(k)
+                if isfinite(L) && (L > target) && isfinite(prevL) && (prevL <= target)
+                    return (prevk, k)
+                end
+                prevk, prevL = k, L
+            end
+            return nothing
+        end
+
+        function bisect_cross(a, b; maxiter=80, tol=1e-10)
+            lo, hi = a, b
+            for _ in 1:maxiter
+                mid = (lo + hi)/2
+                fmid = loss(mid) - target
+                if !isfinite(fmid)
+                    hi = mid
+                    continue
+                end
+                if fmid > 0
+                    hi = mid
+                else
+                    lo = mid
+                end
+                if abs(hi - lo) <= tol*max(1.0, abs(mid))
+                    return (lo + hi)/2
+                end
+            end
+            return (lo + hi)/2
+        end
+
+        left_br  = bracket_side(-1)
+        right_br = bracket_side(+1)
+        k_lo = left_br  === nothing ? ki_min : bisect_cross(left_br[1], left_br[2])
+        k_hi = right_br === nothing ? ki_max : bisect_cross(right_br[1], right_br[2])
+        ci_profile = (k_lo, k_hi)
+    end
 
     return (
-        k_hat     = k̂,
-        k_err     = tcrit * se,
-        se        = se,
-        ci        = ci,
-        rss       = RSS,
-        sigma2    = σ²,
-        dof       = dof,
-        n_used    = n_used,
+        ki = k̂,
+        ki_err = k_err,
+        se = se,
+        ci_t = ci_t,
+        ci_profile = ci_profile,
+        delta_target = Δtarget,
+        delta_rss = Δrss,
+        profile_note = profile_note,
+        rss = RSS0,
+        sigma2 = σ²,
+        dof = dof,
+        n_used = length(rJ),
+        r2_coeff = R2,
         converged = Optim.converged(res),
-        result    = res
+        result = res
     )
 end
+
 
 function compute_metrics(A,X)
     LA = log10.(A)
@@ -566,9 +562,10 @@ table_qm_path = joinpath(@__DIR__,
     "simulation_data",
     "qm_simulation_7M",
     "qm_7000000_screen_profiles_f1_table.jld2");
-table_qm      = load(table_qm_path)["table"];
-@info "QM data loaded"
 qm_meta = let
+    table_qm      = load(table_qm_path)["table"];
+    @info "QM data loaded"
+
     keys_qm = collect(keys(table_qm))  # make it an indexable Vector of tuples
 
     nz_qm = sort(unique(getindex.(keys_qm, 1)))
@@ -586,11 +583,21 @@ qm_meta = let
     # --- return renamed container ---
     OrderedDict(
         :nz => nz_qm,
-        :gw => gw_qm,
+        :σw => gw_qm,
         :λ0 => λ0_qm,
         :λs => 0.001
     );
 end
+
+table_qm_path = joinpath(@__DIR__,
+    "simulation_data",
+    "qm_simulation_7M",
+    "qm_screen_profiles_f1_table.jld2");
+ks = JLD2_MyTools.list_keys_jld_qm(table_qm_path)
+@show length(ks.keys)
+@show ks.nz
+@show ks.σw
+@show ks.λ0
 
 # =============================================================================
 # CoQuantum Dynamics (CQD) simulation data
@@ -615,7 +622,7 @@ cqd_meta = jldopen(table_cqd_path, "r") do file
     rename = OrderedDict(
         "induction_coeff"   => :ki,
         "nz_bins"           => :nz,
-        "gaussian_width_mm" => :gw,
+        "gaussian_width_mm" => :σw,
         "λ0_raw_list"       => :λ0,
         "λ0_spline"         => :λs,
     )
@@ -705,9 +712,9 @@ pretty_table(data_exp_scattered;
 
 # ---- common parameter sets across QM and CQD ----
 meta_nz = Int.(intersect(qm_meta[:nz],cqd_meta[:nz]));
-meta_σw = intersect(qm_meta[:gw],cqd_meta[:gw]);
+meta_σw = intersect(qm_meta[:σw],cqd_meta[:σw]);
 meta_λ0 = intersect(qm_meta[:λ0],cqd_meta[:λ0]);
-@info "Common parameter grid" meta_nz=meta_nz meta_gw=meta_σw meta_λ0=meta_λ0
+@info "Common parameter grid" meta_nz=meta_nz meta_σw=meta_σw meta_λ0=meta_λ0
 # number of CQD induction coefficients available
 n_ki    = length(cqd_meta[:ki]);
 
@@ -733,11 +740,15 @@ gaussian_width_mm = 0.300;
 # extract the QM-predicted maximum deflection z_max as a function of coil
 # current I, and construct a smooth interpolant z_qm(I).
 # =============================================================================
-data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)];
+data_qm = jldopen(table_qm_path, "r") do file
+    file[JLD2_MyTools.make_keypath_qm(nz_bins, gaussian_width_mm, λ0_raw)]
+end
+
+# data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)];
 Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)];
 zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)];
 zqm = Spline1D(Ic_QM,zmax_QM,k=3);
-table_qm = nothing
+# table_qm = nothing
 # =============================================================================
 # Build CQD matrix z_max(I, kᵢ)
 #
@@ -822,9 +833,12 @@ plot!(fig,
 annotate!(fig, 1e-2,1, 
     text(L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(Int(1e3*gaussian_width_mm))\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",:black,12));
 display(fig)
+savefig(fig, joinpath(OUTDIR,"fig001.$(FIG_EXT)"))
 
 fig = plot_cqd_vs_qm(z_up_ki, zmax_QM, Icoils, cqd_meta[:ki]);
 display(fig)
+savefig(fig, joinpath(OUTDIR,"fig002.$(FIG_EXT)"))
+
 # =============================================================================
 
 # =============================================================================
@@ -917,6 +931,7 @@ fit_figs = plot(fit_surface, fit_contour,
     top_margin = 3mm,
 );
 display(fit_figs)
+savefig(fit_figs, joinpath(OUTDIR,"fig003.$(FIG_EXT)"))
 
 ##################################################################################################
 ##################################################################################################
@@ -1148,6 +1163,7 @@ plot!(
 # -----------------------------------------------------------------------------
 plot!(
     fig;
+    title = "Scaled using only QM",
     xlabel = "Current (A)",
     ylabel = L"$z_{\mathrm{max}}$ (mm)",
     xaxis  = :log10,
@@ -1165,7 +1181,7 @@ plot!(
     left_margin = 3mm,
 )
 display(fig)
-
+savefig(fig, joinpath(OUTDIR,"fig004.$(FIG_EXT)"))
 
 # =============================================================================
 # Post-fit diagnostics
@@ -1267,6 +1283,7 @@ CSV.write(joinpath(OUTDIR,"rel_error_original.csv"),df_orig)
 fig= plot(fig2,fig1,
     layout=(2,1),
     size=(1000,600))
+savefig(fig, joinpath(OUTDIR,"fig005.$(FIG_EXT)"))
 
 
 # ==============================================================================
@@ -1573,7 +1590,7 @@ function plot_full_ki_fit(
     Keywords
       - ki_itp : (I, ki) -> z_CQD
       - zqm    : I -> z_QM
-      - out    : output from fit_ki_with_error (expects k_hat, k_err, ci)
+      - out    : output from fit_ki_with_error (expects k_fit, k_err, ci)
     """
 
     # --- Scale the data using p ---
@@ -1613,8 +1630,8 @@ function plot_full_ki_fit(
     )
 
     # --- Confidence interval band (unscaled) ---
-    z_lo = ki_itp.(Iscan, Ref(out.ci[1]))
-    z_hi = ki_itp.(Iscan, Ref(out.ci[2]))
+    z_lo = ki_itp.(Iscan, Ref(out.ci_t[1]))
+    z_hi = ki_itp.(Iscan, Ref(out.ci_t[2]))
     mb   = log_mask(Iscan, z_lo) .& log_mask(Iscan, z_hi)
     plot!(
         fig,
@@ -1632,8 +1649,8 @@ function plot_full_ki_fit(
     plot!(
         fig,
         Iscan,
-        ki_itp.(Iscan, Ref(out.k_hat)),
-        label = L"$k_{i}= \left( %$(round(out.k_hat, digits=4)) \pm %$(round(out.k_err, digits=4)) \right) \times 10^{-6} $",
+        ki_itp.(Iscan, Ref(out.ki)),
+        label = L"$k_{i}= \left( %$(round(out.ki, digits=4)) \pm %$(round(out.ki_err, digits=4)) \right) \times 10^{-6} $",
         line = (:solid, :blue, 2),
         marker = (:xcross, :blue, 1),
     )
@@ -1722,7 +1739,8 @@ wanted_data_dirs = [
     "20250814", "20250820",
     "20250825", "20250919",
     "20251002", "20251003",
-    "20251006", "20251109"
+    "20251006"
+    # , "20251109"
     # ...
 ]
 
@@ -1844,7 +1862,7 @@ for wanted_data_dir in wanted_data_dirs
         data_fitting;
         bounds = (cqd_meta[:ki][ki_start], cqd_meta[:ki][ki_stop]),
     )
-    @info "Fitting (𝓂 = $(mag))" "kᵢ\t\t" = out.k_hat "Err kᵢ\t" = out.k_err "kᵢ interval\t" = out.ci
+    @info "Fitting (𝓂 = $(mag))" "kᵢ\t\t" = out.ki "Err kᵢ\t" = out.ki_err "kᵢ interval\t" = out.ci_t
 
     # --------------------------------------------------------------------------
     # 8) Summary plot: raw + scaled data, fit curves, CI band, QM curve
@@ -1876,205 +1894,335 @@ function fit_ki_joint_scaling_fitsubset(
     n_front::Int = n_front,
     n_back::Int  = n_back,
     w::Float64   = 0.5,
-    ref_type::Symbol = :arith,        # :arith or :geom
-    )
-    """
-        fit_ki_joint_scaling_fitsubset(
-            data, zqm, ki_itp, thresholdI, ki_range;
-            fit_mode=:low_high, n_front=50, n_back=50,
-            w=0.7, ref_type=:arith
-        )
+    ref_type::Symbol = :arith,           # :arith or :geom
 
-    Fit the CQD parameter `ki` while dynamically rescaling the experimental data
-    using a high-current tail region and a combined QM+CQD reference.
+    # --- uncertainty knobs ---
+    conf::Real = 0.95,
+    use_Zse::Bool = false,
+    profile::Bool = true,
+    profile_grid::Int = 400,)
 
-    Inputs
-    ------
-    data :: AbstractMatrix{<:Real}
-        N×4 (or wider) array. The function uses:
-            - `data[:,1]` : Iexp  experimental current (A)
-            - `data[:,3]` : yexp  experimental z_max (mm)
-        (Any other columns are ignored here.)
-
-    zqm :: callable
-        Interpolated QM model: `zqm(I) -> z_QM(I)`.
-
-    ki_itp :: callable
-        Interpolated CQD model: `ki_itp(I, ki) -> z_CQD(I; ki)`.
-
-    thresholdI :: Real
-        Current threshold (A) defining the tail region used ONLY for scaling.
-        Only points with `Iexp ≥ thresholdI` contribute to the scale factor.
-
-    ki_range :: Tuple{<:Real,<:Real}
-        (kmin, kmax) bracket for the 1D Brent optimizer over `ki`.
-
-    Keyword arguments
-    -----------------
-    fit_mode :: Symbol = :low_high
-        Select which experimental points are used for the *ki fit* (NOT for scaling):
-            :full      → use all points
-            :low       → use only the first `n_front` points
-            :high      → use only the last  `n_back` points
-            :low_high  → use both first `n_front` and last `n_back` points
-
-    n_front :: Int = 50
-        Number of lowest-current points used when `fit_mode` includes low-current.
-
-    n_back :: Int = 50
-        Number of highest-current points used when `fit_mode` includes high-current.
-
-    w :: Real = 0.7
-        Weight for the QM model in the combined tail reference model.
-
-    ref_type :: Symbol = :arith
-        Tail reference type:
-            :arith → z_ref = w*zQM + (1-w)*zCQD
-            :geom  → z_ref = zQM^w * zCQD^(1-w)   (weighted in log space)
-
-    Method summary
-    --------------
-    1) Identify tail points (I ≥ thresholdI) used ONLY to compute a global scale factor.
-    2) For each trial `ki`, build a tail reference curve z_ref_tail(ki) from QM and CQD.
-    3) Compute scale(ki) by least-squares projection of y_tail onto z_ref_tail.
-            s(ki) = <y_tail, z_ref_tail> / <z_ref_tail, z_ref_tail>
-    4) Scale the entire experimental dataset by 1/scale(ki).
-    5) Fit `ki` by minimizing mean squared log-residuals between scaled experiment and CQD
-    restricted to the subset selected by `fit_mode`.
-    6) Return best-fit ki, final scale factor, and the minimum loss value.
-    """
     # --- Unpack experimental current and z_max ---
-    Iexp = data[:, 1]
-    yexp = data[:, 3]
+    Iexp = collect(Float64, data[:, 1])
+    yexp = collect(Float64, data[:, 3])
+    σy   = collect(Float64, data[:, 4])   # used only if use_Zse=true
+
+    # base validity (log requires y>0; σy>0 if used)
+    mbase = isfinite.(Iexp) .& isfinite.(yexp) .& (yexp .> 0)
+    if use_Zse
+        mbase .&= isfinite.(σy) .& (σy .> 0)
+    end
+    Iexp, yexp, σy = Iexp[mbase], yexp[mbase], σy[mbase]
     N = length(Iexp)
+    @assert N ≥ 2 "Not enough valid data points."
 
     # ------------------------------
     # 1) Tail region (for scaling)
-    # Use only points with Iexp ≥ thresholdI to compute the scale factor.
     # ------------------------------
-    tail_idx = findall(Iexp .>= thresholdI)
-    isempty(tail_idx) && error("No experimental points with current ≥ $thresholdI A")
+    tail_mask = Iexp .>= thresholdI
+    n_tail = count(tail_mask)
+    n_tail > 0 || error("No experimental points with current ≥ $thresholdI A")
 
-    I_tail = Iexp[tail_idx]
-    y_tail = yexp[tail_idx]
+    I_tail = Iexp[tail_mask]
+    y_tail = yexp[tail_mask]
 
     # -----------------------------------------
-    # 2) Fitting region (for ki optimization)
+    # 2) Fitting region (subset for ki optimization)
     # -----------------------------------------
-    # Only use a subset of points for the ki fit:
-    # - first n_front points (low current)
-    # - last  n_back points (high current)
     low_range  = 1:min(n_front, N)
     high_range = max(1, N - n_back + 1):N
 
-    fit_idx = begin
-        if fit_ki_mode === :full
-            collect(1:N)
-        elseif fit_ki_mode === :low
-            collect(low_range)
-        elseif fit_ki_mode === :high
-            collect(high_range)
-        elseif fit_ki_mode === :low_high
-            vcat(collect(low_range), collect(high_range))
-        else
-            error("Invalid fit_ki_mode = $fit_ki_mode. Use :full, :low, :high, or :low_high.")
-        end
-    end
-
-    # Informative logging
-    if fit_ki_mode === :full
-        println("Using FULL data range for kᵢ fitting")
+    fit_idx = if fit_ki_mode === :full
+        collect(1:N)
     elseif fit_ki_mode === :low
-        println("Using LOW-current range for kᵢ fitting: ", extrema(Iexp[low_range]), " A")
+        collect(low_range)
     elseif fit_ki_mode === :high
-        println("Using HIGH-current range for kᵢ fitting: ", extrema(Iexp[high_range]), " A")
+        collect(high_range)
     elseif fit_ki_mode === :low_high
-        println("Using LOW + HIGH current ranges for kᵢ fitting: ",
-                extrema(Iexp[low_range]), " A & ",
-                extrema(Iexp[high_range]), " A")
+        vcat(collect(low_range), collect(high_range))
+    else
+        error("Invalid fit_ki_mode = $fit_ki_mode. Use :full, :low, :high, or :low_high.")
     end
+    n_fit_idx = length(fit_idx)
+
+    # weights in log10 space from σy:
+    # Var(log10 y) ≈ (σy/(y ln 10))^2 => w = (y ln 10 / σy)^2
+    log_weights(y, σ) = ((y .* log(10.0)) ./ σ) .^ 2
 
     # ------------------------------------------------
-    # 3) Reference model in the tail: z_ref(I; ki)
+    # 3) Tail reference model z_ref(I; ki)
     # ------------------------------------------------
-    # Given a trial ki, construct the tail-region reference curve that
-    # will be used to define the scale factor. This can be:
-    #
-    #  - arithmetic blend:  z_ref = w*zQM + (1-w)*zCQD
-    #  - geometric blend:   z_ref = zQM^w * zCQD^(1-w)
-    #
-    # Note: we only evaluate this in the tail region.
     function zref_tail_for(ki)
         zqm_tail  = zqm.(I_tail)
         zcqd_tail = ki_itp.(I_tail, ki)
 
         if ref_type === :arith
-            return w .* zqm_tail .+ (1 - w) .* zcqd_tail
+            zref = w .* zqm_tail .+ (1 - w) .* zcqd_tail
         elseif ref_type === :geom
-            return zqm_tail .^ w .* zcqd_tail .^ (1 - w)
+            # require positivity for fractional powers
+            zref = zqm_tail .^ w .* zcqd_tail .^ (1 - w)
         else
             error("Invalid ref_type = $ref_type. Use :arith or :geom.")
         end
+        zref
     end
 
     # ------------------------------------------------
-    # 4) Loss function over ki
-    # For each trial ki, we:
-    #  - build CQD prediction y_cqd(I; ki)
-    #  - compute the tail reference z_ref_tail(ki)
-    #  - compute the optimal scale s(ki) so that
-    #       y_tail ≈ s(ki) * z_ref_tail
-    #    in a least-squares sense:
-    #       s(ki) = <y_tail, z_ref_tail> / <z_ref_tail, z_ref_tail>
-    #  - scale the *full* experimental data by 1/s(ki)
-    #  - compute log-residuals between scaled experiment and CQD model
-    #    only for the chosen fit_idx points
-    #  - return mean squared log-residuals as the loss.
+    # 4) Scale factor s(ki) from tail projection
     # ------------------------------------------------
-    function loss(ki)
-        # CQD prediction at all experimental currents
+    function scale_for(ki)
+        zref_tail = zref_tail_for(ki)
+        m = isfinite.(zref_tail) .& isfinite.(y_tail) .& (zref_tail .!= 0)
+        any(m) || return NaN
+        denom = dot(zref_tail[m], zref_tail[m])
+        denom == 0 && return NaN
+        dot(y_tail[m], zref_tail[m]) / denom
+    end
+
+    # ------------------------------------------------
+    # 5) Residual builder in log10 space on fit subset
+    #     r_i = log10(yexp/scale) - log10(y_cqd)
+    # ------------------------------------------------
+    function residuals_for(ki)
+        scale = scale_for(ki)
+        if !isfinite(scale) || scale == 0
+            return nothing
+        end
+
         y_cqd = ki_itp.(Iexp, ki)
 
-        # Tail reference curve (QM/CQD blend) and projection scale
-        zref_tail = zref_tail_for(ki)
-        # Scale factor: least-squares projection of y_tail onto zref_tail
-        scale = dot(y_tail, zref_tail) / dot(zref_tail, zref_tail)
+        # mask only selected indices + positivity for logs
+        mfit = falses(N); mfit[fit_idx] .= true
+        m = mfit .&
+            isfinite.(y_cqd) .& (y_cqd .> 0) .&
+            isfinite.(yexp) .& (yexp .> 0) .&
+            (yexp ./ scale .> 0)
 
-        # Apply global scaling to experimental data
-        yexp_scaled = yexp ./ scale
+        any(m) || return nothing
 
-        # Log-residuals only on the selected fitting subset
-        r = log.(yexp_scaled[fit_idx]) .- log.(y_cqd[fit_idx])
+        y_scaled = yexp[m] ./ scale
+        r = log10.(y_scaled) .- log10.(y_cqd[m])
 
-        return mean(abs2, r)
+        ww = if use_Zse
+            log_weights(yexp[m], σy[m])
+        else
+            ones(length(r))
+        end
+
+        return (r=r, w=ww, m=m, scale=scale)
     end
 
     # ------------------------------------------------
-    # 5) 1D optimization over ki (Brent)
+    # 6) Loss = weighted RSS in log10 space
+    # ------------------------------------------------
+    function loss(ki)
+        out = residuals_for(ki)
+        out === nothing && return Inf
+        sum(out.w .* (out.r .^ 2))
+    end
+
+    # ------------------------------------------------
+    # 7) Optimize ki (Brent)
     # ------------------------------------------------
     kmin, kmax = ki_range
-    opt = optimize(loss, kmin, kmax, Brent())
+    opt = optimize(loss, float(kmin), float(kmax), Brent())
+    ki_fit = Optim.minimizer(opt)
 
-    ki_fit = Optim.minimizer(opt)   # best-fit ki
-    mse    = Optim.minimum(opt)     # minimum loss value (mean squared log-residual)
+    out0 = residuals_for(ki_fit)
+    out0 === nothing && error("Unexpected: residuals invalid at optimum ki.")
+    r0, w0, m0 = out0.r, out0.w, out0.m
+    scale_final = out0.scale
+
+    p = 1
+    n_used0 = length(r0)
+    @assert n_used0 > p "Not enough valid points to estimate uncertainty"
+
+    RSS0 = sum(w0 .* (r0 .^ 2))
+    mse0 = RSS0 / n_used0
 
     # ------------------------------------------------
-    # 6) Final scale factor at ki_fit (for output)
-    # Recompute the reference tail with the best-fit ki and get the final
-    # scale factor that defines the global rescaling of the experiment.
+    # 8) Curvature-based SE via finite-difference Jacobian dr/dki
     # ------------------------------------------------
-    zref_tail_final = zref_tail_for(ki_fit)
-    scale_final = dot(y_tail, zref_tail_final) / dot(zref_tail_final, zref_tail_final)
+    fd_step(k, lo, hi; rel=cbrt(eps(Float64)), absmin=1e-12) = begin
+        hh = max(absmin, rel * max(abs(k), 1.0))
+        room = min(k - lo, hi - k)
+        room > 0 ? min(hh, 0.5 * room) : absmin
+    end
+    h₀ = fd_step(ki_fit, float(kmin), float(kmax))
+
+    outp = residuals_for(ki_fit + h₀)
+    outm = residuals_for(ki_fit - h₀)
+    (outp === nothing || outm === nothing) &&
+        error("Derivative evaluation failed near optimum; try widening bounds or check model positivity.")
+
+    mJ = out0.m .& outp.m .& outm.m
+    @assert count(mJ) > p "Not enough common points to compute derivative."
+
+    function r_on_mask(ki, m)
+        scale = scale_for(ki)
+        y_cqd = ki_itp.(Iexp, ki)
+        y_scaled = yexp[m] ./ scale
+        log10.(y_scaled) .- log10.(y_cqd[m])
+    end
+
+    r_plus  = r_on_mask(ki_fit + h₀, mJ)
+    r_minus = r_on_mask(ki_fit - h₀, mJ)
+    drdk = (r_plus .- r_minus) ./ (2h₀)
+
+    wJ = use_Zse ? log_weights(yexp[mJ], σy[mJ]) : ones(count(mJ))
+    rJ = r_on_mask(ki_fit, mJ)
+
+    RSS = sum(wJ .* (rJ .^ 2))
+    dof = length(rJ) - p
+    σ²  = RSS / dof
+    SJJ = sum(wJ .* (drdk .^ 2))
+    se  = sqrt(σ² / SJJ)
+
+    tcrit = quantile(TDist(dof), 0.5 + conf/2)
+    k_err = tcrit * se
+    ci_t  = (ki_fit - k_err, ki_fit + k_err)
 
     # ------------------------------------------------
-    # 7) Return results
+    # 9) R² in log10 space on mJ
     # ------------------------------------------------
+    # Rebuild y_hat on mJ
+    scale0 = scale_for(ki_fit)
+    y_cqd0 = ki_itp.(Iexp, ki_fit)
+    y_obs  = log10.(yexp[mJ] ./ scale0)
+    y_hat  = log10.(y_cqd0[mJ])
+
+    ȳw  = sum(wJ .* y_obs) / sum(wJ)
+    TSS = sum(wJ .* (y_obs .- ȳw).^2)
+    R2  = TSS > 0 ? 1 - RSS/TSS : NaN
+
+    # ---------------------------------------------------------
+    # 10) Profile interval with proper scaling
+    #
+    # If use_Zse=true: ΔRSS = χ²(1,conf)
+    # If use_Zse=false: ΔRSS = σ²_hat * χ²(1,conf), with σ²_hat = RSS0/dof0
+    # (this makes the threshold match the loss scale)
+    # ---------------------------------------------------------
+    ci_profile = nothing
+    Δtarget = nothing
+    Δrss = nothing
+    profile_note = nothing
+
+    if profile
+        Δtarget = quantile(Chisq(1), conf)
+
+        if use_Zse
+            Δrss = Δtarget
+            profile_note = nothing
+        else
+            profile_note = :profile_interval_scaled_for_unweighted
+            dof0 = n_used0 - p
+            σ²hat0 = RSS0 / dof0
+            Δrss = σ²hat0 * Δtarget
+        end
+
+        target = RSS0 + Δrss
+
+        function bracket_side(dir::Int)
+            grid = range(ki_fit, dir > 0 ? float(kmax) : float(kmin); length=profile_grid)
+            prevk = first(grid)
+            prevL = loss(prevk)
+            for k in Iterators.drop(grid, 1)
+                L = loss(k)
+                if isfinite(L) && (L > target) && isfinite(prevL) && (prevL <= target)
+                    return (prevk, k)
+                end
+                prevk, prevL = k, L
+            end
+            return nothing
+        end
+
+        function bisect_cross(a, b; maxiter=80, tol=1e-10)
+            lo, hi = a, b
+            for _ in 1:maxiter
+                mid = (lo + hi)/2
+                fmid = loss(mid) - target
+                if !isfinite(fmid)
+                    hi = mid
+                    continue
+                end
+                if fmid > 0
+                    hi = mid
+                else
+                    lo = mid
+                end
+                if abs(hi - lo) <= tol*max(1.0, abs(mid))
+                    return (lo + hi)/2
+                end
+            end
+            return (lo + hi)/2
+        end
+
+        left_br  = bracket_side(-1)
+        right_br = bracket_side(+1)
+
+        k_lo = left_br  === nothing ? float(kmin) : bisect_cross(left_br[1], left_br[2])
+        k_hi = right_br === nothing ? float(kmax) : bisect_cross(right_br[1], right_br[2])
+
+        ci_profile = (k_lo, k_hi)
+    end
+
+    # ------------------------------------------------
+    # 11) Extra diagnostics (linear-space error from log10 residuals)
+    # ------------------------------------------------
+    rmse_log10 = sqrt(mse0)
+    mult_rmse  = 10.0 ^ rmse_log10
+
+    frac_err = abs.(10.0 .^ r0 .- 1.0)
+    med_abs_frac = median(frac_err)
+    p90_abs_frac = quantile(frac_err, 0.90)
+    p99_abs_frac = quantile(frac_err, 0.99)
+    max_abs_frac = maximum(frac_err)
+    n_bad_2pct   = count(>(0.02), frac_err)
+    n_bad_5pct   = count(>(0.05), frac_err)
+
+    scale_inv = 1 / scale_final
+    scale_pct = (scale_inv - 1) * 100
+
     return (
-        ki_fit       = ki_fit,        # best-fit ki
-        scale_factor = scale_final,   # global magnification correction
-        mse          = mse,           # mean squared log-residual at optimum
+        ki_fit       = ki_fit,
+        scale_factor = scale_final,
+        scale_inv    = scale_inv,
+        scale_pct    = scale_pct,
+
+        rss          = RSS0,
+        mse          = mse0,
+        rmse_log10   = rmse_log10,
+
+        se           = se,
+        k_err        = k_err,
+        ci_t         = ci_t,
+
+        ci_profile   = ci_profile,
+        delta_target = Δtarget,
+        delta_rss    = Δrss,
+        profile_note = profile_note,
+
+        R2           = R2,
+
+        mult_rmse    = mult_rmse,
+        med_abs_frac = med_abs_frac,
+        p90_abs_frac = p90_abs_frac,
+        p99_abs_frac = p99_abs_frac,
+        max_abs_frac = max_abs_frac,
+        n_bad_2pct   = n_bad_2pct,
+        n_bad_5pct   = n_bad_5pct,
+
+        n_total      = N,
+        n_tail       = n_tail,
+        n_fit_idx    = n_fit_idx,
+        n_used       = length(rJ),
+
+        converged    = Optim.converged(opt),
+        result       = opt
     )
 end
+
+
 
 # =============================================================================
 # Joint scaling + kᵢ fit on the COMBINED experimental curve (exp_avg)
@@ -2144,6 +2292,9 @@ fit_scaled = fit_ki(
     (ki_start, ki_stop),
 )
 
+fit_scaled = fit_ki_with_error(ki_itp, data_scaled_fitting; bounds=(cqd_meta[:ki][ki_start], cqd_meta[:ki][ki_stop]), conf=0.95, use_Zse=false)
+
+
 # -----------------------------------------------------------------------------
 # 5) Plot: scaled experiment + QM + CQD best-fit
 # -----------------------------------------------------------------------------
@@ -2188,8 +2339,7 @@ plot!(fig,
     left_margin=3mm,
 )
 display(fig)
-
-
+savefig(fig, joinpath(OUTDIR,"fig006.$(FIG_EXT)"))
 
 # =============================================================================
 # SCATTERED DATA
@@ -2219,7 +2369,7 @@ plot!(fig,
     data_scaled[:,1],data_scaled[:,3],
     xerr = data_scaled[:,2],
     yerr = data_scaled[:,4],
-    label=L"Experimental data (magnif.factor $m = %$(round(global_mag_factor, digits=4))$)",
+    label=L"Experimental data ($\delta_{m} = %$(round(global_mag_factor, sigdigits=2))$)",
     seriestype=:scatter,
     marker = (:circle,4,:white,stroke(0.5,:black) )
     # line=(:dash,:darkgreen,3),
@@ -2232,7 +2382,8 @@ plot!(fig,I_scan, zqm.(I_scan),
 )
 plot!(fig,
     I_scan, ki_itp.(I_scan, Ref(fit_scaled.ki)),
-    label=L"Coquantum dynamics: $k_{i}= \left( %$(round(fit_scaled.ki, sigdigits=3)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
+    # label=L"Coquantum dynamics: $k_{i}= \left( %$(round(fit_scaled.ki, sigdigits=2)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
+    label=L"Coquantum dynamics: $k_{i} \approx %$(round(fit_scaled.ki, sigdigits=2)) \times 10^{-6} $",
     line=(:solid,:red,2),
     # marker=(:xcross, :blue, 0.2),
     markerstrokewidth=1
@@ -2242,8 +2393,8 @@ plot!(fig,
     ylabel = L"$F=1$ peak position (mm)",
     xaxis=:log10,
     yaxis=:log10,
-    labelfontsize=14,
-    tickfontsize=12,
+    labelfontsize=16,
+    tickfontsize=14,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     # xlims=(0.010,1.05),
@@ -2266,7 +2417,7 @@ plot!(fig,
     gradvsI.(data_scaled[:,1]),data_scaled[:,3],
     xerr = gradvsI.(data_scaled[:,2]),
     yerr = data_scaled[:,4],
-    label=L"Experiment (mag. $m = %$(round(global_mag_factor, digits=1))$)",
+    label=L"Experiment ($\delta_{m} = %$(round(global_mag_factor, sigdigits=2))$)",
     seriestype=:scatter,
     marker = (:circle,4,:white,stroke(0.5,:black) )
     # line=(:dash,:darkgreen,3),
@@ -2280,7 +2431,8 @@ plot!(fig,gradvsI.(I_scan), zqm.(I_scan),
 plot!(fig,
     gradvsI.(I_scan), ki_itp.(I_scan, Ref(fit_scaled.ki)),
     # label=L"Coquantum dynamics: $k_{i}= \left( %$(round(result.ki_fit, digits=4)) \pm %$(round(result.mse, sigdigits=1)) \right) \times 10^{-6} $",
-    label=L"Coquantum dynamics: $k_{i}=  %$(round(fit_scaled.ki, digits=2)) \times 10^{-6} $",
+    # label=L"Coquantum dynamics: $k_{i}=  %$(round(fit_scaled.ki, digits=2)) \times 10^{-6} $",
+    label=L"Coquantum dynamics: $k_{i} \approx  %$(round(fit_scaled.ki, sigdigits=2)) \times 10^{-6} $",
     line=(:solid,:red,2),
     # marker=(:xcross, :blue, 0.2),
     markerstrokewidth=1
@@ -2290,8 +2442,8 @@ plot!(fig,
     ylabel = L"$F=1$ peak position (mm)",
     xaxis=:log10,
     yaxis=:log10,
-    labelfontsize=14,
-    tickfontsize=12,
+    labelfontsize=16,
+    tickfontsize=14,
     # xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     xlims=(5,400),
@@ -2305,7 +2457,8 @@ display(fig)
 savefig(fig,joinpath(OUTDIR,"single_SG_comparison_vsg.svg"))
 savefig(fig,joinpath(OUTDIR,"single_SG_comparison_vsg.png"))
 
-
+CSV.write( joinpath(OUTDIR,"data_exp.csv") , DataFrame(data_scaled, ["Ic", "sIc", "zmax", "szmax"]))
+CSV.write( joinpath(OUTDIR,"data_sim.csv") , DataFrame(hcat(I_scan, zqm.(I_scan), ki_itp.(I_scan, Ref(fit_scaled.ki))), ["Ic","QM","CQD"])  )
 
 struct FitStats
     logMSE::Float64
@@ -2551,8 +2704,9 @@ Returns a tuple of plots: (p_data, p_residuals, p_hist, p_bars).
 end
 
 p1, p2, p3 = make_diagnostic_plots(x_exp, y_exp, y_CQD, y_QM, stats_CQD, stats_QM; σ=σ_exp)
-plot(p1, p2, p3; 
+fig = plot(p1, p2, p3; 
     layout = (2, 2), 
     size = (1000, 1000),
     left_margin=3mm,
 )
+savefig(fig, joinpath(OUTDIR,"fig007.$(FIG_EXT)"))
