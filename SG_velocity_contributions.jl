@@ -208,6 +208,11 @@ centers_z = collect((-kz:kz) .* z_bin_size);
 edges_z = collect((-(kz + 0.5)) * z_bin_size : z_bin_size : ((kz + 0.5) * z_bin_size));
 ##################################################################################################
 qm_data  = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_3m","qm_3000000_screen_data.jld2"))["alive"]
+
+jldopen( joinpath(@__DIR__,"simulation_data","qm_simulation_7M","qm_screen_data.jld2"), "r" ) do file
+    keys(file["screen"])
+end
+
 qm_at_nI = QM_analyze_profiles_to_dict(
     qm_data, K39_params;
     manifold=:F_bottom, n_bins=(nx_bins, nz_bins), width_mm=width_mm,
@@ -779,7 +784,7 @@ end
 cqd_ki = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_2.8m","cqd_2800000_ki0001_up_screen.jld2"))["screen"]
 
 Icoils = cqd_ki[:Icoils][14:end]
-ki_fit = 2.25e-6
+ki_fit = 2.50e-6
 number_precessions = round(1/(TWOπ*ki_fit))
 collapse_time = inv.(ki_fit * abs(γₑ)* TheoreticalSimulation.BvsI.(Icoils))
 
