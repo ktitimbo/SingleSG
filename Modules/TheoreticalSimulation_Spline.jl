@@ -400,7 +400,8 @@ z_first = out[1][:z_max_smooth_spline_mm]
 
 """
 function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParams;
-    manifold::Union{Symbol, Integer} =:F_bottom, n_bins::Tuple = (1,4), width_mm::Float64 = 0.150, 
+    manifold::Union{Symbol,Integer,AbstractVector{<:Integer},Tuple{Vararg{Integer}}} = :F_bottom,
+    n_bins::Tuple = (1,4), width_mm::Float64 = 0.150, 
     add_plot::Bool = false, plot_xrange::Symbol = :all,
     λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, mode::Symbol = :probability)
 
@@ -412,6 +413,10 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
 
     Ix = data[:Icoils]
     out = OrderedDict{Int, OrderedDict{Symbol, Any}}()
+
+    is_group = manifold isa AbstractVector{<:Integer} || manifold isa Tuple{Vararg{Integer}}
+    manifold_tag = is_group ? :custom : manifold
+
     for i in eachindex(Ix)
         if manifold===:F_top
             img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][1:Int(2*p.Ispin+2)])...)                 # 7:8 is [x,z] in mm from 1:2I+2
@@ -421,6 +426,10 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
             img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][1:Int(2*p.Ispin+1)])...)                 # 7:8 is [x,z] in mm from 1:2I+1
         elseif manifold===:S_down
             img_F = 1e3 .* vcat((xz[:, 7:8] for xz in data[:data][i][Int(2*p.Ispin+2):Int(4*p.Ispin+2)])...)  # 7:8 is [x,z] in mm from 2I+2:4I+2
+        elseif is_group
+            lvls = collect(manifold)
+            @assert !isempty(lvls) "Empty level list passed as manifold"
+            img_F = 1e3 .* vcat((data[:data][i][lvl][:, 7:8] for lvl in lvls)...)
         else
             lvl = manifold isa Integer ? Int(manifold) :
                   begin
@@ -432,7 +441,7 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
         end
     
         result = analyze_screen_profile(Ix[i], img_F;
-                manifold=manifold, 
+                manifold=manifold_tag, 
                 nx_bins=nx_bins, nz_bins=nz_bins, 
                 width_mm=width_mm, 
                 add_plot=add_plot, 
