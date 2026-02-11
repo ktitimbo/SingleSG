@@ -192,7 +192,7 @@ gaussian_width_mm = 0.270
 λ0_raw            = 0.01
 λ0_spline         = 0.001
 
-# Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
+# Monte Carlo generation of particles traversing the filtering slit [x0 y0 z0 v0x v0y v0z]
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
 jldsave( joinpath(OUTDIR,"cross_slit_particles_$(Nss).jld2"), data = crossing_slit)
 
