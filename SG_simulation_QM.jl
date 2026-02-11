@@ -41,7 +41,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 # Set the working directory to the current location
 cd(@__DIR__) ;
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
-const OUTDIR    = joinpath(@__DIR__, "simulation_data", RUN_STAMP);
+const OUTDIR    = joinpath(@__DIR__, "simulation_data", "QM"*RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 const TEMP_DIR = joinpath(@__DIR__,"artifacts", "JuliaTemp")
@@ -60,6 +60,7 @@ rng_set = MersenneTwister(base_seed_set)
 # Custom modules
 include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
+include("./Modules/JLD2_MyTools.jl");
 include("./Modules/TheoreticalSimulation.jl");
 using .TheoreticalSimulation;
 TheoreticalSimulation.SAVE_FIG = SAVE_FIG;
@@ -183,7 +184,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 5_000 ; 
+const Nss = 10_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -202,7 +203,7 @@ if SAVE_FIG
 end
 
 ##################################################################################################
-#   QUANTUM MECHANICS
+##   QUANTUM MECHANICS
 ##################################################################################################
 @time particles_flag  = TheoreticalSimulation.QM_flag_travelling_particles(
                             Icoils, 
@@ -268,6 +269,11 @@ profiles_Sup  = QM_analyze_profiles_to_dict(alive_screen, K39_params;
 println("Profiles ms=$(-(K39_params.Ispin))")
 profiles_Sdown  = QM_analyze_profiles_to_dict(alive_screen, K39_params;
                     manifold=:S_down,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+println("Profiles F=1, ms=6,8")
+profiles_6_8    = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+                    manifold=[6,8],   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+
+
 jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_profiles.jld2"), profiles = OrderedDict(
                                                                     :nz_bins    => nz_bins,
                                                                     :gauss_w    => gaussian_width_mm,
@@ -276,7 +282,9 @@ jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_profiles.jld2"), profiles = OrderedDic
                                                                     :lower      => profiles_bottom, 
                                                                     :Sup        => profiles_Sup, 
                                                                     :Sdown      => profiles_Sdown, 
-                                                                    :lvl5       => profiles_5) 
+                                                                    :lvl5       => profiles_5,
+                                                                    :lvl68      => profiles_6_8
+                                                                    ) 
                                                                     )
 
 # Profiles : different contributions
@@ -351,6 +359,15 @@ anim = @animate for j in eachindex(Icoils)
         marker=(:circle,:white,2),
         markerstrokecolor=:dodgerblue3,
         markerstrokewidth=1)
+    vline!([profiles_6_8[j][:z_max_smooth_spline_mm]],
+        line=(:gold2,0.5), 
+        label=L"$z_{\mathrm{max}}=%$(round(profiles_6_8[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+    plot!(profiles_6_8[j][:z_profile][:,1],profiles_6_8[j][:z_profile][:,3],
+        label=L"$F=1$, $m_{F}=-1,1$",
+        line=(:solid,:gold2,1),
+        marker=(:circle,:white,2),
+        markerstrokecolor=:gold2,
+        markerstrokewidth=1)
     vline!([profiles_5[j][:z_max_smooth_spline_mm]],
         line=(:dodgerblue3,0.5), 
         label=L"$z_{\mathrm{max}}=%$(round(profiles_5[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
@@ -363,17 +380,20 @@ anim = nothing
 
 # Peak position (mm) : lower branch
 fig=plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
-plot!(fig,Icoils[2:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
+plot!(fig,Icoils[12:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][12:end],
     label=L"Trajectory $\vert 2,-2\rangle$",
     line=(:solid,:red,2))
-plot!(fig,Icoils[2:end], [profiles_bottom[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
+plot!(fig,Icoils[12:end], [profiles_bottom[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][12:end],
     label=L"Trajectory $F=1$",
     line=(:solid,:blue,2))
-plot!(fig,Icoils[2:end], [profiles_Sdown[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][2:end],
+plot!(fig,Icoils[12:end], [profiles_Sdown[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][12:end],
     label=L"Trajectory $m_{s}=-1/2$",
     line=(:solid,:purple,2))
-plot!(fig,I_exp[2:end],z_exp[2:end],
-    ribbon=δz_exp[5:end],
+plot!(fig,Icoils[12:end], [profiles_6_8[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][12:end],
+    label=L"Trajectory $F=1$, $m_{F}=-1,1$",
+    line=(:solid,:darkgreen,2))
+plot!(fig,I_exp[12:end],z_exp[12:end],
+    ribbon=δz_exp[12:end],
     label="Experiment (combined)",
     line=(:black,:dash,2),
     fillalpha=0.23, 
@@ -381,8 +401,8 @@ plot!(fig,I_exp[2:end],z_exp[2:end],
     )
 plot!(fig,xaxis=:log10,
     yaxis=:log10,
-    xlims=(0.8e-3,2),
-    ylims=(0.8e-4,2),
+    xlims=(15e-3,1.05),
+    # ylims=(0.8e-4,2.5),
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
             [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
@@ -583,10 +603,11 @@ anim = nothing
 
 nz_bins_list = [1,2,4];
 ls_list = [:solid,:dash,:dot];
-gaussian_width_mm_list = [0.050, 0.065, 0.100, 0.150, 0.200, 0.300, 0.400, 0.500];
+gaussian_width_mm_list = [0.010, 0.050, 0.065, 0.100, 0.150, 0.200, 0.275, 0.300, 0.400, 0.500];
 zmax_gaussian_width = zeros(length(nz_bins_list),nI,length(gaussian_width_mm_list));
 for (jdx,nz) in enumerate(nz_bins_list)
     for (idx,val) in enumerate(gaussian_width_mm_list)
+        @info "Binning nz = $(nz)   |   Gaussian σw = $(Int(1e3*val))μm"
 
         profiles_bottom_temp = QM_analyze_profiles_to_dict(alive_screen, K39_params;
                         manifold=:F_bottom, n_bins= (nx_bins , nz), width_mm=val, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
@@ -606,11 +627,11 @@ for (jdx,nz) in enumerate(nz_bins_list)
     for (idx,val) in enumerate(gaussian_width_mm_list)
         plot!(fig, 
         Icoils[Ic_start_idx:end], zmax_gaussian_width[jdx,Ic_start_idx:end,idx],
-        label = L"$n_{z}=%$(nz_bins_list[jdx])$ | $w=%$(1e3*gaussian_width_mm_list[idx])\,\mathrm{\mu m}$",
+        label = L"$n_{z}=%$(nz_bins_list[jdx])$ | $w=%$(Int(1e3*gaussian_width_mm_list[idx]))\,\mathrm{\mu m}$",
         line=(ls_list[jdx],cls[idx],1.5),)
     end
 end
-plot!(fig,I_exp[2:end], z_exp[2:end],
+plot!(fig,I_exp[2:end], 1.28/1.20* z_exp[2:end],
     ribbon=δz_exp[5:end],
     label="Experiment (combined)",
     line=(:black,:dash,2),
@@ -620,16 +641,16 @@ plot!(fig,I_exp[2:end], z_exp[2:end],
 plot!(fig,
     xaxis=:log10,
     yaxis=:log10,
-    xlims=(8e-3,2),
+    xlims=(8e-3,1.05),
     ylims=(8e-3,2),
     xticks = ([ 1e-2, 1e-1, 1.0], 
             [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([ 1e-2, 1e-1, 1.0], 
             [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    size=(850,650),
+    size=(1250,650),
     rightmargin=5mm,
     legend=:outerbottom,
-    legend_columns = 4,)
+    legend_columns = 5,)
 display(fig)
 savefig(fig,joinpath(OUTDIR,"qm_comparison_w_n.$(FIG_EXT)"))
 
@@ -695,9 +716,10 @@ GC.gc()
 @info "Memory cleaned after QM data acquired"
 println("Free memory: $(Sys.free_memory() / (1024)^3) GiB")
 
-Ns = 7_000_000
+Ns = Nss
+# Ns = 7_000_000
 # const OUTDIR = joinpath(@__DIR__,"simulation_data","quantum_simulation_$(Int(1e-6*Ns))M")
-const OUTDIR = joinpath("W://SternGerlach//quantum_simulation_7M")
+# const OUTDIR = joinpath("W://SternGerlach//quantum_simulation_7M")
 data_exists = isfile(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))
 
 if !data_exists
@@ -916,11 +938,9 @@ else
 
     nx_bins = 32 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
-    # gaussian_width_mm = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
-    gaussian_width_mm = [0.250, 0.270, 0.300 ];  # try different gaussian widths
+    gaussian_width_mm = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.270, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
-
 
     # ============================== F=1 manifold ==============================
     println("QM approach : analyzing screen profiles for F=1 manifold")
@@ -937,6 +957,19 @@ else
         table_f1[(nz, gw, λ0_raw)] = profiles_bottom_loop
     end
     jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_profiles_f1_table.jld2"), table = table_f1)
+
+    outpath = joinpath(OUTDIR, "qm_screen_profiles_f1_table.jld2")
+    jldopen(outpath, "w") do file
+        ks = collect(keys(table_f1))
+        # meta (use your naming, but note: your example swapped names)
+        file["meta/nz"] = sort(unique(getindex.(ks, 1)))
+        file["meta/σw"] = sort(unique(getindex.(ks, 2)))
+        file["meta/λ0"] = sort(unique(getindex.(ks, 3)))
+        # store each key separately
+        for (nz, σw, λ0) in ks
+            file[JLD2_MyTools.make_keypath_qm(nz, σw, λ0)] = table_f1[(nz, σw, λ0)]
+        end
+    end
 
     clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list) )
     fig = plot(
@@ -969,7 +1002,7 @@ else
         yticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
         size = (850, 650),
         rightmargin = 5mm,
-        legend = :outerright,
+        legend = :outerbottom,
         legend_columns = length(nz_bins),
     )
     display(fig)
@@ -992,6 +1025,19 @@ else
         table_f2[(nz, gw, λ0_raw)] = profiles_bottom_loop
     end
     jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_profiles_f2_table.jld2"), table = table_f2)
+
+    outpath = joinpath(OUTDIR, "qm_screen_profiles_f2_table.jld2")
+    jldopen(outpath, "w") do file
+        ks = collect(keys(table_f2))
+        # meta (use your naming, but note: your example swapped names)
+        file["meta/nz"] = sort(unique(getindex.(ks, 1)))
+        file["meta/σw"] = sort(unique(getindex.(ks, 2)))
+        file["meta/λ0"] = sort(unique(getindex.(ks, 3)))
+        # store each key separately
+        for (nz, σw, λ0) in ks
+            file[JLD2_MyTools.make_keypath_qm(nz, σw, λ0)] = table_f2[(nz, σw, λ0)]
+        end
+    end
 
     clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list) )
     fig = plot(
@@ -1024,7 +1070,7 @@ else
         yticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
         size = (850, 650),
         rightmargin = 5mm,
-        legend = :outerright,
+        legend = :outerbottom,
         legend_columns = length(nz_bins),
     )
     display(fig)
@@ -1090,6 +1136,8 @@ else
 
     println("script $RUN_STAMP has finished!")
 end
+
+#########################################################################################
 
 # In case of merging
 # path_1 = joinpath("W://SternGerlach//quantum_simulation_7M","qm_7000000_screen_profiles_f2_table.jld2")
