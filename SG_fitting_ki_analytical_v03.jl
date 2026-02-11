@@ -613,8 +613,8 @@ ks = JLD2_MyTools.list_keys_jld_qm(table_qm_path)
 # =============================================================================
 table_cqd_path = joinpath(@__DIR__,
     "simulation_data",
-    "cqd_simulation_6M",
-    "cqd_6000000_up_profiles_bykey.jld2");
+    "cqd_simulation_7M",
+    "cqd_7000000_up_profiles_bykey.jld2");
 cqd_meta = jldopen(table_cqd_path, "r") do file
     meta = file["meta"]
 
@@ -623,7 +623,8 @@ cqd_meta = jldopen(table_cqd_path, "r") do file
         "induction_coeff"   => :ki,
         "nz_bins"           => :nz,
         "gaussian_width_mm" => :σw,
-        "λ0_raw_list"       => :λ0,
+        "λ0_raw"            => :λ0,
+        # "λ0_raw_list"       => :λ0,
         "λ0_spline"         => :λs,
     )
 
@@ -720,7 +721,7 @@ n_ki    = length(cqd_meta[:ki]);
 
 # ---- chosen working point for this run ----
 nx_bins , nz_bins = 128 , 2;
-gaussian_width_mm = 0.300;
+gaussian_width_mm = 0.270;
 λ0_raw            = 0.01;
 λ0_spline         = 0.001;
 @info "Selected parameters" nx_bins=nx_bins nz_bins=nz_bins gw=gaussian_width_mm λ0_raw=λ0_raw λ0_spline=λ0_spline
@@ -767,7 +768,8 @@ for (i,ki) in enumerate(cqd_meta[:ki])
     # Load the CQD profile data for this ki and analysis configuration.
     # The keypath encodes the branch (:up), ki, nz_bins, gaussian_width_mm, λ0_raw.
     data_up = jldopen(table_cqd_path, "r") do file
-        file[keypath(:up,ki,nz_bins,gaussian_width_mm,λ0_raw)]
+        # file[keypath(:up,ki,nz_bins,gaussian_width_mm,λ0_raw)]
+        file[JLD2_MyTools.make_keypath_cqd(:up,ki,nz_bins,gaussian_width_mm,λ0_raw)]
     end
     # Extract z_max (in mm) for each simulated current index l = 1:nI
     # and store as the i-th column of z_up_ki.
@@ -860,7 +862,8 @@ savefig(fig, joinpath(OUTDIR,"fig002.$(FIG_EXT)"))
 # =============================================================================
 
 # Select a subset of kᵢ values for interpolation (e.g., exclude tails if needed)
-ki_start , ki_stop = 1 , 109 ;
+# ki_start , ki_stop = 1 , 109 ;
+ki_start , ki_stop = 1 , 41 ;
 println("Interpolation in the induction term goes from ",
     (cqd_meta[:ki][ki_start]),
     "×10⁻⁶ to ",
