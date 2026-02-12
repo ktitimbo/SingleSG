@@ -184,7 +184,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 10_000 ; 
+const Nss = 8_000_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -421,27 +421,27 @@ f,mf=quantum_numbers[lvl]
 # =========================
 # Precompute geometry overlays (constant)
 # =========================
-x_magnet    = 1e-3 .* range(-1.0, 1.0, length=1000)  # m
-z_edge_um   = 1e6 .* TheoreticalSimulation.z_magnet_edge.(x_magnet) # μm
-x_magnet_mm = 1e3 .* x_magnet                        # mm
+x_magnet    = 1e-3 .* range(-1.0, 1.0, length=1000);  # m
+z_edge_um   = 1e6 .* TheoreticalSimulation.z_magnet_edge.(x_magnet);  # μm
+x_magnet_mm = 1e3 .* x_magnet;   # mm
 
-R_mm = 1e3 * R_aper
-θcirc = range(0, 2π, length=361)
-x_circ_mm = R_mm .* cos.(θcirc)                      # mm
-z_circ_um = (1e3 * R_mm) .* sin.(θcirc)              # μm
+R_mm = 1e3 * R_aper;   # mm
+θcirc = range(0, 2π, length=361);
+x_circ_mm = R_mm .* cos.(θcirc);          # mm
+z_circ_um = (1e3 * R_mm) .* sin.(θcirc);  # μm
 
 # =========================
 # Precompute stage distances (divide by v0y inside loop)
 # =========================
-y_slit   = y_FurnaceToSlit
-y_sg_in  = y_FurnaceToSlit + y_SlitToSG
-y_sg_out = y_sg_in + y_SG
-y_aper   = y_sg_out + y_SGToAperture
-y_scr    = y_sg_out + y_SGToScreen
+y_slit   = y_FurnaceToSlit ;
+y_sg_in  = y_FurnaceToSlit + y_SlitToSG ;
+y_sg_out = y_sg_in + y_SG ;
+y_aper   = y_sg_out + y_SGToAperture ;
+y_scr    = y_sg_out + y_SGToScreen ;
 
 anim = @animate for j in iter
     data_set = alive_screen[:data][j][lvl];
-    n = size(data_set, 1) ; 
+    n = Int(round(size(data_set, 1)/10)) ; 
     
     # --- preallocate arrays for histograms (scaled units) ---
     xs_a = Vector{Float64}(undef, n); zs_a = Vector{Float64}(undef, n)  # furnace (mm, μm)
@@ -745,7 +745,6 @@ else
     nI      = length(Icoils);
     quantum_numbers = alive_screen[:levels];
 
-
     # ATOMS PROPAGATION
     r = 1:1:nI;
     iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
@@ -774,7 +773,7 @@ else
 
     anim = @animate for j in iter
         data_set = alive_screen[:data][j][lvl];
-        n = size(data_set, 1) ; 
+        n = Int(round(size(data_set, 1) / 10 )); 
         
         # --- preallocate arrays for histograms (scaled units) ---
         xs_a = Vector{Float64}(undef, n); zs_a = Vector{Float64}(undef, n)  # furnace (mm, μm)
@@ -938,144 +937,160 @@ else
 
     nx_bins = 32 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
-    gaussian_width_mm = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.270, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
+    gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.100, 0.150, 0.200, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
-
+    
+    param_grid = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list))
+    
+    clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list))
+    line_styles = [:solid, :dash, :dot, :dashdot]
+    
     # ============================== F=1 manifold ==============================
-    println("QM approach : analyzing screen profiles for F=1 manifold")
-    # three-dimensional dictionary keyed by (nz, gw, λ0_raw)
-    table_f1 = OrderedDict{Tuple{Int, Float64, Float64},
-                        OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
-    @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-        println("Profiles F=$(K39_params.Ispin-0.5), for nz_bin=$nz, Gaussian-convolution σ=$(Int(1e3*gw))μm, SplineFit smoothing factor λ₀=$(λ0_raw)")
-        profiles_bottom_loop = QM_analyze_profiles_to_dict(
-            alive_screen, K39_params;
-            manifold=:F_bottom, n_bins=(nx_bins, nz), width_mm=gw,
-            add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth=λ0_spline, mode=:probability
-        )
-        table_f1[(nz, gw, λ0_raw)] = profiles_bottom_loop
-    end
-    jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_profiles_f1_table.jld2"), table = table_f1)
+    outpath_1 = joinpath(OUTDIR, "qm_screen_profiles_f1_table.jld2")
 
-    outpath = joinpath(OUTDIR, "qm_screen_profiles_f1_table.jld2")
-    jldopen(outpath, "w") do file
-        ks = collect(keys(table_f1))
-        # meta (use your naming, but note: your example swapped names)
-        file["meta/nz"] = sort(unique(getindex.(ks, 1)))
-        file["meta/σw"] = sort(unique(getindex.(ks, 2)))
-        file["meta/λ0"] = sort(unique(getindex.(ks, 3)))
-        # store each key separately
-        for (nz, σw, λ0) in ks
-            file[JLD2_MyTools.make_keypath_qm(nz, σw, λ0)] = table_f1[(nz, σw, λ0)]
+    jldopen(outpath_1, "w") do file
+        file["meta/nx"] = nx_bins
+        file["meta/nz"] = sort(nz_bins)
+        file["meta/σw"] = sort(gaussian_width_mm)
+        file["meta/λ0"] = sort(λ0_raw_list)
+
+        f_level = K39_params.Ispin-0.5
+        println("QM approach : analyzing screen profiles for F=$(f_level) manifold")
+
+        # @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
+        @time for (nz, gw, λ0_raw) in param_grid
+
+            println("Profiles F=$(f_level), nz=$nz, σ=$(Int(round(1e3*gw)))μm, λ₀=$λ0_raw")
+
+            profiles_bottom_loop = QM_analyze_profiles_to_dict(
+                alive_screen, K39_params;
+                manifold=:F_bottom,
+                n_bins=(nx_bins, nz),
+                width_mm=gw,
+                add_plot=false,
+                plot_xrange=:all,
+                λ_raw=λ0_raw,
+                λ_smooth=λ0_spline,
+                mode=:probability
+            )
+
+            keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0_raw)
+
+            file[keypath] = profiles_bottom_loop
+            
         end
     end
+    
+    fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
+    jldopen(outpath_1, "r") do file
+        color_idx = 1
+        for λ0_raw in λ0_raw_list
+            for gw in gaussian_width_mm
+                nz_idx = 1
+                for nz in nz_bins
+                    keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0_raw)
 
-    clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list) )
-    fig = plot(
-        xlabel = "Currents (A)",
-        ylabel = L"$z_{\mathrm{max}}$ (mm)",
-    )
-    local color_idx = 1
-    line_styles = [:solid, :dash, :dot, :dashdot]
-    for λ0_raw in λ0_raw_list
-        for gw in gaussian_width_mm
-            nz_idx = 1
-            for nz in nz_bins
-                zvals = [table_f1[(nz, gw, λ0_raw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
-                label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0_raw)$"
-                plot!(Icoils[2:end], abs.(zvals[2:end]),
-                    line = (line_styles[nz_idx], clrs[color_idx], 2),
-                    label = label)
-                nz_idx      += 1
-                color_idx   += 1
+                    # load only this realization
+                    prof = file[keypath]
+
+                    zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0_raw)$"
+
+                    plot!(Icoils[2:end], abs.(zvals[2:end]),
+                        line = (line_styles[nz_idx], clrs[color_idx], 2),
+                        label = label)
+
+                    nz_idx += 1
+                    color_idx += 1
+                end
             end
         end
     end
-    display(fig)
-    plot!(
-        xaxis = :log10,
-        yaxis = :log10,
-        xlims = (8e-3, 2),
-        ylims = (8e-3, 2),
-        xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        yticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        size = (850, 650),
-        rightmargin = 5mm,
-        legend = :outerbottom,
-        legend_columns = length(nz_bins),
+    plot!(fig,
+        xaxis=:log10, yaxis=:log10,
+        xlims=(8e-3, 2), ylims=(8e-3, 2),
+        xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        size=(850, 650),
+        rightmargin=5mm,
+        legend=:outerbottom,
+        legend_columns=length(nz_bins),
     )
-    display(fig)
     savefig(fig, joinpath(OUTDIR, "qm_profiles_f1_table_comparison_w_n.$(FIG_EXT)"))
-    table_f1 = nothing
-    GC.gc()
 
     # ============================== F=2 manifold ==============================
-    println("QM approach : analyzing screen profiles for F=2 manifold")
-    # three-dimensional dictionary keyed by (nz, gw, λ0_raw)
-    table_f2 = OrderedDict{Tuple{Int, Float64, Float64},
-                        OrderedDict{Int64, OrderedDict{Symbol, Any}}}()
-    @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-        println("Profiles F=$(K39_params.Ispin+0.5), for nz_bin=$nz, Gaussian-convolution σ=$(Int(1e3*gw))μm, SplineFit smoothing factor λ₀=$(λ0_raw)")
-        profiles_bottom_loop = QM_analyze_profiles_to_dict(
-            alive_screen, K39_params;
-            manifold=:F_top, n_bins=(nx_bins, nz), width_mm=gw,
-            add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth=λ0_spline, mode=:probability
-        )
-        table_f2[(nz, gw, λ0_raw)] = profiles_bottom_loop
-    end
-    jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_profiles_f2_table.jld2"), table = table_f2)
+    outpath_2 = joinpath(OUTDIR, "qm_screen_profiles_f2_table.jld2")
 
-    outpath = joinpath(OUTDIR, "qm_screen_profiles_f2_table.jld2")
-    jldopen(outpath, "w") do file
-        ks = collect(keys(table_f2))
-        # meta (use your naming, but note: your example swapped names)
-        file["meta/nz"] = sort(unique(getindex.(ks, 1)))
-        file["meta/σw"] = sort(unique(getindex.(ks, 2)))
-        file["meta/λ0"] = sort(unique(getindex.(ks, 3)))
-        # store each key separately
-        for (nz, σw, λ0) in ks
-            file[JLD2_MyTools.make_keypath_qm(nz, σw, λ0)] = table_f2[(nz, σw, λ0)]
+    jldopen(outpath_2, "w") do file
+        file["meta/nx"] = nx_bins
+        file["meta/nz"] = sort(nz_bins)
+        file["meta/σw"] = sort(gaussian_width_mm)
+        file["meta/λ0"] = sort(λ0_raw_list)
+
+        f_level = K39_params.Ispin+0.5
+        println("QM approach : analyzing screen profiles for F=$(f_level) manifold")
+
+        # @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
+        @time for (nz, gw, λ0_raw) in param_grid
+
+            println("Profiles F=$(f_level), nz=$nz, σ=$(Int(round(1e3*gw)))μm, λ₀=$λ0_raw")
+
+            profiles_bottom_loop = QM_analyze_profiles_to_dict(
+                alive_screen, K39_params;
+                manifold=:F_top,
+                n_bins=(nx_bins, nz),
+                width_mm=gw,
+                add_plot=false,
+                plot_xrange=:all,
+                λ_raw=λ0_raw,
+                λ_smooth=λ0_spline,
+                mode=:probability
+            )
+
+            keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0_raw)
+
+            file[keypath] = profiles_bottom_loop
+            
         end
     end
 
-    clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list) )
-    fig = plot(
-        xlabel = "Currents (A)",
-        ylabel = L"$z_{\mathrm{max}}$ (mm)",
-    )
-    local color_idx = 1
-    line_styles = [:solid, :dash, :dot, :dashdot]
-    for λ0_raw in λ0_raw_list
-        for gw in gaussian_width_mm
-            nz_idx = 1
-            for nz in nz_bins
-                zvals = [table_f2[(nz, gw, λ0_raw)][i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
-                label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0_raw)$"
-                plot!(Icoils[2:end], abs.(zvals[2:end]),
-                    line = (line_styles[nz_idx], clrs[color_idx], 2),
-                    label = label)
-                nz_idx      += 1
-                color_idx   += 1
+    fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
+    jldopen(outpath_2, "r") do file
+        color_idx = 1
+        for λ0_raw in λ0_raw_list
+            for gw in gaussian_width_mm
+                nz_idx = 1
+                for nz in nz_bins
+                    keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0_raw)
+
+                    # load only this realization
+                    prof = file[keypath]
+
+                    zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0_raw)$"
+
+                    plot!(Icoils[2:end], abs.(zvals[2:end]),
+                        line = (line_styles[nz_idx], clrs[color_idx], 2),
+                        label = label)
+
+                    nz_idx += 1
+                    color_idx += 1
+                end
             end
         end
     end
-    display(fig)
-    plot!(
-        xaxis = :log10,
-        yaxis = :log10,
-        xlims = (8e-3, 2),
-        ylims = (8e-3, 2),
-        xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        yticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        size = (850, 650),
-        rightmargin = 5mm,
-        legend = :outerbottom,
-        legend_columns = length(nz_bins),
+    plot!(fig,
+        xaxis=:log10, yaxis=:log10,
+        xlims=(8e-3, 2), ylims=(8e-3, 2),
+        xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        size=(850, 650),
+        rightmargin=5mm,
+        legend=:outerbottom,
+        legend_columns=length(nz_bins),
     )
-    display(fig)
     savefig(fig, joinpath(OUTDIR, "qm_profiles_f2_table_comparison_w_n.$(FIG_EXT)"))
-    table_f2 = nothing
 
     #########################################################################################
     GC.gc()
