@@ -1305,8 +1305,8 @@ module MyExperimentalAnalysis
     BG = T.(raw_data[:BG_data])
 
     # Background subtract then flat-field correct
-    F1proc = (F1 .- BG) ./ flat4
-    F2proc = (F2 .- BG) ./ flat4
+    F1proc = (F1 .- BG) #./ flat4
+    F2proc = (F2 .- BG) #./ flat4
 
     return OrderedDict(
         :Currents            => raw_data[:Currents],
@@ -1497,7 +1497,9 @@ module MyExperimentalAnalysis
 
 
     function mag_factor(directory::String)
-        if directory > "20251101"
+        if directory >= "20260211"
+            values = (1.00, 0.01)
+        elseif directory >= "20251101"
             # values = (0.996,0.0047)
             values = (1.08,0.03)
         else
