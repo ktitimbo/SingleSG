@@ -105,7 +105,7 @@ Assumptions / dependencies
 - Uses `Plots.jl` (with LaTeXStrings) and an initialized backend.
 
 Example
-```julia
+julia
 plot_SG_geometry("sg_geometry")
 # writes OUTDIR/sg_geometry.<FIG_EXT>
 """
@@ -185,7 +185,7 @@ Assumptions / dependencies
 - Assumes nonzero speeds for angle calculations (`‖v‖ > 0`).
 
 Example
-```julia
+julia
 fig = plot_velocity_stats(alive, "Beam velocity statistics", "vel_stats_run42")
 """
 function plot_velocity_stats(alive::Matrix{Float64}, title::String, filename::String)
