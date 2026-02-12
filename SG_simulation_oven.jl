@@ -1,7 +1,7 @@
 # Simulation of atom trajectories in the Stern–Gerlach experiment
 # Kelvin Titimbo
-# California Institute of Technology
-# August 2025
+# Caltech
+# February 2026
 
 #  Plotting Setup
 # ENV["GKS_WSTYPE"] = "100"
@@ -41,7 +41,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 # Set the working directory to the current location
 cd(@__DIR__) ;
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
-const OUTDIR    = joinpath(@__DIR__, "simulation_data", RUN_STAMP);
+const OUTDIR    = joinpath(@__DIR__, "simulation_data", "OvenCanal"*RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 const TEMP_DIR = joinpath(@__DIR__,"artifacts", "JuliaTemp")
@@ -173,32 +173,404 @@ TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
     return SVector(v*sθ*sϕ, v*cθ, v*sθ*cϕ)
 end
 
-@inline function InitialPositions(rng::AbstractRNG)
-    x0 = x_furnace * (rand(rng) - 0.5)
-    z0 = z_furnace * (rand(rng) - 0.5)
-    return SVector(x0,0,z0)
+@inline function sample_initial_conditions!(pos::Matrix{Float64},
+                                            vel::Matrix{Float64},
+                                            rng::AbstractRNG,
+                                            p::TheoreticalSimulation.EffusionParams)
+    N = size(pos, 1)
+    @inbounds for i in 1:N
+        # position
+        pos[i,1] = x_furnace * (rand(rng) - 0.5)
+        pos[i,2] = 0.0
+        pos[i,3] = z_furnace * (rand(rng) - 0.5)
+
+        # velocity
+        v = AtomicBeamVelocity_v3(rng, p)
+        vel[i,1] = v[1]
+        vel[i,2] = v[2]
+        vel[i,3] = v[3]
+    end
+    return nothing
 end
 
-@inline function sample_initial_conditions(N, rng, p)
+@inline function sample_initial_conditions(N::Int,
+                                           rng::AbstractRNG,
+                                           p::TheoreticalSimulation.EffusionParams)
     pos = Matrix{Float64}(undef, N, 3)
     vel = Matrix{Float64}(undef, N, 3)
-
-    @inbounds for i in 1:N
-        pos_i = InitialPositions(rng)
-        vel_i = AtomicBeamVelocity_v3(rng, p)
-
-        pos[i,1] = pos_i[1]
-        pos[i,2] = pos_i[2]
-        pos[i,3] = pos_i[3]
-
-        vel[i,1] = vel_i[1]
-        vel[i,2] = vel_i[2]
-        vel[i,3] = vel_i[3]
-    end
-
+    sample_initial_conditions!(pos, vel, rng, p)
     return pos, vel
 end
 
+############################################################
+# +++++++ Compact version ++++++++++++++++++++++++++++++++++
+@inline function time_to_plane_scalar(x::Float64, y::Float64, z::Float64,
+                                      vx::Float64, vy::Float64, vz::Float64,
+                                      axis::Int, bound::Float64)
+    v = (axis == 1) ? vx : (axis == 2 ? vy : vz)
+    if v == 0.0
+        return Inf
+    end
+    p = (axis == 1) ? x : (axis == 2 ? y : z)
+    t = (bound - p) / v
+    return (t > 0.0) ? t : Inf
+end
+
+@inline function next_hit_scalar_exact(x::Float64, y::Float64, z::Float64,
+                                       vx::Float64, vy::Float64, vz::Float64,
+                                       xmin::Float64, xmax::Float64,
+                                       L::Float64,
+                                       zmin::Float64, zmax::Float64)
+
+    tx0 = time_to_plane_scalar(x,y,z, vx,vy,vz, 1, xmin)
+    tx1 = time_to_plane_scalar(x,y,z, vx,vy,vz, 1, xmax)
+
+    ty0 = time_to_plane_scalar(x,y,z, vx,vy,vz, 2, 0.0)
+    ty1 = time_to_plane_scalar(x,y,z, vx,vy,vz, 2, L)
+
+    tz0 = time_to_plane_scalar(x,y,z, vx,vy,vz, 3, zmin)
+    tz1 = time_to_plane_scalar(x,y,z, vx,vy,vz, 3, zmax)
+
+    tmin = tx0; hit_axis = 1; hit_side = 0
+    if tx1 < tmin; tmin = tx1; hit_axis = 1; hit_side = 1; end
+    if ty0 < tmin; tmin = ty0; hit_axis = 2; hit_side = 0; end
+    if ty1 < tmin; tmin = ty1; hit_axis = 2; hit_side = 1; end
+    if tz0 < tmin; tmin = tz0; hit_axis = 3; hit_side = 0; end
+    if tz1 < tmin; tmin = tz1; hit_axis = 3; hit_side = 1; end
+
+    return tmin, hit_axis, hit_side
+end
+
+@inline function sample_lambertian_dir_axis(rng::AbstractRNG, hit_axis::Int, hit_side::Int)
+    u1 = rand(rng)
+    u2 = rand(rng)
+    r  = sqrt(u1)
+    ϕ  = 2π * u2
+    sϕ, cϕ = sincos(ϕ)
+
+    lx = r * cϕ
+    ly = r * sϕ
+    lz = sqrt(1.0 - u1)
+
+    if hit_axis == 1
+        nx = (hit_side == 0) ? 1.0 : -1.0
+        return (nx*lz, lx, ly)
+    else
+        nz = (hit_side == 0) ? 1.0 : -1.0
+        return (lx, ly, nz*lz)
+    end
+end
+
+function simulate_cavity_diffusive_exit!(exited::BitVector,
+                                         exit_pos::Matrix{Float64},
+                                         exit_vel::Matrix{Float64},
+                                         pos0::AbstractMatrix{<:Real},
+                                         vel0::AbstractMatrix{<:Real},
+                                         L::Real;
+                                         max_bounces::Int = 50_000,
+                                         eps_push::Float64 = 1e-12,
+                                         rng::AbstractRNG = Random.default_rng())
+
+    N = size(pos0, 1)
+    @assert size(pos0,2) == 3 && size(vel0,2) == 3 && size(vel0,1) == N
+    @assert length(exited) == N
+    @assert size(exit_pos) == (N, 3)
+    @assert size(exit_vel) == (N, 3)
+
+    xmin = -0.5 * Float64(x_furnace)
+    xmax =  0.5 * Float64(x_furnace)
+    zmin = -0.5 * Float64(z_furnace)
+    zmax =  0.5 * Float64(z_furnace)
+    Lf   = Float64(L)
+    eps  = Float64(eps_push)
+
+    fill!(exited, false)
+
+    @inbounds for i in 1:N
+        # if pos0/vel0 are Float64 matrices, these are already Float64
+        x  = pos0[i,1]
+        y  = pos0[i,2]
+        z  = pos0[i,3]
+        vx = vel0[i,1]
+        vy = vel0[i,2]
+        vz = vel0[i,3]
+
+        s2 = vx*vx + vy*vy + vz*vz
+        s2 == 0.0 && continue
+        speed = sqrt(s2)
+
+        nb = 0
+        while nb <= max_bounces
+            thit, hit_axis, hit_side = next_hit_scalar_exact(x,y,z, vx,vy,vz, xmin,xmax, Lf, zmin,zmax)
+            thit == Inf && break
+
+            # move to collision point
+            xh = muladd(thit, vx, x)
+            yh = muladd(thit, vy, y)
+            zh = muladd(thit, vz, z)
+
+            if hit_axis == 2
+                if hit_side == 1
+                    exited[i] = true
+                    exit_pos[i,1] = xh; exit_pos[i,2] = yh; exit_pos[i,3] = zh
+                    exit_vel[i,1] = vx; exit_vel[i,2] = vy; exit_vel[i,3] = vz
+                end
+                break
+            end
+
+            nb += 1
+            dvx, dvy, dvz = sample_lambertian_dir_axis(rng, hit_axis, hit_side)
+            vx = speed * dvx
+            vy = speed * dvy
+            vz = speed * dvz
+
+            # push slightly inward
+            if hit_axis == 1
+                nx = (hit_side == 0) ? 1.0 : -1.0
+                x = xh + eps * nx
+                y = yh
+                z = zh
+            else
+                nz = (hit_side == 0) ? 1.0 : -1.0
+                x = xh
+                y = yh
+                z = zh + eps * nz
+            end
+        end
+    end
+
+    return nothing
+end
+
+function collect_transmitted_diffusive_compact(
+    N_t::Int,
+    rng::AbstractRNG,
+    p::TheoreticalSimulation.EffusionParams,
+    L::Real;
+    batch::Int = 50_000,
+    # diffusive options
+    max_bounces::Int = 50_000,
+    eps_push::Float64 = 1e-12,)
+    tbl = Matrix{Float64}(undef, N_t, 6)
+    filled = 0
+
+    Lf  = Float64(L)
+    eps = Float64(eps_push)
+
+    # reusable batch buffers
+    pos0 = Matrix{Float64}(undef, batch, 3)
+    vel0 = Matrix{Float64}(undef, batch, 3)
+
+    # reusable outputs for exit-only simulator
+    exited   = falses(batch)
+    exit_pos = Matrix{Float64}(undef, batch, 3)
+    exit_vel = Matrix{Float64}(undef, batch, 3)
+
+    while filled < N_t
+        sample_initial_conditions!(pos0, vel0, rng, p)
+
+        simulate_cavity_diffusive_exit!(exited, exit_pos, exit_vel, pos0, vel0, Lf;
+                                        max_bounces=max_bounces,
+                                        eps_push=eps,
+                                        rng=rng)
+
+        @inbounds for i in 1:batch
+            filled >= N_t && break
+            exited[i] || continue
+
+            filled += 1
+            tbl[filled,1] = exit_pos[i,1]
+            tbl[filled,2] = exit_pos[i,2]
+            tbl[filled,3] = exit_pos[i,3]
+            tbl[filled,4] = exit_vel[i,1]
+            tbl[filled,5] = exit_vel[i,2]
+            tbl[filled,6] = exit_vel[i,3]
+        end
+    end
+
+    return tbl
+end
+
+function collect_slitcrossing_diffusive_compact(n_t::Int,
+                                                rng::AbstractRNG,
+                                                p::TheoreticalSimulation.EffusionParams,
+                                                L::Real;
+                                                batch::Int = 50_000,
+                                                # diffusive options (passed through)
+                                                max_bounces::Int = 50_000,
+                                                eps_push::Float64 = 1e-12,
+                                                log_every::Int = 1)
+    # Output rows are exit-state at cavity exit: [x y z vx vy vz]
+    out = Matrix{Float64}(undef, n_t, 6)
+
+    half_x = 0.5 * x_slit   # uses your const globals
+    half_z = 0.5 * z_slit
+    yFS    = Float64(y_FurnaceToSlit)
+
+    filled = 0
+    iter   = 0
+
+    # Reuse buffers so we don't allocate per batch
+    pos0 = Matrix{Float64}(undef, batch, 3)
+    vel0 = Matrix{Float64}(undef, batch, 3)
+
+    exited   = falses(batch)
+    exit_pos = Matrix{Float64}(undef, batch, 3)
+    exit_vel = Matrix{Float64}(undef, batch, 3)
+
+    while filled < n_t
+        iter += 1
+
+        # generate batch
+        sample_initial_conditions!(pos0, vel0, rng, p)
+
+        # simulate diffusive, exit-only (fills exited/exit_pos/exit_vel)
+        simulate_cavity_diffusive_exit!(exited, exit_pos, exit_vel, pos0, vel0, L;
+                                        max_bounces=max_bounces,
+                                        eps_push=eps_push,
+                                        rng=rng)
+
+        # filter by crossing the slit plane at y = y_FurnaceToSlit downstream
+        @inbounds for i in 1:batch
+            exited[i] || continue
+
+            vy = exit_vel[i, 2]          # always > 0
+            t  = yFS / vy
+
+            # z first (narrower slit)
+            z0  = exit_pos[i, 3]
+            vz  = exit_vel[i, 3]
+            z_at = muladd(vz, t, z0)
+
+            if (-half_z < z_at < half_z)
+                x0  = exit_pos[i, 1]
+                vx  = exit_vel[i, 1]
+                x_at = muladd(vx, t, x0)
+
+                if (-half_x < x_at < half_x)
+                    filled += 1
+                    # write [x y z vx vy vz] into output
+                    out[filled, 1] = exit_pos[i, 1]
+                    out[filled, 2] = exit_pos[i, 2]
+                    out[filled, 3] = exit_pos[i, 3]
+                    out[filled, 4] = exit_vel[i, 1]
+                    out[filled, 5] = exit_vel[i, 2]
+                    out[filled, 6] = exit_vel[i, 3]
+                    filled >= n_t && break
+                end
+            end
+        end
+
+        if log_every > 0 && (iter % log_every == 0)
+            acc = filled / (iter * batch)
+            @info "Accumulated $filled / $n_t (accept≈$(round(100*acc; digits=5))%)"
+        end
+    end
+
+    return out
+end
+
+function collect_slitcrossing_diffusive_compact_threads(n_t::Int,
+                                                        rng0::AbstractRNG,
+                                                        p::TheoreticalSimulation.EffusionParams,
+                                                        L::Real;
+                                                        batch::Int = 50_000,
+                                                        max_bounces::Int = 50_000,
+                                                        eps_push::Float64 = 1e-12,
+                                                        log_every::Int = 1)
+
+    out = Matrix{Float64}(undef, n_t, 6)
+
+    half_x = 0.5 * x_slit
+    half_z = 0.5 * z_slit
+    yFS    = Float64(y_FurnaceToSlit)
+    Lf     = Float64(L)
+    eps    = Float64(eps_push)
+
+    nT = Threads.nthreads()
+
+    local_rows = [Vector{NTuple{6,Float64}}() for _ in 1:nT]
+    local_iters = zeros(Int, nT)
+    local_attempts = zeros(Int, nT)
+    local_hits = zeros(Int, nT)
+
+    seeds = rand(rng0, UInt64, nT)
+    rngs  = [MersenneTwister(seeds[t]) for t in 1:nT]
+
+    filled = Threads.Atomic{Int}(0)
+
+    Threads.@threads for tid in 1:nT
+        rng = rngs[tid]
+
+        pos0 = Matrix{Float64}(undef, batch, 3)
+        vel0 = Matrix{Float64}(undef, batch, 3)
+        exited   = falses(batch)
+        exit_pos = Matrix{Float64}(undef, batch, 3)
+        exit_vel = Matrix{Float64}(undef, batch, 3)
+
+        rows = local_rows[tid]
+
+        stop = false
+        while !stop && filled[] < n_t
+            local_iters[tid] += 1
+            local_attempts[tid] += batch
+
+            sample_initial_conditions!(pos0, vel0, rng, p)
+
+            simulate_cavity_diffusive_exit!(exited, exit_pos, exit_vel, pos0, vel0, Lf;
+                                            max_bounces=max_bounces,
+                                            eps_push=eps,
+                                            rng=rng)
+
+            @inbounds for i in 1:batch
+                exited[i] || continue
+
+                vy = exit_vel[i,2]
+                t  = yFS / vy
+
+                z_at = muladd(exit_vel[i,3], t, exit_pos[i,3])
+                if (-half_z < z_at < half_z)
+                    x_at = muladd(exit_vel[i,1], t, exit_pos[i,1])
+                    if (-half_x < x_at < half_x)
+                        k = Threads.atomic_add!(filled, 1)  # old value
+                        if k < n_t
+                            push!(rows, (exit_pos[i,1], exit_pos[i,2], exit_pos[i,3],
+                                         exit_vel[i,1], exit_vel[i,2], exit_vel[i,3]))
+                            local_hits[tid] += 1
+                        else
+                            stop = true
+                            break
+                        end
+                    end
+                end
+            end
+
+            if log_every > 0 && tid == 1 && (local_iters[tid] % log_every == 0)
+                total_filled = filled[]
+                total_attempts = sum(local_attempts)
+                acc = total_filled / max(total_attempts, 1)
+                @info "Accumulated $total_filled / $n_t (accept≈$(round(100*acc; digits=5))%)"
+            end
+        end
+    end
+
+    # Merge
+    k = 0
+    for tid in 1:nT
+        rows = local_rows[tid]
+        @inbounds for r in rows
+            k += 1
+            k > n_t && break
+            out[k,1] = r[1]; out[k,2] = r[2]; out[k,3] = r[3]
+            out[k,4] = r[4]; out[k,5] = r[5]; out[k,6] = r[6]
+        end
+        k >= n_t && break
+    end
+
+    return out
+end
+
+############################################################
 
 # --------------------------
 # Geometry helpers
@@ -286,11 +658,9 @@ end
 # Simulator (centered x,z; open y)
 # --------------------------
 
-function simulate_cavity_centered(pos0::AbstractMatrix{<:Real},
+function simulate_cavity_diffusive(pos0::AbstractMatrix{<:Real},
                                   vel0::AbstractMatrix{<:Real},
                                   L::Real;
-                                  x_furnace::Real = 2.0e-3,
-                                  z_furnace::Real = 100e-6,
                                   max_bounces::Int = 50_000,
                                   eps_push::Float64 = 1e-12,
                                   collect_backscatter::Bool = true,
@@ -421,10 +791,7 @@ end
 function simulate_cavity_ballistic(pos0::AbstractMatrix{<:Real},
                                    vel0::AbstractMatrix{<:Real},
                                    L::Real;
-                                   x_furnace::Real = 2.0e-3,
-                                   z_furnace::Real = 100e-6,
-                                   max_steps::Int = 10,
-                                   rng::AbstractRNG = Random.default_rng())  # rng unused, kept for symmetry
+                                   max_steps::Int = 10)
 
     N = size(pos0, 1)
     @assert size(pos0,2) == 3 && size(vel0,2) == 3 && size(vel0,1) == N
@@ -528,7 +895,7 @@ end
 
 @inline solid_angle_cone(θmax) = 2π * (1 - cos(θmax))
 
-function brightness_proxy(out; x_furnace, z_furnace, θmax = 10e-3)
+function brightness_proxy(out; θmax = 10e-3)
     A = Float64(x_furnace) * Float64(z_furnace)
     Ω = solid_angle_cone(θmax)
 
@@ -543,9 +910,9 @@ function brightness_proxy(out; x_furnace, z_furnace, θmax = 10e-3)
     return (B=B, Nincone=Nincone, Ω=Ω, A=A)
 end
 
-function brightness_reduction(out_ball, out_diff; x_furnace, z_furnace, θmax=10e-3)
-    Bb = brightness_proxy(out_ball; x_furnace=x_furnace, z_furnace=z_furnace, θmax=θmax).B
-    Bd = brightness_proxy(out_diff; x_furnace=x_furnace, z_furnace=z_furnace, θmax=θmax).B
+function brightness_reduction(out_ball, out_diff; θmax=10e-3)
+    Bb = brightness_proxy(out_ball; θmax=θmax).B
+    Bd = brightness_proxy(out_diff; θmax=θmax).B
     red = (Bb > 0) ? (Bd / Bb) : NaN
     return (B_ballistic=Bb, B_diffusive=Bd, reduction=red, θmax=θmax)
 end
@@ -557,8 +924,6 @@ function collect_transmitted_inout_table(
     L::Real;
     model::Symbol = :diffusive,
     batch::Int = 50_000,
-    x_furnace::Real = 2.0e-3,
-    z_furnace::Real = 100e-6,
     # diffusive options
     max_bounces::Int = 50_000,
     eps_push::Float64 = 1e-12,
@@ -570,27 +935,20 @@ function collect_transmitted_inout_table(
 
     # hoist constants/conversions once
     Lf = Float64(L)
-    xf = Float64(x_furnace)
-    zf = Float64(z_furnace)
     eps = Float64(eps_push)
 
     while filled < N_t
         pos0, vel0 = sample_initial_conditions(batch, rng, p)
 
         out = if model === :diffusive
-            simulate_cavity_centered(pos0, vel0, Lf;
-                x_furnace=xf,
-                z_furnace=zf,
+            simulate_cavity_diffusive(pos0, vel0, Lf;
                 max_bounces=max_bounces,
                 eps_push=eps,
                 collect_backscatter=collect_backscatter,
                 rng=rng,
             )
         else
-            simulate_cavity_ballistic(pos0, vel0, Lf;
-                x_furnace=xf,
-                z_furnace=zf,
-            )
+            simulate_cavity_ballistic(pos0, vel0, Lf)
         end
 
         ex = out.exited            # BitVector
@@ -624,200 +982,62 @@ function collect_transmitted_inout_table(
     return tbl
 end
 
-
-
-@inline function passes_slit_from_row(row, y_slit, xh, zh)
-    xf  = row[7];  yf  = row[8];  zf  = row[9]
-    vxf = row[10]; vyf = row[11]; vzf = row[12]
-
-    if vyf <= 0.0
-        return false
-    end
-    t = (y_slit - yf) / vyf
-    if t <= 0.0
-        return false
-    end
-    xs = xf + vxf * t
-    zs = zf + vzf * t
-    return (abs(xs) <= xh) & (abs(zs) <= zh)
-end
-
-function collect_exit_particles_passing_slit_via_exit_table(
-    N_slit::Int,
+function collect_transmitted_exit_table(
+    N_t::Int,
     rng::AbstractRNG,
     p::TheoreticalSimulation.EffusionParams,
     L::Real;
-    y_slit::Real,
-    x_slit::Real = 4.0e-3,
-    z_slit::Real = 300e-6,
     model::Symbol = :diffusive,
-
-    # stage-1 (exit collection) knobs
-    N_exit_chunk::Int = 200_000,   # how many exited particles to collect per chunk
     batch::Int = 50_000,
-    x_furnace::Real = 2.0e-3,
-    z_furnace::Real = 100e-6,
+    # diffusive options
     max_bounces::Int = 50_000,
     eps_push::Float64 = 1e-12,
-    collect_backscatter::Bool = false,)
-    @assert y_slit > L
-    y_slit = Float64(y_slit)
-    xh = 0.5 * Float64(x_slit)
-    zh = 0.5 * Float64(z_slit)
+    collect_backscatter::Bool = false,
+    )
+    @assert model === :diffusive || model === :ballistic "model must be :diffusive or :ballistic"
 
-    out_tbl = Matrix{Float64}(undef, N_slit, 6)
+    # Only exit state: [x y z vx vy vz]
+    tbl = Matrix{Float64}(undef, N_t, 6)
     filled = 0
 
-    while filled < N_slit
-        # Stage 1: collect a chunk of exited particles (Nx12 table)
-        tbl12 = collect_transmitted_inout_table(
-            N_exit_chunk, rng, p, L;
-            model=model,
-            batch=batch,
-            x_furnace=x_furnace,
-            z_furnace=z_furnace,
-            max_bounces=max_bounces,
-            eps_push=eps_push,
-            collect_backscatter=collect_backscatter,
-        )
+    # hoist constants/conversions once
+    Lf  = Float64(L)
+    eps = Float64(eps_push)
 
-        # Stage 2: filter those exits by downstream slit
-        @inbounds for k in 1:size(tbl12, 1)
-            (filled >= N_slit) && break
-            row = @view tbl12[k, :]
+    while filled < N_t
+        pos0, vel0 = sample_initial_conditions(batch, rng, p)
 
-            if passes_slit_from_row(row, y_slit, xh, zh)
-                filled += 1
-                # write exit-only columns: xf yf zf vxf vyf vzf
-                out_tbl[filled, 1] = row[7]
-                out_tbl[filled, 2] = row[8]
-                out_tbl[filled, 3] = row[9]
-                out_tbl[filled, 4] = row[10]
-                out_tbl[filled, 5] = row[11]
-                out_tbl[filled, 6] = row[12]
-            end
+        out = if model === :diffusive
+            simulate_cavity_diffusive(pos0, vel0, Lf;
+                max_bounces=max_bounces,
+                eps_push=eps,
+                collect_backscatter=collect_backscatter,
+                rng=rng,
+            )
+        else
+            simulate_cavity_ballistic(pos0, vel0, Lf)
+        end
+
+        ex = out.exited   # BitVector
+        ep = out.exit_pos # batch×3
+        ev = out.exit_vel # batch×3
+
+        @inbounds for i in 1:batch
+            filled >= N_t && break
+            ex[i] || continue
+
+            filled += 1
+            # exit state only
+            tbl[filled, 1] = ep[i, 1]
+            tbl[filled, 2] = ep[i, 2]
+            tbl[filled, 3] = ep[i, 3]
+            tbl[filled, 4] = ev[i, 1]
+            tbl[filled, 5] = ev[i, 2]
+            tbl[filled, 6] = ev[i, 3]
         end
     end
 
-    return out_tbl
-end
-
-# multi - threading
-
-@inline function passes_slit_from_cols(xf, yf, zf, vxf, vyf, vzf, y_slit, xh, zh)
-    vyf <= 0.0 && return false
-    t = (y_slit - yf) / vyf
-    t <= 0.0 && return false
-    xs = xf + vxf*t
-    zs = zf + vzf*t
-    return (abs(xs) <= xh) & (abs(zs) <= zh)
-end
-
-@inline function passes_slit_from_exit(xf, zf, vxf, vyf, vzf, d, xh, zh)
-    vyf <= 0.0 && return false
-    invvy = 1.0 / vyf
-    xs = xf + vxf * (d * invvy)
-    zs = zf + vzf * (d * invvy)
-    return (abs(xs) <= xh) & (abs(zs) <= zh)
-end
-
-function collect_exit_particles_passing_slit_threaded(
-    N_slit::Int,
-    rng::AbstractRNG,
-    p::TheoreticalSimulation.EffusionParams,
-    L::Real;
-    d::Real,                       # d = y_slit - L  (your 0.224)
-    x_slit::Real = 4.0e-3,
-    z_slit::Real = 300e-6,
-    model::Symbol = :diffusive,
-    batch::Int = 200_000,          # try larger batch
-    x_furnace::Real = 2.0e-3,
-    z_furnace::Real = 100e-6,
-    max_bounces::Int = 50_000,
-    eps_push::Float64 = 1e-12,
-    collect_backscatter::Bool = false,)
-    @assert model === :diffusive || model === :ballistic
-
-    d  = Float64(d)
-    xh = 0.5 * Float64(x_slit)
-    zh = 0.5 * Float64(z_slit)
-
-    out_tbl = Matrix{Float64}(undef, N_slit, 6)
-    filled = 0
-
-    nt = Threads.nthreads()
-    seeds = rand(rng, UInt64, nt)
-    rngs = [Random.Xoshiro(seeds[t]) for t in 1:nt]
-
-    # thread-local buffers (grow-only)
-    local_bufs = [Matrix{Float64}(undef, 0, 6) for _ in 1:nt]
-
-    next_report = 0.1         # next milestone (10%)
-
-    while filled < N_slit
-        # each thread produces accepted exits from one batch
-        @threads for t in 1:nt
-            rt = rngs[t]
-
-            pos0, vel0 = sample_initial_conditions(batch, rt, p)
-
-            out = if model === :diffusive
-                simulate_cavity_centered(pos0, vel0, L;
-                    x_furnace=x_furnace,
-                    z_furnace=z_furnace,
-                    max_bounces=max_bounces,
-                    eps_push=eps_push,
-                    collect_backscatter=collect_backscatter,
-                    rng=rt)
-            else
-                simulate_cavity_ballistic(pos0, vel0, L;
-                    x_furnace=x_furnace,
-                    z_furnace=z_furnace)
-            end
-
-            ex = out.exited
-            ep = out.exit_pos
-            ev = out.exit_vel
-
-            # pessimistic prealloc: at most batch rows
-            buf = Matrix{Float64}(undef, batch, 6)
-            n = 0
-
-            @inbounds for i in 1:batch
-                ex[i] || continue
-
-                xf  = ep[i,1]; zf = ep[i,3]
-                vxf = ev[i,1]; vyf = ev[i,2]; vzf = ev[i,3]
-
-                if passes_slit_from_exit(xf, zf, vxf, vyf, vzf, d, xh, zh)
-                    n += 1
-                    buf[n,1] = xf
-                    buf[n,2] = ep[i,2]   # yf (~L)
-                    buf[n,3] = zf
-                    buf[n,4] = vxf
-                    buf[n,5] = vyf
-                    buf[n,6] = vzf
-                end
-            end
-
-            # store only used prefix
-            local_bufs[t] = @view buf[1:n, :]
-        end
-
-        # serial merge
-        for t in 1:nt
-            buf = local_bufs[t]
-            n = size(buf, 1)
-            n == 0 && continue
-
-            take = min(n, N_slit - filled)
-            out_tbl[filled+1:filled+take, :] .= buf[1:take, :]
-            filled += take
-            filled >= N_slit && break
-        end
-    end
-
-    return out_tbl
+    return tbl
 end
 
 
@@ -830,20 +1050,20 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Ns = 100_000 ; 
+const Ns = 500_000 ; 
 @info "Number of MonteCarlo particles : $(Ns)\n"
 # Monte Carlo generation of particles traversing the filtering SG-slit [x0 y0 z0 v0x v0y v0z]
 crossing_slit = TheoreticalSimulation.generate_samples(Ns, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
 
 r0, v0 = sample_initial_conditions(Ns, rng_set, effusion_params)
-L=400e-6
+L=400.0e-6
 y_slit = L + y_FurnaceToSlit
 
 # Diffusive (Lambertian)
-out_diff = simulate_cavity_centered(r0, v0, L; x_furnace=x_furnace, z_furnace=z_furnace,rng=rng_set)
+out_diff = simulate_cavity_diffusive(r0, v0, L; rng=rng_set)
 
 # Ballistic (geometric): new function
-out_ball = simulate_cavity_ballistic(r0, v0, L; x_furnace=x_furnace, z_furnace=z_furnace)
+out_ball = simulate_cavity_ballistic(r0, v0, L)
 
 # 1) transmissions + Clausing
 cmp = compare_ballistic_diffusive(out_ball, out_diff)
@@ -853,50 +1073,191 @@ ang_diff = exit_angles(out_diff)
 ang_ball = exit_angles(out_ball)
 
 # 3) brightness reduction in a chosen forward cone (e.g. 5 mrad)
-bright = brightness_reduction(out_ball, out_diff; x_furnace=x_furnace, z_furnace=z_furnace, θmax=asin(effusion_params.sinθmax))
+bright = brightness_reduction(out_ball, out_diff; θmax=asin(effusion_params.sinθmax))
 
-@show cmp
-@show bright
-@show mean(ang_diff.θ), mean(abs.(ang_diff.θx)), mean(abs.(ang_diff.θz))
-
-@time tbl_diff = collect_transmitted_inout_table(Ns, rng_set, effusion_params, L;
-    model=:diffusive, batch=3*Ns, x_furnace=x_furnace, z_furnace=z_furnace);
-@time tbl_ball = collect_transmitted_inout_table(Ns, rng_set, effusion_params, L;
-    model=:ballistic, batch=2*Ns, x_furnace=x_furnace, z_furnace=z_furnace)
-
-data_exit_diff = tbl_diff[:,7:end];
-TheoreticalSimulation.plot_velocity_stats(data_exit_diff, "Oven: Diffusive" , "velocity_pdf")
+@show cmp;
+@show bright;
+@show mean(ang_diff.θ), mean(abs.(ang_diff.θx)), mean(abs.(ang_diff.θz));
 
 
+# @time tbl_ball = collect_transmitted_inout_table(Ns, rng_set, effusion_params, L; model=:ballistic, batch=2*Ns)
+
+# data_exit_ball = tbl_ball[:,7:end];
+# TheoreticalSimulation.plot_velocity_stats(data_exit_ball, "Oven: Ballistic" , "velocity_pdf")
 
 
+# Nss = 5_000_000
+# @time tbl_diff = collect_transmitted_inout_table(Nss, rng_set, effusion_params, L;
+#     model=:diffusive, batch=3*Nss, x_furnace=x_furnace, z_furnace=z_furnace);
+# data_exit_diff = tbl_diff[:,7:end];
+# TheoreticalSimulation.plot_velocity_stats(data_exit_diff, "Oven: Diffusive" , "velocity_pdf")
 
-plot!(suptitle="Released from oven")
+# x_at_slit = data_exit_diff[:,1] .+ data_exit_diff[:,4] ./ data_exit_diff[:,5] .* y_FurnaceToSlit
+# y_at_slit = data_exit_diff[:,2] .+ y_FurnaceToSlit
+# z_at_slit = data_exit_diff[:,3] .+ data_exit_diff[:,6] ./ data_exit_diff[:,5] .* y_FurnaceToSlit
 
-histogram(data_exit[:,6])
-
-
-tbl_ball = collect_transmitted_inout_table(Ns, rng_set, effusion_params, L;
-    model=:ballistic, batch=2*Ns, x_furnace=x_furnace, z_furnace=z_furnace)
-
-
-
-
-
-tbl_exit = collect_exit_particles_passing_slit_threaded(
-    Ns, rng_set, effusion_params, L;
-    d=y_FurnaceToSlit, model=:diffusive, batch=500_000)
+# idx = (abs.(x_at_slit) .< x_slit/2) .& (abs.(z_at_slit) .< z_slit/2 )
+# @info "Crossing slit $(sum(idx))/$(Nss)"
+# data_crossing = data_exit_diff[idx,:]
 
 
+function collect_crossing_table_fast(n_t::Int,
+                                     rng_set,
+                                     effusion_params,
+                                     L;
+                                     model::Symbol = :diffusive,
+                                     batch_size::Int = 5_000_000,
+                                     batch_mult::Int = 3,   # matches your batch=3*Nss idea
+                                     log_every::Int = 1)
 
 
-tbl = collect_exit_particles_passing_slit_via_exit_table(Ns, rng_set, effusion_params, L;
-    x_slit=x_slit,
-    y_slit=y_slit,
-    z_slit=z_slit,
-    model=:diffusive,
-    batch=10_000,
-    N_exit_chunk = 20_000,
-    x_furnace=x_furnace,
-    z_furnace=z_furnace,
-)
+    ncols = 6          # because you want tbl[:, 7:end]
+    out   = Matrix{Float64}(undef, n_t, ncols)
+
+    # Constants hoisted
+    half_x = 0.5 * x_slit
+    half_z = 0.5 * z_slit
+    yFS    = y_FurnaceToSlit
+
+    filled = 0
+    iter   = 0
+
+    while filled < n_t
+        iter += 1
+
+        tbl = collect_transmitted_inout_table(batch_size, rng_set, effusion_params, L;
+                                              model=model,
+                                              batch=batch_mult*batch_size)
+
+        nrows = size(tbl, 1)
+
+        @inbounds for i in 1:nrows
+            # Pull needed columns from tbl[:,7:end] WITHOUT creating that slice
+            # data_exit = tbl[:,7:end] so:
+            #   x0 = tbl[i,7], y0 = tbl[i,8], z0 = tbl[i,9],
+            #   vx = tbl[i,10], vy = tbl[i,11], vz = tbl[i,12]
+            x0 = tbl[i, 7]
+            z0 = tbl[i, 9]
+            vx = tbl[i,10]
+            vy = tbl[i,11]
+            vz = tbl[i,12]
+
+            t_y = yFS / vy
+            x_at_slit = muladd(vx, t_y, x0)
+            z_at_slit = muladd(vz, t_y, z0)
+
+            if abs(x_at_slit) < half_x && abs(z_at_slit) < half_z
+                filled += 1
+                # Copy entire row tbl[i,7:end] into out[filled,:] without slicing
+                for j in 1:ncols
+                    out[filled, j] = tbl[i, 6 + j]
+                end
+                filled >= n_t && break
+            end
+        end
+
+        if log_every > 0 && (iter % log_every == 0)
+            @info "Accumulated $filled / $n_t (batch_size=$batch_size, transmission~$(round(100*filled/(batch_size*iter);digits=6))%)"
+        end
+    end
+
+    return out
+end
+
+
+function collect_crossing_table_fastest(n_t::Int,
+                                               rng_set,
+                                               effusion_params,
+                                               L;
+                                               model::Symbol = :diffusive,
+                                               batch_size::Int = 5_000_000,
+                                               batch_mult::Int = 3,
+                                               log_every::Int = 1)
+
+    out = Matrix{Float64}(undef, n_t, 6)
+
+    half_x = 0.5 * x_slit
+    half_z = 0.5 * z_slit
+    yFS    = y_FurnaceToSlit
+
+    filled = 0
+    iter   = 0
+
+    while filled < n_t
+        iter += 1
+
+        tbl = collect_transmitted_exit_table(batch_size, rng_set, effusion_params, L;
+                                              model=model,
+                                              batch=batch_mult*batch_size)
+
+        @inbounds for i in 1:batch_size
+            # vy > 0 always
+            vy = tbl[i, 5]
+            t  = yFS / vy
+
+            # z-test first (narrower slit -> reject earlier)
+            z0 = tbl[i,3]
+            vz = tbl[i,6]
+            z_at = muladd(vz, t, z0)  # z0 + vz*t
+
+            if (-half_z < z_at < half_z)
+                x0 = tbl[i, 1]
+                vx = tbl[i,4]
+                x_at = muladd(vx, t, x0)
+
+                if (-half_x < x_at < half_x)
+                    filled += 1
+                    copyto!(@view(out[filled, :]), @view(tbl[i, :]))
+                    filled >= n_t && break
+                end
+            end
+        end
+
+        if log_every > 0 && (iter % log_every == 0)
+            acc = filled / (iter * batch_size)
+            @info "Accumulated $filled / $n_t (accept≈$(round(100*acc; digits=5))%)"
+        end
+    end
+
+    return out
+end
+
+@time collect_crossing_table_fast(1000,
+                                     rng_set,
+                                     effusion_params,
+                                     L;
+                                     model= :diffusive,
+                                     batch_size = 5_000_000,
+                                     batch_mult = 3,
+                                     log_every = 1);
+
+@time collect_crossing_table_fastest(1000,
+                                     rng_set,
+                                     effusion_params,
+                                     L;
+                                     model= :diffusive,
+                                     batch_size = 5_000_000,
+                                     batch_mult = 3,
+                                     log_every = 1);
+
+
+@time dd= collect_slitcrossing_diffusive_compact(1_000,
+                                     rng_set,
+                                     effusion_params,
+                                     L;
+                                     batch = 20_000_000,
+                                     log_every = 1);
+
+@time out = collect_slitcrossing_diffusive_compact_threads(1_000_000,
+                                     rng_set,
+                                     effusion_params,
+                                     L;
+                                     batch = 50_000_000,
+                                     log_every = 1);
+
+TheoreticalSimulation.plot_velocity_stats(out, "Oven: Diffusive" , "velocity_pdf")
+jldopen(joinpath(OUTDIR,"slitcrossing_data.jld2"), "w") do file
+    file["data/initial"] = out
+    file["meta/N"] = size(out,1)
+    file["meta/L"] = L
+end
