@@ -31,6 +31,7 @@ using CSV, DataFrames, DelimitedFiles
 using Dates
 using Alert
 # Custom modules
+include("./Modules/JLD2_MyTools.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
 using .MyExperimentalAnalysis;
 # Set the working directory to the current location
@@ -95,7 +96,8 @@ data_JSF = OrderedDict(
     [0.0409, 0.0566, 0.0830, 0.1015, 0.1478, 0.1758, 0.2409, 0.3203, 0.4388, 0.5433, 0.6423, 0.8394, 1.1267, 1.5288], #CQD
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
-data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_6M","qm_6000000_screen_profiles_f1_table.jld2"))["table"]
+
+data_qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_7M","qm_screen_profiles_f1_table.jld2")
 
 # Importing data
 if !isfile(outfile_processed) # check if the processed images exists
@@ -152,7 +154,9 @@ for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
     MyExperimentalAnalysis.OUTDIR   = OUTDIR;
     summary_table[row,:] = Cell[RUN_STAMP, n_bins, λ0]
 
-    chosen_qm = data_qm[(n_bins, 0.200, λ0)]
+    chosen_qm =  jldopen(data_qm_path,"r") do file
+        file[JLD2_MyTools.make_keypath_qm(n_bins,0.270, λ0)]
+    end
     Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][3:end]
     zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][3:end]
 
