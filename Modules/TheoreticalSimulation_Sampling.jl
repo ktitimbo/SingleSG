@@ -156,7 +156,7 @@ The function prints timing for the threaded region and total iterations.
   (e.g., `MersenneTwister(hash((base_seed, thread_id)))`).
 
 # Example
-```julia
+julia
 Threads.nthreads()  # ensure desired thread count is set before starting Julia
 alive = _generate_samples_multithreaded(100_000, 12345, effusion_params; v_pdf = :v3)
 size(alive)  # (100000, 6)
@@ -255,7 +255,7 @@ Each returned row is `[x0, y0, z0, v0x, v0y, v0z]` with `y0 = 0.0` (SI units).
   but row order may vary due to concurrency.
 
 # Example
-```julia
+julia
 alive_serial = generate_samples(50_000, effusion_params; v_pdf=:v3, rng=MersenneTwister(42))
 alive_mt     = generate_samples(50_000, effusion_params; multithreaded=true, base_seed=1234)
 """
@@ -307,7 +307,7 @@ For `:balanced`, both are `No×8`.
 - All work is in-place friendly and uses `@inbounds`/`@views` in hot loops.
 
 # Example
-```julia
+julia
 using StableRNGs
 rng = StableRNG(42)
 No = size(alive, 1)
