@@ -810,6 +810,7 @@ module MyExperimentalAnalysis
     function stack_data(data_directory::AbstractString;
                         pattern = r"Cur(.*?)A",
                         ampmeter_scale = r"Ran(.*?)A",
+                        bz_pattern = r"Bz(.*?)G",
                         error_factor = 0.015,
                         order::Symbol = :desc,
                         keynames = ("BG","F1","F2"),
@@ -820,6 +821,11 @@ module MyExperimentalAnalysis
             endswith(tok, "u") ? parse(Float64, chop(tok; tail=1)) * 1e-6 :
             endswith(tok, "m") ? parse(Float64, chop(tok; tail=1)) * 1e-3 :
                                 parse(Float64, tok)
+
+        parse_bz(tok::AbstractString) =
+        endswith(tok, "u") ? parse(Float64, chop(tok; tail=1)) * 1e-6 :
+        endswith(tok, "m") ? parse(Float64, chop(tok; tail=1)) * 1e-3 :
+                             parse(Float64, tok)
         # -----------------------------------------------------------------------
                         
         # 1) Collect only .mat files that match the pattern
@@ -843,17 +849,33 @@ module MyExperimentalAnalysis
             ran_tokens[i] = mr.captures[1]  # e.g. "10m", "1000m", "500u"
         end
 
-        # Convert both Cur and Ran to amps (use the helper)
+        # Convert both Cur and Ran to amps
         currents = parse_amp.(tokens)
         ran_vals = parse_amp.(ran_tokens)   # amplitude in A (from Ran...)
+
+        # 2c) Optional: extract Bz tokens, but ONLY keep if present in ALL files
+        bz_matches = [match(bz_pattern, f) for f in files]
+        has_bz_all = all(!isnothing, bz_matches)
+
+        bz_vals = nothing
+        if has_bz_all
+            println("\n Magnetic field reported in Gauss\n")
+            bz_tokens = SubString{String}[m.captures[1] for m in bz_matches]  # safe: all non-nothing
+            bz_vals   = parse_bz.(bz_tokens)  # in "G" units, unless you scale
+        end
 
         # 3) Sort by current (asc/desc)
         p = order === :desc ? sortperm(currents; rev=true) :
             order === :asc  ? sortperm(currents) :
             throw(ArgumentError("order must be :asc or :desc"))
+
         files    = files[p]
         currents = Float64.(currents[p])
         currents_errors = error_factor * Float64.(ran_vals[p])
+
+        if has_bz_all
+            bz_vals = Float64.(bz_vals[p])
+        end
 
         # 4) Probe sizes & eltype from first file
         keyBG, keyF1, keyF2 = keynames
@@ -886,15 +908,21 @@ module MyExperimentalAnalysis
             verbose && i % 5 == 0 && @info "Loaded $i / $N" file=f
         end
 
-        return OrderedDict(
+        out = OrderedDict(
             :Directory      => String(data_directory),
             :Files          => files,
             :Currents       => currents,        # amperes
-            :CurrentsError  => currents_errors,  # amperes (0.015 * Ran in A)
+            :CurrentsError  => currents_errors, # amperes (0.015 * Ran in A)
             :F1_data        => F1,              # 540×2560×number of images× number of currents
-            :F2_data        => F2,
-            :BG_data        => BG
+            :F2_data        => F2,              # 540×2560×number of images× number of currents
+            :BG_data        => BG,              # 540×2560×number of images× number of currents
         )
+
+        if has_bz_all
+            out[:BzTesla] = 1e-4 .* bz_vals           # in Tesla, since the filename ends with "G"
+        end
+
+        return out
     end
 
     """
@@ -1309,10 +1337,11 @@ module MyExperimentalAnalysis
     F2proc = (F2 .- BG) #./ flat4
 
     return OrderedDict(
-        :Currents            => raw_data[:Currents],
-        :CurrentsError       => raw_data[:CurrentsError],
-        :F1ProcessedImages   => F1proc,   # size: 540 × 2560 × number of images× number of currents
-        :F2ProcessedImages   => F2proc,   # size: 540 × 2560 × number of images× number of currents
+        :Currents           => raw_data[:Currents],
+        :CurrentsError      => raw_data[:CurrentsError],
+        :BzTesla            => raw_data[:BzTesla],
+        :F1ProcessedImages  => F1proc,   # size: 540 × 2560 × number of images× number of currents
+        :F2ProcessedImages  => F2proc,   # size: 540 × 2560 × number of images× number of currents
     )
     end
 
