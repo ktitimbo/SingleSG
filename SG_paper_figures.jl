@@ -171,6 +171,7 @@ function standard_error(x)
     return std(x; corrected=true) ./ sqrt.(length(x))
 end
 ##################################################################################################
+
 # Coil currents
 Icoils = [0.00,
             0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
@@ -180,6 +181,26 @@ Icoils = [0.00,
             0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
 ];
 nI = length(Icoils);
+
+
+x  = 0:0.1:10
+y1 = sin.(x)
+y2 = 100 .* cos.(x)
+
+p = plot(x, y1;
+    label="y1",
+    xlabel="x",
+    ylabel="sin(x)",
+    legend=:topright,
+)
+plot!(twinx(p), x, y2;
+    label="y2",
+    ylabel="100 cos(x)",
+)
+
+p
+
+
 
 ki_6M = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 
         0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 
@@ -194,7 +215,7 @@ ki_6M = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09,
         9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 10.0, 
         100.0, 1000.0, 10000.0, 100000.0]
 
-ki_fit = 2.5e-6
+ki_fit = 2.4e-6
 
 cqd_ki_path = joinpath("Y://SternGerlach//simulations/cqd_simulation_6M","up","cqd_6000000_ki034_up_screen.jld2");
 cqd_ki = load(cqd_ki_path,"screen")[:data]
