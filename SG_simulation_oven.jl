@@ -21,11 +21,11 @@ using Dates
 const T_START = Dates.now() ; # Timestamp start for execution timing
 # Numerical tools
 using LinearAlgebra, DataStructures
-using Interpolations, Roots, Loess, Optim
-using BSplineKit
-using Polynomials
-using DSP
-using LambertW, PolyLog
+# using Interpolations, Roots, Loess, Optim
+# using BSplineKit
+# using Polynomials
+# using DSP
+# using LambertW, PolyLog
 using StatsBase
 using Random, Statistics, NaNStatistics, Distributions, StaticArrays
 using Alert
@@ -1838,13 +1838,13 @@ log_step = Int(round(0.1*Ns))
 crossing_slit = TheoreticalSimulation.generate_samples(Ns, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
 plot_statistics(crossing_slit, "Oven (no thickness): cos(θ)" , "histogram_original")
 
-out_diff = collect_transmitted_diffusive_compact( Ns, rng_set, effusion_params, Lcanal; batch = 500_000)
+out_diff = collect_transmitted_diffusive_compact( Ns, rng_set, effusion_params, Lcanal; batch = batch_size)
 plot_statistics(out_diff, "Oven (thickness): diffusive" , "histogram_diffusive")
 
-out_refl = collect_transmitted_reflective_compact( Ns, rng_set, effusion_params, Lcanal; batch = 500_000)
+out_refl = collect_transmitted_reflective_compact( Ns, rng_set, effusion_params, Lcanal; batch = batch_size)
 plot_statistics(out_refl, "Oven (thickness): specular" , "histogram_specular")
 
-out_kill = collect_transmitted_kill_on_collision_compact( Ns, rng_set, effusion_params, Lcanal; batch = 500_000)
+out_kill = collect_transmitted_kill_on_collision_compact( Ns, rng_set, effusion_params, Lcanal; batch = batch_size)
 plot_statistics(out_kill, "Oven (thickness): kill" , "histogram_kill")
 
 jldopen(joinpath(OUTDIR,"slitcrossing_data.jld2"), "w") do file
@@ -1881,9 +1881,9 @@ end
 
 r0, v0 = sample_initial_conditions(Ns, rng_set, effusion_params)
 # Diffusive (Lambertian)
-out_diff = simulate_cavity_diffusive(r0, v0, L; rng=rng_set)
+out_diff = simulate_cavity_diffusive(r0, v0, Lcanal; rng=rng_set)
 # Ballistic (geometric): new function
-out_ball = simulate_cavity_ballistic(r0, v0, L)
+out_ball = simulate_cavity_ballistic(r0, v0, Lcanal)
 # 1) transmissions + Clausing
 cmp = compare_ballistic_diffusive(out_ball, out_diff)
 # 2) angular distributions at y=L (arrays of angles)
