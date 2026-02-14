@@ -130,5 +130,102 @@ module JLD2_MyTools
         return nothing
     end
 
+    function make_keypath_exp(data::AbstractString, nz::Int, λ0::Float64)
+        # This generates the keys for files as qm_screen_profiles_f1_table
+        fmt = Printf.Format("%.3f")
+        λ0_str = Printf.format(fmt, λ0)
+
+        return "$(data)/nz=$(nz)/λ0=$(λ0_str)"
+    end
+
+
+    parse_nz(nz_key::AbstractString) = parse(Int, split(nz_key, "=", limit=2)[2])
+    parse_λ0(λ0_key::AbstractString) = parse(Float64, split(λ0_key, "=", limit=2)[2])
+    function show_exp_summary(path::AbstractString, data::AbstractString; full_keys = Set(["BzTesla","Currents","ErrorCurrents"]))
+        fmt6(x::Real) = @sprintf("%.6f", x)
+        function format_value(v)
+            if v isa AbstractVector{<:Real}
+                return "[" * join(fmt6.(v), ", ") * "]"
+            elseif v isa Real
+                return fmt6(v)
+            else
+                return repr(v)
+            end
+        end
+        jldopen(path, "r") do f
+            println("====================================")
+            println("FILE:  ", path)
+            println("DATA:  ", data)
+            println("====================================")
+
+            println("\nMETA:")
+            if haskey(f, "meta")
+                for k in sort(String.(collect(keys(f["meta"]))))
+                    v = f["meta/$k"]
+
+                    if v isa AbstractVector
+                        if k in full_keys
+                            # show the full vector
+                            # println(@sprintf("  %-18s : %s", k, repr(v)))
+                            println(@sprintf("  %-18s : %s", k, format_value(v)))
+                        else
+                            # compact summary
+                            n = length(v)
+                            if n == 0
+                                println(@sprintf("  %-18s : Vector(len=0)", k))
+                            else
+                                println(@sprintf("  %-18s : Vector(len=%d), first=%s, last=%s",
+                                                k, n, repr(first(v)), repr(last(v))))
+                            end
+                        end
+                    else
+                        println(@sprintf("  %-18s : %s", k, repr(v)))
+                    end
+                end
+            else
+                println("  (no meta)")
+            end
+
+            # ---- RUNS ----
+            println("\nSTORED PARAMETERS:")
+            if !haskey(f, data)
+                println("  (no group '$data')")
+                println("  top-level keys: ", sort(String.(collect(keys(f)))))
+                return
+            end
+
+            nz_vals = Int[]
+            λ0_vals = Float64[]
+
+            for nz_key in String.(collect(keys(f[data])))
+                startswith(nz_key, "nz=") || continue
+                nz = parse_nz(nz_key)
+
+                for λ0_key in String.(collect(keys(f["$data/$nz_key"])))
+                    startswith(λ0_key, "λ0=") || continue
+                    λ0 = parse_λ0(λ0_key)
+
+                    push!(nz_vals, nz)
+                    push!(λ0_vals, λ0)
+                end
+            end
+
+            nz_list = sort(unique(nz_vals))
+            λ0_list = sort(unique(λ0_vals))
+
+            println("  nz   : ", nz_list)
+            println("  λ0   : ", [@sprintf("%.3f", x) for x in λ0_list])
+            println("  runs : ", length(nz_vals))
+
+            println("\nRUNS (nz, λ0):")
+            combos = sort(unique(zip(nz_vals, λ0_vals)), by = x -> (x[1], x[2]))
+            for (nz, λ0) in combos
+                println(@sprintf("  nz=%-3d  λ0=%.3f", nz, λ0))
+            end
+        end
+    end
+
+
+
 
 end
