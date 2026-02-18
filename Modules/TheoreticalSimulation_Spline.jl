@@ -462,6 +462,82 @@ function QM_analyze_profiles_to_dict(data::OrderedDict{Symbol,Any}, p::AtomParam
     return out
 end
 
+function QM_analyze_profiles_to_dict(jld_path::AbstractString, p::AtomParams;
+    manifold::Union{Symbol,Integer,AbstractVector{<:Integer},Tuple{Vararg{Integer}}} = :F_bottom,
+    n_bins::Tuple = (1,4), width_mm::Float64 = 0.150,
+    add_plot::Bool = false, plot_xrange::Symbol = :all,
+    λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, mode::Symbol = :probability)
+
+    out = OrderedDict{Int, OrderedDict{Symbol, Any}}()
+
+    nx_bins = n_bins[1]
+    nz_bins = n_bins[2]
+
+    is_group = manifold isa AbstractVector{<:Integer} || manifold isa Tuple{Vararg{Integer}}
+    manifold_tag = is_group ? :custom : manifold
+
+    jldopen(jld_path, "r") do file
+        @assert haskey(file, "meta/Icoils") "missing JLD2 key: meta/Icoils"
+        @assert haskey(file, "meta/levels") "missing JLD2 key: meta/levels"
+
+        Ix = file["meta/Icoils"]   # vector of currents
+        # levels = file["meta/levels"]  # if you need it later
+
+        nI = length(Ix)
+
+        for i in 1:nI
+            screen_key = "screen/I$(i)"
+            @assert haskey(file, screen_key) "missing JLD2 key: $screen_key"
+
+            # This should be exactly what used to be data_alive_screen[i]
+            data_i = file[screen_key]
+
+            # data_i is expected to be indexable by level: data_i[lvl] is a matrix,
+            # with columns including 7:8 = (x,z) in meters (?) and you convert to mm.
+            img_F = if manifold === :F_top
+                1e3 .* vcat((xz[:, 7:8] for xz in data_i[1:Int(2*p.Ispin+2)])...)
+            elseif manifold === :F_bottom
+                1e3 .* vcat((xz[:, 7:8] for xz in data_i[Int(2*p.Ispin+3):Int(4*p.Ispin+2)])...)
+            elseif manifold === :S_up
+                1e3 .* vcat((xz[:, 7:8] for xz in data_i[1:Int(2*p.Ispin+1)])...)
+            elseif manifold === :S_down
+                1e3 .* vcat((xz[:, 7:8] for xz in data_i[Int(2*p.Ispin+2):Int(4*p.Ispin+2)])...)
+            elseif is_group
+                lvls = collect(manifold)
+                @assert !isempty(lvls) "Empty level list passed as manifold"
+                1e3 .* vcat((data_i[lvl][:, 7:8] for lvl in lvls)...)
+            else
+                lvl = manifold isa Integer ? Int(manifold) :
+                      begin
+                          v = tryparse(Int, string(manifold))
+                          @assert v !== nothing "Non-numeric manifold '$manifold' (expected e.g. :1, :2, ...)"
+                          v
+                      end
+                1e3 .* data_i[lvl][:, 7:8]
+            end
+
+            result = analyze_screen_profile(Ix[i], img_F;
+                manifold=manifold_tag,
+                nx_bins=nx_bins, nz_bins=nz_bins,
+                width_mm=width_mm,
+                add_plot=add_plot,
+                plot_xrange=plot_xrange,
+                λ_raw=λ_raw, λ_smooth=λ_smooth, mode=mode)
+
+            out[i] = OrderedDict{Symbol, Any}(
+                :Icoil                  => Ix[i],
+                :z_max_raw_mm           => result.z_max_raw_mm,
+                :z_max_raw_spline_mm    => result.z_max_raw_spline_mm,
+                :z_max_smooth_mm        => result.z_max_smooth_mm,
+                :z_max_smooth_spline_mm => result.z_max_smooth_spline_mm,
+                :z_profile              => result.z_profile,
+            )
+        end
+    end
+
+    return out
+end
+
 
 function CQD_analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
     nx_bins::Integer = 2, nz_bins::Integer = 2, 
