@@ -184,7 +184,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 5_000 ; 
+const Nss = 10_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -295,7 +295,117 @@ jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_profiles.jld2"), profiles = OrderedDic
                                                                     :lvl8       => profiles_8,
                                                                     :lvl68      => profiles_6_8
                                                                     ) 
-                                                                    )
+)
+
+# profiles_top2    = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
+#                     manifold=:F_top, n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+# profiles_bottom2 = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
+#                     manifold=:F_bottom, n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+# profiles_52      = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
+#                     manifold=5,         n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+# profiles_Sup2    = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
+#                     manifold=:S_up,     n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+# profiles_Sdown2  = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
+#                     manifold=:S_down,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+# profiles_6_82    = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
+#                     manifold=[6,8],   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+# profiles_62      = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
+#                     manifold=6,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+# profiles_72      = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
+#                     manifold=7,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+# profiles_82      = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
+#                     manifold=8,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+
+# # helper: robust float compare
+# _isapprox(a::Number, b::Number; rtol=1e-10, atol=1e-12) = isapprox(a, b; rtol=rtol, atol=atol)
+# using DataStructures: OrderedDict
+
+# function compare_QM_outputs(outA::OrderedDict{Int,<:Any},
+#                             outB::OrderedDict{Int,<:Any};
+#                             rtol=1e-10, atol=1e-12,
+#                             fields=(:Icoil, :z_max_raw_mm, :z_max_raw_spline_mm,
+#                                     :z_max_smooth_mm, :z_max_smooth_spline_mm, :z_profile))
+
+#     # outer keys
+#     if collect(keys(outA)) != collect(keys(outB))
+#         onlyA = setdiff(collect(keys(outA)), collect(keys(outB)))
+#         onlyB = setdiff(collect(keys(outB)), collect(keys(outA)))
+#         return (ok=false, msg="Outer keys differ. onlyA=$(onlyA), onlyB=$(onlyB)")
+#     end
+
+#     for i in keys(outA)
+#         a = outA[i]
+#         b = outB[i]
+
+#         for f in fields
+#             if !haskey(a, f) || !haskey(b, f)
+#                 return (ok=false, msg="Missing field $f at i=$i. hasA=$(haskey(a,f)) hasB=$(haskey(b,f))")
+#             end
+
+#             va = a[f]
+#             vb = b[f]
+
+#             # scalars
+#             if (va isa Number) && (vb isa Number)
+#                 if !isapprox(va, vb; rtol=rtol, atol=atol)
+#                     return (ok=false, msg="Mismatch at i=$i field=$f: A=$(va) B=$(vb) Δ=$(va-vb)")
+#                 end
+
+#             # arrays (includes z_profile Nx3)
+#             elseif (va isa AbstractArray{<:Number}) && (vb isa AbstractArray{<:Number})
+#                 if size(va) != size(vb)
+#                     return (ok=false, msg="Size mismatch at i=$i field=$f: sizeA=$(size(va)) sizeB=$(size(vb))")
+#                 end
+
+#                 if !isapprox(va, vb; rtol=rtol, atol=atol)
+#                     Δ = va .- vb
+#                     maxabs = maximum(abs.(Δ))
+
+#                     if f === :z_profile && ndims(va) == 2 && size(va,2) == 3
+#                         colmax = [maximum(abs.(Δ[:,j])) for j in 1:3]
+#                         # find first mismatch location (row,col)
+#                         mask = .!isapprox.(va, vb; rtol=rtol, atol=atol)
+#                         idx = findfirst(mask)
+#                         (r,c) = idx === nothing ? (missing, missing) : Tuple(idx)
+#                         return (ok=false,
+#                                 msg="Array mismatch at i=$i field=:z_profile (Nx3). " *
+#                                     "max|Δ|=$(maxabs), per-col max=$(colmax). " *
+#                                     "first mismatch at (row,col)=($(r),$(c)): A=$(va[r,c]) B=$(vb[r,c])")
+#                     else
+#                         mask = .!isapprox.(va, vb; rtol=rtol, atol=atol)
+#                         idx = findfirst(mask)
+#                         return (ok=false,
+#                                 msg="Array mismatch at i=$i field=$f. max|Δ|=$(maxabs). first mismatch index=$(idx)")
+#                     end
+#                 end
+
+#             else
+#                 # fallback exact compare
+#                 if va != vb
+#                     return (ok=false, msg="Mismatch at i=$i field=$f: typeofA=$(typeof(va)) typeofB=$(typeof(vb))")
+#                 end
+#             end
+#         end
+#     end
+
+#     return (ok=true, msg="Outputs match for fields=$(fields) with rtol=$rtol atol=$atol")
+# end
+
+# res = compare_QM_outputs(profiles_bottom, profiles_bottom2; rtol=1e-25, atol=1e-25);
+# @info res.msg
+# res = compare_QM_outputs(profiles_top, profiles_top2; rtol=1e-25, atol=1e-25);
+# @info res.msg
+# res = compare_QM_outputs(profiles_5, profiles_52; rtol=1e-25, atol=1e-25);
+# @info res.msg
+# res = compare_QM_outputs(profiles_6, profiles_62; rtol=1e-25, atol=1e-25);
+# @info res.msg
+# res = compare_QM_outputs(profiles_7, profiles_72; rtol=1e-25, atol=1e-25);
+# @info res.msg
+# res = compare_QM_outputs(profiles_8, profiles_82; rtol=1e-25, atol=1e-25);
+# @info res.msg
+# res = compare_QM_outputs(profiles_6_8, profiles_6_82; rtol=1e-25, atol=1e-25);
+# @info res.msg
+
 
 # Profiles : different contributions
 anim = @animate for j in eachindex(Icoils)
@@ -742,10 +852,11 @@ Ns = Nss
 # Ns = 7_000_000
 # const OUTDIR = joinpath(@__DIR__,"simulation_data","quantum_simulation_$(Int(1e-6*Ns))M")
 # const OUTDIR = joinpath("W://SternGerlach//quantum_simulation_7M")
-data_exists = isfile(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))
 
-if !data_exists
-    println("Analyzing data arriving to the screen")
+data_screen_path    = joinpath(OUTDIR,"qm_screen_data.jld2")
+
+if !isfile(data_screen_path)
+    @info "Analyzing data arriving to the screen"
 
     dataQM = load(joinpath(OUTDIR,"qm_$(Ns)_valid_particles_data.jld2"))["data"]
     data_alive_screen = TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen)
@@ -756,7 +867,7 @@ if !data_exists
                 :data   => data_alive_screen);
     jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"), alive = alive_screen)
     
-    jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
+    jldopen(data_screen_path , "w") do file
         file["meta/Icoils"] = dataQM[:Icoils]
         file["meta/levels"] = dataQM[:levels] 
         for i in 1:nI
@@ -769,13 +880,13 @@ if !data_exists
     @info "Memory cleaned after QM data acquired"
 else    
     # data analysis
-    println("QM approach : peak position data analysis") 
+    @info "QM approach : peak position data analysis"
 
-    Icoils = jldopen(joinpath(OUTDIR,"qm_screen_data.jld2") , "r") do fname
+    Icoils = jldopen(data_screen_path , "r") do fname
         fname["meta/Icoils"]
     end
     nI      = length(Icoils);
-    quantum_numbers = jldopen(joinpath(OUTDIR,"qm_screen_data.jld2") , "r") do fname
+    quantum_numbers = jldopen(data_screen_path , "r") do fname
         fname["meta/levels"]
     end
 
@@ -783,94 +894,94 @@ else
     r = 1:1:nI;
     iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
     lvl = 5 #Int(4*K39_params.Ispin+2)
-    f,mf=quantum_numbers[lvl]
+    f,mf=quantum_numbers[lvl] ; 
     # =========================
     # Precompute geometry overlays (constant)
     # =========================
-    x_magnet    = 1e-3 .* range(-1.0, 1.0, length=1000)  # m
-    z_edge_um   = 1e6 .* TheoreticalSimulation.z_magnet_edge.(x_magnet) # μm
-    x_magnet_mm = 1e3 .* x_magnet                        # mm
+    x_magnet    = 1e-3 .* range(-1.0, 1.0, length=1000) ;   # m
+    z_edge_um   = 1e6 .* TheoreticalSimulation.z_magnet_edge.(x_magnet) ;  # μm
+    x_magnet_mm = 1e3 .* x_magnet ;                         # mm
 
-    R_mm = 1e3 * R_aper
-    θcirc = range(0, 2π, length=361)
-    x_circ_mm = R_mm .* cos.(θcirc)                      # mm
-    z_circ_um = (1e3 * R_mm) .* sin.(θcirc)              # μm
+    R_mm = 1e3 * R_aper ;
+    θcirc = range(0, 2π, length=361) ; 
+    x_circ_mm = R_mm .* cos.(θcirc) ;                     # mm
+    z_circ_um = (1e3 * R_mm) .* sin.(θcirc) ;             # μm
 
     # =========================
     # Precompute stage distances (divide by v0y inside loop)
     # =========================
-    y_slit   = y_FurnaceToSlit
-    y_sg_in  = y_FurnaceToSlit + y_SlitToSG
-    y_sg_out = y_sg_in + y_SG
-    y_aper   = y_sg_out + y_SGToAperture
-    y_scr    = y_sg_out + y_SGToScreen
+    y_slit   = y_FurnaceToSlit;
+    y_sg_in  = y_FurnaceToSlit + y_SlitToSG;
+    y_sg_out = y_sg_in + y_SG;
+    y_aper   = y_sg_out + y_SGToAperture;
+    y_scr    = y_sg_out + y_SGToScreen;
 
     anim = @animate for j in iter
-        data_set = jldopen(joinpath(OUTDIR,"qm_screen_data.jld2") , "r") do fname
+        data_set = jldopen(data_screen_path  , "r") do fname
                     fname["screen/I$(j)"][lvl]
         end
         n = Int(round(size(data_set, 1) / 10 )); 
         
         # --- preallocate arrays for histograms (scaled units) ---
-        xs_a = Vector{Float64}(undef, n); zs_a = Vector{Float64}(undef, n)  # furnace (mm, μm)
-        xs_b = Vector{Float64}(undef, n); zs_b = Vector{Float64}(undef, n)  # slit (mm, μm)
-        xs_c = Vector{Float64}(undef, n); zs_c = Vector{Float64}(undef, n)  # SG in (mm, μm)
-        xs_d = Vector{Float64}(undef, n); zs_d = Vector{Float64}(undef, n)  # SG out (mm, μm)
-        xs_f = Vector{Float64}(undef, n); zs_f = Vector{Float64}(undef, n)  # aperture (mm, μm)
-        xs_e = Vector{Float64}(undef, n); zs_e = Vector{Float64}(undef, n)  # screen (mm, mm)
+        xs_a = Vector{Float64}(undef, n); zs_a = Vector{Float64}(undef, n);  # furnace (mm, μm)
+        xs_b = Vector{Float64}(undef, n); zs_b = Vector{Float64}(undef, n);  # slit (mm, μm)
+        xs_c = Vector{Float64}(undef, n); zs_c = Vector{Float64}(undef, n);  # SG in (mm, μm)
+        xs_d = Vector{Float64}(undef, n); zs_d = Vector{Float64}(undef, n);  # SG out (mm, μm)
+        xs_f = Vector{Float64}(undef, n); zs_f = Vector{Float64}(undef, n);  # aperture (mm, μm)
+        xs_e = Vector{Float64}(undef, n); zs_e = Vector{Float64}(undef, n);  # screen (mm, mm)
 
         # --- one pass: compute all stages for each particle ---
         @inbounds for i in 1:n
-            v0y = data_set[i,5]
+            v0y = data_set[i,5];
 
             # Furnace (just the initial plane)
-            xs_a[i] = 1e3 * data_set[i,1]  # mm
-            zs_a[i] = 1e6 * data_set[i,3]  # μm
+            xs_a[i] = 1e3 * data_set[i,1];  # mm
+            zs_a[i] = 1e6 * data_set[i,3];  # μm
 
-            τ_slit  = y_slit  / v0y
-            τ_sgin  = y_sg_in / v0y
-            τ_sgout = y_sg_out / v0y
-            τ_aper  = y_aper  / v0y
-            τ_scr   = y_scr   / v0y
+            τ_slit  = y_slit / v0y;
+            τ_sgin  = y_sg_in / v0y;
+            τ_sgout = y_sg_out / v0y;
+            τ_aper  = y_aper / v0y;
+            τ_scr   = y_scr / v0y;
 
             # NOTE: keep your original calling convention (views)
             rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_slit,  Icoils[j], f, mf,
                                                         @view(data_set[i,1:3]),
                                                         @view(data_set[i,4:6]),
-                                                        K39_params)
+                                                        K39_params);
             xs_b[i] = 1e3 * rtmp[1] ; zs_b[i] = 1e6 * rtmp[3]
 
             rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_sgin,  Icoils[j], f, mf,
                                                         @view(data_set[i,1:3]),
                                                         @view(data_set[i,4:6]),
-                                                        K39_params)
+                                                        K39_params);
             xs_c[i] = 1e3 * rtmp[1] ; zs_c[i] = 1e6 * rtmp[3]
 
             rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_sgout, Icoils[j], f, mf,
                                                         @view(data_set[i,1:3]),
                                                         @view(data_set[i,4:6]),
-                                                        K39_params)
+                                                        K39_params);
             xs_d[i] = 1e3 * rtmp[1] ; zs_d[i] = 1e6 * rtmp[3]
 
             rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_aper,  Icoils[j], f, mf,
                                                         @view(data_set[i,1:3]),
                                                         @view(data_set[i,4:6]),
-                                                        K39_params)
+                                                        K39_params);
             xs_f[i] = 1e3 * rtmp[1] ; zs_f[i] = 1e6 * rtmp[3]
 
             rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_scr,   Icoils[j], f, mf,
                                                         @view(data_set[i,1:3]),
                                                         @view(data_set[i,4:6]),
-                                                        K39_params)
+                                                        K39_params);
             xs_e[i] = 1e3 * rtmp[1] ; zs_e[i] = 1e3 * rtmp[3]
         end
 
-        bins_furn  = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a))
-        bins_slit  = (FreedmanDiaconisBins(xs_b), FreedmanDiaconisBins(zs_b))
-        bins_sgin  = (FreedmanDiaconisBins(xs_c), FreedmanDiaconisBins(zs_c))
-        bins_sgout = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d))
-        bins_aper  = (FreedmanDiaconisBins(xs_f), FreedmanDiaconisBins(zs_f))
-        bins_scr   = (FreedmanDiaconisBins(xs_e), FreedmanDiaconisBins(zs_e))
+        bins_furn  = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a));
+        bins_slit  = (FreedmanDiaconisBins(xs_b), FreedmanDiaconisBins(zs_b));
+        bins_sgin  = (FreedmanDiaconisBins(xs_c), FreedmanDiaconisBins(zs_c));
+        bins_sgout = (FreedmanDiaconisBins(xs_d), FreedmanDiaconisBins(zs_d));
+        bins_aper  = (FreedmanDiaconisBins(xs_f), FreedmanDiaconisBins(zs_f));
+        bins_scr   = (FreedmanDiaconisBins(xs_e), FreedmanDiaconisBins(zs_e));
 
         # Furnace
         figa = histogram2d(xs_a, zs_a;
@@ -971,15 +1082,15 @@ else
     anim = nothing
     GC.gc()
 
-    alive_screen = load(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))["alive"];
-    @info "file loaded"
+    # alive_screen = load(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))["alive"];
+    # @info "file loaded"
 
     nx_bins = 32 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
     gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.100, 0.150, 0.200, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
-    
+  
     param_grid = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list));
     
     clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list))
@@ -995,26 +1106,27 @@ else
         file["meta/λ0"] = sort(λ0_raw_list)
 
         f_level = K39_params.Ispin-0.5
-        println("QM approach : analyzing screen profiles for F=$(f_level) manifold")
+        @info "QM approach : analyzing screen profiles for F=$(f_level) manifold"
 
-        # @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-        @time for (nz, gw, λ0_raw) in param_grid
+        # @time for nz in nz_bins, gw in gaussian_width_mm, λ0 in λ0_raw_list
+        @time for (nz, gw, λ0) in param_grid
 
-            println("Profiles F=$(f_level), nz=$nz, σ=$(Int(round(1e3*gw)))μm, λ₀=$λ0_raw")
+            println("Profiles F=$(f_level), nz=$nz, σ=$(Int(round(1e3*gw)))μm, λ₀=$λ0")
 
             profiles_bottom_loop = QM_analyze_profiles_to_dict(
-                alive_screen, K39_params;
+                data_screen_path, 
+                K39_params;
                 manifold=:F_bottom,
                 n_bins=(nx_bins, nz),
                 width_mm=gw,
                 add_plot=false,
                 plot_xrange=:all,
-                λ_raw=λ0_raw,
+                λ_raw=λ0,
                 λ_smooth=λ0_spline,
                 mode=:probability
             )
 
-            keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0_raw)
+            keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0)
 
             file[keypath] = profiles_bottom_loop
             
@@ -1024,17 +1136,17 @@ else
     fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
     jldopen(outpath_1, "r") do file
         color_idx = 1
-        for λ0_raw in λ0_raw_list
+        for λ0 in λ0_raw_list
             for gw in gaussian_width_mm
                 nz_idx = 1
                 for nz in nz_bins
-                    keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0_raw)
+                    keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0)
 
                     # load only this realization
                     prof = file[keypath]
 
                     zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
-                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0_raw)$"
+                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0)$"
 
                     plot!(Icoils[2:end], abs.(zvals[2:end]),
                         line = (line_styles[nz_idx], clrs[color_idx], 2),
@@ -1068,26 +1180,27 @@ else
         file["meta/λ0"] = sort(λ0_raw_list)
 
         f_level = K39_params.Ispin+0.5
-        println("QM approach : analyzing screen profiles for F=$(f_level) manifold")
+        @info "QM approach : analyzing screen profiles for F=$(f_level) manifold"
 
-        # @time for nz in nz_bins, gw in gaussian_width_mm, λ0_raw in λ0_raw_list
-        @time for (nz, gw, λ0_raw) in param_grid
+        # @time for nz in nz_bins, gw in gaussian_width_mm, λ0 in λ0_raw_list
+        @time for (nz, gw, λ0) in param_grid
 
-            println("Profiles F=$(f_level), nz=$nz, σ=$(Int(round(1e3*gw)))μm, λ₀=$λ0_raw")
+            println("Profiles F=$(f_level), nz=$nz, σ=$(Int(round(1e3*gw)))μm, λ₀=$λ0")
 
             profiles_bottom_loop = QM_analyze_profiles_to_dict(
-                alive_screen, K39_params;
+                data_screen_path, 
+                K39_params;
                 manifold=:F_top,
                 n_bins=(nx_bins, nz),
                 width_mm=gw,
                 add_plot=false,
                 plot_xrange=:all,
-                λ_raw=λ0_raw,
+                λ_raw=λ0,
                 λ_smooth=λ0_spline,
                 mode=:probability
             )
 
-            keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0_raw)
+            keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0)
 
             file[keypath] = profiles_bottom_loop
             
@@ -1097,17 +1210,17 @@ else
     fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
     jldopen(outpath_2, "r") do file
         color_idx = 1
-        for λ0_raw in λ0_raw_list
+        for λ0 in λ0_raw_list
             for gw in gaussian_width_mm
                 nz_idx = 1
                 for nz in nz_bins
-                    keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0_raw)
+                    keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0)
 
                     # load only this realization
                     prof = file[keypath]
 
                     zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
-                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0_raw)$"
+                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0)$"
 
                     plot!(Icoils[2:end], abs.(zvals[2:end]),
                         line = (line_styles[nz_idx], clrs[color_idx], 2),
