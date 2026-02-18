@@ -172,7 +172,7 @@ z_exp  = avg_data[:z_smooth];
 δz_exp = avg_data[:δz_smooth];
 ##################################################################################################
 
-# Coil currents
+## Coil currents
 Icoils = [0.00,
             0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
             0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
@@ -184,7 +184,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 8_000_000 ; 
+const Nss = 5_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -234,7 +234,7 @@ jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
     end
 end
 ############################################################################
-# fname = joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2")
+# fname = joinpath(OUTDIR,"qm_screen_data.jld2")
 #  jldopen(fname, "r") do file
 #         file["screen/i1"]  
 # end
@@ -243,7 +243,6 @@ end
 #     println("meta:  ", collect(keys(f["meta"])))
 #     println("screen:", collect(keys(f["screen"])))
 # end
-
 
 # clean memory
 crossing_slit           = nothing
@@ -255,7 +254,7 @@ GC.gc()
 
 
 println("Profiles F=$(K39_params.Ispin+0.5)")
-profiles_top = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_top    = QM_analyze_profiles_to_dict(alive_screen, K39_params;
                     manifold=:F_top,    n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles F=$(K39_params.Ispin-0.5)")
 profiles_bottom = QM_analyze_profiles_to_dict(alive_screen, K39_params;
@@ -264,15 +263,23 @@ println("Profiles F=$(K39_params.Ispin+0.5), mf=$(-(K39_params.Ispin+0.5))")
 profiles_5      = QM_analyze_profiles_to_dict(alive_screen, K39_params;
                     manifold=5,         n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles ms=$((K39_params.Ispin))")
-profiles_Sup  = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_Sup    = QM_analyze_profiles_to_dict(alive_screen, K39_params;
                     manifold=:S_up,     n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles ms=$(-(K39_params.Ispin))")
 profiles_Sdown  = QM_analyze_profiles_to_dict(alive_screen, K39_params;
                     manifold=:S_down,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-println("Profiles F=1, ms=6,8")
+println("Profiles F=1, ms=-1,+1")
 profiles_6_8    = QM_analyze_profiles_to_dict(alive_screen, K39_params;
                     manifold=[6,8],   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-
+println("Profiles F=1, ms=-1")
+profiles_6      = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+                    manifold=6,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+println("Profiles F=1, ms=0")
+profiles_7      = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+                    manifold=7,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
+println("Profiles F=1, ms=+1")
+profiles_8      = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+                    manifold=8,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 
 jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_profiles.jld2"), profiles = OrderedDict(
                                                                     :nz_bins    => nz_bins,
@@ -283,6 +290,9 @@ jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_profiles.jld2"), profiles = OrderedDic
                                                                     :Sup        => profiles_Sup, 
                                                                     :Sdown      => profiles_Sdown, 
                                                                     :lvl5       => profiles_5,
+                                                                    :lvl6       => profiles_6,
+                                                                    :lvl7       => profiles_7,
+                                                                    :lvl8       => profiles_8,
                                                                     :lvl68      => profiles_6_8
                                                                     ) 
                                                                     )
@@ -379,37 +389,50 @@ gif(anim, gif_path, fps=2)  # adjust fps
 anim = nothing
 
 # Peak position (mm) : lower branch
+i_idx = findall(>(0.010), Icoils)[1]
 fig=plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
-plot!(fig,Icoils[12:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][12:end],
+plot!(fig,Icoils[i_idx:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $\vert 2,-2\rangle$",
     line=(:solid,:red,2))
-plot!(fig,Icoils[12:end], [profiles_bottom[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][12:end],
+plot!(fig,Icoils[i_idx:end], [profiles_bottom[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $F=1$",
     line=(:solid,:blue,2))
-plot!(fig,Icoils[12:end], [profiles_Sdown[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][12:end],
+plot!(fig,Icoils[i_idx:end], [profiles_Sdown[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $m_{s}=-1/2$",
     line=(:solid,:purple,2))
-plot!(fig,Icoils[12:end], [profiles_6_8[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][12:end],
-    label=L"Trajectory $F=1$, $m_{F}=-1,1$",
+plot!(fig,Icoils[i_idx:end], [profiles_6_8[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
+    label=L"Trajectory $F=1$, $m_{F}=-1,+1$",
     line=(:solid,:darkgreen,2))
-plot!(fig,I_exp[12:end],z_exp[12:end],
-    ribbon=δz_exp[12:end],
-    label="Experiment (combined)",
-    line=(:black,:dash,2),
-    fillalpha=0.23, 
-    fillcolor=:black, 
-    )
+plot!(fig,Icoils[i_idx:end], [profiles_6[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
+    label=L"Trajectory $F=1$, $m_{F}=-1$",
+    line=(:dash,:cyan4,2))
+plot!(fig,Icoils[i_idx:end], [profiles_7[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
+    label=L"Trajectory $F=1$, $m_{F}=0$",
+    line=(:dash,:slateblue3,2))
+plot!(fig,Icoils[i_idx:end], [profiles_8[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
+    label=L"Trajectory $F=1$, $m_{F}=+1$",
+    line=(:dash,:sienna3,2))
 plot!(fig,xaxis=:log10,
     yaxis=:log10,
-    xlims=(15e-3,1.05),
-    # ylims=(0.8e-4,2.5),
+    xlims=(10e-3,1.05),
+    ylims=(5e-3,2.5),
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
             [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
             [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    legend=:topleft,
+    legend=:bottomright,
+    foreground_color_legend=nothing,
+    background_color_legend=nothing,
     left_margin =2mm,
 )
+savefig(fig,joinpath(OUTDIR,"QM_results_comparison_a.$(FIG_EXT)"))
+plot!(fig,I_exp[12:end],z_exp[12:end],
+    ribbon=δz_exp[12:end],
+    label="Experiment (combined)",
+    line=(:black,:dot,2),
+    fillalpha=0.23, 
+    fillcolor=:black, 
+    )
 display(fig)
 savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
 
@@ -708,7 +731,6 @@ open(joinpath(OUTDIR,"simulation_report.txt"), "w") do io
     write(io, report)
 end
 
-
 println("script $RUN_STAMP has finished!")
 alert("script $RUN_STAMP has finished!")
 
@@ -726,24 +748,36 @@ if !data_exists
     println("Analyzing data arriving to the screen")
 
     dataQM = load(joinpath(OUTDIR,"qm_$(Ns)_valid_particles_data.jld2"))["data"]
+    data_alive_screen = TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen)
+
     @time alive_screen = OrderedDict(
                 :Icoils => dataQM[:Icoils],
                 :levels => dataQM[:levels], 
-                :data   => TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen));
+                :data   => data_alive_screen);
     jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"), alive = alive_screen)
+    
+    jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
+        file["meta/Icoils"] = dataQM[:Icoils]
+        file["meta/levels"] = dataQM[:levels] 
+        for i in 1:nI
+            file["screen/I$(i)"] = data_alive_screen[i]  
+        end
+    end
     dataQM = nothing
+    data_alive_screen = nothing
     GC.gc()
     @info "Memory cleaned after QM data acquired"
 else    
     # data analysis
     println("QM approach : peak position data analysis") 
 
-    alive_screen = load(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))["alive"];
-    @info "file loaded"
-
-    Icoils  = alive_screen[:Icoils];
+    Icoils = jldopen(joinpath(OUTDIR,"qm_screen_data.jld2") , "r") do fname
+        fname["meta/Icoils"]
+    end
     nI      = length(Icoils);
-    quantum_numbers = alive_screen[:levels];
+    quantum_numbers = jldopen(joinpath(OUTDIR,"qm_screen_data.jld2") , "r") do fname
+        fname["meta/levels"]
+    end
 
     # ATOMS PROPAGATION
     r = 1:1:nI;
@@ -772,7 +806,9 @@ else
     y_scr    = y_sg_out + y_SGToScreen
 
     anim = @animate for j in iter
-        data_set = alive_screen[:data][j][lvl];
+        data_set = jldopen(joinpath(OUTDIR,"qm_screen_data.jld2") , "r") do fname
+                    fname["screen/I$(j)"][lvl]
+        end
         n = Int(round(size(data_set, 1) / 10 )); 
         
         # --- preallocate arrays for histograms (scaled units) ---
@@ -929,11 +965,14 @@ else
         display(fig)
         savefig(fig, joinpath(OUTDIR,"QM_time_evolution_$(@sprintf("%02d", j)).$(FIG_EXT)"))
     end
-    gif_path = joinpath(OUTDIR, "QM_time_evolution.gif");
+    # gif_path = joinpath(OUTDIR, "QM_time_evolution.gif");
     # gif(anim, gif_path, fps=2)  # adjust fps
-    @info "Saved GIF" gif_path ;
+    # @info "Saved GIF" gif_path ;
     anim = nothing
     GC.gc()
+
+    alive_screen = load(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))["alive"];
+    @info "file loaded"
 
     nx_bins = 32 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
@@ -941,7 +980,7 @@ else
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
     
-    param_grid = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list))
+    param_grid = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list));
     
     clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list))
     line_styles = [:solid, :dash, :dot, :dashdot]
@@ -1014,7 +1053,7 @@ else
         yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
         size=(850, 650),
         rightmargin=5mm,
-        legend=:outerbottom,
+        legend=:outerright,
         legend_columns=length(nz_bins),
     )
     savefig(fig, joinpath(OUTDIR, "qm_profiles_f1_table_comparison_w_n.$(FIG_EXT)"))
