@@ -46,7 +46,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20260211" ;
+data_directory      = "20260213" ;
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
 data_summary_path = joinpath(@__DIR__, "analysis_data", data_directory)
@@ -1415,6 +1415,7 @@ println("EXPERIMENTAL ANALYSIS COMPLETED!")
 alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 
 
+
 nz = 2
 λ0 = 0.01
 
@@ -1432,6 +1433,17 @@ bb= jldopen(path, "r") do file
 end
 dd = jldopen(path, "r") do file
     file[JLD2_MyTools.make_keypath_exp(data_directory, nz, λ0)];
+end
+
+path_old = joinpath(@__DIR__, "analysis_data", "20260211", "20260211_report_summary.jld2");
+ii_old= jldopen(path_old, "r") do file
+    file["meta/Currents"];
+end
+bb_old = jldopen(path_old, "r") do file
+    file["meta/BzTesla"];
+end
+dd_old = jldopen(path_old, "r") do file
+    file[JLD2_MyTools.make_keypath_exp("20260211", nz, λ0)];
 end
 
 include("./Modules/TheoreticalSimulation.jl");
@@ -1477,13 +1489,23 @@ pretty_table(data_exp_scattered;
         equal_data_column_widths= true,)
 
 
-plot(ii[5:end], dd[:fw_F1_peak_pos][1][5:end],
-    yerr = dd[:fw_F1_peak_pos][2][5:end],
-    label="KK data",
+plot(ii[6:end], dd[:fw_F1_peak_pos][1][6:end],
+    yerr = dd[:fw_F1_peak_pos][2][6:end],
+    label="KK data: $(data_directory)",
     xlabel="Current (A)",
     ylabel=L"$F=1$ peak (mm)",
     seriestype=:scatter,
     marker=(:circle,2,:black),
+    xscale=:log10,
+    yscale=:log10,)
+plot!(ii_old[6:end], dd_old[:fw_F1_peak_pos][1][6:end],
+    yerr = dd[:fw_F1_peak_pos][2][6:end],
+    label="KK data: 20260211",
+    xlabel="Current (A)",
+    ylabel=L"$F=1$ peak (mm)",
+    seriestype=:scatter,
+    marker=(:circle,2,:blue),
+    markerstrokecolor=:blue,
     xscale=:log10,
     yscale=:log10,)
 plot!(data_exp_scattered[10:end,1], data_exp_scattered[10:end,3],
@@ -1494,12 +1516,12 @@ plot!(data_exp_scattered[10:end,1], data_exp_scattered[10:end,3],
     markerstrokecolor=:red,)
 plot!(Ic_QM_sim, zm_QM_sim,
     label=L"QM$(n_{z}=%$(nz),\lambda_{0}=%$(λ0))$",
-    line=(:solid,2, :blue),
+    line=(:solid,2, :green),
     legend=:bottomright)
 
 
-plot(bb[5:end], dd[:fw_F1_peak_pos][1][5:end],
-    yerr = dd[:fw_F1_peak_pos][2][5:end],
+plot(bb[6:end], dd[:fw_F1_peak_pos][1][6:end],
+    yerr = dd[:fw_F1_peak_pos][2][6:end],
     label="KK data",
     xlabel="Magnetic field (T)",
     ylabel=L"$F=1$ peak (mm)",
