@@ -734,9 +734,9 @@ gif(anim, gif_path, fps=2)  # adjust fps
 @info "Saved GIF" gif_path ;
 anim = nothing
 
-nz_bins_list = [1,2,4];
+nz_bins_list = [1,2];
 ls_list = [:solid,:dash,:dot];
-gaussian_width_mm_list = [0.010, 0.050, 0.065, 0.100, 0.150, 0.200, 0.275, 0.300, 0.400, 0.500];
+gaussian_width_mm_list = [0.010, 0.050, 0.100, 0.150, 0.200, 0.250, 0.300, 0.400, 0.500];
 zmax_gaussian_width = zeros(length(nz_bins_list),nI,length(gaussian_width_mm_list));
 for (jdx,nz) in enumerate(nz_bins_list)
     for (idx,val) in enumerate(gaussian_width_mm_list)
@@ -1087,7 +1087,7 @@ else
 
     nx_bins = 32 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
-    gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.100, 0.150, 0.200, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
+    gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.075, 0.100, 0.150, 0.200, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
   
