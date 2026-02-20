@@ -414,7 +414,7 @@ for dir_chosen in dir_list
     # sym_weight encourages symmetry of H around 0 (softly)
     # So H_est is your inferred “instrument + unmodelled physics” blur.
     H_est = ProfileFitTools.deconv_kernel(G, F, z_m;
-                        λ=1e-2, stepsize=5e-3, maxiter=50000,
+                        λ=1e-2, stepsize=8e-3, maxiter=50000,
                         nonneg=true, normalize=true,
                         sym_weight=1e-6)
     
