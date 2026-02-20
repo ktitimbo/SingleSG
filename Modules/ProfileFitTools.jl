@@ -1315,7 +1315,7 @@ function deconv_kernel(g::Vector{Float64}, k::Vector{Float64}, z::Vector{Float64
     # --- add these BEFORE the main loop (right after fprev is computed is fine) ---
     x_prev   = copy(x)                 # snapshot for step-size / movement diagnostics
     stall_ct = 0                       # consecutive “no progress” counter
-    stall_max = 5                      # stop after 5 consecutive stalls
+    stall_max = 3                      # stop after 5 consecutive stalls
 
     # thresholds (tune)
     tol_rel_obj = 1e-4                 # objective relative change threshold (per verbose check)
