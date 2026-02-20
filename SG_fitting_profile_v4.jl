@@ -980,7 +980,8 @@ norm_mode = :none ;
 
 nrange_z = 20001;
 
-dir_list = ["20250814" , "20250820" , "20250825" , "20250919" , "20251002" , "20251003", "20251006"]
+dir_list = ["20250814" , "20250820" , "20250825" , "20250919" , "20251002" , "20251003", "20251006","20260211","20260213"]
+dir_list = ["20260211","20260213"]
 
 hdr_top = Any[
     "Residuals",
@@ -1018,7 +1019,7 @@ for wanted_data_dir in dir_list
     end
 
     exp_data = load(joinpath(read_exp_info.directory,"profiles_mean.jld2"))["profiles"];
-    Ic_sampled = exp_data[:Icoils];
+    Ic_sampled = abs.(exp_data[:Icoils]);
     nI = length(Ic_sampled);
 
     chosen_currents_idx = [1]
@@ -1504,191 +1505,191 @@ function aic(y, yhat, k)
     return n*log(r/n) + 2k
 end
 
-dir_chosen = "20250820" ;
+dir_chosen = "20260211" ;
 
 for dir_chosen in dir_list
-data = dict[dir_chosen];
-p_baseline = Polynomial(data[3])
+    data = dict[dir_chosen];
+    p_baseline = Polynomial(data[3])
 
-z_range = data[4][:,1]
-data_exp = data[4][:,2]
-base_line = p_baseline.(z_range)
-data_exp_no_baseline = (data_exp .- base_line) 
-data_exp_normalized = data_exp_no_baseline./ data[2][1]
+    z_range = data[4][:,1]
+    data_exp = data[4][:,2]
+    base_line = p_baseline.(z_range)
+    data_exp_no_baseline = (data_exp .- base_line) 
+    data_exp_normalized = data_exp_no_baseline./ data[2][1]
 
-ΔL = y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen
-δslit = y_FurnaceToSlit
-z_m = 1e-3*z_range
-pdf_oven = unitbox_scaled(z_m, z_furnace*(ΔL-δslit)/δslit ; soft=true, ϵ=0.007)
-pdf_slit = unitbox_scaled(z_m, z_slit* ΔL/δslit ; soft=true, ϵ=0.007)
-Δz = mean(diff(z_m))   # in mm (or whatever your z units are)
-pdf_conv = conv_centered(pdf_oven, pdf_slit, Δz)
-pdf_conv ./= (sum(pdf_conv) * Δz)
+    ΔL = y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen
+    δslit = y_FurnaceToSlit
+    z_m = 1e-3*z_range
+    pdf_oven = unitbox_scaled(z_m, z_furnace*(ΔL-δslit)/δslit ; soft=true, ϵ=0.007)
+    pdf_slit = unitbox_scaled(z_m, z_slit* ΔL/δslit ; soft=true, ϵ=0.007)
+    Δz = mean(diff(z_m))   # in mm (or whatever your z units are)
+    pdf_conv = conv_centered(pdf_oven, pdf_slit, Δz)
+    pdf_conv ./= (sum(pdf_conv) * Δz)
 
-figA = plot(z_range, pdf_oven,
-label="Furnace",
-line=(:solid,2,:orangered2),
-xlabel=L"$z$ (mm)",
-xlims = (-1.5,1.5));
-plot!(figA, z_range, pdf_slit,
-line=(:dash,2,:darkgreen),
-label="Slit");
-display(figA)
-
-𝒢     = TheoreticalSimulation.GvsI(0.0)
-μ_eff = [TheoreticalSimulation.μF_effective(0.0, v[1], v[2], K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
-pdf_theory  = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
-                        μF, 𝒢, z_m, K39_params, effusion_params; pdf=:finite),
-                    +, μ_eff)
-pdf_theory ./= (sum(pdf_theory) * Δz)
-
-figB = plot(z_range, pdf_theory,
-    label="Profile at the screen",
-    line=(:black,1.5),
-    xlims=(-2,2)
-);
-plot!(figB, z_range, pdf_conv,
-    label="Conv(furnace,slit)",
-    line=(:dash,:orangered,1.2)
-);
-display(figB)
-
-figC = plot(z_range[1:8:end], data_exp[1:8:end],
-    seriestype=:scatter,
-    marker=(:circle,2,:white),
-    markerstrokecolor=:black,
-    label="Experimental data ($(dir_chosen))",
+    figA = plot(z_range, pdf_oven,
+    label="Furnace",
+    line=(:solid,2,:orangered2),
     xlabel=L"$z$ (mm)",
-    ylabel="Intensity (au)"
-);
-plot!(figC, z_range, base_line,
-    label=L"Baseline $P_{5}$",
-    line=(:dash,2,:red)
-);
-plot!(figC, z_range,  data_exp_no_baseline,
-    label="Data",
-    seriestype=:scatter,
-    marker=(:circle,2,:white),
-    markerstrokecolor=:gray25,
-);
-display(figC)
+    xlims = (-1.5,1.5));
+    plot!(figA, z_range, pdf_slit,
+    line=(:dash,2,:darkgreen),
+    label="Slit");
+    display(figA)
 
-figD = plot(z_range[1:8:end], data_exp_normalized[1:8:end],
-    seriestype=:scatter,
-    marker=(:circle,2,:white),
-    markerstrokecolor=:black,
-    label="Experimental data: normalized",
-    xlabel=L"$z$ (mm)",
-    ylabel="Intensity (au)"
-);
-plot!(figD, z_range, pdf_theory/maximum(pdf_theory),
-    label="Theoretical model",
-    line=(:dash,1.5,:orangered)
-);
-display(figD)
+    𝒢     = TheoreticalSimulation.GvsI(0.0)
+    μ_eff = [TheoreticalSimulation.μF_effective(0.0, v[1], v[2], K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
+    pdf_theory  = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
+                            μF, 𝒢, z_m, K39_params, effusion_params; pdf=:finite),
+                        +, μ_eff)
+    pdf_theory ./= (sum(pdf_theory) * Δz)
 
-G = max.(data_exp_normalized, 0.0)
-G ./= (sum(G) * Δz)
-F = pdf_theory
-F ./= (sum(F) * Δz)   # if F is meant as a PDF kernel too
+    figB = plot(z_range, pdf_theory,
+        label="Profile at the screen",
+        line=(:black,1.5),
+        xlims=(-2,2)
+    );
+    plot!(figB, z_range, pdf_conv,
+        label="Conv(furnace,slit)",
+        line=(:dash,:orangered,1.2)
+    );
+    display(figB)
 
-H_est = deconv_kernel(G, F, z_m;
-                      λ=1e-2, stepsize=1e-3, maxiter=8000,
-                      nonneg=true, normalize=true,
-                      sym_weight=1e-6)
-figE = plot(xlabel=L"$z$ (mm)")
-plot!(figE, z_range,G,
-    label="Experiment ($dir_chosen)",
-    seriestype=:scatter,
-    marker=(:circle,2,:white),
-    markerstrokecolor=:black,
-);
-plot!(figE, z_range,F,
-    label="Theoretical",
-    line=(:solid,2,:blue)
-);
-plot!(figE, z_range,H_est,
-    label="Blurring function",
-    line=(:solid,2,:forestgreen)
-);
-display(figE)
+    figC = plot(z_range[1:8:end], data_exp[1:8:end],
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:black,
+        label="Experimental data ($(dir_chosen))",
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)"
+    );
+    plot!(figC, z_range, base_line,
+        label=L"Baseline $P_{5}$",
+        line=(:dash,2,:red)
+    );
+    plot!(figC, z_range,  data_exp_no_baseline,
+        label="Data",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:gray25,
+    );
+    display(figC)
 
-LL = conv_centered(F, H_est, Δz)
-figF = plot(xlabel=L"$z$ (mm)");
-plot!(figF, z_range, G,
-    label="Experiment ($dir_chosen)",
-    seriestype=:scatter,
-    marker=(:circle,3,:white),
-    markerstrokewidth=0.2,
-    markerstrokecolor=:black
-);
-plot!(figF, z_range, LL,
-    label="Conv(Theory,Blurring)",
-    line=(:solid,1.3,:red)
-);
-display(figF)
+    figD = plot(z_range[1:8:end], data_exp_normalized[1:8:end],
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:black,
+        label="Experimental data: normalized",
+        xlabel=L"$z$ (mm)",
+        ylabel="Intensity (au)"
+    );
+    plot!(figD, z_range, pdf_theory/maximum(pdf_theory),
+        label="Theoretical model",
+        line=(:dash,1.5,:orangered)
+    );
+    display(figD)
 
-figG = plot(z_range, (LL .- G),
-    line=(:blue,3),
-    label="Residuals"
-);
-display(figG)
+    G = max.(data_exp_normalized, 0.0)
+    G ./= (sum(G) * Δz)
+    F = pdf_theory
+    F ./= (sum(F) * Δz)   # if F is meant as a PDF kernel too
 
-# U_est = deconv_smooth(G, pdf_slit, z_m; λ=1e-1, stepsize=1e-1, maxiter=2000,
-#                       nonneg=true, normalize=true)
-# plot(z_range,U_est)
+    H_est = deconv_kernel(G, F, z_m;
+                        λ=1e-2, stepsize=1e-3, maxiter=8000,
+                        nonneg=true, normalize=true,
+                        sym_weight=1e-6)
+    figE = plot(xlabel=L"$z$ (mm)")
+    plot!(figE, z_range,G,
+        label="Experiment ($dir_chosen)",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:black,
+    );
+    plot!(figE, z_range,F,
+        label="Theoretical",
+        line=(:solid,2,:blue)
+    );
+    plot!(figE, z_range,H_est,
+        label="Blurring function",
+        line=(:solid,2,:forestgreen)
+    );
+    display(figE)
 
-fitG = fit_gaussian(z_m, H_est)
-pG = coef(fitG)
+    LL = conv_centered(F, H_est, Δz)
+    figF = plot(xlabel=L"$z$ (mm)");
+    plot!(figF, z_range, G,
+        label="Experiment ($dir_chosen)",
+        seriestype=:scatter,
+        marker=(:circle,3,:white),
+        markerstrokewidth=0.2,
+        markerstrokecolor=:black
+    );
+    plot!(figF, z_range, LL,
+        label="Conv(Theory,Blurring)",
+        line=(:solid,1.3,:red)
+    );
+    display(figF)
 
-fitL = fit_lorentzian(z_m, H_est)
-pL = coef(fitL)
+    figG = plot(z_range, (LL .- G),
+        line=(:blue,3),
+        label="Residuals"
+    );
+    display(figG)
 
-fitPV = fit_pvoigt(z_m, H_est)
-pPV = coef(fitPV)
+    # U_est = deconv_smooth(G, pdf_slit, z_m; λ=1e-1, stepsize=1e-1, maxiter=2000,
+    #                       nonneg=true, normalize=true)
+    # plot(z_range,U_est)
 
-yhatG = gauss(z_m, pG)
-yhatL = lorentz(z_m, pL)
-yhatPV = pvoigt(z_m, pPV)
+    fitG = fit_gaussian(z_m, H_est)
+    pG = coef(fitG)
 
-@show rss(H_est, yhatG) aic(H_est, yhatG, 4)
-@show rss(H_est, yhatL) aic(H_est, yhatL, 4)
+    fitL = fit_lorentzian(z_m, H_est)
+    pL = coef(fitL)
 
-figH = plot(xlabel=L"$z$ (mm)",
-    xlims=(-2.5,2.5));
-plot!(figH, z_range, H_est,
-    label="Blurring function",
-    line=(:solid,1.8,:forestgreen)
-);
-plot!(figH, z_range, yhatG,
-    label=L"Gaussian fit $(\sigma_{w}=%$(round(1e6*pG[3];sigdigits=6)))\mathrm{\mu m}$",
-    line=(:dash,1.5,:purple)
-);
-display(figH)
-plot!(figH, z_range, yhatL,
-    label="Lorentzian fit",
-    line=(:dash,1.5,:pink)
-);
-plot!(figH, z_range, yhatPV,
-    label="Pseudo-Voigt fit",
-    line=(:dash,1.5,:dodgerblue3)
-);
-display(figH)
+    fitPV = fit_pvoigt(z_m, H_est)
+    pPV = coef(fitPV)
 
-HH = conv_centered(pdf_theory, yhatG, Δz)
-figI = plot(z_range, G,
-    label="Experiment ($(dir_chosen))",
-    seriestype=:scatter,
-    marker=(:circle,3,:white),
-    markerstrokewidth=0.2,
-    markerstrokecolor=:black
-);
-plot!(figI, z_range,HH,
-    label=L"Conv(Theory, Gauss($%$(round(1e6*pG[3];sigdigits=6))\mathrm{\mu m}$)",
-    line=(:red,2,:solid),
-    xlabel=L"$z$ (mm)",
-);
-display(figI)
+    yhatG = gauss(z_m, pG)
+    yhatL = lorentz(z_m, pL)
+    yhatPV = pvoigt(z_m, pPV)
+
+    @show rss(H_est, yhatG) aic(H_est, yhatG, 4)
+    @show rss(H_est, yhatL) aic(H_est, yhatL, 4)
+
+    figH = plot(xlabel=L"$z$ (mm)",
+        xlims=(-2.5,2.5));
+    plot!(figH, z_range, H_est,
+        label="Blurring function",
+        line=(:solid,1.8,:forestgreen)
+    );
+    plot!(figH, z_range, yhatG,
+        label=L"Gaussian fit $(\sigma_{w}=%$(round(1e6*pG[3];sigdigits=6)))\mathrm{\mu m}$",
+        line=(:dash,1.5,:purple)
+    );
+    display(figH)
+    plot!(figH, z_range, yhatL,
+        label="Lorentzian fit",
+        line=(:dash,1.5,:pink)
+    );
+    plot!(figH, z_range, yhatPV,
+        label="Pseudo-Voigt fit",
+        line=(:dash,1.5,:dodgerblue3)
+    );
+    display(figH)
+
+    HH = conv_centered(pdf_theory, yhatG, Δz)
+    figI = plot(z_range, G,
+        label="Experiment ($(dir_chosen))",
+        seriestype=:scatter,
+        marker=(:circle,3,:white),
+        markerstrokewidth=0.2,
+        markerstrokecolor=:black
+    );
+    plot!(figI, z_range,HH,
+        label=L"Conv(Theory, Gauss($%$(round(1e6*pG[3];sigdigits=6))\mathrm{\mu m}$)",
+        line=(:red,2,:solid),
+        xlabel=L"$z$ (mm)",
+    );
+    display(figI)
 
 end
 
