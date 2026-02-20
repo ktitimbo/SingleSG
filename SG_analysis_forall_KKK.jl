@@ -46,7 +46,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20260213" ;
+data_directory      = "20250814" ;
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
 data_summary_path = joinpath(@__DIR__, "analysis_data", data_directory)
@@ -142,9 +142,12 @@ else
 end
 data_processed = load(outfile_processed)["data"]
 
-plot(data_processed[:Currents], abs.(data_processed[:BzTesla]),
-    seriestype=:scatter,
-    xscale=:log10,)
+if haskey(data_processed, :BzTesla)
+    fig = plot(data_processed[:Currents], abs.(data_processed[:BzTesla]),
+        seriestype=:scatter,
+        xscale=:log10,)
+    display(fig)
+end
 
 Icoils  = data_processed[:Currents]
 ΔIcoils = data_processed[:CurrentsError]
@@ -1416,126 +1419,126 @@ alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 
 
 
-nz = 2
-λ0 = 0.01
+# nz = 2
+# λ0 = 0.01
 
-chosen_qm =  jldopen(data_qm_path,"r") do file
-    file[JLD2_MyTools.make_keypath_qm(nz,0.270, λ0)]
-end
-Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][11:end]
-zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][11:end]
+# chosen_qm =  jldopen(data_qm_path,"r") do file
+#     file[JLD2_MyTools.make_keypath_qm(nz,0.270, λ0)]
+# end
+# Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][11:end]
+# zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][11:end]
 
-ii= jldopen(path, "r") do file
-    file["meta/Currents"];
-end
-bb= jldopen(path, "r") do file
-    file["meta/BzTesla"];
-end
-dd = jldopen(path, "r") do file
-    file[JLD2_MyTools.make_keypath_exp(data_directory, nz, λ0)];
-end
+# ii= jldopen(path, "r") do file
+#     file["meta/Currents"];
+# end
+# bb= jldopen(path, "r") do file
+#     file["meta/BzTesla"];
+# end
+# dd = jldopen(path, "r") do file
+#     file[JLD2_MyTools.make_keypath_exp(data_directory, nz, λ0)];
+# end
 
-path_old = joinpath(@__DIR__, "analysis_data", "20260211", "20260211_report_summary.jld2");
-ii_old= jldopen(path_old, "r") do file
-    file["meta/Currents"];
-end
-bb_old = jldopen(path_old, "r") do file
-    file["meta/BzTesla"];
-end
-dd_old = jldopen(path_old, "r") do file
-    file[JLD2_MyTools.make_keypath_exp("20260211", nz, λ0)];
-end
+# path_old = joinpath(@__DIR__, "analysis_data", "20260211", "20260211_report_summary.jld2");
+# ii_old= jldopen(path_old, "r") do file
+#     file["meta/Currents"];
+# end
+# bb_old = jldopen(path_old, "r") do file
+#     file["meta/BzTesla"];
+# end
+# dd_old = jldopen(path_old, "r") do file
+#     file[JLD2_MyTools.make_keypath_exp("20260211", nz, λ0)];
+# end
 
-include("./Modules/TheoreticalSimulation.jl");
-include("./Modules/DataReading.jl");
-exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"];
-@info "Experimental data loaded"
-# 1. Fit spline for the experiment data
-data_experiment = Spline1D(
-    exp_avg[:i_smooth], 
-    exp_avg[:z_smooth], 
-    k=3, 
-    bc="extrapolate", 
-    s=0.0, 
-    w = 1 ./ exp_avg[:δz_smooth].^2
-);
-# xq and δxq from grouped data
-xq  = exp_avg[:Ic_grouped][:,1];
-δxq = exp_avg[:Ic_grouped][:,2];
-# 2. Spline derivative at xq : 
-# Evaluate derivative dz/dI at the grouped current points xq.
-# This is needed to propagate δI into δz via slope*δI.
-dyq = derivative(data_experiment, xq; nu=1);
-# 3. Interpolate δy uncertainty to xq
-err_spline = Spline1D(exp_avg[:i_smooth], exp_avg[:δz_smooth], k=3, bc="extrapolate");
-δy_interp = err_spline.(xq);   # # σ_z at xq
-# 4. Total propagated uncertainty σ_total = sqrt( (dz/dI * σ_I)^2 + σ_z(I)^2 )
-δyq = sqrt.( (dyq .* δxq).^2 .+ δy_interp.^2 );
-# Pack into a convenient table:
-# columns = [I, δI, z_spline(I), σ_total]
-data_exp_scattered = hcat(xq,δxq,data_experiment.(xq),δyq);
-pretty_table(data_exp_scattered;
-        alignment     = :c,
-        title         = @sprintf("EXPERIMENTAL DATA (scattered)"),
-        column_labels = ["Ic (A)","δIc (A)", "z (mm)", "δz (mm)"],
-        formatters    = ([fmt__printf("%1.3f", [1]),fmt__printf("%1.4f", [2]),fmt__printf("%1.3f", 3:4)]),
-        style         = TextTableStyle(
-                        first_line_column_label = crayon"yellow bold",
-                        table_border  = crayon"blue bold",
-                        column_label  = crayon"yellow bold",
-                        title = crayon"bold red"
-                        ),
-        table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-        equal_data_column_widths= true,)
-
-
-plot(ii[6:end], dd[:fw_F1_peak_pos][1][6:end],
-    yerr = dd[:fw_F1_peak_pos][2][6:end],
-    label="KK data: $(data_directory)",
-    xlabel="Current (A)",
-    ylabel=L"$F=1$ peak (mm)",
-    seriestype=:scatter,
-    marker=(:circle,2,:black),
-    xscale=:log10,
-    yscale=:log10,)
-plot!(ii_old[6:end], dd_old[:fw_F1_peak_pos][1][6:end],
-    yerr = dd[:fw_F1_peak_pos][2][6:end],
-    label="KK data: 20260211",
-    xlabel="Current (A)",
-    ylabel=L"$F=1$ peak (mm)",
-    seriestype=:scatter,
-    marker=(:circle,2,:blue),
-    markerstrokecolor=:blue,
-    xscale=:log10,
-    yscale=:log10,)
-plot!(data_exp_scattered[10:end,1], data_exp_scattered[10:end,3],
-    yerr = data_exp_scattered[10:end,4],
-    label="Xukun data",
-    seriestype=:scatter,
-    marker=(:circle,2,:white),
-    markerstrokecolor=:red,)
-plot!(Ic_QM_sim, zm_QM_sim,
-    label=L"QM$(n_{z}=%$(nz),\lambda_{0}=%$(λ0))$",
-    line=(:solid,2, :green),
-    legend=:bottomright)
+# include("./Modules/TheoreticalSimulation.jl");
+# include("./Modules/DataReading.jl");
+# exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"];
+# @info "Experimental data loaded"
+# # 1. Fit spline for the experiment data
+# data_experiment = Spline1D(
+#     exp_avg[:i_smooth], 
+#     exp_avg[:z_smooth], 
+#     k=3, 
+#     bc="extrapolate", 
+#     s=0.0, 
+#     w = 1 ./ exp_avg[:δz_smooth].^2
+# );
+# # xq and δxq from grouped data
+# xq  = exp_avg[:Ic_grouped][:,1];
+# δxq = exp_avg[:Ic_grouped][:,2];
+# # 2. Spline derivative at xq : 
+# # Evaluate derivative dz/dI at the grouped current points xq.
+# # This is needed to propagate δI into δz via slope*δI.
+# dyq = derivative(data_experiment, xq; nu=1);
+# # 3. Interpolate δy uncertainty to xq
+# err_spline = Spline1D(exp_avg[:i_smooth], exp_avg[:δz_smooth], k=3, bc="extrapolate");
+# δy_interp = err_spline.(xq);   # # σ_z at xq
+# # 4. Total propagated uncertainty σ_total = sqrt( (dz/dI * σ_I)^2 + σ_z(I)^2 )
+# δyq = sqrt.( (dyq .* δxq).^2 .+ δy_interp.^2 );
+# # Pack into a convenient table:
+# # columns = [I, δI, z_spline(I), σ_total]
+# data_exp_scattered = hcat(xq,δxq,data_experiment.(xq),δyq);
+# pretty_table(data_exp_scattered;
+#         alignment     = :c,
+#         title         = @sprintf("EXPERIMENTAL DATA (scattered)"),
+#         column_labels = ["Ic (A)","δIc (A)", "z (mm)", "δz (mm)"],
+#         formatters    = ([fmt__printf("%1.3f", [1]),fmt__printf("%1.4f", [2]),fmt__printf("%1.3f", 3:4)]),
+#         style         = TextTableStyle(
+#                         first_line_column_label = crayon"yellow bold",
+#                         table_border  = crayon"blue bold",
+#                         column_label  = crayon"yellow bold",
+#                         title = crayon"bold red"
+#                         ),
+#         table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+#         equal_data_column_widths= true,)
 
 
-plot(bb[6:end], dd[:fw_F1_peak_pos][1][6:end],
-    yerr = dd[:fw_F1_peak_pos][2][6:end],
-    label="KK data",
-    xlabel="Magnetic field (T)",
-    ylabel=L"$F=1$ peak (mm)",
-    seriestype=:scatter,
-    marker=(:circle,2,:black),
-    xscale=:log10,
-    yscale=:log10,)
-# plot!(TheoreticalSimulation.BvsI.(data_exp_scattered[10:end,1]), data_exp_scattered[10:end,3],
+# plot(ii[6:end], dd[:fw_F1_peak_pos][1][6:end],
+#     yerr = dd[:fw_F1_peak_pos][2][6:end],
+#     label="KK data: $(data_directory)",
+#     xlabel="Current (A)",
+#     ylabel=L"$F=1$ peak (mm)",
+#     seriestype=:scatter,
+#     marker=(:circle,2,:black),
+#     xscale=:log10,
+#     yscale=:log10,)
+# plot!(ii_old[6:end], dd_old[:fw_F1_peak_pos][1][6:end],
+#     yerr = dd[:fw_F1_peak_pos][2][6:end],
+#     label="KK data: 20260211",
+#     xlabel="Current (A)",
+#     ylabel=L"$F=1$ peak (mm)",
+#     seriestype=:scatter,
+#     marker=(:circle,2,:blue),
+#     markerstrokecolor=:blue,
+#     xscale=:log10,
+#     yscale=:log10,)
+# plot!(data_exp_scattered[10:end,1], data_exp_scattered[10:end,3],
 #     yerr = data_exp_scattered[10:end,4],
 #     label="Xukun data",
 #     seriestype=:scatter,
 #     marker=(:circle,2,:white),
 #     markerstrokecolor=:red,)
-plot!(TheoreticalSimulation.BvsI.(Ic_QM_sim), zm_QM_sim,
-    label=L"QM$(n_{z}=%$(nz),\lambda_{0}=%$(λ0))$",
-    line=(:solid,2, :blue),
-    legend=:bottomright)
+# plot!(Ic_QM_sim, zm_QM_sim,
+#     label=L"QM$(n_{z}=%$(nz),\lambda_{0}=%$(λ0))$",
+#     line=(:solid,2, :green),
+#     legend=:bottomright)
+
+
+# plot(bb[6:end], dd[:fw_F1_peak_pos][1][6:end],
+#     yerr = dd[:fw_F1_peak_pos][2][6:end],
+#     label="KK data",
+#     xlabel="Magnetic field (T)",
+#     ylabel=L"$F=1$ peak (mm)",
+#     seriestype=:scatter,
+#     marker=(:circle,2,:black),
+#     xscale=:log10,
+#     yscale=:log10,)
+# # plot!(TheoreticalSimulation.BvsI.(data_exp_scattered[10:end,1]), data_exp_scattered[10:end,3],
+# #     yerr = data_exp_scattered[10:end,4],
+# #     label="Xukun data",
+# #     seriestype=:scatter,
+# #     marker=(:circle,2,:white),
+# #     markerstrokecolor=:red,)
+# plot!(TheoreticalSimulation.BvsI.(Ic_QM_sim), zm_QM_sim,
+#     label=L"QM$(n_{z}=%$(nz),\lambda_{0}=%$(λ0))$",
+#     line=(:solid,2, :blue),
+#     legend=:bottomright)
