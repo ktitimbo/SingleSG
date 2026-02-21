@@ -159,7 +159,6 @@ hdr_top = Any[
 ];
 hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * ProfileFitTools.sub(k) for k in 0:P_DEGREE]);
 
-
 for wanted_data_dir in dir_list
     # wanted_data_dir = dir_list[1]
 
@@ -312,11 +311,11 @@ for dir_chosen in dir_list
     data = dict[dir_chosen]
     p_baseline = Polynomial(data[3]); # background polynomial
 
-    z_range = data[4][:,1];     # z-values
-    data_exp = data[4][:,2];    # interpolated experiment evaluated in the given z
+    z_range   = data[4][:,1];     # z-values
+    data_exp  = data[4][:,2];    # interpolated experiment evaluated in the given z
     base_line = p_baseline.(z_range);   # evaluate the background polynomial at z
     data_exp_no_baseline = (data_exp .- base_line);     # experiment minus background
-    data_exp_normalized = data_exp_no_baseline ./ data[2][1]; # normalized profile
+    data_exp_normalized  = data_exp_no_baseline ./ data[2][1]; # normalized profile
 
     ΔL      = y_FurnaceToSlit + y_SlitToSG + y_SG + y_SGToScreen
     δslit   = y_FurnaceToSlit
@@ -519,7 +518,7 @@ for dir_chosen in dir_list
     results_dict[dir_chosen] = (
     current_A      = data[1],
     blurrGwidth_um = 1e6 * pG[3],
-    zmax_mm        = TheoreticalSimulation.max_of_bspline_positions(z_range, HH ; λ0=0.001)
+    zmax_mm        = TheoreticalSimulation.max_of_bspline_positions(z_range, HH ; λ0=0.001)[1][1]
     )
 
 
@@ -659,9 +658,12 @@ for dir_chosen in dir_list
     # plot(z_m, resid, label="residual")
 end
 
+jldopen(joinpath(OUTDIR,"blur_conv.jld2"), "w") do f
+    f["convolution"]    = results_dict
+end
+
 T_END = Dates.now()
 T_RUN = Dates.canonicalize(T_END-T_START)
-
 
 report = """
 ***************************************************
@@ -674,6 +676,7 @@ EXPERIMENT
 EXPERIMENT ANALYSIS PROPERTIES    
     Analysis Binning            : $(wanted_binning)
     Analysis spline smoothing   : $(wanted_smooth)
+    Analysis directories        : $(dir_list)
 
 CAMERA FEATURES
     Number of pixels            : $(nx_pixels) × $(nz_pixels)
@@ -698,7 +701,7 @@ CODE
 println(report)
 
 # Save to file
-open(joinpath(OUTDIR,"analysis_report.txt"), "w") do io
+open(joinpath(OUTDIR,"convolution_report.txt"), "w") do io
     write(io, report)
 end
 
