@@ -13,13 +13,22 @@ module DataReading
     (default `"2025"`).
 
     Keyword arguments
-    - `hint`: string that folder names must start with (default `"2025"`).
+    - `hint`: string that folder names must start with (default `"2025"`) or 
+    a collection of strings (e.g. `["2025","2026"]`).
     """
-    function folder_read(parent::AbstractString; hint::AbstractString="2025")
-        flds = filter(f -> isdir(joinpath(parent, f)) && startswith(f, hint), readdir(parent))
-        sort!(flds)
-        return flds
+function folder_read(parent::AbstractString; hint=["2025","2026"])
+
+    # normalize → always work with a vector of prefixes
+    hints = hint isa AbstractString ? (hint,) : Tuple(hint)
+
+    flds = filter(readdir(parent)) do f
+        isdir(joinpath(parent, f)) &&
+        any(h -> startswith(f, h), hints)
     end
+
+    sort!(flds)
+    return flds
+end
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2) Parse report.txt → (binning::Union{Int,Missing}, smoothing::Union{Float64,Missing})
