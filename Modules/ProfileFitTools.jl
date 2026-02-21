@@ -116,6 +116,91 @@ function normalize_pdf!(y::AbstractVector, Δz; nonneg::Bool=true)
 end
 
 """
+    mean_rms_width(z, y, Δz)
+
+Compute the mean position and RMS width of a 1D distribution.
+
+Given a sampled profile `y(z)`, this function interprets the data as a
+(non-necessarily normalized) density and returns
+
+    μ  = ∫ z p(z) dz
+    σ  = sqrt( ∫ (z - μ)² p(z) dz )
+
+where `p(z)` is the normalized nonnegative version of `y`.
+
+---------------------------------------------------------------------------
+Algorithm
+---------------------------------------------------------------------------
+
+1. Negative values are clipped:
+       y₂ = max(y, 0)
+
+   This suppresses numerical artifacts such as noise, interpolation
+   oscillations, or deconvolution ringing.
+
+2. The profile is normalized:
+       p(z) = y₂ / ∫ y₂ dz
+
+3. Mean and variance are computed using discrete quadrature with spacing `Δz`.
+
+---------------------------------------------------------------------------
+Arguments
+---------------------------------------------------------------------------
+
+- `z::AbstractVector`
+    Spatial grid.
+
+- `y::AbstractVector`
+    Profile values (normalization not required).
+
+- `Δz::Real`
+    Grid spacing used for numerical integration.
+
+---------------------------------------------------------------------------
+Returns
+---------------------------------------------------------------------------
+
+- `(μ, σ)::Tuple{Float64,Float64}`
+
+    μ : mean (centroid) position  
+    σ : RMS width (standard deviation)
+
+Both are expressed in the same units as `z`.
+
+---------------------------------------------------------------------------
+Physical interpretation
+---------------------------------------------------------------------------
+
+The centroid μ detects small alignment or centering shifts, while σ
+quantifies spatial broadening. For approximately Gaussian kernels,
+
+    σ²(F ⊗ H) ≈ σ²(F) + σ²(H),
+
+making σ particularly useful for estimating effective blur widths in
+transport and imaging problems such as Stern–Gerlach beam propagation.
+
+---------------------------------------------------------------------------
+Notes
+---------------------------------------------------------------------------
+
+• Assumes approximately uniform spacing in `z`.
+
+• Safe for partially negative inputs (values are clipped).
+
+• Recommended diagnostic before and after deconvolution to distinguish
+  centering errors from genuine broadening.
+"""
+function mean_rms_width(z, y, Δz)
+    y2 = max.(y, 0.0)
+    y2 ./= sum(y2) * Δz
+
+    μ = sum(z .* y2) * Δz
+    σ = sqrt(sum(((z .- μ).^2) .* y2) * Δz)
+
+    return μ, σ
+end
+
+"""
     std_sample(a, N)
 
 Compute the factor
@@ -1312,7 +1397,6 @@ function deconv_kernel(g::Vector{Float64}, k::Vector{Float64}, z::Vector{Float64
     fprev = local_objective(x)
     return_meta && push!(obj_trace, fprev)
 
-    # --- add these BEFORE the main loop (right after fprev is computed is fine) ---
     x_prev   = copy(x)                 # snapshot for step-size / movement diagnostics
     stall_ct = 0                       # consecutive “no progress” counter
     stall_max = 3                      # stop after 5 consecutive stalls
@@ -1364,14 +1448,6 @@ function deconv_kernel(g::Vector{Float64}, k::Vector{Float64}, z::Vector{Float64
         # project
         local_project!(x)
 
-        # if verbose_every > 0 && (it % verbose_every == 0)
-        #     fnow = local_objective(x)
-        #     rel = abs(fnow - fprev) / max(fprev, 1e-12)
-        #     @printf("iter %5d | obj=%.6g | relΔ=%.3g\n", it, fnow, rel)
-        #     fprev = fnow
-        #     return_meta && push!(obj_trace, fnow)
-        # end
-        # --- replace your existing verbose block with THIS ---
         if verbose_every > 0 && (it % verbose_every == 0)
 
             # Objective and relative improvement
@@ -1413,7 +1489,7 @@ function deconv_kernel(g::Vector{Float64}, k::Vector{Float64}, z::Vector{Float64
             end
 
             @printf(
-                "iter %7d | obj=%.6g | relΔobj=%.3g | relΔx=%.3g | data=%.6g | reg=%.6g | sym=%.6g\n",
+                "iter %7d | obj=%.3g | relΔobj=%.3g | relΔx=%.3g | data=%.3g | reg=%.3g | sym=%.3g\n",
                 it, fnow, rel_obj, rel_x, data_term, reg_term, sym_term
             )
 
@@ -1550,14 +1626,264 @@ function aic(y, yhat, k)
     return n*log(r/n) + 2k
 end
 
+"""
+    sg_width_diagnostic(z, G, F, Δz)
+
+Compute a Stern–Gerlach width diagnostic comparing experimental (`G`)
+and theoretical (`F`) profiles.
+
+Returns centroid shift and excess variance:
+
+    Δμ  = μ_G - μ_F
+    Δσ² = σ_G² - σ_F²
+
+where μ and σ are computed from normalized nonnegative versions
+of the profiles.
+
+---------------------------------------------------------------------------
+Returns
+---------------------------------------------------------------------------
+
+NamedTuple with fields:
+
+- `Δμ`      : centroid shift
+- `Δσ²`     : excess variance
+- `μG, μF`  : centroids
+- `σG, σF`  : RMS widths
+
+---------------------------------------------------------------------------
+Physical interpretation
+---------------------------------------------------------------------------
+
+Δμ ≠ 0     → misalignment, timing offset, or magnetic-field bias  
+Δσ² > 0    → additional blur beyond theoretical prediction  
+Δσ² ≈ 0    → theory already explains observed width
+
+For approximately Gaussian kernels:
+
+    σ_H ≈ sqrt(max(Δσ², 0))
+
+estimates the effective blur width.
+"""
+function sg_width_diagnostic(z, G, F, Δz)
+
+    μG, σG = mean_rms_width(z, G, Δz)
+    μF, σF = mean_rms_width(z, F, Δz)
+
+    Δμ  = μG - μF
+    Δσ2 = σG^2 - σF^2
+
+    return (
+        Δμ = Δμ,
+        Δσ² = Δσ2,
+        μG = μG,
+        μF = μF,
+        σG = σG,
+        σF = σF
+    )
+end
+
+"""
+    fit_mixture_blur(G, F, z;
+                     ε0=0.5,
+                     nouter=12,
+                     λ=1e-2, stepsize=1e-1, maxiter=4000,
+                     sym_weight=0.0)
+
+Estimate a *mixture blur model* describing experimental data as a combination
+of an ideal theoretical profile and a blurred component.
+
+The model assumes
+
+    G(z) ≈ (1 - ε) F(z) + ε (F ⊗ H)(z),
+
+where
+
+- `G(z)` : measured (experimental) profile,
+- `F(z)` : theoretical or reference profile,
+- `H(z)` : unknown nonnegative blurring kernel,
+- `ε ∈ (0,1)` : fraction of the signal affected by blur,
+- `⊗` denotes centered convolution.
+
+Physically, this model represents a situation where only a fraction of the
+particles (or signal) undergo additional broadening mechanisms
+(e.g. scattering, diffuse reflections, imperfect transport, or background
+processes), while the remaining fraction follows the ideal prediction.
+
+---------------------------------------------------------------------------
+Algorithm
+---------------------------------------------------------------------------
+
+The estimation is performed by alternating optimization:
+
+1. **Blur-only target construction**
+
+       T ≈ (G - (1-ε)F) / ε
+
+   which isolates the component expected to satisfy
+
+       T ≈ F ⊗ H.
+
+2. **Kernel estimation**
+
+   The blur kernel `H` is recovered via regularized constrained
+   deconvolution (`deconv_kernel`) enforcing
+
+       H ≥ 0,      ∫ H dz = 1,
+
+   together with optional smoothness (`λ`) and symmetry penalties.
+
+3. **Mixture-weight update**
+
+   With `H` fixed, the optimal ε minimizing
+
+       || G - [(1-ε)F + ε(F⊗H)] ||₂²
+
+   is computed analytically by least squares.
+
+These steps are repeated `nouter` times.
+
+---------------------------------------------------------------------------
+Inputs
+---------------------------------------------------------------------------
+
+- `G::Vector{Float64}` :
+    Experimental profile sampled on grid `z`.
+
+- `F::Vector{Float64}` :
+    Theoretical/reference profile defined on the same grid.
+
+- `z::Vector{Float64}` :
+    Spatial grid (assumed approximately uniform).
+
+---------------------------------------------------------------------------
+Keyword Arguments
+---------------------------------------------------------------------------
+
+- `ε0` :
+    Initial guess for blur fraction ε.
+
+- `nouter` :
+    Number of outer alternating iterations.
+
+- `λ` :
+    Smoothness regularization strength passed to `deconv_kernel`.
+
+- `stepsize`, `maxiter` :
+    Optimization parameters for the inner deconvolution.
+
+- `sym_weight` :
+    Optional symmetry penalty encouraging `H(z) ≈ H(-z)`.
+
+---------------------------------------------------------------------------
+Returns
+---------------------------------------------------------------------------
+
+`(ε, H, recon, resid)`
+
+- `ε` :
+    Estimated blurred fraction.
+
+- `H` :
+    Recovered normalized blur kernel.
+
+- `recon` :
+    Reconstructed profile
+        (1-ε)F + ε(F ⊗ H).
+
+- `resid` :
+    Reconstruction residual `recon - G`.
+
+---------------------------------------------------------------------------
+Interpretation
+---------------------------------------------------------------------------
+
+- ε ≈ 0 :
+    Data is well described by the ideal model `F`.
+
+- ε ≈ 1 :
+    Entire signal behaves as a blurred version of `F`
+    (reduces to standard deconvolution).
+
+- 0 < ε < 1 :
+    Evidence for coexistence of ballistic/ideal and
+    broadened populations.
+
+---------------------------------------------------------------------------
+Notes
+---------------------------------------------------------------------------
+
+• Inputs are internally normalized to unit area for numerical stability.
+
+• This procedure is an alternating least-squares approximation rather than a
+  full probabilistic EM algorithm, but is typically robust and efficient.
+
+• Residual structure after fitting usually indicates model mismatch
+  (centering errors, incorrect geometry, or missing physics) rather than
+  insufficient convergence.
+
+The measured profile is modeled as a superposition of two transport channels: 
+an ideal population that follows the predicted Stern–Gerlach evolution and 
+a second population that undergoes additional stochastic broadening. Mathematically,
+
+𝐺(𝑧) ≈ (1−𝜀)𝐹(𝑧)+𝜀(𝐹⊗𝐻)(𝑧),
+
+where 
+F(z) is the theoretically expected distribution at the screen and 
+H(z) represents an effective blurring kernel describing unresolved physical processes. The parameter 
+ε quantifies the fraction of particles affected by these processes.
+
+In this picture, 
+H does not correspond to a single microscopic interaction but rather to an effective 
+transport response function, incorporating mechanisms such as diffuse scattering at 
+apertures, imperfect collimation, residual collisions, or alignment fluctuations. 
+The mixture model therefore separates intrinsic Stern–Gerlach dynamics (contained in F) 
+from additional experimental broadening, allowing the relative weight and spatial scale 
+of non-ideal transport effects to be quantified directly from the data.
+"""
+function fit_mixture_blur(G, F, z;
+                          ε0=0.5,
+                          nouter=12,
+                          λ=1e-2, stepsize=5e-2, maxiter=50000,
+                          sym_weight=1e-6)
+
+    Δz = mean(diff(z))
+    # normalize to area 1 (you said they already are, but keep safe)
+    G = copy(G); F = copy(F)
+    G ./= sum(G)*Δz
+    F ./= sum(F)*Δz
+
+    ε = clamp(ε0, 1e-3, 1-1e-3)
+    H = fill(0.0, length(G))
+    H[length(G)÷2] = 1/Δz   # delta-ish init then normalized by projection inside deconv
+
+    for t in 1:nouter
+        # build "blur-only target":  (G - (1-ε)F)/ε  ≈ F*H
+        T = (G .- (1-ε).*F) ./ ε
+        # (do NOT clip hard; let solver handle it via nonneg projection)
+        H = deconv_kernel(T, F, z;
+                          λ=λ, stepsize=stepsize, maxiter=maxiter,
+                          nonneg=true, normalize=true,
+                          sym_weight=sym_weight,
+                          verbose_every=0)
+
+        FH = conv_centered(F, H, Δz)
+        # update ε by least squares on G ≈ F + ε(FH - F)
+        d = FH .- F
+        num = sum((G .- F) .* d) * Δz
+        den = sum(d .* d) * Δz + 1e-18
+        ε = clamp(num/den, 1e-3, 1-1e-3)
+
+        @printf("outer %2d | ε=%.4f\n", t, ε)
+    end
+
+    Δz = mean(diff(z))
+    recon = (1-ε).*F .+ ε .* conv_centered(F, H, Δz)
+    resid = recon .- G
+    return ε, H, recon, resid
+end
+
+
 ########### END COPY ###########
-
-
-
-
-
-
-
-
 
 end # module
