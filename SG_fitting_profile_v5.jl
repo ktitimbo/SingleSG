@@ -37,7 +37,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 @info "Julia threads" count = Threads.nthreads()
 # Set the working directory to the current location
 cd(@__DIR__) ;
-const OUTDIR    = joinpath(@__DIR__, "data_studies", RUN_STAMP);
+const OUTDIR    = joinpath(@__DIR__, "data_studies", "CONV"*RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 # General setup
@@ -126,8 +126,6 @@ TheoreticalSimulation.default_y_SG              = y_SG;
 TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
 TheoreticalSimulation.default_R_tube            = R_tube;
 
-
-
 # Select experimental data
 dict = OrderedDict{String, Tuple{
     Float64,           # Ic[lower]
@@ -147,7 +145,12 @@ norm_mode = :none ;
 
 nrange_z = 20001;
 
-dir_list = ["20250814" , "20250820" , "20250825" , "20250919" , "20251002" , "20251003", "20251006","20260211","20260213"]
+dir_list = [
+    "20250814" , "20250820" , "20250825" , 
+    "20250919" , 
+    "20251002" , "20251003", "20251006",
+    "20260211" , "20260213"
+]
 
 hdr_top = Any[
     "Residuals",
@@ -296,8 +299,6 @@ jldopen(joinpath(OUTDIR,"baseline_results_P$(P_DEGREE).jld2"), "w") do f
     f["meta/Pdegree"]   = P_DEGREE
 end
 
-
-
 # dir_chosen = "20260211" ;
 results_dict = Dict{Any,NamedTuple}()
 # For each dataset
@@ -336,11 +337,11 @@ for dir_chosen in dir_list
     plot!(figA, z_range, pdf_slit,
     line=(:dash,2,:darkgreen),
     label="Slit");
-    plot!(title="Theoretical")
+    plot!(title="Theoretical");
     display(figA)
 
-    𝒢     = TheoreticalSimulation.GvsI(0*data[1])
-    μ_eff = [TheoreticalSimulation.μF_effective(0*data[1], v[1], v[2], K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
+    𝒢     = TheoreticalSimulation.GvsI(data[1])
+    μ_eff = [TheoreticalSimulation.μF_effective(data[1], v[1], v[2], K39_params) for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
     pdf_theory  = mapreduce(μF -> TheoreticalSimulation.getProbDist_v3(
                             μF, 𝒢, z_m, K39_params, effusion_params; pdf=:finite),
                         +, μ_eff)
@@ -356,7 +357,7 @@ for dir_chosen in dir_list
         label="Conv(furnace,slit)",
         line=(:dash,:orangered,1.2)
     );
-    plot!(title="Simulation & Model")
+    plot!(title="Simulation & Model");
     display(figB)
 
     # raw exp + baseline + baseline-subtracted
@@ -378,7 +379,7 @@ for dir_chosen in dir_list
         marker=(:circle,2,:white),
         markerstrokecolor=:gray25,
     );
-    plot!(title="Experiment & background")
+    plot!(title="Experiment & background");
     display(figC)
 
     # normalized exp vs normalized theory
@@ -386,13 +387,14 @@ for dir_chosen in dir_list
         seriestype=:scatter,
         marker=(:circle,2,:white),
         markerstrokecolor=:black,
-        label="Experimental data: normalized",
+        label="Experimental data ($(dir_chosen)): normalized",
         xlabel=L"$z$ (mm)",
         ylabel="Intensity (au)"
     );
     plot!(figD, z_range, pdf_theory/maximum(pdf_theory),
         label="Theoretical model",
-        line=(:dash,1.5,:orangered)
+        line=(:dash,1.5,:orangered),
+        legend=:outerbottom,
     );
     display(figD)
 
@@ -414,8 +416,9 @@ for dir_chosen in dir_list
     # sym_weight encourages symmetry of H around 0 (softly)
     # So H_est is your inferred “instrument + unmodelled physics” blur.
     H_est = ProfileFitTools.deconv_kernel(G, F, z_m;
-                        λ=1e-2, stepsize=1e-2, maxiter=50000,
+                        λ=1e-2, stepsize=1e-2, 
                         nonneg=true, normalize=true,
+                        maxiter=50000, verbose_every = 5000,
                         sym_weight=1e-6)
     
     figE = plot(xlabel=L"$z$ (mm)")
@@ -437,8 +440,8 @@ for dir_chosen in dir_list
     display(figE)
 
     # Validate the deconvolution by reconvolution
-    # LL = F ⊗ H : Conv(theory,Smoothing)
-    LL = ProfileFitTools.conv_centered(F, H_est, Δz)
+    # signal_predicted = F ⊗ H : Conv(theory,Smoothing)
+    signal_predicted = ProfileFitTools.conv_centered(F, H_est, Δz);
     figF = plot(xlabel=L"$z$ (mm)");
     plot!(figF, z_range, G,
         label="Experiment ($dir_chosen)",
@@ -447,44 +450,37 @@ for dir_chosen in dir_list
         markerstrokewidth=0.2,
         markerstrokecolor=:black
     );
-    plot!(figF, z_range, LL,
+    plot!(figF, z_range, signal_predicted,
         label="Conv(Theory,Blurring)",
         line=(:solid,1.3,:red)
     );
     display(figF)
 
-    # Residuals
-    figG = plot(z_range, (LL .- G),
-        line=(:blue,3),
-        label="Residuals"
-    );
-    display(figG)
-
     # Fit parametric shapes to the inferred blur kernel H_est
-    fitG = ProfileFitTools.fit_gaussian(z_m, H_est)
+    fitG = ProfileFitTools.fit_gaussian(z_m, H_est);
     pG   = coef(fitG)
 
-    fitL = ProfileFitTools.fit_lorentzian(z_m, H_est)
+    fitL = ProfileFitTools.fit_lorentzian(z_m, H_est);
     pL   = coef(fitL)
 
-    fitPV = ProfileFitTools.fit_pvoigt(z_m, H_est)
+    fitPV = ProfileFitTools.fit_pvoigt(z_m, H_est);
     pPV   = coef(fitPV)
 
-    yhatG  = ProfileFitTools.gauss(z_m, pG)
-    yhatL  = ProfileFitTools.lorentz(z_m, pL)
-    yhatPV = ProfileFitTools.pvoigt(z_m, pPV)
+    yhatG  = ProfileFitTools.gauss(z_m, pG);
+    yhatL  = ProfileFitTools.lorentz(z_m, pL);
+    yhatPV = ProfileFitTools.pvoigt(z_m, pPV);
 
-    @info "Gaussian"
+    @info "Gaussian fitting statistics"
     @show  ProfileFitTools.rss(H_est, yhatG) ProfileFitTools.aic(H_est, yhatG, 4);
-    @info "Lorentzian"
+    @info "Lorentzian fitting statistics"
     @show ProfileFitTools.rss(H_est, yhatL) ProfileFitTools.aic(H_est, yhatL, 4);
-    @info "PseudoVoigt"
+    @info "PseudoVoigt fitting statistics"
     @show ProfileFitTools.rss(H_est, yhatPV) ProfileFitTools.aic(H_est, yhatPV, 6);
 
     figH = plot(xlabel=L"$z$ (mm)",
         xlims=(-2.5,2.5));
     plot!(figH, z_range, H_est,
-        label="Blurring function",
+        label="Blurring function for $(dir_chosen)",
         line=(:solid,1.8,:forestgreen)
     );
     plot!(figH, z_range, yhatG,
@@ -518,9 +514,7 @@ for dir_chosen in dir_list
         xlims=(-3,3),
     );
     display(figI)
-
-    
-    
+ 
     # --- store results ---
     results_dict[dir_chosen] = (
     current_A      = data[1],
@@ -528,142 +522,142 @@ for dir_chosen in dir_list
     zmax_mm        = TheoreticalSimulation.max_of_bspline_positions(z_range, HH ; λ0=0.001)
     )
 
-    function gaussian_fixed_sigma(σ;A)
 
-        model(x, p) = @. A * exp(-0.5*((x - p[2]) / σ)^2) + 0*p[3]
+    # ============================================================
+    # Diagnostics for convolution/deconvolution pipeline
+    #   Goal:
+    #     - Check reconstruction error:      (signal_predicted - G)
+    #     - Check subtle centering shifts:   compare cumulative integrals (CDF-like)
+    #
+    #   Definitions (your notation):
+    #     G      : experimental profile without baseline (as PDF)
+    #     F      : theoretical profile (as PDF)
+    #     H_est  : estimated blur kernel (as PDF)
+    #     signal_predicted     : reconstructed profile = F ⊗ H_est
+    #
+    #   Assumptions:
+    #     - z_m is your z-grid (meters) with ~uniform spacing
+    #     - Δz = mean(diff(z_m))
+    #     - ProfileFitTools.conv_centered implements centered "same" convolution
+    # ============================================================
+    @info "Running diagnostic"
+    # ----------------------------
+    # 1) Ensure G, F, H_est are PDFs on the same grid
+    # ----------------------------
+    Gpdf = copy(G);
+    Fpdf = copy(F);
+    Hpdf = copy(H_est);
 
-        return model
-    end
+    ProfileFitTools.normalize_pdf!(Gpdf, Δz; nonneg=true);
+    ProfileFitTools.normalize_pdf!(Fpdf, Δz; nonneg=true);
+    ProfileFitTools.normalize_pdf!(Hpdf, Δz; nonneg=true);
 
-    model = gaussian_fixed_sigma(pG[3]; A=maximum(data_exp_no_baseline))
-    final_fit = LsqFit.curve_fit(model, z_m, data_exp_no_baseline, [maximum(data_exp_no_baseline), 0.0, 0.0]);
-    pp = coef(final_fit)
-    yhat = model(z_m,pp)
+    @show sum(Gpdf)*Δz sum(Fpdf)*Δz sum(Hpdf)*Δz;
 
-    figJ = plot(z_range, data_exp_no_baseline,
-        label="Exp–Bgd : $(dir_chosen)",
-        line=(:solid,2,:black))
-    plot!(z_range, yhat,
-        label=L"Gaussian fit ($A=%$(round(pp[1]; digits=2))$, $\sigma_{w}=%$(round(1e6*pG[3];digits=2))\mathrm{\mu m}$, $z_{0} = %$(round(1e6*pp[2];digits=2))\mathrm{\mu m}$, $c_{\mathrm{off}}=%$(round(pp[3];digits=2))$)")
-    plot!(xlabel=L"$z$ (mm)",
-        ylabel = "au",
-        legend=:outerbottom,
-    )
-    display(figJ)
+    # ----------------------------
+    # 2) Forward reconstruction: LL = F ⊗ H
+    # ----------------------------
+    LL = ProfileFitTools.conv_centered(Fpdf, Hpdf, Δz);
+    LL = ProfileFitTools.normalize_pdf!(LL, Δz; nonneg=true);  # keep it a PDF for fair comparisons
+
+    # ----------------------------
+    # 3) Residual diagnostic: (LL - G)
+    #     - If residual shows oscillations: deconv/regularization issues
+    #     - If residual shows antisymmetry / systematic sign change: centering shift
+    # ----------------------------
+    res = LL .- Gpdf
+
+    fig_res = plot(
+        z_range, res,
+        xlabel = L"$z$ (mm)",
+        label  = "Residual",
+        line   = (:blue, 2),
+    );
+    fig_abs = plot(
+        z_range, abs.(res),
+        xlabel = L"$z$ (mm)",
+        label  = "|Residual|",
+        line   = (:black, 2),
+    );
+    plot(fig_res, fig_abs,
+        suptitle="Residual reconstruction",
+        layour=(1,2))
+
+    # ----------------------------
+    # 4) Cumulative integral diagnostic (CDF-like)
+    #     Why it helps:
+    #       - Even a tiny shift in LL vs G creates a clearly visible offset in CDFs
+    #       - CDF comparison is much less sensitive to pointwise noise
+    # ----------------------------
+    cdf_G  = cumsum(Gpdf) * Δz;
+    cdf_LL = cumsum(LL)   * Δz;
+
+    # Force exact endpoints to reduce tiny numerical drift (optional)
+    cdf_G  ./= cdf_G[end];
+    cdf_LL ./= cdf_LL[end];
+
+    fig_cdf = plot(
+        z_range, cdf_G,
+        xlabel = L"$z$ (mm)",
+        ylabel = "Cumulative integral",
+        label  = "CDF(Experiment $(dir_chosen))",
+        line   = (:black, 2),
+        title  = "CDF comparison (centering diagnostic)",
+    );
+    plot!(fig_cdf, z_range, cdf_LL,
+        label = "CDF(Model)",
+        line  = (:red, 2, :dash),
+    );
+    display(fig_cdf)
+
+    # Difference of CDFs is an even sharper centering detector:
+    # - If LL is shifted right, CDF_LL - CDF_G tends to show a characteristic S-shape.
+    dcdf = cdf_LL .- cdf_G;
+    fig_dcdf = plot(
+        z_range, dcdf,
+        xlabel = L"$z$ (m)",
+        ylabel = "CDF(Model) - CDF(Experiment)",
+        label  = "ΔCDF",
+        line   = (:purple, 2),
+        title  = "ΔCDF (very sensitive to small shifts)",
+    );
+    display(fig_dcdf)
+
+    # ----------------------------
+    # 5) Quick numeric summaries (optional but useful)
+    # ----------------------------
+    rss_val = sum(abs2, res)              # pointwise mismatch (PDF units)
+    l1_val  = sum(abs.(res)) * Δz         # integrated absolute error
+    @show rss_val l1_val;
+
+    # A small “center-of-mass” shift estimate (if it exists):
+    μG  = sum(z_m .* Gpdf) * Δz ;
+    μLL = sum(z_m .* LL)   * Δz ;
+    @show μG μLL (μLL - μG)  ;
+
+    diag = ProfileFitTools.sg_width_diagnostic(z_m, Gpdf, LL, Δz)
+    @info "SG diagnostic"
+    @show diag.Δμ diag.Δσ² diag.σG diag.σF;
+
+    # ============================================================
+    # End diagnostics
+    # ============================================================
+
+    # """
+    # Estimate mixture model: G ≈ (1-ε)F + ε(F * H), with H≥0, ∫H=1.
+    # Returns (ε, H, recon, residual).
+    # """
+    # G0 = data_exp_normalized; 
+    # G0 ./= sum(G0)*Δz
+    # F0 = pdf_theory;           
+    # F0 ./= sum(F0)*Δz;
+
+    # ε, Hmix, recon, resid = ProfileFitTools.fit_mixture_blur(G0, F0, z_m; ε0=0.85, nouter=15, λ=1e-2, sym_weight=1e-6)
+    # plot(z_range, G0, label="Exp.Signal($dir_chosen)");
+    # plot!(z_range, recon, label="Mixture recombined");
+    # plot!(z_range, Hmix, label="Blurring");
+    # plot(z_m, resid, label="residual")
 end
-
-
-
-σ = 200e-6
-H_true = exp.(-(z_m .^ 2)/(2σ^2))
-H_true ./= sum(H_true)*Δz
-
-G_test = conv_centered(pdf_theory, H_true, Δz)
-
-H_rec = deconv_kernel(G_test, pdf_theory, z_m;
-                      λ=1e-2, stepsize=1e-1, maxiter=6000,
-                      nonneg=true, normalize=true)
-
-plot(z_m, H_true, label="true")
-plot!(z_m, H_rec, label="recovered")
-
-
-
-function rms_width(z, y, Δz)
-    y2 = max.(y, 0.0)
-    y2 ./= sum(y2)*Δz
-    μ = sum(z .* y2)*Δz
-    return sqrt(sum(((z .- μ).^2) .* y2) * Δz)
-end
-
-σG = rms_width(z_m, G, Δz)
-σF = rms_width(z_m, F, Δz)
-σH = rms_width(z_m, H_est, Δz)
-
-σG^2
-σF^2 + σH^2
-
-@show σG σF σG/σF
-
-
-areaG = sum(G) * Δz
-areaF = sum(F) * Δz
-
-@show areaG areaF
-
-
-σH = sqrt(σG^2 - σF^2)  # using your computed σG, σF (in meters)
-H_gauss = exp.(-0.5 .* (z_m ./ σH).^2)
-H_gauss ./= sum(H_gauss) * Δz
-LLg = conv_centered(F, H_gauss, Δz)
-plot(z_m, LLg ./ maximum(LLg), label="F * Gaussian(σH)")
-plot!(z_m, G  ./ maximum(G),  label="G")
-
-
-
-"""
-Estimate mixture model: G ≈ (1-ε)F + ε(F * H), with H≥0, ∫H=1.
-
-Returns (ε, H, recon, residual).
-"""
-function fit_mixture_blur(G, F, z;
-                          ε0=0.5,
-                          nouter=12,
-                          λ=1e-2, stepsize=1e-1, maxiter=4000,
-                          sym_weight=0.0)
-
-    Δz = mean(diff(z))
-    # normalize to area 1 (you said they already are, but keep safe)
-    G = copy(G); F = copy(F)
-    G ./= sum(G)*Δz
-    F ./= sum(F)*Δz
-
-    ε = clamp(ε0, 1e-3, 1-1e-3)
-    H = fill(0.0, length(G))
-    H[length(G)÷2] = 1/Δz   # delta-ish init then normalized by projection inside deconv
-
-    for t in 1:nouter
-        # build "blur-only target":  (G - (1-ε)F)/ε  ≈ F*H
-        T = (G .- (1-ε).*F) ./ ε
-        # (do NOT clip hard; let solver handle it via nonneg projection)
-        H = deconv_kernel(T, F, z;
-                          λ=λ, stepsize=stepsize, maxiter=maxiter,
-                          nonneg=true, normalize=true,
-                          sym_weight=sym_weight,
-                          verbose_every=0)
-
-        FH = conv_centered(F, H, Δz)
-        # update ε by least squares on G ≈ F + ε(FH - F)
-        d = FH .- F
-        num = sum((G .- F) .* d) * Δz
-        den = sum(d .* d) * Δz + 1e-18
-        ε = clamp(num/den, 1e-3, 1-1e-3)
-
-        @printf("outer %2d | ε=%.4f\n", t, ε)
-    end
-
-    Δz = mean(diff(z))
-    recon = (1-ε).*F .+ ε .* conv_centered(F, H, Δz)
-    resid = recon .- G
-    return ε, H, recon, resid
-end
-
-
-Δz = mean(diff(z_m))
-G0 = data_exp_normalized;  G0 ./= sum(G0)*Δz
-F0 = pdf_theory;           F0 ./= sum(F0)*Δz
-
-ε, Hmix, recon, resid = fit_mixture_blur(G0, F0, z_m; ε0=0.5, λ=1e-2, sym_weight=1e-6)
-
-plot(z_m, G0, label="G")
-plot!(z_m, recon, label="mixture recon")
-plot(z_m, resid, label="residual")
-
-
-
-
-
-
 
 T_END = Dates.now()
 T_RUN = Dates.canonicalize(T_END-T_START)
