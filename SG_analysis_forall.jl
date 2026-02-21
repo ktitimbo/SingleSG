@@ -46,7 +46,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20250820" ;
+data_directory      = "20250825" ;
 # Furnace 
 Temperature = 273.15 + 205
 
@@ -101,7 +101,7 @@ data_JSF = OrderedDict(
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
 
-data_qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen_profiles_f1_table.jld2")
+data_qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_7M","qm_screen_profiles_f1_table.jld2")
 
 # Importing data
 if !isfile(outfile_processed) # check if the processed images exists
