@@ -46,13 +46,15 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20250820" ;
+data_directory      = "20250919" ;
+# Furnace 
+Temperature = 273.15 + 205
+
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
 data_summary_path = joinpath(@__DIR__, "analysis_data","summary",data_directory)
 isdir(data_summary_path) || mkpath(data_summary_path);
-# Furnace 
-Temperature = 273.15 + 205
+
 
 # STERN–GERLACH EXPERIMENT SETUP
 # Camera and pixel geometry : intrinsic properties
