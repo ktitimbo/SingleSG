@@ -1333,8 +1333,8 @@ module MyExperimentalAnalysis
     BG = T.(raw_data[:BG_data])
 
     # Background subtract then flat-field correct
-    F1proc = (F1 .- BG) ./ flat4
-    F2proc = (F2 .- BG) ./ flat4
+    F1proc = (F1 .- BG) #./ flat4
+    F2proc = (F2 .- BG) #./ flat4
 
     return OrderedDict(
         :Currents           => raw_data[:Currents],
