@@ -32,6 +32,7 @@ const T_START = Dates.now()
 include("./Modules/MyExperimentalAnalysis.jl");
 using .MyExperimentalAnalysis;
 include("./Modules/DataReading.jl");
+include("./Modules/JLD2_MyTools.jl");
 # Set the working directory to the current location
 cd(@__DIR__) 
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSS");
@@ -59,23 +60,16 @@ data_JSF = OrderedDict(
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
 
-# To be generalized
-data_qm   = load(joinpath(@__DIR__,"simulation_data","quantum_simulation_6M","qm_6000000_screen_profiles_f1_table.jld2"))["table"]
-nz_fix, σ_fix, λ0_fix = (2,0.250,0.01)
-chosen_qm = data_qm[(nz_fix, σ_fix, λ0_fix)]
+nz_fix, σ_fix, λ0_fix = (2,0.200,0.01)
+chosen_qm = jldopen(joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
+    file[JLD2_MyTools.make_keypath_qm(nz_fix,σ_fix,λ0_fix)]
+end
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
 zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
-# Ic_qm =  [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-# zm_qm = [ 0.07000392151832582, 0.12103624215126021,
-#  0.1637624935340883, 0.19920462520122545, 0.23292316199064259, 0.25916178963661196,
-#  0.2878604881906509, 0.31263042984724054, 0.3374424611139296, 0.4497195784807205,
-#  0.5458749029445646, 0.641772232809067, 0.7316863846147059, 0.830490922909975,
-#  0.9258644851398463, 1.0140804073005922, 1.0981745467764124, 1.2656789418584087,
-#  1.4240360171699535, 1.5814155127000782, 1.6859927244621518, 1.8169193762660025]
-#
 
 parent_folder = joinpath(@__DIR__, "analysis_data");
 data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
+data_directories = ["20260211", "20260213", "20260220"];
 
 n_runs = length(data_directories);
 I_all  = Vector{Vector{Float64}}(undef, n_runs);
@@ -174,7 +168,9 @@ for data_directory in data_directories
         markerstrokewidth = 1,
         markerstrokecolor=cols_k[i]
         )
-        chosen_qm_i  = data_qm[(m[key][1],σ_fix,m[key][2])]
+        chosen_qm_i  = jldopen(joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
+                            file[JLD2_MyTools.make_keypath_qm(m[key][1],σ_fix,m[key][2])]
+        end       
         Ic_qm_i      = [chosen_qm_i[i][:Icoil] for i in eachindex(chosen_qm_i)][2:end]
         zm_qm_i      = [chosen_qm_i[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm_i)][2:end]
         if m[key][1] == 1
@@ -723,10 +719,10 @@ display(fig)
 saveplot(fig, "g_inter_vs_mc_vs_fit")
 
 
-
 jldsave(joinpath(OUTDIR,"data_averaged_$(selected_bin).jld2"), 
     data=OrderedDict(
         :nz_bin         => selected_bin,
+        :σw_um          => round(1000*σ_fix; sigdigits=6),
         :λ0_spl         => selected_spl,
         :dir            => data_directories,
         :mag_factor     => hcat(magnification_factor_ith ,magnification_factor_error_ith),
@@ -856,7 +852,3 @@ ss["data"]
 ss["data"][:Currents]
 size(ss["data"][:F1ProcessedImages])
 ss["data"][:F1ProcessedImages]
-
-[:,:,30,20]
-
-[:F1_data]
