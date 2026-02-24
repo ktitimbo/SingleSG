@@ -1088,6 +1088,7 @@ else
     nx_bins = 32 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
     gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.075, 0.100, 0.150, 0.200, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
+    gaussian_width_mm = [0.125, 0.175, 0.225];  # try different gaussian widths
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
   
