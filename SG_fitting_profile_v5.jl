@@ -146,10 +146,12 @@ norm_mode = :none ;
 nrange_z = 20001;
 
 dir_list = [
-    "20250814" , "20250820" , "20250825" , 
+    "20250814" , "20250820" , "20250825",
     "20250919" , 
     "20251002" , "20251003", "20251006",
-    "20260211" , "20260213"
+    "20251109",
+    "20260211" , "20260213",
+    "20260220"
 ]
 
 hdr_top = Any[
@@ -299,7 +301,7 @@ jldopen(joinpath(OUTDIR,"baseline_results_P$(P_DEGREE).jld2"), "w") do f
 end
 
 # dir_chosen = "20260211" ;
-results_dict = Dict{Any,NamedTuple}()
+results_dict = OrderedDict{Any,NamedTuple}()
 # For each dataset
 # (1) subtract a polynomial baseline, 
 # (2) build theoretical and geometric PDFs on the screen, 
@@ -551,7 +553,7 @@ for dir_chosen in dir_list
     ProfileFitTools.normalize_pdf!(Fpdf, Δz; nonneg=true);
     ProfileFitTools.normalize_pdf!(Hpdf, Δz; nonneg=true);
 
-    @show sum(Gpdf)*Δz sum(Fpdf)*Δz sum(Hpdf)*Δz;
+    @show round(sum(Gpdf)*Δz; digits=3) round(sum(Fpdf)*Δz; digits=3) round(sum(Hpdf)*Δz; digits=3) ;
 
     # ----------------------------
     # 2) Forward reconstruction: LL = F ⊗ H
@@ -707,3 +709,9 @@ end
 
 println("Experiment analysis finished!")
 alert("Experiment analysis finished!")
+
+
+data_cov = load(joinpath(@__DIR__,"data_studies","CONV20260223T111536082","blur_conv.jld2" ), "convolution")
+
+[data_cov[s].blurrGwidth_um for s in ["20250814","20250820","20250825","20250919"]]
+[data_cov[s].blurrGwidth_um for s in ["20260211","20260213","20260220"]]
