@@ -46,9 +46,9 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20250825" ;
+data_directory      = "20260220" ;
 # Furnace 
-Temperature = 273.15 + 205
+Temperature = 273.15 + 200
 
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
@@ -101,7 +101,7 @@ data_JSF = OrderedDict(
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
 
-data_qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_7M","qm_screen_profiles_f1_table.jld2")
+data_qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen_profiles_f1_table.jld2")
 
 # Importing data
 if !isfile(outfile_processed) # check if the processed images exists
@@ -1422,24 +1422,25 @@ alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 
 
 
-# nz = 2
-# λ0 = 0.01
 
-# chosen_qm =  jldopen(data_qm_path,"r") do file
-#     file[JLD2_MyTools.make_keypath_qm(nz,0.270, λ0)]
-# end
-# Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][11:end]
-# zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][11:end]
+nz = 2
+λ0 = 0.01
 
-# ii= jldopen(path, "r") do file
-#     file["meta/Currents"];
-# end
-# bb= jldopen(path, "r") do file
-#     file["meta/BzTesla"];
-# end
-# dd = jldopen(path, "r") do file
-#     file[JLD2_MyTools.make_keypath_exp(data_directory, nz, λ0)];
-# end
+chosen_qm =  jldopen(data_qm_path,"r") do file
+    file[JLD2_MyTools.make_keypath_qm(nz,0.270, λ0)]
+end
+Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][11:end]
+zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][11:end]
+
+ii= jldopen(path, "r") do file
+    file["meta/Currents"];
+end
+bb= jldopen(path, "r") do file
+    file["meta/BzTesla"];
+end
+dd = jldopen(path, "r") do file
+    file[JLD2_MyTools.make_keypath_exp(data_directory, nz, λ0)];
+end
 
 # df = DataFrame(hcat(ii,bb,dd[:fw_F1_peak_pos][1],dd[:fw_F1_peak_pos][2]), [:Ic,:Bz, :zF1, :ErrzF1 ])
 # CSV.write( joinpath(@__DIR__,"analysis_data",data_directory,"$(data_directory)_data.csv"), df)
