@@ -1101,6 +1101,9 @@ else
     outpath_1 = joinpath(OUTDIR, "qm_screen_profiles_f1_table.jld2")
 
     jldopen(outpath_1, "w") do file
+        file["meta/N"]  = Ns
+        file["meta/T"]  = T_K
+        file["meta/s_spline"] = λ0_spline
         file["meta/nx"] = nx_bins
         file["meta/nz"] = sort(nz_bins)
         file["meta/σw"] = sort(gaussian_width_mm)
@@ -1175,6 +1178,9 @@ else
     outpath_2 = joinpath(OUTDIR, "qm_screen_profiles_f2_table.jld2")
 
     jldopen(outpath_2, "w") do file
+        file["meta/N"]  = Ns
+        file["meta/T"]  = T_K
+        file["meta/s_spline"] = λ0_spline
         file["meta/nx"] = nx_bins
         file["meta/nz"] = sort(nz_bins)
         file["meta/σw"] = sort(gaussian_width_mm)
@@ -1306,6 +1312,31 @@ else
 end
 
 #########################################################################################
+# run1_path = joinpath(dirname(OUTDIR),"qm_simulation_8M","run1","qm_screen_profiles_f1_table.jld2")
+# run2_path = joinpath(dirname(OUTDIR),"qm_simulation_8M","run2","qm_screen_profiles_f1_table.jld2")
+# out_path = joinpath(dirname(OUTDIR),"qm_simulation_8M","qm_screen_profiles_f1_table.jld2")
+# JLD2_MyTools.merge_qm_two_runs(run1_path,
+#                     run2_path,
+#                     out_path;
+#                     Ns = 8_000_000,
+#                     T_C = 205.0,
+#                     s_spline = 0.001)
+
+# JLD2_MyTools.list_keys_jld_qm(out_path)
+# JLD2_MyTools.tree_jld(out_path)
+
+# run1_path = joinpath(dirname(OUTDIR),"qm_simulation_8M","run1","qm_screen_profiles_f2_table.jld2")
+# run2_path = joinpath(dirname(OUTDIR),"qm_simulation_8M","run2","qm_screen_profiles_f2_table.jld2")
+# out_path = joinpath(dirname(OUTDIR),"qm_simulation_8M","qm_screen_profiles_f2_table.jld2")
+# JLD2_MyTools.merge_qm_two_runs(run1_path,
+#                     run2_path,
+#                     out_path;
+#                     Ns = 8_000_000,
+#                     T_C = 205.0,
+#                     s_spline = 0.001)
+
+# JLD2_MyTools.list_keys_jld_qm(out_path)
+# JLD2_MyTools.tree_jld(out_path)
 
 # In case of merging
 # path_1 = joinpath("W://SternGerlach//quantum_simulation_7M","qm_7000000_screen_profiles_f2_table.jld2")
