@@ -225,7 +225,199 @@ module JLD2_MyTools
         end
     end
 
+"""
+    parse_qm_key(key::String) -> (nz, σw, λ0)
 
+Extract numeric parameters from a QM table key.
+Expected format:
+    table/nz=.../σw=.../λ0=...
+"""
+function parse_qm_key(key::AbstractString)
+    parts = split(key, '/')
+    @assert length(parts) ≥ 4 "Invalid QM key: $key"
 
+    nz  = parse(Int,      split(parts[2], '=')[2])
+    σw  = parse(Float64,  split(parts[3], '=')[2])
+    λ0  = parse(Float64,  split(parts[4], '=')[2])
+
+    return nz, σw, λ0
+end
+
+"""
+    merge_qm_tables_reference(refpath, inpaths, outpath)
+
+Merge multiple QM screen–profile JLD2 tables using a *reference file*
+as the authoritative dataset.
+
+The function copies all entries from `refpath` into a new output file
+and then scans additional input files, adding only parameter combinations
+that are **missing** from the reference. Parameter keys are reconstructed
+using `make_keypath_qm(nz, σw, λ0)` to guarantee consistent formatting
+across runs.
+
+This procedure is designed for combining independent parameter sweeps
+(e.g. different Gaussian widths or smoothing parameters) while ensuring
+that incompatible datasets are not merged.
+
+# Behaviour
+- The reference file defines the required spatial binning (`meta/nx`).
+- Any input file whose `meta/nx` differs from the reference is skipped.
+- For each dataset stored under
+
+      table/nz=.../σw=.../λ0=...
+
+  the tuple `(nz, σw, λ0)` is extracted numerically.
+- Entries already present in the reference are not overwritten.
+- Missing parameter combinations are appended to the output.
+- Metadata (`meta/nz`, `meta/σw`, `meta/λ0`) is rebuilt from the
+  parameter values actually written to the merged file.
+
+# Arguments
+- `refpath::String`:
+  Path to the reference JLD2 table. All its data are copied first
+  and define the merge compatibility conditions.
+
+- `inpaths::Vector{String}`:
+  Additional JLD2 files to scan for missing parameter combinations.
+
+- `outpath::String`:
+  Destination path of the merged JLD2 file.
+
+# Output
+Creates a new JLD2 file at `outpath` containing:
+- all reference datasets,
+- newly discovered `(nz, σw, λ0)` realizations,
+- rebuilt metadata describing the full parameter grid.
+
+# Notes
+- Keys are regenerated using `make_keypath_qm`, preventing duplicate
+  entries caused by floating-point formatting differences
+  (e.g. `"0.1"` vs `"0.100"`).
+- The reference file is treated as authoritative: existing datasets
+  are never replaced.
+- The function assumes the internal hierarchy used by
+  `qm_screen_profiles_f*_table.jld2`.
+
+# Physics context
+Each table entry corresponds to a reconstructed screen probability
+distribution obtained from the quantum Stern–Gerlach propagation
+pipeline for a specific parameter triple
+
+    (n_z, σ_w, λ₀),
+
+representing vertical binning, Gaussian smoothing width, and raw
+regularization strength, respectively. The merge therefore enlarges
+the explored parameter space without altering previously validated
+results.
+
+# Example
+julia
+merge_qm_tables_reference(
+    "runA/qm_screen_profiles_f1_table.jld2",
+    ["runB/qm_screen_profiles_f1_table.jld2",
+     "runC/qm_screen_profiles_f1_table.jld2"],
+    "qm_screen_profiles_f1_table_merged.jld2"
+)
+"""
+function merge_qm_tables_reference(
+        refpath::String,
+        inpaths::Vector{String},
+        outpath::String)
+
+    # -----------------------------
+    # Load reference nx
+    # -----------------------------
+    ref_nx = jldopen(refpath,"r") do f
+        Int(f["meta/nx"])
+    end
+
+    @info "Reference nx = $ref_nx"
+
+    written = Set{Tuple{Int,Float64,Float64}}()
+
+    nz_set  = Set{Int}()
+    gw_set  = Set{Float64}()
+    λ0_set  = Set{Float64}()
+
+    # =============================
+    # Create output and copy reference
+    # =============================
+    jldopen(outpath,"w") do fout
+
+        jldopen(refpath,"r") do fref
+            for k in keys(fref)
+
+                if startswith(k,"table/")
+                    nz,gw,λ0 = parse_qm_key(k)
+
+                    canon = make_keypath_qm(nz,gw,λ0)
+                    fout[canon] = fref[k]
+
+                    push!(written,(nz,gw,λ0))
+                    push!(nz_set,nz)
+                    push!(gw_set,gw)
+                    push!(λ0_set,λ0)
+                else
+                    # copy meta and everything else
+                    fout[k] = fref[k]
+                end
+            end
+        end
+
+        # =============================
+        # Scan additional files
+        # =============================
+        for ip in inpaths
+            ip == refpath && continue
+
+            jldopen(ip,"r") do fin
+
+                # ---- nx consistency check ----
+                nx_in = Int(fin["meta/nx"])
+                if nx_in != ref_nx
+                    @warn "Skipping (nx mismatch)" file=ip nx_in ref_nx
+                    return
+                end
+
+                added = 0
+
+                for k in keys(fin)
+                    startswith(k,"table/") || continue
+
+                    nz,gw,λ0 = parse_qm_key(k)
+
+                    tup = (nz,gw,λ0)
+
+                    # add only missing combinations
+                    if !(tup in written)
+
+                        canon = make_keypath_qm(nz,gw,λ0)
+
+                        fout[canon] = fin[k]
+
+                        push!(written,tup)
+                        push!(nz_set,nz)
+                        push!(gw_set,gw)
+                        push!(λ0_set,λ0)
+
+                        added += 1
+                    end
+                end
+
+                @info "Merged new entries" file=ip added
+            end
+        end
+
+        # =============================
+        # rebuild META (authoritative)
+        # =============================
+        fout["meta/nx"] = ref_nx
+        fout["meta/nz"] = sort(collect(nz_set))
+        fout["meta/σw"] = sort(collect(gw_set))
+        fout["meta/λ0"] = sort(collect(λ0_set))
+    end
+
+    @info "Reference merge finished" outpath
+end
 
 end
