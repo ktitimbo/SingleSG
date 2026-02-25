@@ -1323,26 +1323,32 @@ function build_processed_dict(raw_data::OrderedDict{Symbol,Any},
                             DK::AbstractMatrix, FL::AbstractMatrix;
                             T = Float32, epsval = T(1e-12))
 
-# Per-pixel flat field, clamp to avoid zeros
-flat = max.(T.(FL) .- T.(DK), epsval)
-flat4 = reshape(flat, size(flat,1), size(flat,2), 1, 1)  # expand to 4D
+    # Per-pixel flat field, clamp to avoid zeros
+    flat = max.(T.(FL) .- T.(DK), epsval)
+    flat4 = reshape(flat, size(flat,1), size(flat,2), 1, 1)  # expand to 4D
 
-# Promote to Float32 once
-F1 = T.(raw_data[:F1_data])
-F2 = T.(raw_data[:F2_data])
-BG = T.(raw_data[:BG_data])
+    # Promote to Float32 once
+    F1 = T.(raw_data[:F1_data])
+    F2 = T.(raw_data[:F2_data])
+    BG = T.(raw_data[:BG_data])
 
-# Background subtract then flat-field correct
-F1proc = (F1 .- BG) #./ flat4
-F2proc = (F2 .- BG) #./ flat4
+    # Background subtract then flat-field correct
+    F1proc = (F1 .- BG) #./ flat4
+    F2proc = (F2 .- BG) #./ flat4
 
-return OrderedDict(
-    :Currents           => raw_data[:Currents],
-    :CurrentsError      => raw_data[:CurrentsError],
-    :BzTesla            => raw_data[:BzTesla],
-    :F1ProcessedImages  => F1proc,   # size: 540 × 2560 × number of images× number of currents
-    :F2ProcessedImages  => F2proc,   # size: 540 × 2560 × number of images× number of currents
-)
+    out = OrderedDict(
+        :Currents           => raw_data[:Currents],
+        :CurrentsError      => raw_data[:CurrentsError],
+        :F1ProcessedImages  => F1proc,   # size: 540 × 2560 × number of images× number of currents
+        :F2ProcessedImages  => F2proc,   # size: 540 × 2560 × number of images× number of currents
+    )
+
+    # --- optional field ---
+    if haskey(raw_data, :BzTesla)
+        out[:BzTesla] = raw_data[:BzTesla]
+    end
+
+    return out
 end
 
 """
