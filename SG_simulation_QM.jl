@@ -226,7 +226,8 @@ alive_screen = OrderedDict(:Icoils=>Icoils, :levels => quantum_numbers , :data =
 jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), alive = alive_screen)
 
 ############### data saved in block format for easier access ###############
-jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
+data_screen_path = joinpath(OUTDIR,"qm_screen_data.jld2")
+jldopen(data_screen_path, "w") do file
     file["meta/Icoils"] = Icoils
     file["meta/levels"] = quantum_numbers 
     for i in 1:nI
@@ -248,37 +249,39 @@ end
 crossing_slit           = nothing
 particles_flag          = nothing
 particles_trajectories  = nothing
+data_alive_screen       = nothing
+alive_screen            = nothing
 GC.gc()
 @info "Memory cleaned after QM data acquired"
-@info "Free system memory $(round(Sys.free_memory() / 1024^3,digits=1)) GiB"
+@info "Free system memory $(round(Sys.free_memory() / 1024^3,sigdigits=6)) GiB"
 
 
 println("Profiles F=$(K39_params.Ispin+0.5)")
-profiles_top    = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_top    = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=:F_top,    n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles F=$(K39_params.Ispin-0.5)")
-profiles_bottom = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_bottom = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=:F_bottom, n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles F=$(K39_params.Ispin+0.5), mf=$(-(K39_params.Ispin+0.5))")
-profiles_5      = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_5      = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=5,         n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles ms=$((K39_params.Ispin))")
-profiles_Sup    = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_Sup    = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=:S_up,     n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles ms=$(-(K39_params.Ispin))")
-profiles_Sdown  = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_Sdown  = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=:S_down,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles F=1, ms=-1,+1")
-profiles_6_8    = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_6_8    = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=[6,8],   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles F=1, ms=-1")
-profiles_6      = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_6      = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=6,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles F=1, ms=0")
-profiles_7      = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_7      = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=7,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles F=1, ms=+1")
-profiles_8      = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+profiles_8      = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=8,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 
 jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_profiles.jld2"), profiles = OrderedDict(
@@ -296,115 +299,6 @@ jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_profiles.jld2"), profiles = OrderedDic
                                                                     :lvl68      => profiles_6_8
                                                                     ) 
 )
-
-# profiles_top2    = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
-#                     manifold=:F_top, n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-# profiles_bottom2 = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
-#                     manifold=:F_bottom, n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-# profiles_52      = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
-#                     manifold=5,         n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-# profiles_Sup2    = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
-#                     manifold=:S_up,     n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-# profiles_Sdown2  = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
-#                     manifold=:S_down,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-# profiles_6_82    = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
-#                     manifold=[6,8],   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-# profiles_62      = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
-#                     manifold=6,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-# profiles_72      = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
-#                     manifold=7,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-# profiles_82      = QM_analyze_profiles_to_dict(joinpath(OUTDIR,"qm_screen_data.jld2"), K39_params;
-#                     manifold=8,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-
-# # helper: robust float compare
-# _isapprox(a::Number, b::Number; rtol=1e-10, atol=1e-12) = isapprox(a, b; rtol=rtol, atol=atol)
-# using DataStructures: OrderedDict
-
-# function compare_QM_outputs(outA::OrderedDict{Int,<:Any},
-#                             outB::OrderedDict{Int,<:Any};
-#                             rtol=1e-10, atol=1e-12,
-#                             fields=(:Icoil, :z_max_raw_mm, :z_max_raw_spline_mm,
-#                                     :z_max_smooth_mm, :z_max_smooth_spline_mm, :z_profile))
-
-#     # outer keys
-#     if collect(keys(outA)) != collect(keys(outB))
-#         onlyA = setdiff(collect(keys(outA)), collect(keys(outB)))
-#         onlyB = setdiff(collect(keys(outB)), collect(keys(outA)))
-#         return (ok=false, msg="Outer keys differ. onlyA=$(onlyA), onlyB=$(onlyB)")
-#     end
-
-#     for i in keys(outA)
-#         a = outA[i]
-#         b = outB[i]
-
-#         for f in fields
-#             if !haskey(a, f) || !haskey(b, f)
-#                 return (ok=false, msg="Missing field $f at i=$i. hasA=$(haskey(a,f)) hasB=$(haskey(b,f))")
-#             end
-
-#             va = a[f]
-#             vb = b[f]
-
-#             # scalars
-#             if (va isa Number) && (vb isa Number)
-#                 if !isapprox(va, vb; rtol=rtol, atol=atol)
-#                     return (ok=false, msg="Mismatch at i=$i field=$f: A=$(va) B=$(vb) Δ=$(va-vb)")
-#                 end
-
-#             # arrays (includes z_profile Nx3)
-#             elseif (va isa AbstractArray{<:Number}) && (vb isa AbstractArray{<:Number})
-#                 if size(va) != size(vb)
-#                     return (ok=false, msg="Size mismatch at i=$i field=$f: sizeA=$(size(va)) sizeB=$(size(vb))")
-#                 end
-
-#                 if !isapprox(va, vb; rtol=rtol, atol=atol)
-#                     Δ = va .- vb
-#                     maxabs = maximum(abs.(Δ))
-
-#                     if f === :z_profile && ndims(va) == 2 && size(va,2) == 3
-#                         colmax = [maximum(abs.(Δ[:,j])) for j in 1:3]
-#                         # find first mismatch location (row,col)
-#                         mask = .!isapprox.(va, vb; rtol=rtol, atol=atol)
-#                         idx = findfirst(mask)
-#                         (r,c) = idx === nothing ? (missing, missing) : Tuple(idx)
-#                         return (ok=false,
-#                                 msg="Array mismatch at i=$i field=:z_profile (Nx3). " *
-#                                     "max|Δ|=$(maxabs), per-col max=$(colmax). " *
-#                                     "first mismatch at (row,col)=($(r),$(c)): A=$(va[r,c]) B=$(vb[r,c])")
-#                     else
-#                         mask = .!isapprox.(va, vb; rtol=rtol, atol=atol)
-#                         idx = findfirst(mask)
-#                         return (ok=false,
-#                                 msg="Array mismatch at i=$i field=$f. max|Δ|=$(maxabs). first mismatch index=$(idx)")
-#                     end
-#                 end
-
-#             else
-#                 # fallback exact compare
-#                 if va != vb
-#                     return (ok=false, msg="Mismatch at i=$i field=$f: typeofA=$(typeof(va)) typeofB=$(typeof(vb))")
-#                 end
-#             end
-#         end
-#     end
-
-#     return (ok=true, msg="Outputs match for fields=$(fields) with rtol=$rtol atol=$atol")
-# end
-
-# res = compare_QM_outputs(profiles_bottom, profiles_bottom2; rtol=1e-25, atol=1e-25);
-# @info res.msg
-# res = compare_QM_outputs(profiles_top, profiles_top2; rtol=1e-25, atol=1e-25);
-# @info res.msg
-# res = compare_QM_outputs(profiles_5, profiles_52; rtol=1e-25, atol=1e-25);
-# @info res.msg
-# res = compare_QM_outputs(profiles_6, profiles_62; rtol=1e-25, atol=1e-25);
-# @info res.msg
-# res = compare_QM_outputs(profiles_7, profiles_72; rtol=1e-25, atol=1e-25);
-# @info res.msg
-# res = compare_QM_outputs(profiles_8, profiles_82; rtol=1e-25, atol=1e-25);
-# @info res.msg
-# res = compare_QM_outputs(profiles_6_8, profiles_6_82; rtol=1e-25, atol=1e-25);
-# @info res.msg
 
 
 # Profiles : different contributions
@@ -846,7 +740,7 @@ alert("script $RUN_STAMP has finished!")
 
 GC.gc()
 @info "Memory cleaned after QM data acquired"
-println("Free memory: $(Sys.free_memory() / (1024)^3) GiB")
+println("Free memory: $(round(Sys.free_memory() / 1024^3,sigdigits=6)) GiB")
 
 Ns = Nss
 # Ns = 7_000_000
@@ -1087,8 +981,7 @@ else
 
     nx_bins = 32 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
-    gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.075, 0.100, 0.150, 0.200, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
-    gaussian_width_mm = [0.125, 0.175, 0.225];  # try different gaussian widths
+    gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
   
@@ -1254,7 +1147,7 @@ else
     #########################################################################################
     GC.gc()
     @info "Memory cleaned after processing QM data"
-    println("Free memory: $(Sys.free_memory() / 1e9) GB") 
+    println("Free memory: $(round(Sys.free_memory() / 1024^3,sigdigits=6)) GiB") 
     #########################################################################################
     T_END = Dates.now()
     T_RUN = Dates.canonicalize(T_END-T_START)

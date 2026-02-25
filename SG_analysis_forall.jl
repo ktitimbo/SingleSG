@@ -46,9 +46,9 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20260220" ;
+data_directory      = "20250814" ;
 # Furnace 
-Temperature = 273.15 + 200
+Temperature = 273.15 + 205
 
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
@@ -1371,10 +1371,13 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             write(io, report)
         end
 
+        δi, _ , _ , _, _  = curr_error_physical() 
         file[JLD2_MyTools.make_keypath_exp(data_directory, n_bins, λ0)] = OrderedDict(
             :RUNSTAMP               => RUN_STAMP,
+            :ErrorCurrentsPhys      =>  
             :z_mm                   => z_mm,
             :z_mm_error             => z_mm_error,
+
             # Mean profiles
             :F1_profile             => profiles_F1.mean,
             :F1_err                 => profiles_F1.sem,
@@ -1412,6 +1415,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         )
 
     end
+    
 end
 
 path = joinpath(data_summary_path, data_directory * "_report_summary.jld2")
@@ -1549,3 +1553,76 @@ end
 #     label=L"QM$(n_{z}=%$(nz),\lambda_{0}=%$(λ0))$",
 #     line=(:solid,2, :blue),
 #     legend=:bottomright)
+
+
+data_directory = "20250814"
+data_path = joinpath(@__DIR__,"analysis_data","summary",data_directory,data_directory*"_report_summary.jld2")
+
+JLD2_MyTools.tree_jld(data_path)
+
+dI , d1 = jldopen(data_path, "r") do fname
+    Ic = fname["meta/Currents"]
+    ΔIc = fname["meta/ErrorCurrents"]
+
+    return (Ic,ΔIc), fname[JLD2_MyTools.make_keypath_exp(data_directory,2,0.01)]
+end
+
+d1
+
+plot(dI[1][1:20], d1[:fw_F1_peak_pos_raw][1][1:20])
+plot!(dI[1][1:20], d1[:fw_F2_peak_pos_raw][1][1:20])
+hline!([d1[:centroid_fw_mm][1]])
+d1[:fw_F2_peak_pos]
+
+
+Ic_around_0 = filter(v -> v <= 0.010, dI[1])
+ni  = length(Ic_around_0)
+z1  = d1[:fw_F1_peak_pos][1]
+δz1 = d1[:fw_F1_peak_pos][2]
+z2  = d1[:fw_F2_peak_pos][1]
+δz2 = d1[:fw_F2_peak_pos][2]
+
+δIc_new, δI_added, m0, i0, σd0  = deltaIc_new_physical(dI[1], dI[2], z1, z2;
+                            δz1=δz1, δz2=δz2,
+                            use_mismatch=false,
+                            nfit=ni, order=3,
+                            weight=:gaussian, h=nothing)
+@info "zero index" i0 dI[1][i0] z1[i0] z2[i0]
+@info "d'(0) estimate" m0
+@info "added δIc (systematic) (mA)" 1000 * δI_added
+
+σd0
+hcat(dI[1], dI[2], δIc_new, 100 * δIc_new ./ dI[1])
+
+
+
+
+# ---------------- local derivative at 0 via weighted local polynomial ----------------
+"""
+    local_derivative_at0(x, y; nfit=7, order=2, weight=:gaussian, h=nothing)
+
+Estimate y'(0) from a weighted local polynomial fit using the `nfit` points
+closest to x=0.
+
+- Fits y ≈ a0 + a1*x + a2*x^2 + ... + a_order*x^order
+- Returns a1 (the derivative at 0)
+
+Weights:
+- weight=:gaussian uses w = exp(-(x/h)^2). If h is not provided, it is set from the data.
+- weight=:uniform uses equal weights.
+"""
+
+
+"""
+    deltaIc_new_physical(Ic, δIc, z1, z2; δz1=nothing, δz2=nothing,
+                         nfit=7, order=2, weight=:gaussian, h=nothing,
+                         use_mismatch=true)
+
+Physics-optimal current uncertainty inflation using d=(z1-z2)/2 and a local derivative at Ic≈0.
+
+If `δz1` and `δz2` are provided, the added current uncertainty is computed from
+σ(d0) = 0.5*sqrt(δz1[i0]^2 + δz2[i0]^2).
+
+If they are not provided (or `use_mismatch=true` and you want extra conservatism),
+you may also include the observed mismatch term.
+"""
