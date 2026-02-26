@@ -60,16 +60,20 @@ data_JSF = OrderedDict(
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
 
-nz_fix, σ_fix, λ0_fix = (2,0.200,0.01)
-chosen_qm = jldopen(joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
+nz_fix, σ_fix, λ0_fix = (2,0.200,0.01);
+data_qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen_profiles_f1_table.jld2");
+chosen_qm = jldopen(data_qm_path,"r") do file
     file[JLD2_MyTools.make_keypath_qm(nz_fix,σ_fix,λ0_fix)]
 end
-Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
-zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
+Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end];
+zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end];
 
 parent_folder = joinpath(@__DIR__, "analysis_data");
-data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
-data_directories = ["20260211", "20260213", "20260220"];
+data_directories = [
+    # "20250814", "20250820", "20250825","20250919","20251002","20251003","20251006",
+    "20260211", "20260213", 
+    "20260220", "20260225"
+];
 
 n_runs = length(data_directories);
 I_all  = Vector{Vector{Float64}}(undef, n_runs);
@@ -103,13 +107,13 @@ for (idx,data_directory) in enumerate(data_directories)
         markerstrokewidth = 1.5,)
 end
 plot!(fig_Is,
-    ylim = (1e-3,1.05),
+    ylim = (1e-5,1.05),
     xlim=(-1,n_runs+2),
     yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$"),
     xticks = (1:length(data_directories), data_directories),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     xminorticks = false,
-    xrotation=65,
+    xrotation=75,
     bottom_margin=-2mm,
     left_margin = 6mm,
     size=(350,720)
@@ -117,12 +121,10 @@ plot!(fig_Is,
 display(fig_Is)
 saveplot(fig_Is, "currents_sampled")
 
-# only load a few columns from each fw_data.csv
 sel = [:Icoil_A, :Icoil_error_A, :F1_z_centroid_mm, :F1_z_centroid_se_mm]; 
-
 for data_directory in data_directories
     # Data Directory
-    # data_directory = "20250825" ;
+    # data_directory = "20250814" ;
 
     magnification_factor = mag_factor(data_directory) ;
         
@@ -131,9 +133,8 @@ for data_directory in data_directories
                                     filename="fw_data.csv", 
                                     report_name="experiment_report.txt", 
                                     sort_on=:binning, 
-                                    data_dir_filter=data_directory)
+                                    data_dir_filter=data_directory);
     
-
     pretty_table(hcat(collect(keys(m)),
                         [v.binning   for v in values(m)],
                         [v.smoothing for v in values(m)]); 
@@ -151,46 +152,66 @@ for data_directory in data_directories
                 equal_data_column_widths= true,
     )
 
-    key_labels = collect(keys(m))
-    cols_k = palette(:darkrainbow, length(key_labels))
-    fig=plot(title="Experimental Data : binning & spline smoothing factor",
-    titlefontsize = 12)
-    for (i,key) in enumerate(key_labels)
-        z_real  = abs.(m[key][3][2:end,"F1_z_centroid_mm"]/magnification_factor[1])
-        δz_real = z_real .* sqrt.( (m[key][3][2:end,"F1_z_centroid_se_mm"] ./ m[key][3][2:end,"F1_z_centroid_mm"]).^2 .+ (magnification_factor[2]./magnification_factor[1]).^2  ) 
+    summary_path = joinpath(@__DIR__,"analysis_data\\summary",data_directory, data_directory*"_report_summary.jld2")
+    Icoils = jldopen(summary_path,"r") do mfile
+            abs.(mfile["meta/Currents"])
+    end
 
-        plot!(fig,m[key][3][2:end,"Icoil_A"], z_real, 
-        xerror = m[key][3][2:end,"Icoil_error_A"],
-        yerror = δz_real,
-        label="n=$(m[key][1]) | λ=$(m[key][2])", 
+    nz_list = [1,2]
+    λ0_list = [0.001, 0.005, 0.01, 0.02]
+    param_grid = vec(collect(Iterators.product(nz_list, λ0_list)))
+    sort!(param_grid, by = x -> (x[1], x[2]))
+    N_labels = length(param_grid);
+    cols_k = palette(:darkrainbow, N_labels)
+    
+    fig=plot(title="Experimental Data : binning & spline smoothing factor",
+        titlefontsize = 12)
+    i = 1
+    for (nz,λ0) in param_grid
+        # Check experimental data
+        data_exp = jldopen(summary_path,"r") do mfile
+                mfile[JLD2_MyTools.make_keypath_exp(data_directory,nz,λ0)]
+        end
+        
+        ic = Icoils
+        δic = data_exp[:ErrorCurrentsPhys]
+        zf1 = data_exp[:fw_F1_peak_pos][1] / magnification_factor[1]
+        δzf1 = abs.(zf1) .* sqrt.( (data_exp[:fw_F1_peak_pos][2] ./ data_exp[:fw_F1_peak_pos][1]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
+
+        plot!(fig,
+        ic, zf1, 
+        xerror = δic,
+        yerror = δzf1,
+        label="n=$(nz) | λ=$(λ0)", 
         color=cols_k[i],
         marker=(:circle,cols_k[i],2),
         markerstrokewidth = 1,
         markerstrokecolor=cols_k[i]
         )
-        chosen_qm_i  = jldopen(joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
-                            file[JLD2_MyTools.make_keypath_qm(m[key][1],σ_fix,m[key][2])]
+
+        chosen_qm_i  = jldopen(data_qm_path,"r") do file
+                            file[JLD2_MyTools.make_keypath_qm(nz,σ_fix,λ0)]
         end       
-        Ic_qm_i      = [chosen_qm_i[i][:Icoil] for i in eachindex(chosen_qm_i)][2:end]
-        zm_qm_i      = [chosen_qm_i[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm_i)][2:end]
-        if m[key][1] == 1
+        Ic_qm_i      = [chosen_qm_i[i][:Icoil] for i in eachindex(chosen_qm_i)]
+        zm_qm_i      = [chosen_qm_i[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm_i)]
+        if nz == 1
             qm_color = :grey28
-        elseif m[key][1] == 2
+        elseif nz == 2
             qm_color = :grey42
-        elseif m[key][1] ==3
+        elseif nz ==4
             qm_color = :grey56
         else
             qm_color = :grey70
         end
-
         plot!(Ic_qm_i,zm_qm_i,
             label=false,
-            line=(qm_color,:dash,1.5))
-
-
+            line=(qm_color,:dash,1.5)
+        )
+        i+=1
     end
+    display(fig)
     plot!(fig,Ic_qm,zm_qm, label=L"QM: 
-    $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:solid,:black,2), marker=(:square,:grey66,2))
+        $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:solid,:black,2), marker=(:square,:grey66,2))
     plot!(fig,
         xlabel="Current (A)",
         ylabel=L"$z_{F_{1}}$ (mm)",
@@ -198,20 +219,20 @@ for data_directory in data_directories
         yaxis=:log10,
         xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
         yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        xlims=(1e-3,1.2),
-        ylims=(5e-4,5),
-        size=(850,600),
+        xlims=(1e-4,1.2),
+        ylims=(1e-4,5),
+        size=(1050,600),
         legend=:outerright,
         legend_columns=1,
         legendfontsize=8,
         foreground_color_legend = nothing,
-        left_margin=3mm,
+        left_margin=5mm,
+        bottom_margin=3mm,
         legend_title = data_directory,
     )
     saveplot(fig,"bin_vs_smoothing_$(data_directory)")
     display(fig)
     println("\n")
-
 end
 
 println("Experiment analysis finished!\n\n")
@@ -219,37 +240,18 @@ println("Experiment analysis finished!\n\n")
 #########################################################################################
 # Choose a particular configuration for comparison purposes 
 #########################################################################################
-m_sets = map(d -> DataReading.collect_fw_map(
-                 parent_folder;
-                 select=sel,
-                 filename="fw_data.csv",
-                 report_name="experiment_report.txt",
-                 sort_on=:binning,
-                 data_dir_filter=d
-             ), data_directories)
 
 # desired values
-selected_bin = 2
+selected_bin = nz_fix
 selected_spl = λ0_fix
 
-# exact match (safe for Int; Float uses == here)
-key_run = Vector{Union{Nothing,String}}(undef, length(m_sets))
-for (midx,ms) in enumerate(m_sets)
-    keys_match = [k for (k, nt) in ms if nt.binning == selected_bin && nt.smoothing == selected_spl]
-    key_run[midx] = isempty(keys_match) ? nothing : first(keys_match)
-end
+cols = palette(:darkrainbow, n_runs)
 
 # ---------- common axis + style ----------
 xticks_vals = 10.0 .^ (-6:-1); xticks_vals = vcat(xticks_vals, 1.0)
 yticks_vals = 10.0 .^ (-6:-1); yticks_vals = vcat(yticks_vals, 1.0)
 xtick_labels = [L"10^{%$k}" for k in -6:-1]; xtick_labels = vcat(xtick_labels, L"10^{0}")
 ytick_labels = [L"10^{%$k}" for k in -6:-1]; ytick_labels = vcat(ytick_labels, L"10^{0}")
-
-# ---------- experimental series (4 runs) ----------
-# pack your inputs to avoid repetition
-runs = key_run
-dirs = data_directories
-cols = palette(:darkrainbow, n_runs)
 
 fig1 = plot(
     xlabel = "Current (A)",
@@ -258,99 +260,113 @@ fig1 = plot(
     yaxis  = :log10,
     xticks = (xticks_vals, xtick_labels),
     yticks = (yticks_vals, ytick_labels),
-    xlims  = (8e-3, 1.2),
-    ylims  = (1e-4, 5.0),
+    xlims  = (1e-3, 1.2),
+    ylims  = (1e-4, 3.0),
     legend = :outerright,
-    legend_title = L"sim $n=%$(selected_bin)$ & $\lambda_{0}=%$(selected_spl)$",
+    legend_title = L"$n=%$(selected_bin)$ & $\lambda_{0}=%$(selected_spl)$",
     size   = (900, 420),
     left_margin = 4mm,
     bottom_margin = 3mm,
 )
-for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, cols))
-    magnification_factor = mag_factor(d)
-    # columns and transforms
-    I_A   = M[r][3][2:end, "Icoil_A"]            # mA -> A, abs
-    δI_A  = M[r][3][2:end, "Icoil_error_A"]
-    z_mm  = M[r][3][2:end, "F1_z_centroid_mm"] ./ magnification_factor[1]
-    δz_mm = abs.(z_mm) .* sqrt.( ( M[r][3][2:end, "F1_z_centroid_se_mm"] ./ M[r][3][2:end, "F1_z_centroid_mm"]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
-    
-    # guard for log10 axes: filter out non-positive values
-    I_A   = ifelse.(I_A .> 0, I_A, missing)
-    z_mm  = ifelse.(z_mm .> 0, z_mm, missing)
+for (idx,data_directory) in enumerate(data_directories)
+    magnification_factor = mag_factor(data_directory) ;
 
-    plot!(fig1, I_A, z_mm;
-        xerror = δI_A,
-        yerror = δz_mm,
-        label = "Experiment $(d): n=$(M[r][1]) | λ=$(M[r][2])",
-        marker = (:circle,c,3),
+    summary_path = joinpath(@__DIR__,"analysis_data\\summary",data_directory, data_directory*"_report_summary.jld2")
+
+    Icoils = jldopen(summary_path,"r") do mfile
+            mfile["meta/Currents"]
+    end
+
+    # Check experimental data
+    data_exp = jldopen(summary_path,"r") do mfile
+            mfile[JLD2_MyTools.make_keypath_exp(data_directory,selected_bin,selected_spl)]
+    end
+
+    ic = Icoils
+    δic = data_exp[:ErrorCurrentsPhys]
+    zf1 = data_exp[:fw_F1_peak_pos][1] / magnification_factor[1]
+    δzf1 = zf1 .* sqrt.( (data_exp[:fw_F1_peak_pos][2] ./ data_exp[:fw_F1_peak_pos][1]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
+
+    # guard for log10 axes: filter out non-positive values
+    ic   = ifelse.(ic .> 0, ic, missing)
+    zf1  = ifelse.(zf1 .> 0, zf1, missing)
+    plot!(fig1, ic, zf1;
+        xerror = δic,
+        yerror = δzf1,
+        label = "Experiment $(data_directory)",
+        marker = (:circle,cols[idx],3),
         markerstrokewidth = 1,
-        markerstrokecolor = c,
-        line = (:solid,c,1) # pure markers; change to :solid if you want lines
+        markerstrokecolor = cols[idx],
+        line = (:solid,cols[idx],1) # pure markers; change to :solid if you want lines
     )
+    display(fig1)
 end
-# ---------- Alexander's data ----------
-plot!(fig1,
+plot!(fig1, # ---------- Alexander's data ----------
     data_JSF[:exp][:, 1],
     data_JSF[:exp][:, 2],
     label = "Alexander's data",
     line = (:dash, :green, 2),
 )
-plot!(fig1, Ic_qm, zm_qm, label=L"QM $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:black,2))
+plot!(fig1, Ic_qm, zm_qm, label=L"QM $(\sigma_{w}=%$(Int(1000*σ_fix))\mathrm{\mu m})$", line=(:black,2))
 display(fig1)
 saveplot(fig1, "bin_vs_smoothing_log")   # use explicit extension; pdf/png/svg as you like
-
 
 
 fig2 = plot(
     xlabel = "Current (A)",
     ylabel = L"$z_{F_{1}}$ (mm)",
-    # xticks = (xticks_vals, xtick_labels),
-    # yticks = (yticks_vals, ytick_labels),
-    xlims  = (8e-3, 1.2),
+    xlims  = (1e-3, 1.1),
     ylims  = (1e-4, 2.0),
     legend = :outerright,
-    legend_title = L"sim $n=%$(selected_bin)$",
+    legend_title = L"$n=%$(selected_bin)$ & $\lambda_{0}=%$(selected_spl)$",
     size   = (900, 420),
     left_margin = 4mm,
     bottom_margin = 3mm,
 )
-for (j, (M, r, d, c)) in enumerate(zip(m_sets, runs, dirs, cols))
-    magnification_factor = mag_factor(d)
-    # columns and transforms
-    I_A   = M[r][3][2:end, "Icoil_A"]            # mA -> A, abs
-    δI_A  = M[r][3][2:end, "Icoil_error_A"]
-    z_mm  = M[r][3][2:end, "F1_z_centroid_mm"] ./ magnification_factor[1]
-    δz_mm = abs.(z_mm) .* sqrt.( ( M[r][3][2:end, "F1_z_centroid_se_mm"] ./ M[r][3][2:end, "F1_z_centroid_mm"]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
+for (idx,data_directory) in enumerate(data_directories)
+    magnification_factor = mag_factor(data_directory) ;
+
+    summary_path = joinpath(@__DIR__,"analysis_data\\summary",data_directory, data_directory*"_report_summary.jld2")
+
+    Icoils = jldopen(summary_path,"r") do mfile
+            mfile["meta/Currents"]
+    end
+
+    # Check experimental data
+    data_exp = jldopen(summary_path,"r") do mfile
+            mfile[JLD2_MyTools.make_keypath_exp(data_directory,selected_bin,selected_spl)]
+    end
+
+    ic = Icoils
+    δic = data_exp[:ErrorCurrentsPhys]
+    zf1 = data_exp[:fw_F1_peak_pos][1] / magnification_factor[1]
+    δzf1 = abs.(zf1) .* sqrt.( (data_exp[:fw_F1_peak_pos][2] ./ data_exp[:fw_F1_peak_pos][1]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
 
     # guard for log10 axes: filter out non-positive values
-    I_A   = ifelse.(I_A .> 0, I_A, missing)
-    z_mm  = ifelse.(z_mm .> 0, z_mm, missing)
-
-    plot!(fig2, I_A, z_mm;
-        label = "Experiment $(d): n=$(M[r][1]) | λ=$(M[r][2])",
-        marker = (:circle,c,3),
+    ic   = ifelse.(ic .> 0, ic, missing)
+    zf1  = ifelse.(zf1 .> 0, zf1, missing)
+    plot!(fig2, ic, zf1;
+        xerror = δic,
+        yerror = δzf1,
+        label = "Experiment $(data_directory)",
+        marker = (:circle,cols[idx],3),
         markerstrokewidth = 1,
-        markerstrokecolor = c,
-        line = (:solid,c,1) # pure markers; change to :solid if you want lines
+        markerstrokecolor = cols[idx],
+        line = (:solid,cols[idx],1) # pure markers; change to :solid if you want lines
     )
-
-    # If you later want y-error bars, uncomment and make sure the column exists:
-    # yerr = sqrt(30) .* M[r][3][3:end, "F1_z_centroid_se_mm"] ./ magnification_factor
-    # plot!(fig1, I_A, z_mm; yerror = yerr, label = "", color = c, lw = 0)
+    display(fig2)
 end
-# ---------- Alexander's data ----------
-plot!(fig2,
+plot!(fig2, # ---------- Alexander's data ----------
     data_JSF[:exp][:, 1],
     data_JSF[:exp][:, 2],
     label = "Alexander's data",
     line = (:dash, :green, 2),
 )
-plot!(fig2, Ic_qm, zm_qm, label=L"QM $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:black,2))
+plot!(fig2, Ic_qm, zm_qm, label=L"QM $(\sigma_{w}=%$(Int(1000*σ_fix))\mathrm{\mu m})$", line=(:black,2))
 display(fig2)
 saveplot(fig2, "bin_vs_smoothing_lin")   # use explicit extension; pdf/png/svg as you like
 
 println("\nComparison of differente experiments finished!\n\n")
-
 
 #######################################################################################################################
 ######################################### AVERAGING ###################################################################
@@ -362,7 +378,6 @@ for (i, dir) in enumerate(data_directories)
     Ics[i] = data[:Currents]
 end
 clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping);
-clusters.raw
 for s in clusters.summary
     println("Value group ≈ $(@sprintf("%1.3f", s.mean_val)) ± $(round(s.std_val;sigdigits=1)) \t appears in datasets: ", s.datasets)
 end
@@ -373,41 +388,85 @@ Ic_grouped  = round.([clusters.summary[i].mean_val for i in 1:length(clusters.su
 magnification_factor_ith =  [mag_factor(d)[1] for d in data_directories]
 magnification_factor_error_ith =  [mag_factor(d)[2] for d in data_directories]
 """
-Monte-Carlo average of multiple (x,y) sets onto a common grid, propagating x- and y-uncertainties.
+    average_on_grid_mc(xsets, ysets;
+                       σxsets=nothing, σysets=nothing,
+                       xq=:union, B=400, outside=:mask, rel_x=false,
+                       rng=Random.default_rng()) -> (xq_vec, μ, σ)
 
-Inputs:
-  xsets :: Vector{<:AbstractVector}        # e.g. [x1,x2,x3,x4]
-  ysets :: Vector{<:AbstractVector}        #       [y1,y2,y3,y4]
-Keywords:
-  σxsets::Union{Nothing,Vector} = nothing  # [σx1, σx2, ...] (per-point abs. σ; vectors match xsets)
-  σysets::Union{Nothing,Vector} = nothing  # [σy1, σy2, ...] (optional)
-  xq     :: Union{Symbol,AbstractVector} = :union  # :union or provide custom grid vector
-  B      :: Int = 400                      # MC replicates
-  outside::Symbol = :mask                  # :mask | :linear | :flat handling outside each set’s range
-  rel_x   :: Bool = false                  # if true, σx interpreted as relative (fractional) error
+Monte-Carlo average of multiple noisy curves onto a common 1D grid, propagating
+uncertainties in both the x- and y-coordinates.
 
-Returns: (xq, μ, σ) where μ is the MC mean and σ the pointwise std (≈ 1σ band).
+Each input dataset `i` is a pair `(xsets[i], ysets[i])`. For each Monte-Carlo replicate,
+the function perturbs `x` and/or `y` according to the provided uncertainties, interpolates
+the perturbed curve onto a shared query grid `xq_vec` using linear gridded interpolation,
+and then averages across datasets at each grid point (ignoring missing values). The output
+mean `μ` and standard deviation `σ` are computed pointwise across the `B` replicates.
+
+# Arguments
+- `xsets::AbstractVector{<:AbstractVector}`: Collection of x-vectors, one per dataset.
+- `ysets::AbstractVector{<:AbstractVector}`: Collection of y-vectors, one per dataset.
+  Must satisfy `length(xsets) == length(ysets)` and each pair must have matching lengths.
+
+# Keyword Arguments
+- `σxsets::Union{Nothing,AbstractVector}=nothing`:
+  Per-dataset vectors of 1σ uncertainties for `x`. If `nothing`, `x` is not perturbed.
+  Each `σxsets[i]` must match `length(xsets[i])`.
+- `σysets::Union{Nothing,AbstractVector}=nothing`:
+  Per-dataset vectors of 1σ uncertainties for `y`. If `nothing`, `y` is not perturbed.
+  Each `σysets[i]` must match `length(ysets[i])`.
+- `rel_x::Bool=false`:
+  If `true`, interpret `σxsets[i]` as *relative* uncertainties so that `Δx = σx .* x`.
+  If `false`, interpret `σxsets[i]` as absolute uncertainties.
+- `xq::Union{Symbol,AbstractVector}=:union`:
+  Query grid specification. If `:union`, uses `sort!(unique(vcat(xsets...)))`.
+  Otherwise, uses `collect(xq)` as the query grid.
+- `B::Integer=400`:
+  Number of Monte-Carlo replicates.
+- `outside::Symbol=:mask`:
+  Policy for evaluating outside each dataset's x-range:
+  - `:mask`  → return `NaN` outside `[minimum(x), maximum(x)]` (excluded from averages)
+  - `:linear` → linear extrapolation
+  - `:flat`   → constant (flat) extrapolation
+- `rng::AbstractRNG=Random.default_rng()`:
+  Random number generator used for the perturbations.
+
+# Returns
+- `xq_vec::Vector{Float64}`: The common query grid.
+- `μ::Vector{Float64}`: Pointwise Monte-Carlo mean on `xq_vec`.
+- `σ::Vector{Float64}`: Pointwise Monte-Carlo standard deviation (sample std, `corrected=true`)
+  on `xq_vec`. Entries may be `NaN` where no dataset covered that grid point (under `:mask`).
+
+# Notes
+- Within each replicate, each dataset is interpolated with `Gridded(Linear())` after sorting by `x`.
+- When `outside == :mask`, points with no coverage across all datasets remain `NaN` in the output.
+- This routine performs an *unweighted* mean across datasets at each grid point; if you need weighting
+  (e.g. by `σy`), modify the combine step accordingly.
 """
 function average_on_grid_mc(xsets, ysets;
                             σxsets=nothing, σysets=nothing,
-                            xq=:union, B=400, outside=:mask, rel_x=false,
+                            xq=:union, B::Int=400, outside::Symbol=:mask, rel_x::Bool=false,
                             rng = Random.default_rng())
 
-    @assert length(xsets) == length(ysets)
+    @assert length(xsets) == length(ysets) "xsets and ysets must have the same number of datasets"
     nset = length(xsets)
+    
+    @assert outside in (:mask, :linear, :flat) "outside must be :mask, :linear, or :flat"
+    @assert B > 0 "B must be positive"
 
     # Build common grid
-    xq_vec = xq === :union ? sort!(unique(vcat(xsets...))) : collect(xq)
+    xq_vec = xq === :union ? sort!(unique(vcat(map(collect, xsets)...))) : collect(xq)
     m = length(xq_vec)
-    preds = Matrix{Float64}(undef, B, m); fill!(preds, NaN)
+
+    preds = Matrix{Float64}(undef, B, m)
+    fill!(preds, NaN)
 
     # small helper: eval with chosen outside policy
     function eval_on_grid(xb, yb, xq)
         p = sortperm(xb); xb = xb[p]; yb = yb[p]
-        itp = Interpolations.interpolate((xb,), yb, Gridded(Linear()))
-        ext = outside === :linear ? extrapolate(itp, Line()) :
-              outside === :flat   ? extrapolate(itp, Flat()) :
-                                    extrapolate(itp, Throw())
+        itp = Interpolations.interpolate((xb,), yb, Gridded(Interpolations.Linear()))
+        ext = outside === :linear ? Interpolations.extrapolate(itp, Line()) :
+              outside === :flat   ? Interpolations.extrapolate(itp, Flat()) :
+                                    Interpolations.extrapolate(itp, Throw())
         vals = similar(xq, Float64); fill!(vals, NaN)
         if outside === :mask
             mask = (xq .>= first(xb)) .& (xq .<= last(xb))
@@ -476,59 +535,72 @@ end
 # helper: first index where column > threshold (skips missings; falls back to 1)
 @inline function first_gt_idx(df::DataFrame, col::Symbol, thr::Real)
     v = df[!, col]
-    idx = findfirst(x -> !ismissing(x) && x > thr, v)
+    idx = findfirst(x -> !ismissing(x) && x >= thr, v)
     return idx === nothing ? 1 : idx
 end
 
-# Grab the table once per (M, run)
-tables = [M[r][3] for (M, r) in zip(m_sets, runs)]
-col = Dict(
-    :x  => :Icoil_A,
-    :y  => :F1_z_centroid_mm,
-    :sx => :Icoil_error_A,
-    :sy => :F1_z_centroid_se_mm,
-)
+tables = Vector{DataFrame}(undef, n_runs)
+for (idx,data_directory) in enumerate(data_directories)
+    magnification_factor = mag_factor(data_directory) ;
 
-scale_mag_factor = inv.([mag_factor(d)[1] for d in data_directories])   # = 1 / magnification_factor
-threshold = 0.010 # lower cut-off for experimental currents
-CURRENT_ROW_START = [first_gt_idx(t, col[:x], threshold) for t in tables]
+    summary_path = joinpath(@__DIR__,"analysis_data\\summary",data_directory, data_directory*"_report_summary.jld2")
 
-xsets  = [t[i:end, col[:x]]                      for (t,i) in zip(tables, CURRENT_ROW_START)]
-ysets  = [smf .* t[i:end, col[:y]] for (t, i, smf) in zip(tables, CURRENT_ROW_START, scale_mag_factor)]
-σxsets = [t[i:end, col[:sx]]                     for (t,i) in zip(tables, CURRENT_ROW_START)]
-σysets = [abs.(smf .* t[i:end, col[:y]]) .* sqrt.(
-              (t[i:end, col[:sy]] ./ t[i:end, col[:y]]).^2 .+
-              (magfac_err .* smf).^2
-          )
-          for (t, i, smf,magfac_err) in zip(tables, CURRENT_ROW_START, scale_mag_factor, magnification_factor_error_ith)]
-i_sampled_length = 1000
+    Icoils = jldopen(summary_path,"r") do mfile
+            mfile["meta/Currents"]
+    end
+
+    # Check experimental data
+    data_exp = jldopen(summary_path,"r") do mfile
+            mfile[JLD2_MyTools.make_keypath_exp(data_directory,selected_bin,selected_spl)]
+    end
+
+    ic = Icoils
+    δic = data_exp[:ErrorCurrentsPhys]
+    zf1 = data_exp[:fw_F1_peak_pos][1] / magnification_factor[1]
+    δzf1 = abs.(zf1) .* sqrt.( (data_exp[:fw_F1_peak_pos][2] ./ data_exp[:fw_F1_peak_pos][1]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
+    zf2 = data_exp[:fw_F2_peak_pos][1] / magnification_factor[1]
+    δzf2 = abs.(zf2) .* sqrt.( (data_exp[:fw_F2_peak_pos][2] ./ data_exp[:fw_F2_peak_pos][1]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
+
+    tables[idx] = DataFrame(hcat(ic,δic,zf1,δzf1,zf2,δzf2),[:x,:sx,:y1,:sy1,:y2,:sy2])
+end
+
+threshold = 0.000 # lower cut-off for experimental currents
+CURRENT_ROW_START = [first_gt_idx(t, :x, threshold) for t in tables]
+
+xsets  = [ t[i:end, :x]  for (t,i) in zip(tables, CURRENT_ROW_START)]
+y1sets = [ t[i:end, :y1] for (t,i) in zip(tables, CURRENT_ROW_START)]
+y2sets = [ t[i:end, :y2] for (t,i) in zip(tables, CURRENT_ROW_START)]
+σxsets = [ t[i:end, :sx] for (t,i) in zip(tables, CURRENT_ROW_START)]
+σy1sets = [ t[i:end, :sy1] for (t, i) in zip(tables, CURRENT_ROW_START)]
+σy2sets = [ t[i:end, :sy2] for (t, i) in zip(tables, CURRENT_ROW_START)]
+i_sampled_length = 5001
 
 # pick a log-spaced grid across the overall x-range (nice for decades-wide currents)
-xlo = minimum(first.(xsets))
-xhi = maximum(last.(xsets))
+xlo = maximum([minimum(first.(xsets)),1e-9])
+xhi = maximum([maximum(last.(xsets)),1.000])
 xq  = exp10.(range(log10(xlo), log10(xhi), length=i_sampled_length))
 
-xq, μ, σ = average_on_grid_mc(xsets, ysets; σxsets=σxsets, σysets=σysets,
-                              xq=:union, B=500, outside=:mask, rel_x=false)
+xi1, μ1, σ1 = average_on_grid_mc(xsets, y1sets; σxsets=σxsets, σysets=σy1sets,
+                              xq=:union, B=500, outside=:mask, rel_x=true)
 
-# xq, μ, σ_xy = average_on_grid_mc(xsets, ysets; σxsets=σxsets, σysets=σysets)
-# _,  _, σ_y  = average_on_grid_mc(xsets, ysets; σxsets=nothing,   σysets=σysets)
-# _,  _, σ_x  = average_on_grid_mc(xsets, ysets; σxsets=σxsets,    σysets=nothing)
-# # If x and y errors are independent, typically:
+# xq, μ, σ_xy = average_on_grid_mc(xsets, y1sets; σxsets=σxsets, σy1sets=σy1sets)
+# _,  _, σ_y  = average_on_grid_mc(xsets, y1sets; σxsets=nothing,   σy1sets=σy1sets)
+# _,  _, σ_x  = average_on_grid_mc(xsets, y1sets; σxsets=σxsets,    σy1sets=nothing)
+## If x and y errors are independent, typically:
 # σ_quad = sqrt.(σ_x.^2 .+ σ_y.^2)  # should be close to σ_xy
 # hcat(σ_xy, σ_quad )
 
 fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
-    xlims = (10e-3,1.0),
-    ylims = (8e-3, 2),
+    xlims = (1e-3,1.0),
+    ylims = (1e-3, 2),
     legend=:bottomright,
 )
 for i=1:length(data_directories)
-    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]/magnification_factor_ith[i]
-    scatter!(fig,xs, ys,
+    xs = tables[i][CURRENT_ROW_START[i]:end,:x]
+    ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
+    scatter!(fig,xs,ys,
         label=data_directories[i],
         marker=(:circle, :white,3),
         markerstrokecolor=cols[i],
@@ -536,12 +608,15 @@ for i=1:length(data_directories)
         )
 end
 plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
-plot!(fig, xq, μ; 
-    ribbon=σ, 
+plot!(fig, xi1, μ1; 
+    ribbon=σ1,
+    # yerror=σ1,
+    label=false,
+)
+plot!(fig,
     xscale=:log10,
     yscale=:log10, 
     title = "Interpolation MC",
-    label=false,
     color=:black,
 )
 display(fig)
@@ -554,7 +629,7 @@ saveplot(fig, "MC_interpolation")
 using BSplineKit
 i_sampled_length = 2*i_sampled_length
 i_xx = round.(range(threshold,1.000,length=i_sampled_length); digits=5)
-i_xx0 = sort(union(i_xx,Ic_grouped))[3:end]
+i_xx0 = sort(union(xq,Ic_grouped))[1:end]
 i_sampled_length = length(i_xx0)
 
 fig = plot(
@@ -566,8 +641,8 @@ fig = plot(
 z_final = zeros(length(data_directories),i_sampled_length)
 cols = palette(:darkrainbow, length(data_directories));
 for i=1:length(data_directories)
-    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]*scale_mag_factor[i]
+    xs = tables[i][CURRENT_ROW_START[i]:end,:x]
+    ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
     spl = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
     z_final[i,:] = spl.(i_xx0)
     scatter!(fig,xs, ys,
@@ -591,7 +666,6 @@ yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0
 )
 zf1 = vec(mean(z_final, dims=1))
 δzf1 = vec(std(z_final; dims=1, corrected=true)/sqrt(length(data_directories)))
-hcat(zf1,δzf1)
 plot!(fig, i_xx0, zf1,
     ribbon = δzf1,
     fillalpha=0.40, 
@@ -608,10 +682,9 @@ fig = plot(
 z_final_fit = zeros(length(data_directories),i_sampled_length)
 cols = palette(:darkrainbow, length(data_directories))
 for i=1:length(data_directories)
-    xs = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"Icoil_A"]
-    ys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]*scale_mag_factor[i]
-    # δys = m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"]*scale_mag_factor
-    δys = abs.(ys) .* sqrt.( (m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_se_mm"] ./ m_sets[i][runs[i]][3][CURRENT_ROW_START[i]:end,"F1_z_centroid_mm"]).^2 .+ (magnification_factor_error_ith[i]*scale_mag_factor[i]).^2 )
+    xs = tables[i][CURRENT_ROW_START[i]:end,:x]
+    ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
+    δys = tables[i][CURRENT_ROW_START[i]:end,:sy1]
     spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
     z_final_fit[i,:] = spl.(i_xx0)
     scatter!(fig,xs, ys,
@@ -638,7 +711,6 @@ ylims = (8e-3, 2),
 display(fig)
 zf1_fit = vec(mean(z_final_fit, dims=1))
 δzf1_fit = vec(std(z_final_fit; dims=1, corrected=true)/sqrt(length(data_directories)))
-hcat(zf1_fit,δzf1_fit)
 plot!(fig,i_xx0, zf1_fit,
     ribbon = δzf1_fit,
     fillalpha=0.40, 
@@ -647,6 +719,96 @@ plot!(fig,i_xx0, zf1_fit,
     line=(:dash,:black,:2))
 display(fig)
 saveplot(fig, "smoothing_interpolation")
+
+
+z2_final_fit = zeros(length(data_directories),i_sampled_length)
+for i=1:length(data_directories)
+    xs = tables[i][CURRENT_ROW_START[i]:end,:x]
+    ys = tables[i][CURRENT_ROW_START[i]:end,:y2]
+    δys = tables[i][CURRENT_ROW_START[i]:end,:sy2]
+    spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
+    z2_final_fit[i,:] = spl.(i_xx0)
+    scatter!(fig,xs, ys,
+        label=data_directories[i],
+        marker=(:circle, :white,3),
+        markerstrokecolor=cols[i],
+        markerstrokewidth=1,
+        )
+    plot!(fig,i_xx0,spl.(i_xx0),
+        label=false,
+        line=(cols[i],1))
+end
+zf2_fit = vec(mean(z2_final_fit, dims=1))
+δzf2_fit = vec(std(z2_final_fit; dims=1, corrected=true)/sqrt(length(data_directories)))
+plot(i_xx0, zf1_fit,
+    ribbon = δzf1_fit,
+    fillalpha=0.40, 
+    fillcolor=:gray36, 
+    label="Mean F1",
+    line=(:dash,:black,:2))
+plot!(i_xx0, zf2_fit,
+    ribbon = δzf2_fit,
+    fillalpha=0.40, 
+    fillcolor=:gray36, 
+    label="Mean F2",
+    line=(:dash,:black,:2)
+)
+
+Ic_around_0 = filter(v -> v <= 0.010, i_xx0)
+ni_0  = length(Ic_around_0)
+δi, _, _, _, _ = curr_error_physical(
+                i_xx0, 0*i_xx0,
+                zf1_fit, zf2_fit;
+                δz1 = δzf1_fit,
+                δz2 = δzf2_fit,
+                use_mismatch = false,
+                nfit = ni_0, order = 3,
+                weight = :gaussian, h = nothing
+            )
+
+fig = plot(
+    xlabel="Current (A)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+)
+z_final_fit = zeros(length(data_directories),i_sampled_length)
+cols = palette(:darkrainbow, length(data_directories))
+for i=1:length(data_directories)
+    xs = tables[i][CURRENT_ROW_START[i]:end,:x]
+    ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
+    δys = tables[i][CURRENT_ROW_START[i]:end,:sy1]
+    spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
+    z_final_fit[i,:] = spl.(i_xx0)
+    scatter!(fig,xs, ys,
+        label=data_directories[i],
+        marker=(:circle, :white,3),
+        markerstrokecolor=cols[i],
+        markerstrokewidth=1,
+        )
+    plot!(fig,i_xx0,spl.(i_xx0),
+        label=false,
+        line=(cols[i],1))
+end
+plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
+display(fig)
+plot!(fig,
+title = "Fit smoothing cubic spline",
+xaxis=:log10, 
+yaxis=:log10,
+xticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+xlims = (10e-3,1.0),
+ylims = (8e-3, 2),
+)
+plot!(fig,i_xx0[1:50:end], zf1_fit[1:50:end],
+    xerror = δi,
+    yerror = δzf1_fit,
+    fillalpha=0.40, 
+    fillcolor=:gray36, 
+    label="Mean",
+    line=(:dash,:black,:2))
+display(fig)
+saveplot(fig, "smoothing_interpolation")
+
 
 fig = plot(
     xlabel="Current (A)",
@@ -664,8 +826,8 @@ plot!(fig, i_xx0, zf1,
     fillcolor=:dodgerblue, 
     label="Average: interpolation cubic spline",
     line=(:dash,:dodgerblue,:2))
-plot!(fig, xq, μ; 
-    ribbon=σ, 
+plot!(fig, xi1, μ1; 
+    ribbon=σ1, 
     label="Interpolation MC",
     color=:orangered2
 )
@@ -675,12 +837,13 @@ xaxis=:log10,
 yaxis=:log10,
 xticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
 yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-xlims = (10e-3,1.0),
-ylims = (8e-3, 2),
+xlims = (1e-3,1.0),
+ylims = (8e-6, 2),
 legend=:bottomright,
 )
 display(fig)
 saveplot(fig, "inter_vs_mc_vs_fit")
+
 
 
 include("./Modules/TheoreticalSimulation.jl");
@@ -700,8 +863,8 @@ plot!(fig, TheoreticalSimulation.GvsI(i_xx0), zf1,
     fillcolor=:dodgerblue, 
     label="Average: interpolation cubic spline",
     line=(:dash,:dodgerblue,:2))
-plot!(fig, TheoreticalSimulation.GvsI(xq), μ; 
-    ribbon=σ, 
+plot!(fig, TheoreticalSimulation.GvsI(xi1), μ1; 
+    ribbon=σ1, 
     label="Interpolation MC",
     color=:orangered2
 )
@@ -734,12 +897,15 @@ jldsave(joinpath(OUTDIR,"data_averaged_$(selected_bin).jld2"),
         :δz_interp      => δzf1,
         # Fitting data => Mean
         :i_smooth       => i_xx0,
+        :δi_smooth      => δi,
         :z_smooth       => zf1_fit,
         :δz_smooth      => δzf1_fit,
+        :z2_smooth      => zf2_fit,
+        :δz2_smooth     => δzf2_fit,
         # MonteCarlo sampling => Mean
-        :i_mc           => xq,
-        :z_mc           => μ,
-        :δz_mc          => σ
+        :i_mc           => xi1,
+        :z_mc           => μ1,
+        :δz_mc          => σ1
     )
 )
 
@@ -840,15 +1006,24 @@ function plotting_qm_fixed(X::Vector,Y::Vector; idx::Integer = 1, title::String 
     return (m_fit = m_fit, z0_fit = z0_fit, fig=fig)
 end
 
-plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:log10)
-plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:identity)
+# plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:log10)
+# plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:identity)
 
-plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:log10)
-plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:identity)
+# plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:log10)
+# plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:identity)
 
-ss = load(joinpath(@__DIR__,"20250820","data_processed.jld2"))
+# ss = load(joinpath(@__DIR__,"20250820","data_processed.jld2"))
 
-ss["data"]
-ss["data"][:Currents]
-size(ss["data"][:F1ProcessedImages])
-ss["data"][:F1ProcessedImages]
+# ss["data"]
+# ss["data"][:Currents]
+# size(ss["data"][:F1ProcessedImages])
+# ss["data"][:F1ProcessedImages]
+
+
+jldopen(joinpath(@__DIR__,"analysis_data","summary","20260220","20260220_report_summary.jld2"),"r") do file
+    println(file["meta/ErrorCurrents"])
+    file[JLD2_MyTools.make_keypath_exp("20260220",2,0.01)]
+end
+
+f["meta"]
+f[JLD2_MyTools.make_keypath_exp("20260211",2,0.01)]
