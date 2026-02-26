@@ -46,9 +46,9 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20260225" ;
+data_directory      = "20251109" ;
 # Furnace 
-Temperature = 273.15 + 200
+Temperature = 273.15 + 205
 
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
@@ -167,6 +167,8 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
     file["meta/ErrorCurrents"] = ΔIcoils
     file["meta/n_Currents"]    = nI
     file["meta/TemperatureK"]  = Temperature
+    file["meta/nz"]            = nbins_list
+    file["meta/λ0"]            = λ0_list
 
     if haskey(data_processed, :BzTesla)
         file["meta/BzTesla"]   = abs.(data_processed[:BzTesla])
