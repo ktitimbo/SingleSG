@@ -36,7 +36,7 @@ LinearAlgebra.BLAS.set_num_threads(2)
 # Set the working directory to the current location
 cd(@__DIR__) ;
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
-const OUTDIR    = joinpath(@__DIR__, "data_studies", RUN_STAMP);
+const OUTDIR    = joinpath(@__DIR__, "data_studies", "FITki"*RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 # General setup
@@ -558,46 +558,14 @@ nI = length(Icoils); # Number of simulated current points
 # Each entry contains the corresponding screen-profile analysis results
 # for all currents in `Icoils`.
 # =============================================================================
-table_qm_path = joinpath(@__DIR__,
-    "simulation_data",
-    "qm_simulation_7M",
-    "qm_7000000_screen_profiles_f1_table.jld2");
-qm_meta = let
-    table_qm      = load(table_qm_path)["table"];
-    @info "QM data loaded"
-
-    keys_qm = collect(keys(table_qm))  # make it an indexable Vector of tuples
-
-    nz_qm = sort(unique(getindex.(keys_qm, 1)))
-    gw_qm = sort(unique(getindex.(keys_qm, 2)))
-    λ0_qm = sort(unique(getindex.(keys_qm, 3)))
-
-    # --- pretty print aligned ---
-    labels = ["nz_qm", "gw_qm", "λ0_qm"]
-    w = maximum(length.(labels))
-
-    # println(rpad("nz_qm", w), " = ", nz_qm);
-    # println(rpad("gw_qm", w), " = ", gw_qm);
-    # println(rpad("λ0_qm", w), " = ", λ0_qm);
-
-    # --- return renamed container ---
-    OrderedDict(
-        :nz => nz_qm,
-        :σw => gw_qm,
-        :λ0 => λ0_qm,
-        :λs => 0.001
-    );
-end
-
-table_qm_path = joinpath(@__DIR__,
-    "simulation_data",
-    "qm_simulation_7M",
+table_qm_path = joinpath(@__DIR__,"simulation_data",
+    "qm_simulation_8M",
     "qm_screen_profiles_f1_table.jld2");
-ks = JLD2_MyTools.list_keys_jld_qm(table_qm_path)
-@show length(ks.keys)
-@show ks.nz
-@show ks.σw
-@show ks.λ0
+qm_meta = JLD2_MyTools.list_keys_jld_qm(table_qm_path);
+@show length(qm_meta.keys);
+@show qm_meta.nz;
+@show qm_meta.σw;
+@show qm_meta.λ0;
 
 # =============================================================================
 # CoQuantum Dynamics (CQD) simulation data
@@ -611,8 +579,7 @@ ks = JLD2_MyTools.list_keys_jld_qm(table_qm_path)
 #   - λ0  : raw spline smoothing parameter
 #   - λs  : spline smoothing parameter used internally
 # =============================================================================
-table_cqd_path = joinpath(@__DIR__,
-    "simulation_data",
+table_cqd_path = joinpath(@__DIR__, "simulation_data",
     "cqd_simulation_7M",
     "cqd_7000000_up_profiles_bykey.jld2");
 cqd_meta = jldopen(table_cqd_path, "r") do file
@@ -657,7 +624,13 @@ end
 #   - dz/dI is the spline derivative evaluated at xq
 #   - δz_interp is the interpolated z-uncertainty at xq
 # =============================================================================
-exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"];
+exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning_2025","data_averaged_2.jld2"))["data"]
+exp_avg
+
+mask = [any(abs(a - b) ≤ 1e-15 for a in exp_avg[:Ic_grouped][:,1]) for b in exp_avg[:i_smooth]]
+Ichosen  = exp_avg[:i_smooth][mask]
+δIchosen = exp_avg[:δi_smooth][mask]
+
 @info "Experimental data loaded"
 # 1. Fit spline for the experiment data
 data_experiment = Spline1D(
@@ -712,27 +685,27 @@ pretty_table(data_exp_scattered;
 # =============================================================================
 
 # ---- common parameter sets across QM and CQD ----
-meta_nz = Int.(intersect(qm_meta[:nz],cqd_meta[:nz]));
-meta_σw = intersect(qm_meta[:σw],cqd_meta[:σw]);
-meta_λ0 = intersect(qm_meta[:λ0],cqd_meta[:λ0]);
+meta_nz = Int.(intersect(qm_meta.nz,cqd_meta[:nz]));
+meta_σw = intersect(qm_meta.σw,cqd_meta[:σw]);
+meta_λ0 = intersect(qm_meta.λ0,cqd_meta[:λ0]);
 @info "Common parameter grid" meta_nz=meta_nz meta_σw=meta_σw meta_λ0=meta_λ0
 # number of CQD induction coefficients available
 n_ki    = length(cqd_meta[:ki]);
 
 # ---- chosen working point for this run ----
-nx_bins , nz_bins = 128 , 2;
-gaussian_width_mm = 0.270;
-λ0_raw            = 0.01;
-λ0_spline         = 0.001;
-@info "Selected parameters" nx_bins=nx_bins nz_bins=nz_bins gw=gaussian_width_mm λ0_raw=λ0_raw λ0_spline=λ0_spline
+nx_fixed , nz_fixed = 128 , 2;
+σw_fixed  = 0.250;
+λ0_fixed  = 0.01;
+λ0_spline = 0.001;
+@info "Selected parameters" nx_bins=nx_fixed nz_bins=nz_fixed gw=σw_fixed λ0_raw=λ0_fixed λ0_spline=λ0_spline
 
 # -----------------------------------------------------------------------------
 # Sanity checks:
 # Ensure the chosen parameters exist in the *common* QM ∩ CQD sets.
 # -----------------------------------------------------------------------------
-@assert nz_bins in meta_nz "nz_bins = $nz_bins not in common nz set: $meta_nz"
-@assert gaussian_width_mm in meta_σw "gaussian_width_mm = $gaussian_width_mm not in common gw set: $meta_σw"
-@assert λ0_raw in meta_λ0 "λ0_raw = $λ0_raw not in common λ0 set: $meta_λ0"
+@assert nz_fixed in meta_nz "nz_fixed = $nz_fixed not in common nz set: $meta_nz"
+@assert σw_fixed in meta_σw "σw_fixed = $σw_fixed not in common gw set: $meta_σw"
+@assert λ0_fixed in meta_λ0 "λ0_fixed = $λ0_fixed not in common λ0 set: $meta_λ0"
 
 # =============================================================================
 # Quantum-mechanical (QM) reference curve z_max(I)
@@ -742,7 +715,7 @@ gaussian_width_mm = 0.270;
 # current I, and construct a smooth interpolant z_qm(I).
 # =============================================================================
 data_qm = jldopen(table_qm_path, "r") do file
-    file[JLD2_MyTools.make_keypath_qm(nz_bins, gaussian_width_mm, λ0_raw)]
+    file[JLD2_MyTools.make_keypath_qm(nz_fixed, σw_fixed, λ0_fixed)]
 end
 
 # data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)];
@@ -769,7 +742,7 @@ for (i,ki) in enumerate(cqd_meta[:ki])
     # The keypath encodes the branch (:up), ki, nz_bins, gaussian_width_mm, λ0_raw.
     data_up = jldopen(table_cqd_path, "r") do file
         # file[keypath(:up,ki,nz_bins,gaussian_width_mm,λ0_raw)]
-        file[JLD2_MyTools.make_keypath_cqd(:up,ki,nz_bins,gaussian_width_mm,λ0_raw)]
+        file[JLD2_MyTools.make_keypath_cqd(:up,ki,nz_fixed,σw_fixed,λ0_fixed)]
     end
     # Extract z_max (in mm) for each simulated current index l = 1:nI
     # and store as the i-th column of z_up_ki.
@@ -810,12 +783,12 @@ mask_qm = log_mask(Icoils, zmax_QM);
 plot!(Icoils[mask_qm],zmax_QM[mask_qm],
     label="QM",
     line=(:dashdot,:black,2),);
-plot!(fig, exp_avg[:i_smooth], exp_avg[:z_smooth],
-    ribbon=exp_avg[:δz_smooth],
+plot!(fig, exp_avg[:i_smooth][10000:end], exp_avg[:z_smooth][10000:end],
+    ribbon=exp_avg[:δz_smooth][10000:end],
     color=:gold,
     label="Combined experiments",
     line=(:solid,:gold,3),
-    fillalpha=0.3,);
+    fillalpha=0.3,)
 plot!(fig, 
     size=(1350,850),
     xaxis=:log10, 
@@ -831,9 +804,9 @@ plot!(fig,
     legendfontsize=7,
     left_margin=6mm,
     bottom_margin=5mm,
-    foreground_color_legend=nothing);
+    foreground_color_legend=nothing)
 annotate!(fig, 1e-2,1, 
-    text(L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(Int(1e3*gaussian_width_mm))\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",:black,12));
+    text(L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(Int(1e3*σw_fixed))\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$",:black,12));
 display(fig)
 savefig(fig, joinpath(OUTDIR,"fig001.$(FIG_EXT)"))
 
@@ -1179,7 +1152,7 @@ plot!(
               [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     xlims = (0.010, 1.05),
     size  = (900, 800),
-    legendtitle = L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendtitle = L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(1e3*σw_fixed)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$",
     legendfontsize = 12,
     left_margin = 3mm,
 )
@@ -1227,7 +1200,7 @@ plot!(
     xlims=(0.020,1.05),
     # ylims=(-0.10,0.25),
     size=(800,500),
-    legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendtitle=L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(1e3*σw_fixed)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$",
     legendfontsize=12,
     left_margin=3mm,
     bottom_margin=3mm,
@@ -1266,7 +1239,7 @@ plot!(
     xlims=(0.020,1.05),
     # ylims=(-0.10,0.25),
     size=(800,500),
-    legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendtitle=L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(1e3*σw_fixed)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$",
     legendfontsize=12,
     left_margin=3mm,
     bottom_margin=3mm,
@@ -2241,7 +2214,7 @@ end
 i_start = searchsortedfirst(exp_avg[:i_smooth], i_threshold)
 data     = hcat(
     exp_avg[:i_smooth],
-    0.02*exp_avg[:i_smooth],
+    round.(exp_avg[:δi_smooth]; sigdigits=1),
     exp_avg[:z_smooth],
     exp_avg[:δz_smooth]
 )[i_start:end,:]
