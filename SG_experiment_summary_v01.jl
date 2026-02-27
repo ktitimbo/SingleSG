@@ -1,6 +1,6 @@
 # Kelvin Titimbo
 # California Institute of Technology
-# August 2025
+# February 2026
 
 ############## EXPERIMENT ANALYSIS PREAMBLE ##############
 # Headless/Windows-safe GR: set before using Plots
@@ -71,8 +71,8 @@ zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)
 parent_folder = joinpath(@__DIR__, "analysis_data");
 data_directories = [
     # "20250814", "20250820", "20250825","20250919","20251002","20251003","20251006",
-    "20260211", "20260213", 
-    "20260220", "20260225"
+    # "20260211", "20260213", 
+    "20260220", "20260225", "20260226am"
 ];
 
 n_runs = length(data_directories);
@@ -110,7 +110,7 @@ plot!(fig_Is,
     ylim = (1e-5,1.05),
     xlim=(-1,n_runs+2),
     yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$"),
-    xticks = (1:length(data_directories), data_directories),
+    xticks = (1:n_runs, data_directories),
     yticks = ([1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     xminorticks = false,
     xrotation=75,
@@ -371,7 +371,7 @@ println("\nComparison of differente experiments finished!\n\n")
 #######################################################################################################################
 ######################################### AVERAGING ###################################################################
 #######################################################################################################################
-Ics = Vector{Vector{Float64}}(undef, length(data_directories));
+Ics = Vector{Vector{Float64}}(undef, n_runs);
 tol_grouping = 0.05
 for (i, dir) in enumerate(data_directories)
     data = load(joinpath(@__DIR__, dir, "data_processed.jld2"), "data")
@@ -383,7 +383,6 @@ for s in clusters.summary
 end
 Ic_grouped  = round.([clusters.summary[i].mean_val for i in 1:length(clusters.summary)]; digits=3)
 δIc_grouped = round.([clusters.summary[i].std_val for i in 1:length(clusters.summary)]; sigdigits=1)
-
 
 magnification_factor_ith =  [mag_factor(d)[1] for d in data_directories]
 magnification_factor_error_ith =  [mag_factor(d)[2] for d in data_directories]
@@ -573,9 +572,9 @@ y2sets = [ t[i:end, :y2] for (t,i) in zip(tables, CURRENT_ROW_START)]
 σxsets = [ t[i:end, :sx] for (t,i) in zip(tables, CURRENT_ROW_START)]
 σy1sets = [ t[i:end, :sy1] for (t, i) in zip(tables, CURRENT_ROW_START)]
 σy2sets = [ t[i:end, :sy2] for (t, i) in zip(tables, CURRENT_ROW_START)]
-i_sampled_length = 5001
 
 # pick a log-spaced grid across the overall x-range (nice for decades-wide currents)
+i_sampled_length = 20001
 xlo = maximum([minimum(first.(xsets)),1e-9])
 xhi = maximum([maximum(last.(xsets)),1.000])
 xq  = exp10.(range(log10(xlo), log10(xhi), length=i_sampled_length))
@@ -597,7 +596,7 @@ fig = plot(
     ylims = (1e-3, 2),
     legend=:bottomright,
 )
-for i=1:length(data_directories)
+for i=1:n_runs
     xs = tables[i][CURRENT_ROW_START[i]:end,:x]
     ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
     scatter!(fig,xs,ys,
@@ -627,9 +626,9 @@ saveplot(fig, "MC_interpolation")
 # spl = Spline1D(m_sets[1][runs[1]][3][!,"Icoil_A"], m_sets[1][runs[1]][3][!,"F1_z_centroid_mm"]; k=3, s=0.5, bc="extrapolate")   # k=3 cubic; s=0 exact interpolate, s>0 smoothing
 
 using BSplineKit
-i_sampled_length = 2*i_sampled_length
-i_xx = round.(range(threshold,1.000,length=i_sampled_length); digits=5)
-i_xx0 = sort(union(xq,Ic_grouped))[1:end]
+# i_sampled_length = 2*i_sampled_length
+# i_xx = round.(range(threshold,1.000,length=i_sampled_length); digits=5)
+i_xx0 = unique(round.(sort(union(xq,Ic_grouped)); digits=9))
 i_sampled_length = length(i_xx0)
 
 fig = plot(
@@ -638,9 +637,9 @@ fig = plot(
     xlims = (10e-3,1.0),
     ylims = (8e-3, 2),
 )
-z_final = zeros(length(data_directories),i_sampled_length)
-cols = palette(:darkrainbow, length(data_directories));
-for i=1:length(data_directories)
+z_final = zeros(n_runs,i_sampled_length)
+cols = palette(:darkrainbow, n_runs);
+for i=1:n_runs
     xs = tables[i][CURRENT_ROW_START[i]:end,:x]
     ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
     spl = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
@@ -665,7 +664,7 @@ xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0
 yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
 )
 zf1 = vec(mean(z_final, dims=1))
-δzf1 = vec(std(z_final; dims=1, corrected=true)/sqrt(length(data_directories)))
+δzf1 = vec(std(z_final; dims=1, corrected=true)/sqrt(n_runs))
 plot!(fig, i_xx0, zf1,
     ribbon = δzf1,
     fillalpha=0.40, 
@@ -679,9 +678,9 @@ fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
 )
-z_final_fit = zeros(length(data_directories),i_sampled_length)
-cols = palette(:darkrainbow, length(data_directories))
-for i=1:length(data_directories)
+z_final_fit = zeros(n_runs,i_sampled_length)
+cols = palette(:darkrainbow, n_runs)
+for i=1:n_runs
     xs = tables[i][CURRENT_ROW_START[i]:end,:x]
     ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
     δys = tables[i][CURRENT_ROW_START[i]:end,:sy1]
@@ -710,7 +709,7 @@ ylims = (8e-3, 2),
 )
 display(fig)
 zf1_fit = vec(mean(z_final_fit, dims=1))
-δzf1_fit = vec(std(z_final_fit; dims=1, corrected=true)/sqrt(length(data_directories)))
+δzf1_fit = vec(std(z_final_fit; dims=1, corrected=true)/sqrt(n_runs))
 plot!(fig,i_xx0, zf1_fit,
     ribbon = δzf1_fit,
     fillalpha=0.40, 
@@ -721,8 +720,8 @@ display(fig)
 saveplot(fig, "smoothing_interpolation")
 
 
-z2_final_fit = zeros(length(data_directories),i_sampled_length)
-for i=1:length(data_directories)
+z2_final_fit = zeros(n_runs,i_sampled_length)
+for i=1:n_runs
     xs = tables[i][CURRENT_ROW_START[i]:end,:x]
     ys = tables[i][CURRENT_ROW_START[i]:end,:y2]
     δys = tables[i][CURRENT_ROW_START[i]:end,:sy2]
@@ -739,24 +738,31 @@ for i=1:length(data_directories)
         line=(cols[i],1))
 end
 zf2_fit = vec(mean(z2_final_fit, dims=1))
-δzf2_fit = vec(std(z2_final_fit; dims=1, corrected=true)/sqrt(length(data_directories)))
-plot(i_xx0, zf1_fit,
+δzf2_fit = vec(std(z2_final_fit; dims=1, corrected=true)/sqrt(n_runs))
+fig_c = plot(i_xx0, zf1_fit,
     ribbon = δzf1_fit,
     fillalpha=0.40, 
     fillcolor=:gray36, 
     label="Mean F1",
-    line=(:dash,:black,:2))
-plot!(i_xx0, zf2_fit,
+    line=(:dash,:black,1))
+plot!(fig_c,
+    i_xx0, zf2_fit,
     ribbon = δzf2_fit,
     fillalpha=0.40, 
     fillcolor=:gray36, 
     label="Mean F2",
-    line=(:dash,:black,:2)
+    line=(:dash,:black,1)
 )
+plot!(fig_c,
+    xlabel="Current (A)",
+    ylabel="Centered Peak position (mm)",
+    # xlims=(0,0.020)
+    )
+saveplot(fig_c, "fit_interpol_centroid")
 
 Ic_around_0 = filter(v -> v <= 0.010, i_xx0)
 ni_0  = length(Ic_around_0)
-δi, _, _, _, _ = curr_error_physical(
+δi, eδi, m, i0, σd0 = curr_error_physical(
                 i_xx0, 0*i_xx0,
                 zf1_fit, zf2_fit;
                 δz1 = δzf1_fit,
@@ -764,15 +770,18 @@ ni_0  = length(Ic_around_0)
                 use_mismatch = false,
                 nfit = ni_0, order = 3,
                 weight = :gaussian, h = nothing
-            )
+            );
+@show round(eδi,digits=6)
+@info "Channel disagreement at Ic=$(i_xx0[i0])A is $(round(1000*abs.((zf1_fit[i0] - zf2_fit[i0]) / 2 );digits=3))μm"
+@info "Channel error measured at Ic=$(i_xx0[i0])A is $(round(1000*abs.( 0.5 * sqrt( δzf1_fit[i0]^2 + δzf2_fit[i0]^2 ) );digits=3))μm"
 
 fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
 )
-z_final_fit = zeros(length(data_directories),i_sampled_length)
-cols = palette(:darkrainbow, length(data_directories))
-for i=1:length(data_directories)
+z_final_fit = zeros(n_runs,i_sampled_length)
+cols = palette(:darkrainbow, n_runs)
+for i=1:n_runs
     xs = tables[i][CURRENT_ROW_START[i]:end,:x]
     ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
     δys = tables[i][CURRENT_ROW_START[i]:end,:sy1]
@@ -799,15 +808,16 @@ yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0
 xlims = (10e-3,1.0),
 ylims = (8e-3, 2),
 )
-plot!(fig,i_xx0[1:50:end], zf1_fit[1:50:end],
-    xerror = δi,
-    yerror = δzf1_fit,
+plot!(fig,i_xx0[1:200:end], zf1_fit[1:200:end],
+    xerror = δi[1:200:end],
+    yerror = δzf1_fit[1:200:end],
+    marker=(:square,1,:black),
     fillalpha=0.40, 
     fillcolor=:gray36, 
     label="Mean",
-    line=(:dash,:black,:2))
+    line=(:solid,:black,2))
 display(fig)
-saveplot(fig, "smoothing_interpolation")
+saveplot(fig, "smoothing_interpolation_err")
 
 
 fig = plot(
@@ -837,8 +847,8 @@ xaxis=:log10,
 yaxis=:log10,
 xticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
 yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-xlims = (1e-3,1.0),
-ylims = (8e-6, 2),
+xlims = (15e-3,1.0),
+ylims = (1e-3, 2),
 legend=:bottomright,
 )
 display(fig)
@@ -915,115 +925,115 @@ println("\nEXPERIMENTS ANALYSIS FINISHED! $(T_RUN)")
 alert("EXPERIMENTS ANALYSIS FINISHED!")
 
 
-using Optim
+# using Optim
 
-zQM_itpl = BSplineKit.extrapolate(BSplineKit.interpolate(Ic_qm, zm_qm, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
-# index cutoff
-idx = 8
+# zQM_itpl = BSplineKit.extrapolate(BSplineKit.interpolate(Ic_qm, zm_qm, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
+# # index cutoff
+# idx = 8
 
 
 
-# -------------------------------------------------------------
-# 1. Scaling model:   z_scaled = X/s + r
-# -------------------------------------------------------------
-scale_model(X, r, s) = @. X/s + r 
+# # -------------------------------------------------------------
+# # 1. Scaling model:   z_scaled = X/s + r
+# # -------------------------------------------------------------
+# scale_model(X, r, s) = @. X/s + r 
 
-# -------------------------------------------------------------
-# 2. Log-error function with positivity constraints
-# -------------------------------------------------------------
-function log_error(X::Vector, Y::Vector)
-    function f(x)
-        r, s = x
-        s <= 0 && return Inf
+# # -------------------------------------------------------------
+# # 2. Log-error function with positivity constraints
+# # -------------------------------------------------------------
+# function log_error(X::Vector, Y::Vector)
+#     function f(x)
+#         r, s = x
+#         s <= 0 && return Inf
 
-        vals = scale_model(X, r, s)
-        any(vals .<= 0) && return Inf  # log safety
+#         vals = scale_model(X, r, s)
+#         any(vals .<= 0) && return Inf  # log safety
 
-        diff = log10.(Y) .- log10.(vals)
-        return sum(diff .^ 2)
-    end
-    return f
+#         diff = log10.(Y) .- log10.(vals)
+#         return sum(diff .^ 2)
+#     end
+#     return f
+# end
+
+# # -------------------------------------------------------------
+# # 3. Fit (r, s) using Nelder–Mead
+# # -------------------------------------------------------------
+# function fit_rs(X::Vector, Y::Vector; x0=[0.0, 1.0])
+#     f = log_error(X, Y)
+#     res = optimize(f, x0, NelderMead())
+#     return Optim.minimizer(res) 
+# end
+
+# # -------------------------------------------------------------
+# # Plot (QM vs Experiment)
+# # -------------------------------------------------------------
+# function plotting_qm_fixed(X::Vector,Y::Vector; idx::Integer = 1, title::String = "title" , yscale::Symbol = :identity)
+#     z0_fit, m_fit = fit_rs(X, Y; x0=[0.0, 1.0])
+
+#     X_scaled = scale_model(X, z0_fit, m_fit)
+
+#     fig1 = plot(Ic_qm, zm_qm,
+#         label="Model: QM",
+#         line=(:dash,:blue,2));
+#     plot!(i_xx0[idx:end], X_scaled,
+#         label="Experiment: Scaled ($(@sprintf("%2.2f",m_fit*mean(magnification_factor_ith))), $(@sprintf("%2.2f",1000*z0_fit))μm)",
+#         line=(:solid,0.75,2,:red)
+#     );
+#     plot!(
+#         title=title,
+#         xaxis = (L"$I_{c} \ (\mathrm{A})$",
+#                 (10e-3,1),
+#                 ([1e-3, 1e-2, 1e-1, 1.0], 
+#                     [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+#                 :log10,),
+#         yaxis=(L"$z_{\mathrm{max}} \ (\mathrm{mm})$",yscale),
+#         legend=:bottomright,
+#     );
+#     display(fig1)
+
+#     fig2 = plot(i_xx0[idx:end], 100 .*( Y ./ X  .- 1),
+#         label="Experiment : original",
+#         line=(:solid,:red,2)
+#     );
+#     plot!(i_xx0[idx:end], 100*(Y ./ X_scaled .- 1),
+#         label  = "Experiment : scaled",
+#         line=(:solid,:dodgerblue4,2),
+#         ylabel = "Relative Error (%)",
+#         xaxis = (L"$I_{c} \ (\mathrm{A})$",
+#                 (10e-3,1),
+#                 ([1e-3, 1e-2, 1e-1, 1.0], 
+#                     [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+#                 :log10,),
+#     );
+#     hline!([0], line=(:dash,:black,1), label=nothing)
+
+#     fig = plot(fig1,fig2,
+#         layout=(2,1),
+#         size=(800,500),
+#         left_margin=3mm,)
+#     display(fig)
+
+#     return (m_fit = m_fit, z0_fit = z0_fit, fig=fig)
+# end
+
+# # plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:log10)
+# # plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:identity)
+
+# # plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:log10)
+# # plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:identity)
+
+# # ss = load(joinpath(@__DIR__,"20250820","data_processed.jld2"))
+
+# # ss["data"]
+# # ss["data"][:Currents]
+# # size(ss["data"][:F1ProcessedImages])
+# # ss["data"][:F1ProcessedImages]
+
+
+jldopen(joinpath(@__DIR__,"analysis_data","summary","20260225","20260225_report_summary.jld2"),"r") do file
+    println(file["meta/Currents"])
+    file[JLD2_MyTools.make_keypath_exp("20260225",2,0.10)]
 end
 
-# -------------------------------------------------------------
-# 3. Fit (r, s) using Nelder–Mead
-# -------------------------------------------------------------
-function fit_rs(X::Vector, Y::Vector; x0=[0.0, 1.0])
-    f = log_error(X, Y)
-    res = optimize(f, x0, NelderMead())
-    return Optim.minimizer(res) 
-end
-
-# -------------------------------------------------------------
-# Plot (QM vs Experiment)
-# -------------------------------------------------------------
-function plotting_qm_fixed(X::Vector,Y::Vector; idx::Integer = 1, title::String = "title" , yscale::Symbol = :identity)
-    z0_fit, m_fit = fit_rs(X, Y; x0=[0.0, 1.0])
-
-    X_scaled = scale_model(X, z0_fit, m_fit)
-
-    fig1 = plot(Ic_qm, zm_qm,
-        label="Model: QM",
-        line=(:dash,:blue,2));
-    plot!(i_xx0[idx:end], X_scaled,
-        label="Experiment: Scaled ($(@sprintf("%2.2f",m_fit*mean(magnification_factor_ith))), $(@sprintf("%2.2f",1000*z0_fit))μm)",
-        line=(:solid,0.75,2,:red)
-    );
-    plot!(
-        title=title,
-        xaxis = (L"$I_{c} \ (\mathrm{A})$",
-                (10e-3,1),
-                ([1e-3, 1e-2, 1e-1, 1.0], 
-                    [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-                :log10,),
-        yaxis=(L"$z_{\mathrm{max}} \ (\mathrm{mm})$",yscale),
-        legend=:bottomright,
-    );
-    display(fig1)
-
-    fig2 = plot(i_xx0[idx:end], 100 .*( Y ./ X  .- 1),
-        label="Experiment : original",
-        line=(:solid,:red,2)
-    );
-    plot!(i_xx0[idx:end], 100*(Y ./ X_scaled .- 1),
-        label  = "Experiment : scaled",
-        line=(:solid,:dodgerblue4,2),
-        ylabel = "Relative Error (%)",
-        xaxis = (L"$I_{c} \ (\mathrm{A})$",
-                (10e-3,1),
-                ([1e-3, 1e-2, 1e-1, 1.0], 
-                    [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-                :log10,),
-    );
-    hline!([0], line=(:dash,:black,1), label=nothing)
-
-    fig = plot(fig1,fig2,
-        layout=(2,1),
-        size=(800,500),
-        left_margin=3mm,)
-    display(fig)
-
-    return (m_fit = m_fit, z0_fit = z0_fit, fig=fig)
-end
-
-# plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:log10)
-# plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:identity)
-
-# plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:log10)
-# plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:identity)
-
-# ss = load(joinpath(@__DIR__,"20250820","data_processed.jld2"))
-
-# ss["data"]
-# ss["data"][:Currents]
-# size(ss["data"][:F1ProcessedImages])
-# ss["data"][:F1ProcessedImages]
-
-
-jldopen(joinpath(@__DIR__,"analysis_data","summary","20260220","20260220_report_summary.jld2"),"r") do file
-    println(file["meta/ErrorCurrents"])
-    file[JLD2_MyTools.make_keypath_exp("20260220",2,0.01)]
-end
-
-f["meta"]
-f[JLD2_MyTools.make_keypath_exp("20260211",2,0.01)]
+# f["meta"]
+# f[JLD2_MyTools.make_keypath_exp("20260211",2,0.01)]
