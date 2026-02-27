@@ -46,13 +46,13 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20251109" ;
+data_directory      = "20260226pm" ;
 # Furnace 
-Temperature = 273.15 + 205
+Temperature = 273.15 + 200
 
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
-data_summary_path = joinpath(@__DIR__, "analysis_data","summary",data_directory)
+data_summary_path   = joinpath(@__DIR__, "analysis_data","summary",data_directory)
 isdir(data_summary_path) || mkpath(data_summary_path);
 
 
