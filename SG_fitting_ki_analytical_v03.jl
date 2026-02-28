@@ -295,7 +295,6 @@ function fit_ki_with_error(itp, data;
     )
 end
 
-
 function compute_metrics(A,X)
     LA = log10.(A)
     LX = log10.(X)
@@ -625,7 +624,6 @@ end
 #   - δz_interp is the interpolated z-uncertainty at xq
 # =============================================================================
 exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning_2025","data_averaged_2.jld2"))["data"]
-exp_avg
 
 mask = [any(abs(a - b) ≤ 1e-15 for a in exp_avg[:Ic_grouped][:,1]) for b in exp_avg[:i_smooth]]
 Ichosen  = exp_avg[:i_smooth][mask]
@@ -716,7 +714,7 @@ nx_fixed , nz_fixed = 128 , 2;
 # =============================================================================
 data_qm = jldopen(table_qm_path, "r") do file
     file[JLD2_MyTools.make_keypath_qm(nz_fixed, σw_fixed, λ0_fixed)]
-end
+end;
 
 # data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)];
 Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)];
@@ -938,7 +936,7 @@ i_start = searchsortedfirst(exp_avg[:i_smooth], i_threshold) ;
 I_scan = logspace10(i_threshold, 1.00; n = 501);
 
 # Build a convenient N×4 array: [I, δI, z, δz] and keep only I ≥ i_threshold
-data = hcat(exp_avg[:i_smooth],0.02*exp_avg[:i_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :];
+data = hcat(exp_avg[:i_smooth],exp_avg[:δi_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :];
 pretty_table(data;
         alignment     = :c,
         title         = @sprintf("EXPERIMENTAL DATA (continuous)"),
