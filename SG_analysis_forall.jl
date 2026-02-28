@@ -46,7 +46,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20260226pm" ;
+data_directory      = "20260226am" ;
 # Furnace 
 Temperature = 273.15 + 200
 
@@ -1572,17 +1572,19 @@ alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 #     legend=:bottomright)
 
 
-# data_directory = "20250814"
-# data_path = joinpath(@__DIR__,"analysis_data","summary",data_directory,data_directory*"_report_summary.jld2")
+data_directory = "20260226am"
+data_path = joinpath(@__DIR__,"analysis_data","summary",data_directory,data_directory*"_report_summary.jld2")
 
-# JLD2_MyTools.tree_jld(data_path)
+JLD2_MyTools.tree_jld(data_path)
 
-# dI , d1 = jldopen(data_path, "r") do fname
-#     Ic = fname["meta/Currents"]
-#     ΔIc = fname["meta/ErrorCurrents"]
+dI , d1 = jldopen(data_path, "r") do fname
+    Ic =  fname["meta/Currents"]
+    ΔIc = fname["meta/ErrorCurrents"]
 
-#     return (Ic,ΔIc), fname[JLD2_MyTools.make_keypath_exp(data_directory,2,0.01)]
-# end
+    return (Ic,ΔIc), fname[JLD2_MyTools.make_keypath_exp(data_directory,2,0.01)]
+end
+
+d1[:fw_F1_peak_pos][1]
 
 # d1
 
