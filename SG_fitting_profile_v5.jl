@@ -150,8 +150,8 @@ dir_list = [
     # "20250919" , 
     # "20251002" , "20251003", "20251006",
     # "20251109",
-    "20260211" , "20260213",
-    "20260220"
+    # "20260211" , "20260213",
+    "20260220", "20260225", "20260226am","20260226pm","20260227"
 ]
 
 hdr_top = Any[
@@ -716,7 +716,8 @@ m = mean([data_cov_xkl[s].blurrGwidth_um for s in ["20250814","20250820","202508
 s = std([data_cov_xkl[s].blurrGwidth_um for s in ["20250814","20250820","20250825","20250919"]]);
 println("Gaussian phenomenological blurring function ($(@sprintf("%.1f ± %.1f", m, s))) μm ")
 
-data_cov_kk  = load(joinpath(@__DIR__,"data_studies","CONV20260224T144523635","blur_conv.jld2" ), "convolution");
-m = mean([data_cov_kk[s].blurrGwidth_um for s in ["20260211","20260213","20260220"]]);
-s = std([data_cov_kk[s].blurrGwidth_um for s in ["20260211","20260213","20260220"]]);
+data_cov_kk  = load(joinpath(@__DIR__,"data_studies","CONV20260227T192123653","blur_conv.jld2" ), "convolution");
+[data_cov_kk[s].blurrGwidth_um for s in ["20260220", "20260225", "20260226am","20260226pm","20260227"]]
+m = mean([data_cov_kk[s].blurrGwidth_um for s in ["20260220", "20260225", "20260226am","20260226pm","20260227"]]);
+s = std([data_cov_kk[s].blurrGwidth_um for s in ["20260220", "20260225", "20260226am","20260226pm","20260227"]]);
 println("Gaussian phenomenological blurring function ($(@sprintf("%.1f ± %.1f", m, s))) μm ")
