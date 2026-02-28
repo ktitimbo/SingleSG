@@ -293,12 +293,12 @@ Behavior (matches your script):
 """
 function merge_qm_two_runs(run1_path::AbstractString,
                            run2_path::AbstractString,
-                           out_path::AbstractString;
-                           Ns::Integer = 8_000_000,
-                           T_C::Float64 = 205.0,
-                           s_spline::Float64 = 0.001)
+                           out_path::AbstractString)
 
     jldopen(run1_path, "r") do file1
+        N1   = Int(file1["meta/N"])
+        T1   = Float64(file1["meta/T"])
+        s1   = Float64(file1["s_spline"])
         nx1  = Int(file1["meta/nx"])
         nz1  = Vector{Int}(file1["meta/nz"])
         σw1  = Vector{Float64}(file1["meta/σw"])
@@ -306,6 +306,9 @@ function merge_qm_two_runs(run1_path::AbstractString,
         param_grid_1 = Tuple{Int,Float64,Float64}.(collect(Iterators.product(nz1, σw1, λ01)))
 
         jldopen(run2_path, "r") do file2
+            N2   = Int(file2["meta/N"])
+            T2   = Float64(file2["meta/T"])
+            s2   = Float64(file2["s_spline"])
             nx2  = Int(file2["meta/nx"])
             nz2  = Vector{Int}(file2["meta/nz"])
             σw2  = Vector{Float64}(file2["meta/σw"])
@@ -314,6 +317,18 @@ function merge_qm_two_runs(run1_path::AbstractString,
 
             if nx1 != nx2
                 @warn "Not recommended to merge: nₓ do not match $(nx1) ≠ $(nx2)"
+                return nothing
+            end
+            if N1 != N2
+                @warn "Not recommended to merge: N do not match $(N1) ≠ $(N2)"
+                return nothing
+            end
+            if T1 != T2
+                @warn "Not recommended to merge: T do not match $(T1) ≠ $(T2)"
+                return nothing
+            end
+            if s1 != s2
+                @warn "Not recommended to merge: spline do not match $(s1) ≠ $(s2)"
                 return nothing
             end
 
@@ -332,9 +347,9 @@ function merge_qm_two_runs(run1_path::AbstractString,
 
             jldopen(out_path, "w") do outfile
                 # ---- default meta (your original) ----
-                outfile["meta/N"]        = Ns
-                outfile["meta/T"]        = 273.15 + T_C
-                outfile["meta/s_spline"] = s_spline
+                outfile["meta/N"]        = N1
+                outfile["meta/T"]        = T1
+                outfile["meta/s_spline"] = s1
                 outfile["meta/nx"]       = nx1
                 outfile["meta/nz"]       = nz_list
                 outfile["meta/σw"]       = σw_list
