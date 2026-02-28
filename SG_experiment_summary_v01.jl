@@ -71,11 +71,12 @@ zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)
 parent_folder = joinpath(@__DIR__, "analysis_data");
 data_directories = [
     "20250814", "20250820", "20250825","20250919","20251002","20251003","20251006",
+    # "20251109",
     # "20260211", "20260213", 
-    # "20260220", "20260225", "20260226am"
+    # "20260220", "20260225", "20260226am","20260226pm","20260227"
 ];
 
-n_runs = length(data_directories);
+n_runs = length(data_directories)
 I_all  = Vector{Vector{Float64}}(undef, n_runs);
 dI_all = Vector{Vector{Float64}}(undef, n_runs);
 cols = palette(:darkrainbow, n_runs);
@@ -134,7 +135,7 @@ for data_directory in data_directories
                                     report_name="experiment_report.txt", 
                                     sort_on=:binning, 
                                     data_dir_filter=data_directory);
-    
+  
     pretty_table(hcat(collect(keys(m)),
                         [v.binning   for v in values(m)],
                         [v.smoothing for v in values(m)]); 
