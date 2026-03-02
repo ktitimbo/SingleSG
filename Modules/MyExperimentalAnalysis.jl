@@ -1817,8 +1817,52 @@ function local_derivative_at0(x::AbstractVector, y::AbstractVector;
 
     W = Diagonal(sqrt.(w))
     β = (W*A) \ (W*ys)
-    return β[2]
+    return β, xs, ys, w
 end
+
+
+
+"""
+    plot_local_derivative_fit(x, y; nfit=7, order=2, weight=:gaussian, h=nothing, xspan=nothing)
+
+Shows:
+- all points
+- points used in the local fit
+- local polynomial fit curve
+- tangent line at x=0 with slope β[2]
+"""
+function plot_local_derivative_fit(x, y; nfit=7, order=2, weight=:gaussian, h=nothing, xspan=nothing)
+    β, xs, ys, w = local_derivative_at0(x, y; nfit=nfit, order=order, weight=weight, h=h)
+
+    # choose a plotting window near 0
+    if xspan === nothing
+        xspan = maximum(abs.(xs))
+        xspan = (xspan == 0.0) ? 1.0 : xspan
+    end
+    xgrid = range(-xspan/10, xspan; length=300)
+
+    # polynomial prediction
+    yfit = zero.(xgrid) .+ β[1]
+    for k in 1:order
+        yfit .+= β[k+1] .* (xgrid .^ k)
+    end
+
+    # tangent at 0: y = β[1] + β[2] x
+    ytangent = β[1] .+ β[2] .* xgrid
+
+    p = scatter(1000 .* xs, 1000 .* ys; label="fit points (nfit=$nfit)", ms=6)
+
+    plot!(p, 1000 .* xgrid, 1000 .* yfit; label="local poly fit (order=$order)", lw=3)
+    plot!(p, 1000 .* xgrid, 1000 .* ytangent; label="tangent at 0 (slope=$(round(1000 .* β[2], sigdigits=4)))", lw=2, ls=:dash)
+
+    vline!(p, [0.0]; label=false, ls=:dot)
+    title!(p, "Local derivative at 0 (weight=$(weight))")
+    xlabel!(p, "Current (mA)")
+    ylabel!(p, L"$|z_{1}-z_{2}|/2$ (μm)")
+
+    return p
+end
+
 
 """
     curr_error_physical(Ic, δIc, z1, z2;
@@ -1978,9 +2022,19 @@ function curr_error_physical(Ic, δIc, z1, z2;
     z2  = Float64.(z2)
 
     d = (z1 .- z2) ./ 2
-    m = local_derivative_at0(Ic, d; nfit=nfit, order=order, weight=weight, h=h)
+    β, xs, ys, w = local_derivative_at0(Ic, d; nfit=nfit, order=order, weight=weight, h=h)
+    m = β[2]
 
     i0 = argmin(abs.(Ic))
+
+    p = plot_local_derivative_fit(Ic, d; nfit=nfit, order=order, weight=weight, h=h)
+    scatter!(p,
+            [1000 .* Ic[i0]], [1000 .* d[i0]];
+            ms=9,
+            markerstrokewidth=2,
+            label="i0 (closest to 0)")
+    hline!(p, [1000 .* β[1]]; ls=:dot, label="local offset a0 ($(1000*round(β[1], sigdigits=4))μm)")
+    display(p)
 
     # --- uncertainty in d0 ---
     σd0_terms = Float64[]
@@ -2008,7 +2062,7 @@ function curr_error_physical(Ic, δIc, z1, z2;
 
     δIc_new = sqrt.(δIc.^2 .+ extra_δI^2)
 
-    return δIc_new, extra_δI, m, i0, σd0
+    return δIc_new, extra_δI, m, β[1], i0, σd0, abs.(β[1]/β[2])
 end
 
 
