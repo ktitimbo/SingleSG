@@ -129,29 +129,29 @@ for data_directory in data_directories
 
     magnification_factor = mag_factor(data_directory) ;
         
-    m = DataReading.collect_fw_map(parent_folder; 
-                                    select=sel, 
-                                    filename="fw_data.csv", 
-                                    report_name="experiment_report.txt", 
-                                    sort_on=:binning, 
-                                    data_dir_filter=data_directory);
+    # m = DataReading.collect_fw_map(parent_folder; 
+    #                                 select=sel, 
+    #                                 filename="fw_data.csv", 
+    #                                 report_name="experiment_report.txt", 
+    #                                 sort_on=:binning, 
+    #                                 data_dir_filter=data_directory);
   
-    pretty_table(hcat(collect(keys(m)),
-                        [v.binning   for v in values(m)],
-                        [v.smoothing for v in values(m)]); 
-                title = "Analysis for $(data_directory)",
-                column_labels=["Run Label","Binning","Smoothing"],
-                alignment=:c,
-                style = TextTableStyle(
-                        first_line_column_label = crayon"yellow bold",
-                        table_border  = crayon"blue bold",
-                        # column_label  = crayon"yellow bold",
-                ),
-                # border_crayon = crayon"blue bold",
-                table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-                # header_crayon = crayon"yellow bold",
-                equal_data_column_widths= true,
-    )
+    # pretty_table(hcat(collect(keys(m)),
+    #                     [v.binning   for v in values(m)],
+    #                     [v.smoothing for v in values(m)]); 
+    #             title = "Analysis for $(data_directory)",
+    #             column_labels=["Run Label","Binning","Smoothing"],
+    #             alignment=:c,
+    #             style = TextTableStyle(
+    #                     first_line_column_label = crayon"yellow bold",
+    #                     table_border  = crayon"blue bold",
+    #                     # column_label  = crayon"yellow bold",
+    #             ),
+    #             # border_crayon = crayon"blue bold",
+    #             table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    #             # header_crayon = crayon"yellow bold",
+    #             equal_data_column_widths= true,
+    # )
 
     summary_path = joinpath(@__DIR__,"analysis_data","summary",data_directory, data_directory*"_report_summary.jld2")
     Icoils = jldopen(summary_path,"r") do mfile
@@ -385,8 +385,8 @@ end
 Ic_grouped  = round.([clusters.summary[i].mean_val for i in 1:length(clusters.summary)]; digits=3)
 δIc_grouped = round.([clusters.summary[i].std_val for i in 1:length(clusters.summary)]; sigdigits=1)
 
-magnification_factor_ith =  [mag_factor(d)[1] for d in data_directories]
-magnification_factor_error_ith =  [mag_factor(d)[2] for d in data_directories]
+magnification_factor_ith        =  [mag_factor(d)[1] for d in data_directories]
+magnification_factor_error_ith  =  [mag_factor(d)[2] for d in data_directories]
 """
     average_on_grid_mc(xsets, ysets;
                        σxsets=nothing, σysets=nothing,
@@ -757,14 +757,16 @@ plot!(fig_c,
 plot!(fig_c,
     xlabel="Current (A)",
     ylabel="Centered Peak position (mm)",
-    # xlims=(0,0.020)
+    xlims=(0,0.020)
     )
+display(fig_c)
 saveplot(fig_c, "fit_interpol_centroid")
+
 
 Ic_around_0 = filter(v -> v <= 0.010, i_xx0)
 ni_0  = length(Ic_around_0)
-δi, eδi, m, i0, σd0 = curr_error_physical(
-                i_xx0, 0*i_xx0,
+δi, eδi, m, b0, i0, σd0, ishift = curr_error_physical(
+                i_xx0, 0.001*i_xx0,
                 zf1_fit, zf2_fit;
                 δz1 = δzf1_fit,
                 δz2 = δzf2_fit,
