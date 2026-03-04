@@ -564,15 +564,15 @@ display(fig)
 savefig(fig, joinpath(OUTDIR,"CQD_results_comparison.$FIG_EXT"))
 
 
-kis = round.([
-    [exp10(p) * x for p in -8:-8 for x in 1.0:1:9]; 
-    [exp10(p) * x for p in -7:-7 for x in 1.0:1:9]; 
-    [exp10(p) * x for p in -6:-6 for x in 1.0:0.1:9.9]; 
-    [exp10(p) * x for p in -5:-5 for x in 1.0:1:9]; 
-    exp10.(-4:0)
-];sigdigits=4)
-kis = unique(round.([x * exp10(p) for p in -6:-6 for x in 1.0:0.1:5.0];sigdigits=4))
-kis = unique(round.([x * exp10(p) for p in -6:-6 for x in 1.0:0.1:3.0];sigdigits=4))
+# kis = round.([
+#     [exp10(p) * x for p in -8:-8 for x in 1.0:1:9]; 
+#     [exp10(p) * x for p in -7:-7 for x in 1.0:1:9]; 
+#     [exp10(p) * x for p in -6:-6 for x in 1.0:0.1:9.9]; 
+#     [exp10(p) * x for p in -5:-5 for x in 1.0:1:9]; 
+#     exp10.(-4:0)
+# ];sigdigits=4)
+kis = unique(round.([x * exp10(p) for p in -6:-6 for x in 1.0:0.2:5.0];sigdigits=4))
+# kis = unique(round.([x * exp10(p) for p in -6:-6 for x in 1.0:0.1:3.0];sigdigits=4))
 @info "Number of ki sampled" length(kis)
 
 fig=scatter(2*ones(length(kis)), kis,
@@ -754,14 +754,14 @@ Ns = Nss
 induction_coeff     = 1e6 .* kis
 nx_bins             = 32 # fixed nx bins
 nz_bins             = [1, 2, 4]
-gaussian_width_mm   = [0.001, 0.010, 0.065, 0.100, 0.150, 0.200, 0.250, 0.270, 0.300, 0.350, 0.400, 0.450, 0.500]; # try different gaussian widths
+gaussian_width_mm   = [0.001, 0.010, 0.025, 0.050, 0.065, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ]; # try different gaussian widths
 λ0_raw_list         = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
 λ0_spline           = 0.001
 
-nz_bins             = [ 2]
-gaussian_width_mm   = [0.250, 0.270]; # try different gaussian widths
-λ0_raw_list         = [0.001, 0.02]; # try different smoothing factors for raw data
-λ0_spline           = 0.001
+# nz_bins             = [ 2]
+# gaussian_width_mm   = [0.250, 0.270]; # try different gaussian widths
+# λ0_raw_list         = [0.001, 0.02]; # try different smoothing factors for raw data
+# λ0_spline           = 0.001
 
 # Total combinations (diagnostic only)
 Ntot = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
@@ -799,12 +799,16 @@ Ntot = nfiles * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_lis
 outjld = joinpath(OUTDIR, "cqd_$(Ns)_up_profiles_$(ki_initial)_$(ki_final)_bykey.jld2")
 
 jldopen(outjld, "w") do f
-    f["/meta/nz_bins"]           = nz_bins
-    f["/meta/gaussian_width_mm"] = gaussian_width_mm
-    f["/meta/λ0_raw_list"]       = λ0_raw_list
-    f["/meta/λ0_spline"]         = λ0_spline
-    f["/meta/induction_coeff"]   = kis
-    f["/meta/files"]             = files
+    f["meta/N"]         = Ns
+    f["meta/T"]         = T_K
+    f["meta/branch"]    = "up"
+    f["meta/s_spline"]  = λ0_spline
+    f["meta/nx"]        = nx_bins
+    f["/meta/nz"]       = nz_bins
+    f["/meta/σw"]       = gaussian_width_mm
+    f["/meta/λ0"]       = λ0_raw_list
+    f["/meta/ki"]       = kis
+    f["/meta/files"]    = files
 end
 
 # ---------- main loop ----------
@@ -900,12 +904,16 @@ Ntot = nfiles * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_lis
 outjld = joinpath(OUTDIR, "cqd_$(Ns)_dw_profiles_$(ki_initial)_$(ki_final)_bykey.jld2")
 
 jldopen(outjld, "w") do f
-    f["/meta/nz_bins"]           = nz_bins
-    f["/meta/gaussian_width_mm"] = gaussian_width_mm
-    f["/meta/λ0_raw_list"]       = λ0_raw_list
-    f["/meta/λ0_spline"]         = λ0_spline
-    f["/meta/induction_coeff"]   = kis
-    f["/meta/files"]             = files
+    f["meta/N"]         = Ns
+    f["meta/T"]         = T_K
+    f["meta/branch"]    = "dw"
+    f["meta/s_spline"]  = λ0_spline
+    f["meta/nx"]        = nx_bins
+    f["/meta/nz"]       = nz_bins
+    f["/meta/σw"]       = gaussian_width_mm
+    f["/meta/λ0"]       = λ0_raw_list
+    f["/meta/ki"]       = kis
+    f["/meta/files"]    = files
 end
 
 # ---------- main loop ----------
