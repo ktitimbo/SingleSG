@@ -60,6 +60,7 @@ rng_set = MersenneTwister(base_seed_set)
 # Custom modules
 include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
+include("./Modules/JLD2_MyTools.jl");
 include("./Modules/TheoreticalSimulation.jl");
 using .TheoreticalSimulation;
 TheoreticalSimulation.SAVE_FIG = SAVE_FIG;
@@ -312,3 +313,521 @@ plot(Ic, inv.(travel_times ./ collapse_time),
     left_margin=3mm,
     legendfontsize=12,
 )
+
+
+###########################################################################################
+#******************************************************************************************
+#+++++++++++++++++++++ Magnetic field measurements ++++++++++++++++++++++++++++++++++++++++
+"""
+    vector_subset(v::AbstractVector{T}; thr::Real = zero(T)) where {T<:Real}
+        -> (mask, inds, values_view)
+
+Return the subset of elements of `v` that are greater than or equal to a
+given threshold `thr`, together with the corresponding boolean mask and indices.
+
+This function is useful when filtering numerical data while preserving
+alignment across multiple related vectors (e.g. values, uncertainties,
+coordinates, weights).
+
+# Arguments
+- `v::AbstractVector{T}`:
+    Input numeric vector.
+- `thr::Real = zero(T)` (keyword):
+    Threshold value. Elements satisfying `v[i] ≥ thr` are selected.
+    The threshold is internally converted to the element type `T`.
+
+# Returns
+A tuple `(mask, inds, values_view)` where:
+
+- `mask::BitVector`:
+    Boolean mask of length `length(v)` with `true` at positions where
+    `v[i] ≥ thr`.
+- `inds::Vector{Int}`:
+    Indices `i` such that `v[i] ≥ thr`.
+- `values_view`:
+    A `SubArray` view of the selected elements `v[mask]`
+    (no data copy is performed).
+
+# Notes
+- The threshold is converted to type `T` via `convert(T, thr)` to ensure
+  type stability and consistent comparisons.
+- Returning a mask is often preferable when multiple vectors must be
+  filtered consistently:
+  julia
+  mask, inds, vals = vector_subset(v; thr=0.1)
+  x_filt  = x[mask]
+  σx_filt = σx[mask]
+- The returned values are provided as a view (@view v[mask]) to avoid
+unnecessary memory allocation.
+"""
+function vector_subset(v::AbstractVector{T}; thr::Real = zero(T), include_equal::Bool = true) where {T<:Real}
+    thrT = convert(T, thr)  # or: thrT = T(thr)
+    if include_equal
+        mask = v .>= thrT
+    else
+        mask = v .> thrT
+    end
+    inds = findall(mask)
+    return mask, inds, @view v[mask]
+end
+
+
+"""
+    subset_by_cols(A::AbstractMatrix{T}, cols::AbstractVector{<:Integer};
+                        thr::Real = zero(T), include_equal::Bool = true)
+        -> (mask, inds, rows_view)
+
+Return rows of `A` for which all selected columns satisfy the threshold condition.
+
+A row `i` is selected if, for every `c ∈ cols`:
+
+    A[i, c] ≥ thr   (default)
+or
+    A[i, c] > thr   (if `include_equal=false`)
+
+# Arguments
+- `A::AbstractMatrix{T}`:
+    Input matrix (`N×s`).
+- `cols`:
+    Vector of column indices to test.
+- `thr::Real = zero(T)`:
+    Threshold value (converted internally to type `T`).
+- `include_equal::Bool = true`:
+    If true use `≥`, otherwise use `>`.
+
+# Returns
+- `mask::BitVector` of length `N`
+- `inds::Vector{Int}` selected row indices
+- `rows_view` a view `A[mask, :]` (no copy)
+
+# Example
+julia
+A = [0.1  2.0  0.5  4.0;
+     0.8  1.0  0.7  2.0;
+     0.9  0.3  0.2  1.0]
+
+mask, inds, rows = subset_by_cols(A, [1,3]; thr=0.6)
+# Only row 2 satisfies:
+# A[2,1]=0.8 ≥ 0.6 AND A[2,3]=0.7 ≥ 0.6
+"""
+function subset_by_cols(A::AbstractMatrix{T},
+        cols::AbstractVector{<:Integer};
+        thr::Real = zero(T),
+        include_equal::Bool = true) where {T<:Real}
+    thrT = convert(T, thr)
+
+    subA = @view A[:, cols]
+
+    if include_equal
+        mask = vec(all(subA .>= thrT, dims=2))
+    else
+        mask = vec(all(subA .> thrT, dims=2))
+    end
+
+    inds = findall(mask)
+
+    return mask, inds, @view(A[mask, :])
+
+end
+
+
+data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303"]
+no = length(data_directories);
+colores = palette(:darkrainbow, no);
+
+exp_data = Vector{Matrix{Float64}}(undef, no)
+for (idx, dir) in enumerate(data_directories)
+    data = load(joinpath(@__DIR__,dir,"data_processed.jld2"),"data")
+    Ic = data[:Currents]
+    Bz = data[:BzTesla]
+    exp_data[idx] = hcat(Ic,Bz)
+end
+
+fig1 = plot(xlabel="Currents (A)",
+    ylabel="Magnetic field (mT)");
+for (idx, dir) in enumerate(data_directories)
+    data = exp_data[idx]
+    Ic = data[:,1]
+    Bz = data[:,2]
+
+    plot!(fig1, Ic, 1000*Bz,
+        label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
+        marker=(:circle, 2, :white),
+        markerstrokecolor=colores[idx],
+        line=(:dot, colores[idx], 1)
+    )
+
+end
+plot!(fig1,Icoils[2:end], 1e3*TheoreticalSimulation.BvsI.(Icoils)[2:end],
+    label="SG manual",
+    line=(:solid,2,:black));
+plot!(fig1,
+    xscale=:log10,
+    yscale=:log10,
+    xlims=(1e-3,1.02),
+    ylims=(1e-2,1e3),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([0.01, 0.1, 1, 10, 100], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    legend=:bottomright,
+    legendfontsize = 6,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+);
+display(fig1)
+
+fig2 = plot(xlabel="Currents (A)",
+    ylabel="Magnetic field (mT)");
+for (idx, dir) in enumerate(data_directories)
+    data = exp_data[idx]
+    Ic = data[:,1]
+    Bz = data[:,2]
+
+    plot!(fig2, Ic, 1000*Bz,
+        label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
+        marker=(:circle, 2, :white),
+        markerstrokecolor=colores[idx],
+        line=(:dot, colores[idx], 1)
+    )
+
+end
+plot!(fig2,Icoils, 1e3*TheoreticalSimulation.BvsI.(Icoils),
+    label="SG manual",
+    line=(:solid,2,:black));
+plot!(fig2,
+    # xscale=:log10,
+    # yscale=:log10,
+    # xlims=(1e-3,1.02),
+    # ylims=(1e-2,1e3),
+    # xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # yticks = ([0.01, 0.1, 1, 10, 100], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    legend=:bottomright,
+    legendfontsize = 6,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+);
+display(fig2)
+
+fig3 = plot(xlabel="Currents (A)",
+    ylabel="Magnetic field (mT)");
+for (idx, dir) in enumerate(data_directories)
+    data = exp_data[idx]
+    Ic = data[:,1]
+    Bz = data[:,2]
+
+    plot!(fig3, Ic, 1000*Bz,
+        label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
+        marker=(:circle, 2, :white),
+        markerstrokecolor=colores[idx],
+        line=(:dot, colores[idx], 1)
+    )
+
+end
+plot!(fig3,Icoils, 1e3*TheoreticalSimulation.BvsI.(Icoils),
+    label="SG manual",
+    line=(:solid,2,:black));
+plot!(fig3,
+    # xscale=:log10,
+    # yscale=:log10,
+    xlims=(0.0,15e-3),
+    ylims=(-5,15),
+    # xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # yticks = ([0.01, 0.1, 1, 10, 100], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    legend=:bottomright,
+    legendfontsize = 6,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+);
+display(fig3)
+
+
+BvsI_comparison = Vector{Matrix{Float64}}(undef, no)
+for (idx, dir) in enumerate(data_directories)
+    vs = exp_data[idx]
+
+    mask, inds, rows_view = subset_rows_by_cols(vs, [1,2]; thr=1e-3, include_equal = true)
+    BvsI_comparison[idx] = Matrix(rows_view)  # store a copy; or keep the view (see B)
+end
+
+
+fig4 = plot(xlabel="Currents (A)",
+    ylabel=L"$B_{\mathrm{exp}} / B_{\mathrm{manual}}$")
+for (idx, dir) in enumerate(data_directories)
+    B_ratio = BvsI_comparison[idx][:,2] ./ TheoreticalSimulation.BvsI.(BvsI_comparison[idx][:,1])
+    
+    plot!(fig4,  BvsI_comparison[idx][:,1] , B_ratio,
+        label=data_directories[idx],
+        marker=(:circle, 2, :white),
+        markerstrokecolor=colores[idx],
+        line=(:solid,1,colores[idx])
+    )
+    y0 , σ0 = mean(B_ratio), standard_error(B_ratio)
+
+    x = range(1e-3, 1.1, length=200)
+    plot!(fig4, x, fill(y0, length(x)),
+     ribbon = σ0,
+     color = colores[idx],
+     fillalpha = 0.25,
+     line=(:dash,0.5,colores[idx]),
+     label = "$(round(y0; digits=3)) ± $(round(σ0; sigdigits=1))")
+    # hline!([y0], ine=(:dot,0.5,colores[idx]), label= "")
+end
+plot!(fig4,
+    legend=:bottomright,
+    xscale=:log10,
+    yscale=:log10,
+    xlims=(1e-3,1.05),
+    ylims=(3e-1,2),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([0.01, 0.1, 1, 10], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+    legendfontsize = 6,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+)
+display(fig4)
+
+exp_data_corr = Vector{Matrix{Float64}}(undef, no)
+for (idx, dir) in enumerate(data_directories)
+    exp_data_corr[idx] = hcat(exp_data[idx][:,1] , exp_data[idx][:,2] .- exp_data[idx][1,2] )
+end
+
+fig5 = plot(xlabel="Currents (A)",
+    ylabel="Magnetic field (mT)",
+    title="Shifted B field");
+for (idx, dir) in enumerate(data_directories)
+    data = exp_data_corr[idx]
+    Ic = data[:,1]
+    Bz = data[:,2]
+
+    plot!(fig5, Ic, 1000*Bz,
+        label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
+        marker=(:circle, 2, :white),
+        markerstrokecolor=colores[idx],
+        line=(:dot, colores[idx], 1)
+    )
+
+end
+plot!(fig5,Icoils[2:end], 1e3*TheoreticalSimulation.BvsI.(Icoils)[2:end],
+    label="SG manual",
+    line=(:solid,2,:black));
+plot!(fig5,
+    xscale=:log10,
+    yscale=:log10,
+    xlims=(1e-3,1.02),
+    ylims=(1e-2,1e3),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([0.01, 0.1, 1, 10, 100], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    legend=:bottomright,
+    legendfontsize = 6,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+);
+display(fig5)
+
+fig6 = plot(xlabel="Currents (A)",
+    ylabel="Magnetic field (mT)",
+    title="Shifted B field");
+for (idx, dir) in enumerate(data_directories)
+    data = exp_data_corr[idx]
+    Ic = data[:,1]
+    Bz = data[:,2]
+
+    plot!(fig6, Ic, 1000*Bz,
+        label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
+        marker=(:circle, 2, :white),
+        markerstrokecolor=colores[idx],
+        line=(:dot, colores[idx], 1)
+    )
+
+end
+plot!(fig6,Icoils, 1e3*TheoreticalSimulation.BvsI.(Icoils),
+    label="SG manual",
+    line=(:solid,2,:black));
+plot!(fig6,
+    # xscale=:log10,
+    # yscale=:log10,
+    # xlims=(1e-3,1.02),
+    # ylims=(1e-2,1e3),
+    # xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # yticks = ([0.01, 0.1, 1, 10, 100], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    legend=:bottomright,
+    legendfontsize = 6,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+);
+display(fig6)
+
+fig7 = plot(xlabel="Currents (A)",
+    ylabel="Magnetic field (mT)",
+    title="Shifted B field");
+for (idx, dir) in enumerate(data_directories)
+    data = exp_data_corr[idx]
+    Ic = data[:,1]
+    Bz = data[:,2]
+
+    plot!(fig7, Ic, 1000*Bz,
+        label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
+        marker=(:circle, 2, :white),
+        markerstrokecolor=colores[idx],
+        line=(:dot, colores[idx], 1)
+    )
+
+end
+plot!(fig7,Icoils, 1e3*TheoreticalSimulation.BvsI.(Icoils),
+    label="SG manual",
+    line=(:solid,2,:black));
+plot!(fig7,
+    # xscale=:log10,
+    # yscale=:log10,
+    xlims=(0.0,15e-3),
+    ylims=(-5,15),
+    # xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # yticks = ([0.01, 0.1, 1, 10, 100], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    legend=:bottomright,
+    legendfontsize = 6,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+);
+display(fig7)
+
+BvsI_comparison_corr = Vector{Matrix{Float64}}(undef, no)
+for (idx, dir) in enumerate(data_directories)
+    vs = exp_data_corr[idx]
+
+    mask, inds, rows_view = subset_rows_by_cols(vs, [1,2]; thr=1e-3, include_equal = true)
+    BvsI_comparison_corr[idx] = Matrix(rows_view)  # store a copy; or keep the view (see B)
+end
+
+
+fig8 = plot(xlabel="Currents (A)",
+    ylabel=L"$B_{\mathrm{exp}} / B_{\mathrm{manual}}$",
+    title="Shifted B field")
+for (idx, dir) in enumerate(data_directories)
+    B_ratio = BvsI_comparison_corr[idx][:,2] ./ TheoreticalSimulation.BvsI.(BvsI_comparison_corr[idx][:,1])
+    
+    plot!(fig8,
+        BvsI_comparison_corr[idx][:,1] , B_ratio,
+        label=data_directories[idx],
+        marker=(:circle, 2, :white),
+        markerstrokecolor=colores[idx],
+        line=(:solid,1,colores[idx])
+    )
+    y0 , σ0 = mean(B_ratio), standard_error(B_ratio)
+
+    x = range(1e-3, 1.1, length=200)
+    plot!(fig8,
+    x, fill(y0, length(x)),
+    ribbon = σ0,
+    color = colores[idx],
+    fillalpha = 0.25,
+    line=(:dash,0.5,colores[idx]),
+    label = "$(round(y0; digits=3)) ± $(round(σ0; sigdigits=1))")
+end
+plot!(fig8,legend=:bottomright,
+    xscale=:log10,
+    yscale=:log10,
+    xlims=(1e-3,1.05),
+    ylims=(3e-1,2),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([0.01, 0.1, 1, 10], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+    legendfontsize = 6,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+)
+display(fig8)
+
+
+plot(fig1,fig5,
+layout=(1,2),
+size=(1000,600),
+left_margin=5mm,
+bottom_margin=2mm,
+)
+
+plot(fig2,fig6, fig3,fig7,
+layout=(2,2),
+size=(1000,600),
+left_margin=5mm,
+bottom_margin=2mm,
+)
+
+plot(fig4,fig8,
+layout=(1,2),
+size=(1000,600),
+left_margin=5mm,
+bottom_margin=2mm,
+)
+
+
+
+########################################################################################
+#+++++++++++++++++++++++++++ Kahraman & Ku +++++++++++++++++++++++++++++++++++++++++++++
+data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303"]
+bzsign = [-1,1,1,-1,1,1]
+colores = palette(:darkrainbow,6)
+
+fig = plot(
+    xlabel="Currents (mA)",
+    ylabel=L"$F=1$ Peak position (mm)"
+);
+for (idx,dir) in enumerate(data_directories)
+    kk_path = joinpath(@__DIR__, "analysis_data","summary", dir, dir * "_report_summary.jld2")
+    data = jldopen(kk_path, "r") do file
+        ic = file["meta/Currents"]
+        bz = file["meta/BzTesla"]
+
+        dd = file[JLD2_MyTools.make_keypath_exp(dir,2,0.01)]
+        return ( Ic=ic, Bz=bz, F1 = dd[:fw_F1_peak_pos_raw], F2 = dd[:fw_F2_peak_pos_raw], C0 = dd[:centroid_fw_mm] )
+    end
+
+    plot!(fig,
+        1000*data.Ic, data.F1,
+        label="$(dir) (degauss = $(round(1e3*data.Ic[1]; digits=6))mA , $(Int(round(1e4*bzsign[idx]*data.Bz[1])))G )",
+        marker=(:circle, 2, :white),
+        markerstrokecolor=colores[idx],
+        line=(:solid,1,colores[idx])
+    )
+
+    # plot!(fig,
+    #     1000*data.Ic, data.F2,
+    #     label="",
+    #     marker=(:circle, 2, :white),
+    #     markerstrokecolor=colores[idx],
+    #     line=(:dash,1,colores[idx]))
+
+    # hline!(fig, [data.C0[1]], label="",line=(:dash,1,colores[idx]))
+
+end
+display(fig)
+plot!(fig,
+    xlims=(0,25),
+    ylims=(8.83,8.90),
+    legendfontsize=6,
+    foreground_color_legend = nothing,
+)
+plot!(fig,
+    xlims=(750,1010),
+    ylims=(10.30,10.90),
+    legendfontsize=6,
+    foreground_color_legend = nothing,
+)
+
+JLD2_MyTools.show_exp_summary(kk_path, dir)
+
+
+
+
+data_directories = ["20260220","20260225","20260226am","20260226pm","20260227","20260303"]
+dir = data_directories[6]
+bzsign = [-1,1,1,-1,1,1]
+colores = palette(:darkrainbow,6)
+kk_path = joinpath(@__DIR__, "analysis_data","summary", dir, dir * "_report_summary.jld2")
+
+data = jldopen(kk_path, "r") do file
+    dd = file[JLD2_MyTools.make_keypath_exp(dir,2,0.01)]
+end
+
+data[:fw_F1_peak_pos_raw]
+data[:fw_F2_peak_pos_raw]
+
+
+
