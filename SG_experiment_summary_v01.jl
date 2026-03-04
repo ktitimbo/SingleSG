@@ -70,10 +70,10 @@ zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)
 
 parent_folder = joinpath(@__DIR__, "analysis_data");
 data_directories = [
-    "20250814", "20250820", "20250825","20250919","20251002","20251003","20251006",
+    # "20250814", "20250820", "20250825","20250919","20251002","20251003","20251006",
     # "20251109",
     # "20260211", "20260213", 
-    # "20260220", "20260225", "20260226am","20260226pm","20260227"
+    "20260220", "20260225", "20260226am","20260226pm","20260227","20260303"
 ];
 
 n_runs = length(data_directories)
@@ -129,29 +129,29 @@ for data_directory in data_directories
 
     magnification_factor = mag_factor(data_directory) ;
         
-    # m = DataReading.collect_fw_map(parent_folder; 
-    #                                 select=sel, 
-    #                                 filename="fw_data.csv", 
-    #                                 report_name="experiment_report.txt", 
-    #                                 sort_on=:binning, 
-    #                                 data_dir_filter=data_directory);
+    m = DataReading.collect_fw_map(parent_folder; 
+                                    select=sel, 
+                                    filename="fw_data.csv", 
+                                    report_name="experiment_report.txt", 
+                                    sort_on=:binning, 
+                                    data_dir_filter=data_directory);
   
-    # pretty_table(hcat(collect(keys(m)),
-    #                     [v.binning   for v in values(m)],
-    #                     [v.smoothing for v in values(m)]); 
-    #             title = "Analysis for $(data_directory)",
-    #             column_labels=["Run Label","Binning","Smoothing"],
-    #             alignment=:c,
-    #             style = TextTableStyle(
-    #                     first_line_column_label = crayon"yellow bold",
-    #                     table_border  = crayon"blue bold",
-    #                     # column_label  = crayon"yellow bold",
-    #             ),
-    #             # border_crayon = crayon"blue bold",
-    #             table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-    #             # header_crayon = crayon"yellow bold",
-    #             equal_data_column_widths= true,
-    # )
+    pretty_table(hcat(collect(keys(m)),
+                        [v.binning   for v in values(m)],
+                        [v.smoothing for v in values(m)]); 
+                title = "Analysis for $(data_directory)",
+                column_labels=["Run Label","Binning","Smoothing"],
+                alignment=:c,
+                style = TextTableStyle(
+                        first_line_column_label = crayon"yellow bold",
+                        table_border  = crayon"blue bold",
+                        # column_label  = crayon"yellow bold",
+                ),
+                # border_crayon = crayon"blue bold",
+                table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+                # header_crayon = crayon"yellow bold",
+                equal_data_column_widths= true,
+    )
 
     summary_path = joinpath(@__DIR__,"analysis_data","summary",data_directory, data_directory*"_report_summary.jld2")
     Icoils = jldopen(summary_path,"r") do mfile
@@ -159,7 +159,7 @@ for data_directory in data_directories
     end
 
     nz_list = [1,2]
-    λ0_list = [0.001, 0.005, 0.01, 0.02]
+    λ0_list = [0.001, 0.01, 0.02]
     param_grid = vec(collect(Iterators.product(nz_list, λ0_list)))
     sort!(param_grid, by = x -> (x[1], x[2]))
     N_labels = length(param_grid);
@@ -757,7 +757,7 @@ plot!(fig_c,
 plot!(fig_c,
     xlabel="Current (A)",
     ylabel="Centered Peak position (mm)",
-    xlims=(0,0.020)
+    # xlims=(0,0.020)
     )
 display(fig_c)
 saveplot(fig_c, "fit_interpol_centroid")
@@ -771,12 +771,13 @@ ni_0  = length(Ic_around_0)
                 δz1 = δzf1_fit,
                 δz2 = δzf2_fit,
                 use_mismatch = false,
-                nfit = ni_0, order = 3,
+                nfit = ni_0, order = 2,
                 weight = :gaussian, h = nothing
             );
-@show round(eδi,digits=6)
-@info "Channel disagreement at Ic=$(i_xx0[i0])A is $(round(1000*abs.((zf1_fit[i0] - zf2_fit[i0]) / 2 );digits=3))μm"
-@info "Channel error measured at Ic=$(i_xx0[i0])A is $(round(1000*abs.( 0.5 * sqrt( δzf1_fit[i0]^2 + δzf2_fit[i0]^2 ) );digits=3))μm"
+@info "Error computed $(round(eδi,sigdigits=1))mA"
+@info "Current shift $(round(1000*ishift; sigdigits=3))mA"
+@info "Channel disagreement at Ic=$(i_xx0[i0])A is $(round(1000*abs.((zf1_fit[i0] + zf2_fit[i0]) / 2 );sigdigits=3))μm"
+@info "Channel error measured at Ic=$(i_xx0[i0])A is $(round(1000*abs.( 0.5 * sqrt( δzf1_fit[i0]^2 + δzf2_fit[i0]^2 ) ); sigdigits=3))μm"
 
 fig = plot(
     xlabel="Current (A)",
@@ -811,9 +812,13 @@ yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0
 xlims = (10e-3,1.0),
 ylims = (8e-3, 2),
 )
-plot!(fig,i_xx0[1:200:end], zf1_fit[1:200:end],
-    xerror = δi[1:200:end],
-    yerror = δzf1_fit[1:200:end],
+idx = collect(1:200:length(i_xx0))
+if idx[end] != length(i_xx0)
+    push!(idx, length(i_xx0))
+end
+plot!(fig,i_xx0[idx], zf1_fit[idx],
+    xerror = δi[idx] ./ 2,
+    yerror = δzf1_fit[idx],
     marker=(:square,1,:black),
     fillalpha=0.40, 
     fillcolor=:gray36, 
@@ -910,7 +915,7 @@ jldsave(joinpath(OUTDIR,"data_averaged_$(selected_bin).jld2"),
         :δz_interp      => δzf1,
         # Fitting data => Mean
         :i_smooth       => i_xx0,
-        :δi_smooth      => δi,
+        :δi_smooth      => δi ./ 2,
         :z_smooth       => zf1_fit,
         :δz_smooth      => δzf1_fit,
         :z2_smooth      => zf2_fit,
