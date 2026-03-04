@@ -298,7 +298,7 @@ function merge_qm_two_runs(run1_path::AbstractString,
     jldopen(run1_path, "r") do file1
         N1   = Int(file1["meta/N"])
         T1   = Float64(file1["meta/T"])
-        s1   = Float64(file1["s_spline"])
+        s1   = Float64(file1["meta/s_spline"])
         nx1  = Int(file1["meta/nx"])
         nz1  = Vector{Int}(file1["meta/nz"])
         σw1  = Vector{Float64}(file1["meta/σw"])
@@ -308,7 +308,7 @@ function merge_qm_two_runs(run1_path::AbstractString,
         jldopen(run2_path, "r") do file2
             N2   = Int(file2["meta/N"])
             T2   = Float64(file2["meta/T"])
-            s2   = Float64(file2["s_spline"])
+            s2   = Float64(file2["meta/s_spline"])
             nx2  = Int(file2["meta/nx"])
             nz2  = Vector{Int}(file2["meta/nz"])
             σw2  = Vector{Float64}(file2["meta/σw"])
