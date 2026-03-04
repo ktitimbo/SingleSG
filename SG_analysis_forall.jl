@@ -46,9 +46,9 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20260226am" ;
+data_directory      = "20250814" ;
 # Furnace 
-Temperature = 273.15 + 200
+Temperature = 273.15 + 205
 
 outfile_raw         = joinpath(data_directory, "data.jld2")
 outfile_processed   = joinpath(data_directory, "data_processed.jld2")
@@ -157,8 +157,8 @@ Icoils  = data_processed[:Currents]
 nI      = length(Icoils)
 
 # Binning for the analysis
-nbins_list  = (1, 2, 4, 8)
-λ0_list     = (0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
+nbins_list  = (1, 2, 4)
+λ0_list     = (0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05)
 const Cell = Union{Missing, String, Int, Float64}
 summary_table = Matrix{Cell}(undef, length(nbins_list)*length(λ0_list), 3);
 
@@ -171,7 +171,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
     file["meta/λ0"]            = λ0_list
 
     if haskey(data_processed, :BzTesla)
-        file["meta/BzTesla"]   = abs.(data_processed[:BzTesla])
+        file["meta/BzTesla"]   = data_processed[:BzTesla]
     end
 
     for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
@@ -1572,19 +1572,19 @@ alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 #     legend=:bottomright)
 
 
-data_directory = "20260226am"
-data_path = joinpath(@__DIR__,"analysis_data","summary",data_directory,data_directory*"_report_summary.jld2")
+# data_directory = "20260226am"
+# data_path = joinpath(@__DIR__,"analysis_data","summary",data_directory,data_directory*"_report_summary.jld2")
 
-JLD2_MyTools.tree_jld(data_path)
+# JLD2_MyTools.tree_jld(data_path)
 
-dI , d1 = jldopen(data_path, "r") do fname
-    Ic =  fname["meta/Currents"]
-    ΔIc = fname["meta/ErrorCurrents"]
+# dI , d1 = jldopen(data_path, "r") do fname
+#     Ic =  fname["meta/Currents"]
+#     ΔIc = fname["meta/ErrorCurrents"]
 
-    return (Ic,ΔIc), fname[JLD2_MyTools.make_keypath_exp(data_directory,2,0.01)]
-end
+#     return (Ic,ΔIc), fname[JLD2_MyTools.make_keypath_exp(data_directory,2,0.01)]
+# end
 
-d1[:fw_F1_peak_pos][1]
+# d1[:fw_F1_peak_pos][1]
 
 # d1
 
