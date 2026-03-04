@@ -2021,7 +2021,7 @@ function curr_error_physical(Ic, δIc, z1, z2;
     z1  = Float64.(z1)
     z2  = Float64.(z2)
 
-    d = (z1 .- z2) ./ 2
+    d = (z1 .+ z2) ./ 2
     β, xs, ys, w = local_derivative_at0(Ic, d; nfit=nfit, order=order, weight=weight, h=h)
     m = β[2]
 
@@ -2048,7 +2048,7 @@ function curr_error_physical(Ic, δIc, z1, z2;
 
     # optional term from observed mismatch (treat as additional scatter / model mismatch)
     if use_mismatch
-        σd0_mismatch = abs(z1[i0] - z2[i0]) / 2
+        σd0_mismatch = abs(z1[i0] + z2[i0]) / 2
         push!(σd0_terms, σd0_mismatch)
     end
 
