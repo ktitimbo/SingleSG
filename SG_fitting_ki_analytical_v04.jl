@@ -47,6 +47,24 @@ include("./Modules/DataReading.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
 include("./Modules/JLD2_MyTools.jl");
 
+TheoreticalSimulation.BvsI(2.e-3)
+
+xukun = load(joinpath(@__DIR__,"analysis_data","smoothing_binning_2025","data_averaged_2.jld2"),"data")
+suley = load(joinpath(@__DIR__,"analysis_data","smoothing_binning_2026","data_averaged_2.jld2"),"data")
+
+hcat(suley[:i_smooth][9800:end],suley[:z_smooth][9800:end])
+
+plot(xukun[:i_smooth][10100:end], 1.28 * xukun[:z_smooth][10100:end],
+label="xukun (no magnification correction)")
+plot!(xukun[:i_smooth][10100:end], 1.28/1.19 * xukun[:z_smooth][10100:end],
+label="xukun (magnification 1.19 (fitted) | k=2.2e-6")
+plot!(suley[:i_smooth][10800:end],suley[:z_smooth][10800:end],
+label="KK")
+plot!(xscale=:log10, yscale=:log10,
+xlabel="Current (A)",
+ylabel="z peak position (mm)")
+
+
 logspace10(lo, hi; n=50) = 10.0 .^ range(log10(lo), log10(hi); length=n)
 
 function log_mask(x, y)
