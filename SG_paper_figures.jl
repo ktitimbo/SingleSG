@@ -780,11 +780,20 @@ for (idx,dir) in enumerate(data_directories)
     end
 
     plot!(fig,
-        1000*data.Ic, data.F1,
+        1000*data.Ic, data.F1[1],
+        yerror = data.F1[2],
+        seriestype=:scatter,
         label="$(dir) (degauss = $(round(1e3*data.Ic[1]; digits=6))mA , $(Int(round(1e4*bzsign[idx]*data.Bz[1])))G )",
         marker=(:circle, 2, :white),
         markerstrokecolor=colores[idx],
-        line=(:solid,1,colores[idx])
+    )
+    plot!(fig,
+        1000*data.Ic, data.F1[1],
+        seriestype=:line,
+        label= nothing,
+        line=(:solid,0.3,colores[idx]),
+        color = colores[idx],
+        fillalpha=0.10,
     )
 
     # plot!(fig,
@@ -827,7 +836,7 @@ data = jldopen(kk_path, "r") do file
 end
 
 data[:fw_F1_peak_pos_raw]
-data[:fw_F2_peak_pos_raw]
+data[:fw_F2_peak_pos_raw][2]
 
 
 
