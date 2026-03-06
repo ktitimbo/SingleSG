@@ -827,16 +827,22 @@ JLD2_MyTools.show_exp_summary(kk_path, dir)
 
 data_directories = ["20260220","20260225","20260226am","20260226pm","20260227","20260303"]
 dir = data_directories[6]
-bzsign = [-1,1,1,-1,1,1]
-colores = palette(:darkrainbow,6)
-kk_path = joinpath(@__DIR__, "analysis_data","summary", dir, dir * "_report_summary.jld2")
+colores = palette(:darkrainbow,no)
 
-data = jldopen(kk_path, "r") do file
-    dd = file[JLD2_MyTools.make_keypath_exp(dir,2,0.01)]
+centroid_fw = Matrix{Float64}(undef, no, 2)
+for (i,dir) in enumerate(data_directories)
+    kk_path = joinpath(@__DIR__, "analysis_data","summary", dir, dir * "_report_summary.jld2")
+
+    data = jldopen(kk_path, "r") do file
+        dd = file[JLD2_MyTools.make_keypath_exp(dir,2,0.01)]
+    end
+
+    centroid_fw[i,1] = data[:centroid_fw_mm][1]
+    centroid_fw[i,2] = round(data[:centroid_fw_mm][2], digits=3)
+
 end
 
-data[:fw_F1_peak_pos_raw]
-data[:fw_F2_peak_pos_raw][2]
-
-
+plot(data_directories, centroid_fw[:,1],
+ marker=(:circle,:black,2),
+ yerror = centroid_fw[:,2] )
 
