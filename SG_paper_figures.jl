@@ -843,6 +843,10 @@ for (i,dir) in enumerate(data_directories)
 end
 
 plot(data_directories, centroid_fw[:,1],
- marker=(:circle,:black,2),
+label="Zero positions (mm)",
+ color=:blue,
+ marker=(:circle,:white,4),
+ markerstrokecolor=:blue,
+ line=(:solid,2,:blue),
  yerror = centroid_fw[:,2] )
 
