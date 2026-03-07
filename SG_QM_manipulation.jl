@@ -205,7 +205,7 @@ exp_x = 1e3*TheoreticalSimulation.pixel_coordinates(2160, 4, cam_pixelsize);
 exp_z = 1e3*TheoreticalSimulation.pixel_coordinates(2560, 1, cam_pixelsize);
 
 exp_result = DataReading.find_report_data(
-    joinpath(@__DIR__, "analysis_data");
+    joinpath(@__DIR__, "EXPDATA_ANALYSIS");
     wanted_data_dir = "20250919",
     wanted_binning  = 1,
     wanted_smooth   = 0.01,
@@ -651,7 +651,7 @@ for (idx,ic) in enumerate(Icoils)
 
 end
 
-exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"];
+exp_avg = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning","data_averaged_2.jld2"))["data"];
 @info "Experimental data loaded"
 # 1. Fit spline for the experiment data
 data_experiment = Spline1D(

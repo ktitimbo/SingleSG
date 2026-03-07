@@ -54,7 +54,7 @@ Temperature = 273.15 + 205
 
 outfile_raw         = joinpath("EXPERIMENTS",data_directory, "data.jld2")
 outfile_processed   = joinpath("EXPERIMENTS",data_directory, "data_processed.jld2")
-data_summary_path   = joinpath(@__DIR__, "analysis_data","summary",data_directory)
+data_summary_path   = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary",data_directory)
 isdir(data_summary_path) || mkpath(data_summary_path);
 
 
@@ -180,7 +180,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
     for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
         T_START   = Dates.now()
         RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
-        OUTDIR    = joinpath(@__DIR__, "analysis_data", data_directory, RUN_STAMP);
+        OUTDIR    = joinpath(@__DIR__, "EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
         isdir(OUTDIR) || mkpath(OUTDIR);
         @info "Created output directory" OUTDIR
         MyExperimentalAnalysis.OUTDIR   = OUTDIR;
@@ -1471,9 +1471,9 @@ alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 # end
 
 # df = DataFrame(hcat(ii,bb,dd[:fw_F1_peak_pos][1],dd[:fw_F1_peak_pos][2]), [:Ic,:Bz, :zF1, :ErrzF1 ])
-# CSV.write( joinpath(@__DIR__,"analysis_data",data_directory,"$(data_directory)_data.csv"), df)
+# CSV.write( joinpath(@__DIR__,"EXPDATA_ANALYSIS",data_directory,"$(data_directory)_data.csv"), df)
 
-# # path_old = joinpath(@__DIR__, "analysis_data", "20260211", "20260211_report_summary.jld2");
+# # path_old = joinpath(@__DIR__, "EXPDATA_ANALYSIS", "20260211", "20260211_report_summary.jld2");
 # # ii_old= jldopen(path_old, "r") do file
 # #     file["meta/Currents"];
 # # end
@@ -1486,7 +1486,7 @@ alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 
 # include("./Modules/TheoreticalSimulation.jl");
 # include("./Modules/DataReading.jl");
-# exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning","data_averaged_2.jld2"))["data"];
+# exp_avg = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning","data_averaged_2.jld2"))["data"];
 # @info "Experimental data loaded"
 # # 1. Fit spline for the experiment data
 # data_experiment = Spline1D(
@@ -1580,7 +1580,7 @@ alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 
 
 # data_directory = "20260226am"
-# data_path = joinpath(@__DIR__,"analysis_data","summary",data_directory,data_directory*"_report_summary.jld2")
+# data_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",data_directory,data_directory*"_report_summary.jld2")
 
 # JLD2_MyTools.tree_jld(data_path)
 

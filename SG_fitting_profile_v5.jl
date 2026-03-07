@@ -166,7 +166,7 @@ for wanted_data_dir in dir_list
 
     # Data loading
     read_exp_info = DataReading.find_report_data(
-            joinpath(@__DIR__, "analysis_data");
+            joinpath(@__DIR__, "EXPDATA_ANALYSIS");
             wanted_data_dir=wanted_data_dir,
             wanted_binning=wanted_binning,
             wanted_smooth=wanted_smooth
@@ -189,7 +189,7 @@ for wanted_data_dir in dir_list
     end
 
     exp_data = load(joinpath(read_exp_info.directory,"profiles_mean.jld2"))["profiles"];
-    # jldopen(joinpath(@__DIR__, "analysis_data", wanted_data_dir, wanted_data_dir*"_report_summary.jld2"),"r") do file
+    # jldopen(joinpath(@__DIR__, "EXPDATA_ANALYSIS", wanted_data_dir, wanted_data_dir*"_report_summary.jld2"),"r") do file
     #     file[JLD2_MyTools.make_keypath_exp(wanted_data_dir, wanted_binning, wanted_smooth)]
     # end
     Ic_sampled = abs.(exp_data[:Icoils]);

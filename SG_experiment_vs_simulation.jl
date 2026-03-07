@@ -58,7 +58,7 @@ wanted_smooth   = 0.01 ;
 
 # Data loading
 res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
+        joinpath(@__DIR__, "EXPDATA_ANALYSIS");
         wanted_data_dir=wanted_data_dir,
         wanted_binning=wanted_binning,
         wanted_smooth=wanted_smooth

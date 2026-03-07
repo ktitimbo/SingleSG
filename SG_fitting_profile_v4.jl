@@ -996,7 +996,7 @@ for wanted_data_dir in dir_list
 
     # Data loading
     read_exp_info = DataReading.find_report_data(
-            joinpath(@__DIR__, "analysis_data");
+            joinpath(@__DIR__, "EXPDATA_ANALYSIS");
             wanted_data_dir=wanted_data_dir,
             wanted_binning=wanted_binning,
             wanted_smooth=wanted_smooth

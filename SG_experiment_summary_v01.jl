@@ -36,7 +36,7 @@ include("./Modules/JLD2_MyTools.jl");
 # Set the working directory to the current location
 cd(@__DIR__) 
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSS");
-const OUTDIR    = joinpath(@__DIR__, "analysis_data", "smoothing_binning")
+const OUTDIR    = joinpath(@__DIR__, "EXPDATA_ANALYSIS", "smoothing_binning")
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 # General setup
@@ -68,7 +68,7 @@ end
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end];
 zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end];
 
-parent_folder = joinpath(@__DIR__, "analysis_data");
+parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS");
 data_directories = [
     # "20250814", "20250820", "20250825","20250919","20251002","20251003","20251006",
     # "20251109",
@@ -153,7 +153,7 @@ for data_directory in data_directories
                 equal_data_column_widths= true,
     )
 
-    summary_path = joinpath(@__DIR__,"analysis_data","summary",data_directory, data_directory*"_report_summary.jld2")
+    summary_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",data_directory, data_directory*"_report_summary.jld2")
     Icoils = jldopen(summary_path,"r") do mfile
             abs.(mfile["meta/Currents"])
     end
@@ -272,7 +272,7 @@ fig1 = plot(
 for (idx,data_directory) in enumerate(data_directories)
     magnification_factor = mag_factor(data_directory) ;
 
-    summary_path = joinpath(@__DIR__,"analysis_data","summary",data_directory, data_directory*"_report_summary.jld2")
+    summary_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",data_directory, data_directory*"_report_summary.jld2")
 
     Icoils = jldopen(summary_path,"r") do mfile
             mfile["meta/Currents"]
@@ -327,7 +327,7 @@ fig2 = plot(
 for (idx,data_directory) in enumerate(data_directories)
     magnification_factor = mag_factor(data_directory) ;
 
-    summary_path = joinpath(@__DIR__,"analysis_data","summary",data_directory, data_directory*"_report_summary.jld2")
+    summary_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",data_directory, data_directory*"_report_summary.jld2")
 
     Icoils = jldopen(summary_path,"r") do mfile
             mfile["meta/Currents"]
@@ -543,7 +543,7 @@ tables = Vector{DataFrame}(undef, n_runs)
 for (idx,data_directory) in enumerate(data_directories)
     magnification_factor = mag_factor(data_directory) ;
 
-    summary_path = joinpath(@__DIR__,"analysis_data","summary",data_directory, data_directory*"_report_summary.jld2")
+    summary_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",data_directory, data_directory*"_report_summary.jld2")
 
     Icoils = jldopen(summary_path,"r") do mfile
             mfile["meta/Currents"]
@@ -1038,7 +1038,7 @@ alert("EXPERIMENTS ANALYSIS FINISHED!")
 # # ss["data"][:F1ProcessedImages]
 
 
-# jldopen(joinpath(@__DIR__,"analysis_data","summary","20260225","20260225_report_summary.jld2"),"r") do file
+# jldopen(joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary","20260225","20260225_report_summary.jld2"),"r") do file
 #     println(file["meta/Currents"])
 #     file[JLD2_MyTools.make_keypath_exp("20260225",2,0.10)]
 # end

@@ -36,7 +36,7 @@ include("./Modules/JLD2_MyTools.jl");
 # Set the working directory to the current location
 cd(@__DIR__) 
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSS");
-const OUTDIR    = joinpath(@__DIR__, "analysis_data", "smoothing_binning")
+const OUTDIR    = joinpath(@__DIR__, "EXPDATA_ANALYSIS", "smoothing_binning")
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 # General setup
@@ -67,7 +67,7 @@ end
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
 zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
 
-parent_folder = joinpath(@__DIR__, "analysis_data");
+parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS");
 data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
 data_directories = ["20260211", "20260213", "20260220"];
 

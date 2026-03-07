@@ -771,7 +771,7 @@ fig = plot(
     ylabel=L"$F=1$ Peak position (mm)"
 );
 for (idx,dir) in enumerate(data_directories)
-    kk_path = joinpath(@__DIR__, "analysis_data","summary", dir, dir * "_report_summary.jld2")
+    kk_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary", dir, dir * "_report_summary.jld2")
     data = jldopen(kk_path, "r") do file
         ic = file["meta/Currents"]
         bz = file["meta/BzTesla"]
@@ -832,7 +832,7 @@ data_directories = ["20260220","20260225","20260226am","20260226pm","20260227","
 dir = data_directories[6]
 colores = palette(:darkrainbow,no)
 
-kk_path = joinpath(@__DIR__, "analysis_data","summary", dir, dir * "_report_summary.jld2")
+kk_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary", dir, dir * "_report_summary.jld2")
 data = jldopen(kk_path, "r") do file
     ic = file["meta/Currents"]
     bz = file["meta/BzTesla"]
@@ -863,7 +863,7 @@ MyExperimentalAnalysis.post_threshold_mean(data_centroid_fw, data.Ic, data_δcen
 
 centroid_fw = Matrix{Float64}(undef, no, 2)
 for (i,dir) in enumerate(data_directories)
-    kk_path = joinpath(@__DIR__, "analysis_data","summary", dir, dir * "_report_summary.jld2")
+    kk_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary", dir, dir * "_report_summary.jld2")
 
     data = jldopen(kk_path, "r") do file
         dd = file[JLD2_MyTools.make_keypath_exp(dir,2,0.01)]

@@ -158,7 +158,7 @@ TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
 TheoreticalSimulation.default_R_tube            = R_tube;
 
 ##################################################################################################
-avg_data = load(joinpath(@__DIR__, "analysis_data", "smoothing_binning","data_averaged_2.jld2"), "data" )
+avg_data = load(joinpath(@__DIR__, "EXPDATA_ANALYSIS", "smoothing_binning","data_averaged_2.jld2"), "data" )
 I_exp  = avg_data[:i_smooth];
 z_exp  = avg_data[:z_smooth];
 δz_exp = avg_data[:δz_smooth];

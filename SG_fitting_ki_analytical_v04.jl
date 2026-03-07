@@ -49,8 +49,8 @@ include("./Modules/JLD2_MyTools.jl");
 
 TheoreticalSimulation.BvsI(2.e-3)
 
-xukun = load(joinpath(@__DIR__,"analysis_data","smoothing_binning_2025","data_averaged_2.jld2"),"data")
-suley = load(joinpath(@__DIR__,"analysis_data","smoothing_binning_2026","data_averaged_2.jld2"),"data")
+xukun = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning_2025","data_averaged_2.jld2"),"data")
+suley = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning_2026","data_averaged_2.jld2"),"data")
 
 hcat(suley[:i_smooth][9800:end],suley[:z_smooth][9800:end])
 
@@ -641,7 +641,7 @@ end
 #   - dz/dI is the spline derivative evaluated at xq
 #   - δz_interp is the interpolated z-uncertainty at xq
 # =============================================================================
-exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning_2026","data_averaged_2.jld2"))["data"];
+exp_avg = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning_2026","data_averaged_2.jld2"))["data"];
 i_threshold = 0.030 ; 
 # Select only those entries of the *smooth grid* i_smooth that coincide with the
 # grouped-current locations stored in Ic_grouped[:,1]. This mask is used to
@@ -1752,7 +1752,7 @@ for wanted_data_dir in wanted_data_dirs
     # 1) Locate the matching experimental analysis output (report + paths)
     # --------------------------------------------------------------------------
     res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
+        joinpath(@__DIR__, "EXPDATA_ANALYSIS");
         wanted_data_dir = wanted_data_dir,
         wanted_binning  = wanted_binning,
         wanted_smooth   = wanted_smooth,

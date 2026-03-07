@@ -678,7 +678,7 @@ for (row, (λ0,nz_binning)) in enumerate(Iterators.product(λ0_list, nbins_list)
 
     T_START   = Dates.now()
     RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
-    OUTDIR    = joinpath(@__DIR__, "analysis_data", RUN_STAMP);
+    OUTDIR    = joinpath(@__DIR__, "EXPDATA_ANALYSIS", RUN_STAMP);
     isdir(OUTDIR) || mkpath(OUTDIR);
     @info "Created output directory" OUTDIR
     MyExperimentalAnalysis.OUTDIR   = OUTDIR;

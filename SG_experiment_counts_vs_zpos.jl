@@ -64,7 +64,7 @@ data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20
 data_results = OrderedDict{String, NamedTuple{(:fw_centroid_mm, :framewise_mm, :δframewise_mm), Tuple{Any, Any, Any}}}()
 for dir in data_directories
     res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
+        joinpath(@__DIR__, "EXPDATA_ANALYSIS");
         wanted_data_dir = dir,
         wanted_binning  = nz_binning,
         wanted_smooth   = λ0,

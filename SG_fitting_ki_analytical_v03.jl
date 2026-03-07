@@ -623,7 +623,7 @@ end
 #   - dz/dI is the spline derivative evaluated at xq
 #   - δz_interp is the interpolated z-uncertainty at xq
 # =============================================================================
-exp_avg = load(joinpath(@__DIR__,"analysis_data","smoothing_binning_2025","data_averaged_2.jld2"))["data"]
+exp_avg = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning_2025","data_averaged_2.jld2"))["data"]
 
 mask = [any(abs(a - b) ≤ 1e-15 for a in exp_avg[:Ic_grouped][:,1]) for b in exp_avg[:i_smooth]]
 Ichosen  = exp_avg[:i_smooth][mask]
@@ -1729,7 +1729,7 @@ for wanted_data_dir in wanted_data_dirs
     # 1) Locate the matching experimental analysis output (report + paths)
     # --------------------------------------------------------------------------
     res = DataReading.find_report_data(
-        joinpath(@__DIR__, "analysis_data");
+        joinpath(@__DIR__, "EXPDATA_ANALYSIS");
         wanted_data_dir = wanted_data_dir,
         wanted_binning  = wanted_binning,
         wanted_smooth   = wanted_smooth,
