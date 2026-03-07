@@ -69,9 +69,7 @@ end
 """
 function compute_weights(x_array, λ0::Float64)
     λ = clamp(float(λ0), 0.0, 1.0)
-    w = similar(float.(x_array))
-    fill!(w, (1 - λ))
-    return w
+    return fill(1 - λ, length(x_array))
 end
 
 """
