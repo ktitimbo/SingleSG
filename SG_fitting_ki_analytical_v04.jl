@@ -576,7 +576,7 @@ nI = length(Icoils); # Number of simulated current points
 # for all currents in `Icoils`.
 # =============================================================================
 table_qm_path = joinpath(@__DIR__,"simulation_data",
-    "qm_simulation_8M",
+    "QM_T205_8M",
     "qm_screen_profiles_f1_table.jld2");
 qm_meta = JLD2_MyTools.list_keys_jld_qm(table_qm_path);
 @show length(qm_meta.keys);

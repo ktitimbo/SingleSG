@@ -61,7 +61,7 @@ data_JSF = OrderedDict(
 );
 
 nz_fix, σ_fix, λ0_fix = (2,0.200,0.01);
-data_qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen_profiles_f1_table.jld2");
+data_qm_path = joinpath(@__DIR__,"simulation_data","QM_T205_8M","qm_screen_profiles_f1_table.jld2");
 chosen_qm = jldopen(data_qm_path,"r") do file
     file[JLD2_MyTools.make_keypath_qm(nz_fix,σ_fix,λ0_fix)]
 end

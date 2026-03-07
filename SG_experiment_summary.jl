@@ -61,7 +61,7 @@ data_JSF = OrderedDict(
 );
 
 nz_fix, σ_fix, λ0_fix = (2,0.200,0.01)
-chosen_qm = jldopen(joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
+chosen_qm = jldopen(joinpath(@__DIR__,"simulation_data","QM_T205_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
     file[JLD2_MyTools.make_keypath_qm(nz_fix,σ_fix,λ0_fix)]
 end
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
@@ -168,7 +168,7 @@ for data_directory in data_directories
         markerstrokewidth = 1,
         markerstrokecolor=cols_k[i]
         )
-        chosen_qm_i  = jldopen(joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
+        chosen_qm_i  = jldopen(joinpath(@__DIR__,"simulation_data","QM_T205_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
                             file[JLD2_MyTools.make_keypath_qm(m[key][1],σ_fix,m[key][2])]
         end       
         Ic_qm_i      = [chosen_qm_i[i][:Icoil] for i in eachindex(chosen_qm_i)][2:end]
