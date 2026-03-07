@@ -46,12 +46,14 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20251006" ;
+data_directory      = "20251002" ;
 # Furnace 
 Temperature = 273.15 + 205
+# Blurring (gaussian) width
+σw_um = 0.225
 
-outfile_raw         = joinpath(data_directory, "data.jld2")
-outfile_processed   = joinpath(data_directory, "data_processed.jld2")
+outfile_raw         = joinpath("EXPERIMENTS",data_directory, "data.jld2")
+outfile_processed   = joinpath("EXPERIMENTS",data_directory, "data_processed.jld2")
 data_summary_path   = joinpath(@__DIR__, "analysis_data","summary",data_directory)
 isdir(data_summary_path) || mkpath(data_summary_path);
 
@@ -107,7 +109,8 @@ data_qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_8M","qm_screen
 if !isfile(outfile_processed) # check if the processed images exists
     if !isfile(outfile_raw) # check if the raw data exists
         @info "Not found → building $outfile_raw"
-        data_raw = stack_data(data_directory; order=:asc, keynames=("BG","F1","F2"))
+        data_in = joinpath(@__DIR__,"EXPERIMENTS", data_directory)
+        data_raw = stack_data(data_in; order=:asc, keynames=("BG","F1","F2"))
         jldsave(outfile_raw, data=data_raw)
         data_raw = nothing
     else
@@ -115,8 +118,8 @@ if !isfile(outfile_processed) # check if the processed images exists
     end
 
     # Background and Flat with no binning
-    img_dk = matread(joinpath(data_directory, "img_dk.mat"))["DKMean"];
-    img_fl = matread(joinpath(data_directory, "img_fl.mat"))["FLMean"];
+    img_dk = matread(joinpath(@__DIR__,"EXPERIMENTS", "img_dk.mat"))["DKMean"];
+    img_fl = matread(joinpath(@__DIR__,"EXPERIMENTS", "img_fl.mat"))["FLMean"];
     # Binning to match acquired data
     img_dk = bin_x_mean(img_dk,exp_bin_x);
     img_fl = bin_x_mean(img_fl,exp_bin_x);
@@ -132,7 +135,7 @@ if !isfile(outfile_processed) # check if the processed images exists
     local fig = plot(p1, p2; layout=(1,2), link=:both, size=(1000,400), 
     left_margin=4mm,
     bottom_margin=3mm)
-    savefig(fig, joinpath(data_directory,"dark_flat.$(FIG_EXT)"))
+    savefig(fig, joinpath(@__DIR__,"EXPERIMENTS","dark_flat.$(FIG_EXT)"))
 
     data_raw = load(outfile_raw)["data"]
     data_processed = build_processed_dict(data_raw, img_dk,img_fl)
@@ -158,7 +161,7 @@ nI      = length(Icoils)
 
 # Binning for the analysis
 nbins_list  = (1, 2, 4)
-λ0_list     = (0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05)
+λ0_list     = (0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
 const Cell = Union{Missing, String, Int, Float64}
 summary_table = Matrix{Cell}(undef, length(nbins_list)*length(λ0_list), 3);
 
@@ -177,14 +180,14 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
     for (row, (λ0,n_bins)) in enumerate(Iterators.product(λ0_list, nbins_list))
         T_START   = Dates.now()
         RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
-        OUTDIR    = joinpath(@__DIR__, "analysis_data", RUN_STAMP);
+        OUTDIR    = joinpath(@__DIR__, "analysis_data", data_directory, RUN_STAMP);
         isdir(OUTDIR) || mkpath(OUTDIR);
         @info "Created output directory" OUTDIR
         MyExperimentalAnalysis.OUTDIR   = OUTDIR;
         summary_table[row,:] = Cell[RUN_STAMP, n_bins, λ0]
 
         chosen_qm =  jldopen(data_qm_path,"r") do file
-            file[JLD2_MyTools.make_keypath_qm(n_bins,0.270, λ0)]
+            file[JLD2_MyTools.make_keypath_qm(n_bins, σw_um, λ0)]
         end
         Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][3:end]
         zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][3:end]
@@ -259,7 +262,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         data_centroid_mean  = 0.5 * (f1_mean_max .+ f2_mean_max)
         data_centroid_mean_error = 0.5 * sqrt(2) * z_mm_error * ones(length(data_centroid_mean))
         centroid_mean = post_threshold_mean(data_centroid_mean, Icoils, data_centroid_mean_error; 
-                            threshold=0.010,
+                            threshold=0.020,
                             half_life=5, # in samples
                             eps=1e-6,
                             weighted=true)
@@ -531,7 +534,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # )
         plot!(Ic_QM_sim, zm_QM_sim,
             line=(:dash,:darkgreen,2.5),
-            label="Analytic QM"    ,
+            label=L"Analytic QM ($\sigma_{w}=%$(Int(1000*σw_um))\mathrm{\mu m}$)"    ,
         )
         # plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
         # line=(:dot, :red, 3),
@@ -578,7 +581,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # )
         plot!(Ic_QM_sim, zm_QM_sim,
             line=(:dash,:darkgreen,2.5),
-            label="Analytic QM"    ,
+            label=L"Analytic QM ($\sigma_{w}=%$(Int(1000*σw_um))\mathrm{\mu m}$)",
         )
         # plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
         # line=(:dot, :red, 3),
@@ -654,7 +657,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # );
         plot!(Ic_QM_sim, zm_QM_sim,
             line=(:dash,:darkgreen,2.5),
-            label="Analytic QM"    ,
+            label=L"Analytic QM ($\sigma_{w}=%$(Int(1000*σw_um))\mathrm{\mu m}$)",
         );
         # plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
         # line=(:dot, :red, 3),
@@ -710,7 +713,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # );
         plot!(Ic_QM_sim, zm_QM_sim,
             line=(:dash,:darkgreen,2.5),
-            label="Analytic QM"    ,
+            label=L"Analytic QM ($\sigma_{w}=%$(Int(1000*σw_um))\mathrm{\mu m}$)",
         );
         # plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
         # line=(:dot, :red, 3),
@@ -743,7 +746,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # centroid_fw = mean(data_centroid_fw, Weights(nI-1:-1:0)) 
         # centroid_std_err = std(data_centroid_fw, Weights(nI-1:-1:0); corrected=false) / sqrt(nI)
         centroid_fw = post_threshold_mean(data_centroid_fw, Icoils, data_centroid_fw_error; 
-                            threshold=0.010,
+                            threshold=0.020,
                             half_life=5, # in samples
                             eps=1e-6,
                             weighted=true)
@@ -1020,7 +1023,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # );
         plot!(Ic_QM_sim, zm_QM_sim,
             line=(:dash,:darkgreen,2.5),
-            label="Analytic QM"    ,
+            label=L"Analytic QM ($\sigma_{w}=%$(Int(1000*σw_um))\mathrm{\mu m}$)",
         );
         # plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
         # line=(:dot, :red, 3),
@@ -1066,7 +1069,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # )
         plot!(Ic_QM_sim, zm_QM_sim,
             line=(:dash,:darkgreen,2.5),
-            label="Analytic QM",
+            label=L"Analytic QM ($\sigma_{w}=%$(Int(1000*σw_um))\mathrm{\mu m}$)",
         );
         # plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
         # line=(:dot, :red, 3),
@@ -1141,7 +1144,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # );
         plot!(Ic_QM_sim, zm_QM_sim,
             line=(:dash,:darkgreen,2.5),
-            label="Analytic QM"    ,
+            label=L"Analytic QM ($\sigma_{w}=%$(Int(1000*σw_um))\mathrm{\mu m}$)",
         );
         # plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
         # line=(:dot, :red, 3),
@@ -1194,7 +1197,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # );
         plot!(Ic_QM_sim, zm_QM_sim,
             line=(:dash,:darkgreen,2.5),
-            label="Analytic QM"    ,
+            label=L"Analytic QM ($\sigma_{w}=%$(Int(1000*σw_um))\mathrm{\mu m}$)",
         );
         # plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
         # line=(:dot, :red, 3),
@@ -1254,7 +1257,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # );
         plot!(Ic_QM_sim, zm_QM_sim,
             line=(:dash,:darkgreen,2.5),
-            label="Analytic QM"    ,
+            label=L"Analytic QM ($\sigma_{w}=%$(Int(1000*σw_um))\mathrm{\mu m}$)",
         );
         # plot!(fig_comp,data_JSF[:model][:,1], data_JSF[:model][:,3],
         # line=(:dot, :red, 3),
@@ -1304,7 +1307,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # )
         plot!(Ic_QM_sim, zm_QM_sim,
             line=(:dash,:darkgreen,2.5),
-            label="Analytic QM"    ,
+            label=L"Analytic QM ($\sigma_{w}=%$(Int(1000*σw_um))\mathrm{\mu m}$)",
         );
         # plot!(data_JSF[:model][:,1], data_JSF[:model][:,3],
         # line=(:dot, :red, 3),
@@ -1419,13 +1422,11 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             :fw_F2_peak_pos         => (collect(df_fw.F2_z_centroid_mm), collect(df_fw.F2_z_centroid_se_mm)),
         )
 
-        println("Experiment analysis finished!")
-        alert("Experiment analysis finished!")
-
         pretty_table(summary_table;
             title         = data_directory,
             alignment     = :c,
             column_labels = [ "Filename", "n" ,  "λ₀" ],
+            formatters    = [fmt__printf("%d", [2]), fmt__printf("%5.3f", [3])],
             table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
             style         = TextTableStyle(first_line_column_label = crayon"yellow bold",
                             column_label  = crayon"yellow",
@@ -1433,6 +1434,9 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
                             ),
             equal_data_column_widths = true
         )
+
+        println("Experiment analysis finished!\n\n")
+        alert("Experiment analysis finished!")
 
     end
     
