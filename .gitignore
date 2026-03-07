@@ -9,12 +9,14 @@
 
 # Ignore folders
 2025*/ 
+2026*/ 
 results_data/
 simulation_data/
 analysis_data/
 artifacts/
 data_studies/
-
+EXPDATA_ANALYSIS/
+EXPERIMENTS/
 
 # Optional: editor/system files
 .vscode/
