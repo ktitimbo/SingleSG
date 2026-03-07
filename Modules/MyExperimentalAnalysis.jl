@@ -1473,63 +1473,316 @@ function plot_profiles(z_mm, profiles, Icoils; title::AbstractString)
     return fig
 end
 
+"""
+    post_threshold_mean(x, Icoils, δx; threshold,
+                        half_life::Real=5,
+                        eps::Real=1e-6,
+                        weighted::Bool=true)
 
-function post_threshold_mean(x, Icoils, δx ; threshold,
-                                half_life::Real=5, # in samples
-                                eps::Real=1e-6,
-                                weighted::Bool=true)
-    @assert length(x) == length(Icoils)
-    @assert eps ≥ 0
+Compute the mean of `x` and its uncertainty, optionally applying a
+threshold-activated exponential weighting based on the coil current.
 
+The function supports two modes controlled by the keyword `weighted`.
 
-    if !weighted
-        # Plain mean over ALL entries (no threshold)
-        N   = length(x)
-        μ   = mean(x)
-        s   = std(x; corrected=true)
-        sem_data = (N > 1) ? s / sqrt(N) : 0.0
-        # independent per-sample measurement errors δx_i:
-        sem_meas = sqrt(sum(δx.^2)) / N              # = sqrt( (1/N^2)∑δx_i^2 )
-        sem = sqrt(sem_data^2 + sem_meas^2)
-        return (mean=μ, sem=sem)
-    end
+If `weighted = false`, the ordinary arithmetic mean of all samples is
+computed.
 
-    # Weighted branch:
-    idx0 = findfirst(>(threshold), Icoils)
-    @assert idx0 !== nothing "No Icoils entry greater than threshold."
+If `weighted = true`, a weighted mean is computed where samples before
+the first current satisfying `Icoils[i] ≥ threshold` receive a small
+baseline weight `eps`, while samples at and above the threshold receive
+exponentially increasing weights. The growth rate of these weights is
+controlled by `half_life`, expressed in units of sample index.
 
-    # Weighted branch
-    n  = length(x)
-    τ  = half_life / log(2)                 # convert half-life to exp scale
+In both cases the uncertainty of the mean is estimated by combining
+two independent contributions:
 
-    # Build weights for ALL entries:
-    # - pre-threshold: tiny eps
-    # - post-threshold: exponentially increasing (stabilized to avoid overflow)
-    w = fill(eps, n)
-    w[idx0:end] .= exp.( (0:(n - idx0)) ./ τ )
-    # println("weights = $w")
-    
-    μ = mean(x, Weights(w))
+1) Process (statistical) uncertainty from the scatter of the data.
+2) Measurement uncertainty propagated from the pointwise errors `δx`.
 
-    # normalize to probabilities ω (sum=1) for simple formulas
-    ω = w ./ sum(w)
+The function also produces a diagnostic plot showing:
+- the measured data and uncertainty bars,
+- the resulting mean and error band,
+- the normalized weights,
+- the contribution of each sample to the final mean.
 
-    # println("The result from the function is $(μ), whereas force is $(sum(ω .* x))")
+Arguments
+---------
+x :
+    Vector of measured values whose mean is to be estimated.
 
-    # process SEM (from residual scatter, scaled by Kish n_eff)
-    res2    = (x .- μ).^2
-    s_w2    = sum(ω .* res2)             # weighted residual variance (biased form)
-    n_eff   = 1 / sum(ω.^2)              # Kish effective N
-    sem_proc = sqrt(s_w2 / n_eff)
+Icoils :
+    Vector of coil currents corresponding to each entry of `x`.
 
-    # measurement SEM (from known per-sample errors δx_i)
-    sem_meas = sqrt(sum((ω.^2) .* (δx.^2)))
+δx :
+    Vector of measurement uncertainties associated with each value in `x`.
+
+All three vectors must have the same length.
+
+Keyword Arguments
+-----------------
+threshold :
+    Current threshold used to activate the weighted branch. The first
+    index satisfying `Icoils[i] ≥ threshold` defines the onset of the
+    exponential weighting.
+
+half_life = 5 :
+    Controls how fast the post-threshold weights grow. This parameter
+    represents the number of samples required for the weight to double.
+
+eps = 1e-6 :
+    Small baseline weight assigned to pre-threshold samples in the
+    weighted case. Setting `eps = 0` fully suppresses pre-threshold points.
+
+weighted = true :
+    If true, compute the threshold-weighted mean.
+    If false, compute the ordinary unweighted mean.
+
+Returns
+-------
+A named tuple with fields:
+
+mean :
+    Estimated mean of `x`.
+
+sem :
+    Estimated standard error of the mean.
+
+plot :
+    Diagnostic `Plots.jl` figure showing the data, weights, and sample
+    contributions.
+
+Details
+-------
+Unweighted case:
+
+The mean is
+
+    μ = mean(x)
+
+The uncertainty combines scatter of the data and propagated measurement
+errors:
+
+    sem_proc = s / sqrt(N)
+
+where `s` is the sample standard deviation.
+
+Measurement errors propagate as
+
+    sem_meas = sqrt(sum(δx.^2)) / N
+
+The final uncertainty is
 
     sem = sqrt(sem_proc^2 + sem_meas^2)
 
-    return (mean=μ, sem=sem)
-end
+Weighted case:
 
+Let i₀ be the first index such that
+
+    Icoils[i₀] ≥ threshold
+
+Weights are constructed as
+
+    w[i] = eps                     for i < i₀
+    w[i] = exp((i - i₀)/τ)         for i ≥ i₀
+
+where
+
+    τ = half_life / log(2)
+
+The weighted mean is
+
+    μ = sum(w .* x) / sum(w)
+
+Normalized weights are
+
+    ω[i] = w[i] / sum(w)
+
+The effective sample size is estimated using the Kish formula
+
+    n_eff = 1 / sum(ω.^2)
+
+Process uncertainty is obtained from the weighted residual scatter,
+while measurement uncertainty propagates as
+
+    sem_meas = sqrt(sum((ω.^2) .* (δx.^2)))
+
+Example
+-------
+result = post_threshold_mean(z, Icoils, δz;
+                             threshold = 0.03,
+                             half_life = 5)
+
+μ   = result.mean
+sem = result.sem
+
+display(result.plot)
+"""
+function post_threshold_mean(x, Icoils, δx; threshold,
+                             half_life::Real=5,
+                             eps::Real=1e-6,
+                             weighted::Bool=true)
+
+    @assert length(x) == length(Icoils) == length(δx)
+    @assert eps ≥ 0
+
+    n = length(x)
+
+    idx0  = nothing
+    w     = ones(Float64, n)
+    ω     = fill(1 / n, n)
+    n_eff = float(n)
+    τ     = NaN
+    plt   = nothing
+
+    xtick_pos = collect(1:n)
+    xtick_lab = round.(1000 .* Icoils, digits=2)
+
+    if !weighted
+        μ = mean(x)
+
+        s = std(x; corrected=true)
+        sem_proc = (n > 1) ? s / sqrt(n) : 0.0
+        sem_meas = sqrt(sum(δx.^2)) / n
+        sem = sqrt(sem_proc^2 + sem_meas^2)
+
+        p1 = plot(
+            Icoils, x;
+            seriestype = :scatter,
+            yerror = δx,
+            xlabel = L"$I_{c}$ (A)",
+            ylabel = "Center",
+            label = "data",
+            title = "Unweighted mean"
+        )
+        hline!(p1, [μ], label = L"weighted mean:  $z=%$(round(μ,digits=3))$mm", line=(:darkgreen,2) )
+        hspan!( [μ + sem, μ - sem], color=:orangered, alpha=0.30, label=L"Error = $\pm%$(round(sem,digits=3))$mm")
+
+        p2 = plot(
+            1:n, ω;
+            seriestype = :bar,
+            xlabel = "sample index",
+            ylabel = L"$\omega_{i} = 1/N$",
+            label = "normalized weights",
+            title = "Normalized weights"
+        )
+
+        p3 = plot(
+            1:n, ω .* x;
+            seriestype = :bar,
+            xlabel = "sample index",
+            ylabel = L"\omega_{i} x_{i}",
+            label = "contribution",
+            title = "Contribution to mean",
+            xticks = (xtick_pos, xtick_lab),
+            xrotation=85
+
+        )
+
+        annotate!(
+            p3, 10, 0.25,
+            text(
+                "mean = $(round(μ, digits=3))\n" *
+                "sem = $(round(sem, sigdigits=1))\n" *
+                "n_eff = $(round(n_eff, digits=2))",
+                :left, 9
+            )
+        )
+
+        plt = plot(p1, p2, p3; layout = (3, 1), size = (1100, 800), left_margin = 3mm, bottom_margin = 3mm)
+        display(plt)
+
+        return (
+            mean = μ,
+            sem = sem,
+            plot = plt
+        )
+    end
+
+    idx0 = findfirst(>=(threshold), Icoils)
+    @assert idx0 !== nothing "No Icoils entry greater than or equal to threshold."
+
+    τ = half_life / log(2)
+
+    w = fill(Float64(eps), n)
+    w[idx0:end] .= exp.((0:(n - idx0)) ./ τ)
+
+    μ = mean(x, Weights(w))
+    ω = w ./ sum(w)
+
+    res2 = (x .- μ).^2
+    s_w2 = sum(ω .* res2)
+    n_eff = 1 / sum(ω.^2)
+
+    sem_proc = sqrt(s_w2 / n_eff)
+    sem_meas = sqrt(sum((ω.^2) .* (δx.^2)))
+    sem = sqrt(sem_proc^2 + sem_meas^2)
+
+    pre_idx  = 1:(idx0-1)
+    post_idx = idx0:n
+
+    p1 = plot(
+        Icoils, x;
+        seriestype = :scatter,
+        yerror = δx,
+        xlabel = L"$I_{c}$ (A)",
+        ylabel = "Center",
+        label = "data",
+        title = "Signal vs Icoils"
+    )
+    vline!(p1, [threshold], label = "threshold", line=(:dot,:red,1))
+    hline!(p1, [μ], label = L"weighted mean:  $z=%$(round(μ,digits=3))$mm", line=(:darkgreen,2) )
+    hspan!( [μ + sem, μ - sem], color=:orangered, alpha=0.30, label=L"Error = $\pm%$(round(sem,digits=3))$mm")
+
+    if !isempty(pre_idx)
+        scatter!(p1, Icoils[pre_idx], x[pre_idx];
+                 yerror = δx[pre_idx],
+                 label = "pre-threshold")
+    end
+
+    scatter!(p1, Icoils[post_idx], x[post_idx];
+             yerror = δx[post_idx],
+             label = "post-threshold")
+
+    p2 = plot(
+        1:n, ω;
+        seriestype = :bar,
+        xlabel = "sample index",
+        ylabel = L"$\omega_{i} = w_{i} / \sum_{j} w_{j} $",
+        label = "normalized weights",
+        title = "Normalized weights"
+    )
+    vline!(p2, [idx0], label = "idx0", line=(:dot,:red,1))
+
+    p3 = plot(
+        1:n, ω .* x;
+        seriestype = :bar,
+        xlabel = "Current sampled (mA)",
+        ylabel = L"$\omega_{i} x_{i}$",
+        label = "contribution",
+        title = "Contribution to weighted mean",
+        xticks = (collect(range(1,n)),  round.(1000 * Icoils, digits=2)),
+        xrotation=85
+    )
+    annotate!(
+        p3, 10, 0.25,
+        text(
+            "mean = $(round(μ, digits=3))\n" *
+            "sem = $(round(sem, sigdigits=1))\n" *
+            "n_eff = $(round(n_eff, digits=2))\n" *
+            "idx0 = $idx0",
+            :left, 9
+        )
+    )
+
+    plt = plot(p1, p2, p3; layout = (3, 1), size = (1100, 800), left_margin=3mm,bottom_margin=3mm)
+    display(plt)
+
+    return (
+        mean = μ,
+        sem = sem,
+        plot = plt
+    )
+end
 
 function mag_factor(directory::String)
     if directory >= "20260211"
