@@ -60,7 +60,7 @@ data_JSF = OrderedDict(
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
 
-nz_fix, σ_fix, λ0_fix = (2,0.200,0.01);
+nz_fix, σ_fix, λ0_fix = (2,0.250,0.01);
 data_qm_path = joinpath(@__DIR__,"simulation_data","QM_T205_8M","qm_screen_profiles_f1_table.jld2");
 chosen_qm = jldopen(data_qm_path,"r") do file
     file[JLD2_MyTools.make_keypath_qm(nz_fix,σ_fix,λ0_fix)]
@@ -68,12 +68,11 @@ end
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end];
 zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end];
 
-parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS");
 data_directories = [
-    # "20250814", "20250820", "20250825","20250919","20251002","20251003","20251006",
+    "20250814", "20250820", "20250825","20250919","20251002","20251003","20251006",
     # "20251109",
     # "20260211", "20260213", 
-    "20260220", "20260225", "20260226am","20260226pm","20260227","20260303"
+    # "20260220", "20260225", "20260226am","20260226pm","20260227","20260303"
 ];
 
 n_runs = length(data_directories)
@@ -82,7 +81,7 @@ dI_all = Vector{Vector{Float64}}(undef, n_runs);
 cols = palette(:darkrainbow, n_runs);
 
 for (i, dir) in enumerate(data_directories)
-    d   = load(joinpath(@__DIR__, dir, "data_processed.jld2"), "data");
+    d   = load(joinpath(@__DIR__, "EXPERIMENTS", dir, "data_processed.jld2"), "data");
     I_all[i]  = Vector{Float64}(d[:Currents]);
     dI_all[i] = Vector{Float64}(d[:CurrentsError]);
 end
@@ -128,7 +127,8 @@ for data_directory in data_directories
     # data_directory = "20250814" ;
 
     magnification_factor = mag_factor(data_directory) ;
-        
+
+    parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS",data_directory);        
     m = DataReading.collect_fw_map(parent_folder; 
                                     select=sel, 
                                     filename="fw_data.csv", 
@@ -375,7 +375,7 @@ println("\nComparison of differente experiments finished!\n\n")
 Ics = Vector{Vector{Float64}}(undef, n_runs);
 tol_grouping = 0.05
 for (i, dir) in enumerate(data_directories)
-    data = load(joinpath(@__DIR__, dir, "data_processed.jld2"), "data")
+    data = load(joinpath(@__DIR__, "EXPERIMENTS", dir, "data_processed.jld2"), "data")
     Ics[i] = data[:Currents]
 end
 clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping);
