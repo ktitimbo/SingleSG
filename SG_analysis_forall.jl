@@ -46,7 +46,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20251002" ;
+data_directory      = "20251006" ;
 # Furnace 
 Temperature = 273.15 + 205
 # Blurring (gaussian) width
