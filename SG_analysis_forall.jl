@@ -161,7 +161,7 @@ nI      = length(Icoils)
 
 # Binning for the analysis
 nbins_list  = (1, 2, 4)
-λ0_list     = (0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
+λ0_list     = (0.000001, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
 const Cell = Union{Missing, String, Int, Float64}
 summary_table = Matrix{Cell}(undef, length(nbins_list)*length(λ0_list), 3);
 
