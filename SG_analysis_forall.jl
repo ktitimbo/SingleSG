@@ -257,12 +257,13 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         f2_mean_max = my_process_mean_maxima("F2", data_processed, n_bins; half_max=true, λ0=λ0)
 
         data_centroid_mean  = 0.5 * (f1_mean_max .+ f2_mean_max)
-        data_centroid_mean_error = 0.5 * sqrt(2)*z_mm_error*ones(length(data_centroid_mean))
+        data_centroid_mean_error = 0.5 * sqrt(2) * z_mm_error * ones(length(data_centroid_mean))
         centroid_mean = post_threshold_mean(data_centroid_mean, Icoils, data_centroid_mean_error; 
                             threshold=0.010,
                             half_life=5, # in samples
                             eps=1e-6,
                             weighted=true)
+        saveplot(centroid_mean.plot,"mean_centroid_diagnose")
         fig = plot(Icoils, data_centroid_mean,
             xerror = ΔIcoils,
             yerror = data_centroid_mean_error,
@@ -734,11 +735,11 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         f1_max = my_process_framewise_maxima("F1", data_processed, n_bins; half_max=true,λ0=λ0)
         f2_max = my_process_framewise_maxima("F2", data_processed, n_bins; half_max=true,λ0=λ0)
 
-        f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true)/sqrt(size(f1_max,1))).^2 .+ z_mm_error^2 );
-        f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true)/sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
+        f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ z_mm_error^2 );
+        f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
 
         data_centroid_fw       = 0.5 * (f1_z_mm .+ f2_z_mm)
-        data_centroid_fw_error = 0.5 * sqrt.(f1_z_sem_mm.^2 + f2_z_sem_mm.^2) / 2 
+        data_centroid_fw_error = 0.5 * sqrt.(f1_z_sem_mm.^2 + f2_z_sem_mm.^2) 
         # centroid_fw = mean(data_centroid_fw, Weights(nI-1:-1:0)) 
         # centroid_std_err = std(data_centroid_fw, Weights(nI-1:-1:0); corrected=false) / sqrt(nI)
         centroid_fw = post_threshold_mean(data_centroid_fw, Icoils, data_centroid_fw_error; 
@@ -746,6 +747,8 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
                             half_life=5, # in samples
                             eps=1e-6,
                             weighted=true)
+        saveplot(centroid_fw.plot,"fw_centroid_diagnose")
+
 
         fig = plot(Icoils, data_centroid_fw, 
             xerror=ΔIcoils,
