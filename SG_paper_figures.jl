@@ -61,6 +61,7 @@ rng_set = MersenneTwister(base_seed_set)
 include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
 include("./Modules/JLD2_MyTools.jl");
+include("./Modules/MyExperimentalAnalysis.jl");
 include("./Modules/TheoreticalSimulation.jl");
 using .TheoreticalSimulation;
 TheoreticalSimulation.SAVE_FIG = SAVE_FIG;
@@ -821,13 +822,44 @@ plot!(fig,
 )
 
 JLD2_MyTools.show_exp_summary(kk_path, dir)
-
+using Statistics
+using StatsBase
+using Plots
 
 
 
 data_directories = ["20260220","20260225","20260226am","20260226pm","20260227","20260303"]
 dir = data_directories[6]
 colores = palette(:darkrainbow,no)
+
+kk_path = joinpath(@__DIR__, "analysis_data","summary", dir, dir * "_report_summary.jld2")
+data = jldopen(kk_path, "r") do file
+    ic = file["meta/Currents"]
+    bz = file["meta/BzTesla"]
+
+    dd = file[JLD2_MyTools.make_keypath_exp(dir,2,0.01)]
+    return ( Ic=ic, Bz=bz, F1 = dd[:fw_F1_peak_pos_raw], F2 = dd[:fw_F2_peak_pos_raw], C0 = dd[:centroid_fw_mm] )
+end
+data.C0
+
+data_centroid_fw  = 0.5 * (data.F1[1] + data.F2[1])
+data_δcentroid_fw = round.(0.5 * sqrt.(data.F1[2].^2 + data.F2[2].^2) ; sigdigits=1)
+post_threshold_mean(data_centroid_fw, data.Ic, data_δcentroid_fw;
+                                 threshold=0.010,
+                                 half_life=5,
+                                 eps=1e-6,
+                                 weighted=true)
+
+
+MyExperimentalAnalysis.post_threshold_mean(data_centroid_fw, data.Ic, data_δcentroid_fw;
+                                 threshold=0.010,
+                                 half_life=5,
+                                 eps=1e-6,
+                                 weighted=false)
+
+
+
+
 
 centroid_fw = Matrix{Float64}(undef, no, 2)
 for (i,dir) in enumerate(data_directories)
