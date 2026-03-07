@@ -67,9 +67,9 @@ end
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
 zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
 
-parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS");
+
 data_directories = ["20250814", "20250820", "20250825","20250919","20251002","20251003","20251006"];
-data_directories = ["20260211", "20260213", "20260220"];
+# data_directories = ["20260211", "20260213", "20260220"];
 
 n_runs = length(data_directories);
 I_all  = Vector{Vector{Float64}}(undef, n_runs);
@@ -77,7 +77,7 @@ dI_all = Vector{Vector{Float64}}(undef, n_runs);
 cols = palette(:darkrainbow, n_runs);
 
 for (i, dir) in enumerate(data_directories)
-    d   = load(joinpath(@__DIR__, dir, "data_processed.jld2"), "data");
+    d   = load(joinpath(@__DIR__, "EXPERIMENTS", dir, "data_processed.jld2"), "data");
     I_all[i]  = Vector{Float64}(d[:Currents]);
     dI_all[i] = Vector{Float64}(d[:CurrentsError]);
 end
@@ -125,7 +125,8 @@ for data_directory in data_directories
     # data_directory = "20250825" ;
 
     magnification_factor = mag_factor(data_directory) ;
-        
+
+    parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS", data_directory);
     m = DataReading.collect_fw_map(parent_folder; 
                                     select=sel, 
                                     filename="fw_data.csv", 
@@ -219,6 +220,7 @@ println("Experiment analysis finished!\n\n")
 #########################################################################################
 # Choose a particular configuration for comparison purposes 
 #########################################################################################
+parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS");
 m_sets = map(d -> DataReading.collect_fw_map(
                  parent_folder;
                  select=sel,
@@ -227,6 +229,19 @@ m_sets = map(d -> DataReading.collect_fw_map(
                  sort_on=:binning,
                  data_dir_filter=d
              ), data_directories)
+
+m_sets = map(d -> begin
+    parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS", d)
+    DataReading.collect_fw_map(
+        parent_folder;
+        select = sel,
+        filename = "fw_data.csv",
+        report_name = "experiment_report.txt",
+        sort_on = :binning,
+        data_dir_filter = d
+    )
+end, data_directories)
+
 
 # desired values
 selected_bin = 2
@@ -358,7 +373,7 @@ println("\nComparison of differente experiments finished!\n\n")
 Ics = Vector{Vector{Float64}}(undef, length(data_directories));
 tol_grouping = 0.05
 for (i, dir) in enumerate(data_directories)
-    data = load(joinpath(@__DIR__, dir, "data_processed.jld2"), "data")
+    data = load(joinpath(@__DIR__, "EXPERIMENTS", dir, "data_processed.jld2"), "data")
     Ics[i] = data[:Currents]
 end
 clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping);
