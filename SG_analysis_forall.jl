@@ -46,9 +46,10 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20260306r2" ;
+data_directory      = "20260303" ;
 # Furnace 
-Temperature = 273.15 + 200
+TCelsius = 200
+Temperature = 273.15 + TCelsius
 # Blurring (gaussian) width
 σw_um = 0.200
 
@@ -103,7 +104,7 @@ data_JSF = OrderedDict(
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
 
-data_qm_path = joinpath(@__DIR__,"simulation_data","QM_T205_8M","qm_screen_profiles_f1_table.jld2")
+data_qm_path = joinpath(@__DIR__,"simulation_data","QM_T$(TCelsius)_8M","qm_screen_profiles_f1_table.jld2")
 
 # Importing data
 if !isfile(outfile_processed) # check if the processed images exists
@@ -150,8 +151,13 @@ data_processed = load(outfile_processed)["data"]
 if haskey(data_processed, :BzTesla)
     fig = plot(abs.(data_processed[:Currents]), abs.(data_processed[:BzTesla]),
         seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:blue,
+        xlabel="Coil current (A)",
+        ylabel="Magnetic field (T)"
         # xscale=:log10,
         )
+        saveplot(fig, "mag_field_exp")
     display(fig)
 end
 
@@ -257,6 +263,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         saveplot(fig, "mean_profiles_processed")
 
         f1_mean_max = my_process_mean_maxima("F1", data_processed, n_bins; half_max=true, λ0=λ0)
+        println("here")
         f2_mean_max = my_process_mean_maxima("F2", data_processed, n_bins; half_max=true, λ0=λ0)
 
         data_centroid_mean  = 0.5 * (f1_mean_max .+ f2_mean_max)
