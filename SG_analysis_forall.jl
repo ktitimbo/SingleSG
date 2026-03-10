@@ -46,11 +46,11 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20251006" ;
+data_directory      = "20260306r2" ;
 # Furnace 
-Temperature = 273.15 + 205
+Temperature = 273.15 + 200
 # Blurring (gaussian) width
-σw_um = 0.225
+σw_um = 0.200
 
 outfile_raw         = joinpath("EXPERIMENTS",data_directory, "data.jld2")
 outfile_processed   = joinpath("EXPERIMENTS",data_directory, "data_processed.jld2")
@@ -161,7 +161,7 @@ nI      = length(Icoils)
 
 # Binning for the analysis
 nbins_list  = (1, 2, 4)
-λ0_list     = (0.000001, 0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
+λ0_list     = (0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
 const Cell = Union{Missing, String, Int, Float64}
 summary_table = Matrix{Cell}(undef, length(nbins_list)*length(λ0_list), 3);
 
