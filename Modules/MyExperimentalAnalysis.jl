@@ -493,7 +493,7 @@ function process_mean_maxima(signal_key::String, data, n_bins::Integer; half_max
         # --- Plots
         fig_raw = plot(
             xlabel=L"$z$ (mm)", ylabel="Intensity (a.u.)",
-            title=L"%$(signal_key) Raw: $I_c = %$(round(I_current[j], digits=3))\ \mathrm{mA}$",
+            title=L"%$(signal_key) Raw: $I_c = %$(round(1000*I_current[j], digits=3))\ \mathrm{mA}$",
         )
         cols = palette(:phase, n_frames)
         for i in 1:n_frames
