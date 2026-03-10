@@ -221,15 +221,6 @@ println("Experiment analysis finished!\n\n")
 # Choose a particular configuration for comparison purposes 
 #########################################################################################
 parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS");
-m_sets = map(d -> DataReading.collect_fw_map(
-                 parent_folder;
-                 select=sel,
-                 filename="fw_data.csv",
-                 report_name="experiment_report.txt",
-                 sort_on=:binning,
-                 data_dir_filter=d
-             ), data_directories)
-
 m_sets = map(d -> begin
     parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS", d)
     DataReading.collect_fw_map(
