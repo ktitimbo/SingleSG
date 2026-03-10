@@ -505,11 +505,11 @@ function process_mean_maxima(signal_key::String, data, n_bins::Integer; half_max
             z_fit, y_fit,
             seriestype=:scatter, marker=(:circle,:white, 2), markerstrokecolor=:gray36, markerstrokewidth=0.8,
             xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
-            title=L"%$(signal_key) Processed: $I_c = %$(round(I_current[j], digits=3))\ \mathrm{mA}$",
+            title=L"%$(signal_key) Processed: $I_c = %$(round(1000*I_current[j], digits=3))\ \mathrm{mA}$",
             label="$(signal_key) processed", legend=:topleft,
         )
         xs = collect(range(minimum(z_fit), maximum(z_fit), length=2000))
-        plot!(fig_fit, xs, S_fit.(xs), line=(:solid, :red, 2), label="Spline fit")
+        plot!(fig_fit, xs, S_fit.(xs), line=(:solid, :red, 2), label=L"Spline fit ($\lambda_{0}=%$(λ0)$)")
         vline!(fig_fit, [maxima[1]], line=(:dash, :black, 1), label=L"$z_{\max}=%$(round(maxima[1], digits=3))\ \mathrm{mm}$")
 
         fig = plot(fig_raw, fig_fit; layout=@layout([a b]), size=(900, 400), left_margin=3mm, bottom_margin=3mm)
@@ -638,11 +638,11 @@ function process_framewise_maxima(signal_key::String, data, n_bins::Integer; hal
                 seriestype=:scatter, marker=(:circle, :white, 2),
                 markerstrokecolor=:gray36, markerstrokewidth=0.8,
                 xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
-                title=L"%$(signal_key) Frame %$(i): $I_c=%$(round(I_current[j], digits=3))\ \mathrm{mA}$",
+                title=L"%$(signal_key) Frame %$(i): $I_c=%$(round(1000*I_current[j], digits=3))\ \mathrm{mA}$",
                 label="$(signal_key) processed", legend=:topleft,
             );
             xs = collect(range(minimum(z_fit), maximum(z_fit), length=2001));
-            plot!(fig, xs, S_fit.(xs), line=(:solid, :red, 2), label="Spline fit");
+            plot!(fig, xs, S_fit.(xs), line=(:solid, :red, 2), label=L"Spline fit ($\lambda_{0}=%$(λ0)$)");
             vline!(fig, [max_z], line=(:dash, :black, 1), label=L"$z_{\max}=%$(round(max_z, digits=3))\ \mathrm{mm}$");
             display(fig)
             if _has(:SAVE_FIG)
@@ -1244,7 +1244,7 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
         # --- Plots
         fig_raw = plot(
             xlabel=L"$z$ (mm)", ylabel="Intensity (a.u.)",
-            title=L"%$(signal_key) Raw: $I_c = %$(round(I_current[j], digits=3))\ \mathrm{mA}$",
+            title=L"%$(signal_key) Raw: $I_c = %$(1000*round(I_current[j], digits=3))\ \mathrm{mA}$",
         )
         cols = palette(:phase, n_frames)
         for i in 1:n_frames
@@ -1256,7 +1256,7 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
             z_fit, y_fit,
             seriestype=:scatter, marker=(:circle,:white, 2), markerstrokecolor=:gray36, markerstrokewidth=0.8,
             xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
-            title=L"%$(signal_key) Processed: $I_c = %$(round(1e3*I_current[j], digits=3))\ \mathrm{mA}$",
+            title=L"%$(signal_key) Processed: $I_c = %$(1000*round(1e3*I_current[j], digits=3))\ \mathrm{mA}$",
             label="$(signal_key) processed", legend=:topleft,
         )
         xs = collect(range(minimum(z_fit), maximum(z_fit), length=2000))
