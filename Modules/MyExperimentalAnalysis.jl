@@ -1260,7 +1260,7 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
             label="$(signal_key) processed", legend=:topleft,
         )
         xs = collect(range(minimum(z_fit), maximum(z_fit), length=2000))
-        plot!(fig_fit, xs, S_fit.(xs), line=(:solid, :red, 2), label="Spline fit")
+        plot!(fig_fit, xs, S_fit.(xs), line=(:solid, :red, 2), label=L"Spline fit ($\lambda_{0}=%$(λ0)$)")
         vline!(fig_fit, [maxima[1]], line=(:dash, :black, 1), label=L"$z_{\max}=%$(round(maxima[1], digits=3))\ \mathrm{mm}$")
 
         fig = plot(fig_raw, fig_fit; layout=@layout([a b]), size=(900, 400), left_margin=3mm, bottom_margin=3mm)
