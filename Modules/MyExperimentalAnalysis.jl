@@ -1097,7 +1097,7 @@ function my_process_framewise_maxima(signal_key::String, data, n_bins::Integer; 
                 label="$(signal_key) processed", legend=:topleft,
             );
             xs = collect(range(minimum(z_fit), maximum(z_fit), length=2001));
-            plot!(fig, xs, S_fit.(xs), line=(:solid, :red, 2), label="Spline fit");
+            plot!(fig, xs, S_fit.(xs), line=(:solid, :red, 2), label=L"Spline fit ($\lambda_{0}=%$(λ0)$)");
             vline!(fig, [max_z], line=(:dash, :black, 1), label=L"$z_{\max}=%$(round(max_z, digits=3))\ \mathrm{mm}$");
             display(fig)
             if _has(:SAVE_FIG)
