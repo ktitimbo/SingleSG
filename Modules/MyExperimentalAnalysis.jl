@@ -1935,126 +1935,169 @@ end
 
 
 # ---------------- local derivative at 0 via weighted local polynomial ----------------
-"""
-    local_derivative_at0(x, y; nfit=7, order=2, weight=:gaussian, h=nothing) -> Float64
 
-Estimate the derivative ``dy/dx`` evaluated at ``x = 0`` using a *local weighted
-polynomial regression* (local Taylor expansion) constructed from the data points
-closest to zero.
+"""
+    local_derivative_at0(x, y; nfit=7, order=2, weight=:gaussian, h=nothing)
+        -> (β, xs, ys, w)
+
+Estimate the local polynomial expansion of `y(x)` around `x = 0` using the
+data points closest to the origin.
 
 The function selects the `nfit` samples with smallest `|x|` and fits the model
 
     y(x) ≈ a₀ + a₁ x + a₂ x² + ⋯ + a_order x^order
 
-via weighted least squares.  
-The returned value is
+via weighted least squares. The fitted coefficient vector is returned as
 
-    a₁ = dy/dx |_{x=0},
+    β = [a₀, a₁, a₂, ..., a_order].
 
-i.e. the local slope at the origin.
+In particular:
 
-This approach is robust when the global relation `y(x)` is nonlinear but smooth
-near zero, and therefore provides a stable estimate of the derivative without
-requiring symmetric sampling or explicit finite differences.
+- `β[1] = a₀` is the local intercept, i.e. the fitted value at `x = 0`
+- `β[2] = a₁` is the local derivative `dy/dx |_{x=0}`
 
-----------------------------------------------------------------------
+This is a local Taylor-like approximation around zero and is often more robust
+than finite differences when the data are noisy, unevenly spaced, or weakly
+nonlinear near the origin.
+
+--------------------------------------------------------------------------
 # Arguments
-- `x::AbstractVector` :
-    Independent variable values. The origin (`x=0`) is the expansion point.
-    Values need not be sorted.
+- `x::AbstractVector`
+    Independent-variable values. The expansion point is `x = 0`.
+    The input need not be sorted.
 
-- `y::AbstractVector` :
-    Dependent variable values corresponding to `x`.
+- `y::AbstractVector`
+    Dependent-variable values corresponding to `x`.
 
-----------------------------------------------------------------------
+Both vectors must have the same length.
+
+--------------------------------------------------------------------------
 # Keyword Arguments
-- `nfit::Int=7` :
-    Number of points closest to `x=0` used in the local fit.
-    Must satisfy `nfit ≥ order + 2`.
+- `nfit::Int = 7`
+    Number of data points closest to `x = 0` used in the local fit.
 
-- `order::Int=2` :
+    Must satisfy
+
+        nfit ≥ order + 2
+
+    so that the polynomial fit is not underdetermined and retains some local
+    redundancy.
+
+- `order::Int = 2`
     Polynomial order of the local approximation.
+
     Typical choices:
-      * `1` → locally linear behaviour
-      * `2` → allows curvature (recommended default)
-      * `3–4` → higher smooth curvature, but may overfit noisy data
+    - `1`: local linear model
+    - `2`: includes curvature; usually a good default
+    - `3` or higher: may better capture smooth structure, but can overfit noise
 
-- `weight::Symbol=:gaussian` :
-    Weighting scheme for the local regression:
-      * `:gaussian` — points closer to zero receive larger weight
-      * `:uniform`  — all selected points weighted equally
+- `weight::Symbol = :gaussian`
+    Weighting scheme for the selected points.
 
-- `h` :
-    Characteristic width of the Gaussian weights.
-    If `nothing`, it is automatically chosen as the maximum `|x|`
-    among the selected points.
+    Supported values:
+    - `:gaussian` : points closer to zero receive larger weight
+    - `:uniform`  : all selected points are weighted equally
 
-----------------------------------------------------------------------
+- `h = nothing`
+    Width parameter used for Gaussian weighting.
+
+    If `weight == :gaussian` and `h === nothing`, the code sets
+
+        h = maximum(abs.(xs))
+
+    where `xs` are the selected fit points. If all selected points are exactly
+    zero, `h` is set to `1.0` to avoid division by zero.
+
+--------------------------------------------------------------------------
 # Method
-1. Select the `nfit` points minimizing `|x|`.
-2. Build a Vandermonde matrix centered at zero.
-3. Perform weighted least-squares minimization
+1. Identify the `nfit` points with smallest `|x|`.
+2. Construct the local design matrix
 
-       min || W (Aβ − y) ||²
+       A = [1  x  x²  ...  x^order]
 
-   where `W` contains the chosen weights.
-4. Return coefficient `β[2] = a₁`.
+   evaluated on the selected points.
+3. Build the weight vector `w`.
+4. Solve the weighted least-squares problem
 
-----------------------------------------------------------------------
-# Numerical Properties
-- Equivalent to a local Taylor expansion around zero.
-- More stable than finite differences when sampling is uneven or noisy.
-- Naturally handles nonlinear behaviour near the origin.
-- Gaussian weighting reduces bias from distant points.
+       min_β || W (Aβ - y) ||²
 
-----------------------------------------------------------------------
-# Physical Interpretation (typical use)
-In calibration problems, `a₁` represents the *local response coefficient*
-mapping small changes in `x` into changes in `y`. For example, in
-Stern–Gerlach analysis this corresponds to
+   where `W = Diagonal(sqrt.(w))`.
 
-    a₁ ≈ d z / d I_c |_{I_c=0},
-
-which converts a position uncertainty into an equivalent current uncertainty.
-
-----------------------------------------------------------------------
+--------------------------------------------------------------------------
 # Returns
-- `Float64` :
-    Estimated derivative `dy/dx` evaluated at `x = 0`.
+A tuple `(β, xs, ys, w)` where:
 
-----------------------------------------------------------------------
+- `β::Vector{Float64}`
+    Fitted polynomial coefficients `[a₀, a₁, ..., a_order]`.
+
+- `xs::Vector{Float64}`
+    Selected `x` values used in the fit, i.e. the `nfit` points closest to zero.
+
+- `ys::Vector{Float64}`
+    Corresponding `y` values used in the fit.
+
+- `w::Vector{Float64}`
+    Weights assigned to the selected points.
+
+--------------------------------------------------------------------------
 # Notes
-- If the true derivative near zero is very small, the estimate becomes
-  noise-dominated; downstream error propagation may therefore inflate.
-- Increasing `nfit` improves statistical stability but reduces locality.
-- Increasing `order` captures curvature but may amplify noise.
+- The selected points are not re-centered; the polynomial is fitted directly
+  in powers of `x`, so `β[1]` is the fitted value at zero and `β[2]` is the
+  derivative at zero.
+- This function returns the full local fit information, not just the slope,
+  so that downstream routines can inspect the intercept, fitted window,
+  and weighting.
+- If the true slope near zero is very small, `β[2]` may become noise-sensitive.
 
-----------------------------------------------------------------------
+--------------------------------------------------------------------------
+# Physical Interpretation
+In calibration problems, `β[2]` is the local response coefficient converting
+small changes in the control parameter `x` into changes in the measured
+observable `y`.
+
+For example, in Stern–Gerlach analysis with
+
+    x = I_c
+    y = (z₁ - z₂)/2
+
+the coefficient `β[2]` estimates
+
+    d[(z₁-z₂)/2] / dI_c |_{I_c=0},
+
+which can be used to convert a position uncertainty into an equivalent current
+uncertainty.
+
+--------------------------------------------------------------------------
 # Example
-julia
 x = range(-0.02, 0.02, length=21)
-y = 3x .+ 5x.^2 .+ 0.01randn(length(x))
+y = 3 .* x .+ 5 .* x.^2 .+ 0.01 .* randn(length(x))
 
-m = local_derivative_at0(x, y; nfit=9, order=2)
-# ≈ 3
+β, xs, ys, w = local_derivative_at0(x, y; nfit=9, order=2)
+
+a0 = β[1]   # fitted offset at x = 0
+m0 = β[2]   # fitted derivative at x = 0
 """
 function local_derivative_at0(x::AbstractVector, y::AbstractVector;
                               nfit::Int=7, order::Int=2,
                               weight::Symbol=:gaussian, h=nothing)
 
-    @assert length(x) == length(y)
-    @assert nfit ≥ order + 2
+    @assert length(x) == length(y) "x and y must have the same length."
+    @assert nfit ≥ order + 2 "Require nfit ≥ order + 2 for a stable local polynomial fit."
 
+    # Select the points closest to x = 0.
     idx = sortperm(abs.(x))[1:min(nfit, length(x))]
     xs  = Float64.(x[idx])
     ys  = Float64.(y[idx])
 
-    A = Matrix{Float64}(undef, length(xs), order+1)
+    # Build the local polynomial design matrix:
+    # A[:,1] = 1, A[:,2] = x, A[:,3] = x^2, ...
+    A = Matrix{Float64}(undef, length(xs), order + 1)
     A[:, 1] .= 1.0
     for k in 1:order
-        @inbounds A[:, k+1] .= xs.^k
+        @inbounds A[:, k + 1] .= xs.^k
     end
 
+    # Assign weights to the selected points.
     w = ones(length(xs))
     if weight == :gaussian
         if h === nothing
@@ -2063,48 +2106,119 @@ function local_derivative_at0(x::AbstractVector, y::AbstractVector;
         end
         w .= exp.(-(xs ./ h).^2)
     elseif weight != :uniform
-        error("unknown weight=$weight")
+        error("unknown weight = $weight; supported choices are :gaussian and :uniform")
     end
 
+    # Weighted least-squares solve.
     W = Diagonal(sqrt.(w))
-    β = (W*A) \ (W*ys)
+    β = (W * A) \ (W * ys)
+
     return β, xs, ys, w
 end
 
 
-
 """
     plot_local_derivative_fit(x, y; nfit=7, order=2, weight=:gaussian, h=nothing, xspan=nothing)
+        -> p
 
-Shows:
-- all points
-- points used in the local fit
-- local polynomial fit curve
-- tangent line at x=0 with slope β[2]
+Create a diagnostic plot for the local polynomial fit used to estimate the
+derivative at `x = 0`.
+
+The plot shows:
+
+- the selected data points used in the local fit,
+- the fitted local polynomial curve,
+- the tangent line at `x = 0`,
+- a vertical reference line at `x = 0`.
+
+This function is intended as a visual diagnostic to assess whether the chosen
+fit window, polynomial order, and weighting scheme provide a reasonable local
+approximation near the origin.
+
+--------------------------------------------------------------------------
+# Arguments
+- `x::AbstractVector`
+    Independent-variable values.
+
+- `y::AbstractVector`
+    Dependent-variable values.
+
+--------------------------------------------------------------------------
+# Keyword Arguments
+- `nfit::Int = 7`
+    Number of points closest to zero used in the local fit.
+
+- `order::Int = 2`
+    Polynomial order of the local approximation.
+
+- `weight::Symbol = :gaussian`
+    Weighting scheme passed to `local_derivative_at0`.
+
+- `h = nothing`
+    Gaussian width passed to `local_derivative_at0`.
+
+- `xspan = nothing`
+    Horizontal range used to draw the fitted local curve.
+
+    If `nothing`, the function uses
+
+        xspan = maximum(abs.(xs))
+
+    where `xs` are the selected fit points.
+
+--------------------------------------------------------------------------
+# Returns
+- `p`
+    A plot object containing the diagnostic visualization.
+
+--------------------------------------------------------------------------
+# Notes
+- This function uses `local_derivative_at0` internally and therefore inherits
+  its assumptions.
+- The current axis is displayed in mA via multiplication by `1000`.
+- The vertical axis is displayed in μm via multiplication by `1000`.
+- The label of the tangent line reports the slope in scaled display units,
+  not in the raw units of the input arrays.
+
+--------------------------------------------------------------------------
+# Typical Use
+This plot is useful when checking whether the local derivative near zero is
+being estimated from a region that is sufficiently linear and symmetric for
+subsequent uncertainty propagation.
 """
 function plot_local_derivative_fit(x, y; nfit=7, order=2, weight=:gaussian, h=nothing, xspan=nothing)
     β, xs, ys, w = local_derivative_at0(x, y; nfit=nfit, order=order, weight=weight, h=h)
 
-    # choose a plotting window near 0
+    # Choose a plotting window near x = 0.
     if xspan === nothing
         xspan = maximum(abs.(xs))
         xspan = (xspan == 0.0) ? 1.0 : xspan
     end
-    xgrid = range(-xspan/10, xspan; length=300)
 
-    # polynomial prediction
+    # Build a smooth grid for plotting the local polynomial and its tangent.
+    # Keeping the range local helps visualize the fit relevant to the derivative at zero.
+    xgrid = range(-xspan / 10, xspan; length=300)
+
+    # Evaluate the fitted polynomial:
+    # yfit(x) = β[1] + β[2] x + β[3] x^2 + ...
     yfit = zero.(xgrid) .+ β[1]
     for k in 1:order
-        yfit .+= β[k+1] .* (xgrid .^ k)
+        yfit .+= β[k + 1] .* (xgrid .^ k)
     end
 
-    # tangent at 0: y = β[1] + β[2] x
+    # Tangent line at x = 0:
+    # y_tan(x) = a0 + a1 x
     ytangent = β[1] .+ β[2] .* xgrid
 
-    p = scatter(1000 .* xs, 1000 .* ys; label="fit points (nfit=$nfit)", ms=6)
+    p = scatter(1000 .* xs, 1000 .* ys;
+                label="fit points (nfit=$nfit)", ms=6)
 
-    plot!(p, 1000 .* xgrid, 1000 .* yfit; label="local poly fit (order=$order)", lw=3)
-    plot!(p, 1000 .* xgrid, 1000 .* ytangent; label="tangent at 0 (slope=$(round(1000 .* β[2], sigdigits=4)))", lw=2, ls=:dash)
+    plot!(p, 1000 .* xgrid, 1000 .* yfit;
+          label="local poly fit (order=$order)", lw=3)
+
+    plot!(p, 1000 .* xgrid, 1000 .* ytangent;
+          label="tangent at 0 (slope=$(round(1000 .* β[2], sigdigits=4)))",
+          lw=2, ls=:dash)
 
     vline!(p, [0.0]; label=false, ls=:dot)
     title!(p, "Local derivative at 0 (weight=$(weight))")
@@ -2114,208 +2228,291 @@ function plot_local_derivative_fit(x, y; nfit=7, order=2, weight=:gaussian, h=no
     return p
 end
 
-
 """
     curr_error_physical(Ic, δIc, z1, z2;
-                         δz1=nothing, δz2=nothing,
-                         nfit=7, order=2, weight=:gaussian, h=nothing,
-                         use_mismatch=true)
-        -> (δIc_new, extra_δI, m, i0, σd0)
+                        δz1=nothing, δz2=nothing,
+                        nfit=7, order=2, weight=:gaussian, h=nothing,
+                        use_mismatch=true)
+        -> (δIc_new, extra_δI, m, a0, i0, σd0, I0_equiv)
 
-Inflate current uncertainties by converting the *zero-current position
-uncertainty* into an equivalent uncertainty in the control parameter `Ic`.
+Inflate current uncertainties by converting a zero-current uncertainty in the
+antisymmetric position signal into an equivalent uncertainty in the control
+parameter `Ic`.
 
-This function implements a physics-motivated error propagation appropriate
-for symmetric two-channel measurements (e.g. Stern–Gerlach peak positions),
-where the observable signal is the antisymmetric combination
+The method is designed for symmetric two-channel measurements such as
+Stern–Gerlach peak positions, where one forms the antisymmetric observable
 
     d(Ic) = (z1(Ic) - z2(Ic)) / 2.
 
-Instead of modifying the measured positions `z1` and `z2`, the method interprets
-a residual offset at `Ic ≈ 0` as an uncertainty in the effective current axis.
+Rather than shifting the measured positions directly, the function interprets
+a residual offset and/or uncertainty in `d(Ic)` near `Ic ≈ 0` as a calibration
+uncertainty in the current axis.
 
-----------------------------------------------------------------------
+--------------------------------------------------------------------------
 # Physical Idea
 
-Near zero current,
+Near zero current, the antisymmetric signal is approximated locally as
 
-    d(Ic) ≈ (dd/dIc)|₀ ⋅ Ic ,
+    d(Ic) ≈ a₀ + m Ic,
 
-so an uncertainty in position `σ(d₀)` corresponds to an equivalent
-current uncertainty
+where
 
-    δI_added = σ(d₀) / |dd/dIc|₀ .
+- `a₀` is the fitted local offset at `Ic = 0`
+- `m = dd/dIc |₀` is the local slope near zero
 
-This added uncertainty is treated as a systematic calibration uncertainty
-shared by all current points and combined in quadrature with the existing
-measurement uncertainty `δIc`.
+A zero-current uncertainty `σ(d₀)` can therefore be converted into an
+equivalent current uncertainty via
 
-----------------------------------------------------------------------
+    δI_added = σ(d₀) / |m|.
+
+This added uncertainty is interpreted as a correlated calibration uncertainty
+shared by all current points and combined in quadrature with the original
+uncertainty `δIc`.
+
+--------------------------------------------------------------------------
 # Arguments
 - `Ic::AbstractVector`
-    Control parameter (e.g. coil current).
+    Control parameter values, e.g. coil current.
 
 - `δIc::AbstractVector`
-    Original uncertainty associated with each current value.
+    Original uncertainty associated with each entry of `Ic`.
 
-- `z1, z2::AbstractVector`
-    Measured peak positions from two symmetric channels.
+- `z1::AbstractVector`
+    Measured position of the first symmetric channel.
 
-All vectors must have identical length.
+- `z2::AbstractVector`
+    Measured position of the second symmetric channel.
 
-----------------------------------------------------------------------
+All four vectors must have identical length.
+
+--------------------------------------------------------------------------
 # Keyword Arguments
 
 ## Position uncertainties
-- `δz1`, `δz2` :
-    Optional per-point uncertainties for `z1` and `z2`.
-    When provided, the zero-current uncertainty is computed as
+- `δz1 = nothing`, `δz2 = nothing`
+    Optional per-point uncertainties associated with `z1` and `z2`.
 
-        σ(d₀)_meas = ½ √(δz1[i₀]^2 + δz2[i₀]^2)
+    If both are provided, the measurement contribution to the uncertainty in
+    the antisymmetric signal at the point closest to zero current is computed as
 
-    where `i₀` is the index closest to `Ic = 0`.
+        σ(d₀)_meas = 1/2 * sqrt(δz1[i0]^2 + δz2[i0]^2)
+
+    where `i0 = argmin(abs.(Ic))`.
 
 ## Local derivative estimation
-The derivative `(dd/dIc)|₀` is estimated using
-`local_derivative_at0`.
+The local fit is performed using `local_derivative_at0` applied to
 
-- `nfit` :
-    Number of points near zero used in the local polynomial fit.
+    d = (z1 - z2) / 2.
 
-- `order` :
-    Polynomial order for the local Taylor approximation.
+- `nfit::Int = 7`
+    Number of points near zero used in the local polynomial regression.
 
-- `weight` :
-    Weighting scheme (`:gaussian` or `:uniform`).
+- `order::Int = 2`
+    Polynomial order of the local approximation.
 
-- `h` :
-    Gaussian width parameter (automatic if `nothing`).
+- `weight::Symbol = :gaussian`
+    Weighting scheme for the local fit (`:gaussian` or `:uniform`).
 
-## Additional systematic term
-- `use_mismatch=true` :
-    Includes the observed zero-current disagreement
+- `h = nothing`
+    Gaussian width parameter for the local fit. If `nothing`, it is chosen
+    automatically by `local_derivative_at0`.
 
-        σ(d₀)_mismatch = |z1(i₀) - z2(i₀)| / 2
+## Additional mismatch term
+- `use_mismatch::Bool = true`
+    If `true`, include the observed zero-current channel disagreement
 
-    as an additional uncertainty contribution. This accounts for
-    unmodelled systematics such as residual magnetic fields,
-    peak-finding bias, or calibration drift.
+        σ(d₀)_mismatch = |z1[i0] - z2[i0]| / 2
 
-----------------------------------------------------------------------
+    as an additional uncertainty term.
+
+    This is a physics-motivated way to account for residual systematics such as
+    imperfect zeroing, stray fields, calibration drift, peak-finding bias, or
+    other unmodelled asymmetries.
+
+--------------------------------------------------------------------------
 # Method
-1. Construct antisymmetric signal `d = (z1 - z2)/2`.
-2. Estimate local slope `m = dd/dIc|₀` via weighted polynomial fit.
-3. Estimate zero-current uncertainty `σ(d₀)` from:
-   - measurement errors (`δz1`,`δz2`), and/or
-   - observed channel mismatch.
-4. Convert to current uncertainty
+1. Construct the antisymmetric signal
 
-       δI_added = σ(d₀) / |m|.
+       d = (z1 - z2)/2.
 
-5. Combine with original uncertainties:
+2. Estimate the local polynomial coefficients near `Ic = 0`:
 
-       δIc_new = √(δIc² + δI_added²).
+       d(Ic) ≈ a₀ + m Ic + ...
 
-----------------------------------------------------------------------
+   using `local_derivative_at0`.
+
+3. Identify the data point `i0` closest to zero current.
+
+4. Build the zero-current uncertainty `σ(d₀)` from one or both of:
+   - measurement uncertainty from `δz1` and `δz2`
+   - observed channel mismatch at `i0`
+
+5. Combine all available contributions in quadrature:
+
+       σ(d₀) = sqrt(sum(term^2 for term in σd0_terms))
+
+6. Convert this to an equivalent current uncertainty:
+
+       δI_added = σ(d₀) / |m|
+
+7. Combine the added calibration uncertainty with the original current errors:
+
+       δIc_new = sqrt.(δIc.^2 .+ δI_added^2)
+
+--------------------------------------------------------------------------
 # Returns
-Tuple containing:
+A tuple
 
-- `δIc_new::Vector{Float64}` :
-    Updated current uncertainties.
+    (δIc_new, extra_δI, m, a0, i0, σd0, I0_equiv)
 
-- `extra_δI::Float64` :
-    Added systematic current uncertainty.
+containing:
 
-- `m::Float64` :
-    Estimated local derivative `(dd/dIc)|₀`.
+- `δIc_new::Vector{Float64}`
+    Updated current uncertainties after adding the inferred calibration term
+    in quadrature.
 
-- `i0::Int` :
+- `extra_δI::Float64`
+    Added current uncertainty inferred from the zero-current uncertainty in `d`.
+
+- `m::Float64`
+    Local derivative of the antisymmetric signal near zero current,
+    i.e. `dd/dIc |₀`.
+
+- `a0::Float64`
+    Fitted local intercept of the antisymmetric signal at zero current.
+
+- `i0::Int`
     Index of the data point closest to zero current.
 
-- `σd0::Float64` :
-    Total propagated uncertainty in the antisymmetric signal at zero.
+- `σd0::Float64`
+    Total uncertainty assigned to the antisymmetric signal at zero current.
 
-----------------------------------------------------------------------
-# Numerical / Physical Notes
-- Using `(z1 - z2)/2` suppresses common-mode offsets and improves
-  robustness against imaging drifts.
-- If the derivative near zero is very small, the inferred current
-  uncertainty becomes large; this indicates the offset is better
-  interpreted as a position baseline rather than a current error.
-- The added uncertainty represents a *correlated calibration error*
-  shared by all points.
+- `I0_equiv::Float64`
+    Equivalent current offset associated with the fitted local intercept,
 
-----------------------------------------------------------------------
+        I0_equiv = |a0 / m|.
+
+    This is useful as a diagnostic estimate of how far the fitted zero-crossing
+    is shifted from the nominal origin in current units.
+
+--------------------------------------------------------------------------
+# Side Effects
+This function generates and displays a diagnostic plot showing:
+- the local fit points,
+- the fitted local polynomial,
+- the tangent at zero,
+- the point closest to zero current,
+- a horizontal line at the fitted offset `a0`.
+
+--------------------------------------------------------------------------
+# Notes
+- The antisymmetric combination `(z1 - z2)/2` suppresses common-mode shifts and
+  isolates the channel splitting that is most relevant for field/current calibration.
+- If `m` is very small, the inferred `extra_δI` can become very large. In that
+  regime, the observed offset may be better interpreted as a baseline position
+  effect than as a current calibration error.
+- At least one source of `σ(d₀)` must be available. Therefore, either provide
+  both `δz1` and `δz2`, or set `use_mismatch=true`.
+- The added uncertainty is global: it is the same scalar contribution added to
+  every point in `δIc`.
+
+--------------------------------------------------------------------------
 # Typical Use Case
-Stern–Gerlach peak analysis where residual splitting at zero current
-is interpreted as uncertainty in magnetic-field calibration rather
-than displacement noise.
+Stern–Gerlach peak analysis in which a residual asymmetry or finite uncertainty
+at nominal zero current is interpreted as uncertainty in current or magnetic-field
+calibration, rather than as a point-by-point displacement fluctuation.
 
-----------------------------------------------------------------------
+--------------------------------------------------------------------------
 # Example
-julia
-δIc_new, δI_added, m0, i0, σd0 =
+δIc_new, δI_added, m0, a0, i0, σd0, I0_equiv =
     curr_error_physical(Ic, δIc, z1, z2;
-                         δz1=δz1, δz2=δz2,
-                         nfit=9, order=3)
+                        δz1=δz1, δz2=δz2,
+                        nfit=9, order=3)
 """
 function curr_error_physical(Ic, δIc, z1, z2;
-                              δz1=nothing, δz2=nothing,
-                              nfit::Int=7, order::Int=2,
-                              weight::Symbol=:gaussian, h=nothing,
-                              use_mismatch::Bool=true)
+                             δz1=nothing, δz2=nothing,
+                             nfit::Int=7, order::Int=2,
+                             weight::Symbol=:gaussian, h=nothing,
+                             use_mismatch::Bool=true)
 
-    @assert length(Ic)==length(δIc)==length(z1)==length(z2)
+    @assert length(Ic) == length(δIc) == length(z1) == length(z2) \
+        "Ic, δIc, z1, and z2 must all have the same length."
 
+    # Convert everything to Float64 for numerical consistency in the fit
+    # and in the propagated uncertainty calculations.
     Ic  = Float64.(Ic)
     δIc = Float64.(δIc)
     z1  = Float64.(z1)
     z2  = Float64.(z2)
 
+    # Antisymmetric signal:
+    # this is the physically relevant combination for symmetric two-channel data.
     d = (z1 .- z2) ./ 2
-    β, xs, ys, w = local_derivative_at0(Ic, d; nfit=nfit, order=order, weight=weight, h=h)
-    m = β[2]
 
+    # Local polynomial fit near Ic = 0.
+    β, xs, ys, w = local_derivative_at0(Ic, d;
+                                        nfit=nfit, order=order,
+                                        weight=weight, h=h)
+
+    # β[1] = fitted local offset a0, β[2] = local slope m.
+    a0 = β[1]
+    m  = β[2]
+
+    # Index of the experimental point closest to nominal zero current.
     i0 = argmin(abs.(Ic))
 
-    p = plot_local_derivative_fit(Ic, d; nfit=nfit, order=order, weight=weight, h=h)
+    # Diagnostic plot for visual inspection of the local fit and the chosen zero-current point.
+    p = plot_local_derivative_fit(Ic, d;
+                                  nfit=nfit, order=order,
+                                  weight=weight, h=h)
+
     scatter!(p,
-            [1000 .* Ic[i0]], [1000 .* d[i0]];
-            ms=9,
-            markerstrokewidth=2,
-            label="i0 (closest to 0)")
-    hline!(p, [1000 .* β[1]]; ls=:dot, label="local offset a0 ($(1000*round(β[1], sigdigits=4))μm)")
+             [1000 .* Ic[i0]], [1000 .* d[i0]];
+             ms=9,
+             markerstrokewidth=2,
+             label="i0 (closest to 0)")
+
+    hline!(p, [1000 .* a0];
+           ls=:dot,
+           label="local offset a0 ($(1000 * round(a0, sigdigits=4)) μm)")
+
     display(p)
 
-    # --- uncertainty in d0 ---
+    # Build the zero-current uncertainty budget for d(Ic).
     σd0_terms = Float64[]
 
-    # term from provided z uncertainties at i0
+    # Contribution from the provided position uncertainties at the point closest to zero.
     if δz1 !== nothing && δz2 !== nothing
-        @assert length(δz1)==length(Ic) && length(δz2)==length(Ic)
+        @assert length(δz1) == length(Ic) && length(δz2) == length(Ic) \
+            "δz1 and δz2 must match the length of Ic."
+
         σd0_meas = 0.5 * sqrt(Float64(δz1[i0])^2 + Float64(δz2[i0])^2)
         push!(σd0_terms, σd0_meas)
     end
 
-    # optional term from observed mismatch (treat as additional scatter / model mismatch)
+    # Optional extra term from the observed mismatch between channels at nominal zero current.
     if use_mismatch
         σd0_mismatch = abs(z1[i0] - z2[i0]) / 2
         push!(σd0_terms, σd0_mismatch)
     end
 
-    @assert !isempty(σd0_terms) "Provide δz1,δz2 or set use_mismatch=true."
+    @assert !isempty(σd0_terms) "Provide δz1 and δz2, or set use_mismatch=true."
 
-    # combine contributions in quadrature
+    # Combine all contributions in quadrature.
     σd0 = sqrt(sum(t^2 for t in σd0_terms))
 
-    # map to current
+    # Convert the zero-current position uncertainty into an equivalent current uncertainty.
+    # The max(..., eps()) guard prevents division by exactly zero.
     extra_δI = σd0 / max(abs(m), eps())
 
+    # Add the inferred calibration uncertainty equally to all points.
     δIc_new = sqrt.(δIc.^2 .+ extra_δI^2)
 
-    return δIc_new, extra_δI, m, β[1], i0, σd0, abs.(β[1]/β[2])
-end
+    # Diagnostic equivalent current shift associated with the fitted local offset.
+    I0_equiv = abs(a0 / m)
 
+    return δIc_new, extra_δI, m, a0, i0, σd0, I0_equiv
+end
 
     # Public API
     export saveplot, 
