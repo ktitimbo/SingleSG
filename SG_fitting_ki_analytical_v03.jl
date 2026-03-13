@@ -623,11 +623,11 @@ end
 #   - dz/dI is the spline derivative evaluated at xq
 #   - δz_interp is the interpolated z-uncertainty at xq
 # =============================================================================
-exp_avg = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning_2025","data_averaged_2.jld2"))["data"]
+exp_avg = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning","data_averaged_2.jld2"))["data"]
 
 mask = [any(abs(a - b) ≤ 1e-15 for a in exp_avg[:Ic_grouped][:,1]) for b in exp_avg[:i_smooth]]
 Ichosen  = exp_avg[:i_smooth][mask]
-δIchosen = exp_avg[:δi_smooth][mask]
+δIchosen = 0.02*exp_avg[:i_smooth][mask]#exp_avg[:δi_smooth][mask]
 
 @info "Experimental data loaded"
 # 1. Fit spline for the experiment data
@@ -937,6 +937,7 @@ I_scan = logspace10(i_threshold, 1.00; n = 501);
 
 # Build a convenient N×4 array: [I, δI, z, δz] and keep only I ≥ i_threshold
 data = hcat(exp_avg[:i_smooth],exp_avg[:δi_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :];
+data = hcat(exp_avg[:i_smooth],0.02*exp_avg[:i_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :];
 pretty_table(data;
         alignment     = :c,
         title         = @sprintf("EXPERIMENTAL DATA (continuous)"),
@@ -2212,7 +2213,8 @@ end
 i_start = searchsortedfirst(exp_avg[:i_smooth], i_threshold)
 data     = hcat(
     exp_avg[:i_smooth],
-    round.(exp_avg[:δi_smooth]; sigdigits=1),
+    # round.(exp_avg[:δi_smooth]; sigdigits=1),
+    round.(0.08*exp_avg[:i_smooth]; sigdigits=1),
     exp_avg[:z_smooth],
     exp_avg[:δz_smooth]
 )[i_start:end,:]
@@ -2367,15 +2369,16 @@ plot!(fig,
     ylabel = L"$F=1$ peak position (mm)",
     xaxis=:log10,
     yaxis=:log10,
-    labelfontsize=16,
-    tickfontsize=14,
+    labelfontsize=18,
+    tickfontsize=16,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     # xlims=(0.010,1.05),
-    size=(900,800),
+    size=(1500,800),
     # legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
-    legendfontsize=12,
-    left_margin=3mm,
+    legendfontsize=16,
+    left_margin=8mm,
+    bottom_margin=8mm,
 )
 display(fig)
 savefig(fig,joinpath(OUTDIR,"single_SG_comparison.png"))
@@ -2416,16 +2419,17 @@ plot!(fig,
     ylabel = L"$F=1$ peak position (mm)",
     xaxis=:log10,
     yaxis=:log10,
-    labelfontsize=16,
-    tickfontsize=14,
+    labelfontsize=18,
+    tickfontsize=16,
     # xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(5,400),
-    size=(900,800),
+    xlims=(6,320),
+    size=(1500,800),
     # legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
     legend=:topleft,
-    legendfontsize=12,
-    left_margin=3mm,
+    legendfontsize=16,
+    left_margin=8mm,
+    bottom_margin=8mm,
 )
 display(fig)
 savefig(fig,joinpath(OUTDIR,"single_SG_comparison_vsg.svg"))
