@@ -173,6 +173,8 @@ function standard_error(x)
     return std(x; corrected=true) ./ sqrt.(length(x))
 end
 ##################################################################################################
+############ phywe magnetic field measurement ##############################
+BvsI_phywe = sort(CSV.read("SG_BvsI_phywe.csv",DataFrame; header=["Ic","Bz"]),1)
 
 # Coil currents
 Icoils = [0.00,
@@ -319,126 +321,16 @@ plot(Ic, inv.(travel_times ./ collapse_time),
 ###########################################################################################
 #******************************************************************************************
 #+++++++++++++++++++++ Magnetic field measurements ++++++++++++++++++++++++++++++++++++++++
-"""
-    vector_subset(v::AbstractVector{T}; thr::Real = zero(T)) where {T<:Real}
-        -> (mask, inds, values_view)
-
-Return the subset of elements of `v` that are greater than or equal to a
-given threshold `thr`, together with the corresponding boolean mask and indices.
-
-This function is useful when filtering numerical data while preserving
-alignment across multiple related vectors (e.g. values, uncertainties,
-coordinates, weights).
-
-# Arguments
-- `v::AbstractVector{T}`:
-    Input numeric vector.
-- `thr::Real = zero(T)` (keyword):
-    Threshold value. Elements satisfying `v[i] ≥ thr` are selected.
-    The threshold is internally converted to the element type `T`.
-
-# Returns
-A tuple `(mask, inds, values_view)` where:
-
-- `mask::BitVector`:
-    Boolean mask of length `length(v)` with `true` at positions where
-    `v[i] ≥ thr`.
-- `inds::Vector{Int}`:
-    Indices `i` such that `v[i] ≥ thr`.
-- `values_view`:
-    A `SubArray` view of the selected elements `v[mask]`
-    (no data copy is performed).
-
-# Notes
-- The threshold is converted to type `T` via `convert(T, thr)` to ensure
-  type stability and consistent comparisons.
-- Returning a mask is often preferable when multiple vectors must be
-  filtered consistently:
-  julia
-  mask, inds, vals = vector_subset(v; thr=0.1)
-  x_filt  = x[mask]
-  σx_filt = σx[mask]
-- The returned values are provided as a view (@view v[mask]) to avoid
-unnecessary memory allocation.
-"""
-function vector_subset(v::AbstractVector{T}; thr::Real = zero(T), include_equal::Bool = true) where {T<:Real}
-    thrT = convert(T, thr)  # or: thrT = T(thr)
-    if include_equal
-        mask = v .>= thrT
-    else
-        mask = v .> thrT
-    end
-    inds = findall(mask)
-    return mask, inds, @view v[mask]
-end
 
 
-"""
-    subset_by_cols(A::AbstractMatrix{T}, cols::AbstractVector{<:Integer};
-                        thr::Real = zero(T), include_equal::Bool = true)
-        -> (mask, inds, rows_view)
 
-Return rows of `A` for which all selected columns satisfy the threshold condition.
-
-A row `i` is selected if, for every `c ∈ cols`:
-
-    A[i, c] ≥ thr   (default)
-or
-    A[i, c] > thr   (if `include_equal=false`)
-
-# Arguments
-- `A::AbstractMatrix{T}`:
-    Input matrix (`N×s`).
-- `cols`:
-    Vector of column indices to test.
-- `thr::Real = zero(T)`:
-    Threshold value (converted internally to type `T`).
-- `include_equal::Bool = true`:
-    If true use `≥`, otherwise use `>`.
-
-# Returns
-- `mask::BitVector` of length `N`
-- `inds::Vector{Int}` selected row indices
-- `rows_view` a view `A[mask, :]` (no copy)
-
-# Example
-julia
-A = [0.1  2.0  0.5  4.0;
-     0.8  1.0  0.7  2.0;
-     0.9  0.3  0.2  1.0]
-
-mask, inds, rows = subset_by_cols(A, [1,3]; thr=0.6)
-# Only row 2 satisfies:
-# A[2,1]=0.8 ≥ 0.6 AND A[2,3]=0.7 ≥ 0.6
-"""
-function subset_by_cols(A::AbstractMatrix{T},
-        cols::AbstractVector{<:Integer};
-        thr::Real = zero(T),
-        include_equal::Bool = true) where {T<:Real}
-    thrT = convert(T, thr)
-
-    subA = @view A[:, cols]
-
-    if include_equal
-        mask = vec(all(subA .>= thrT, dims=2))
-    else
-        mask = vec(all(subA .> thrT, dims=2))
-    end
-
-    inds = findall(mask)
-
-    return mask, inds, @view(A[mask, :])
-
-end
-
-
-data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303"]
+data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
 no = length(data_directories);
 colores = palette(:darkrainbow, no);
 
 exp_data = Vector{Matrix{Float64}}(undef, no)
 for (idx, dir) in enumerate(data_directories)
-    data = load(joinpath(@__DIR__,dir,"data_processed.jld2"),"data")
+    data = load(joinpath(@__DIR__,"EXPERIMENTS",dir,"data_processed.jld2"),"data")
     Ic = data[:Currents]
     Bz = data[:BzTesla]
     exp_data[idx] = hcat(Ic,Bz)
@@ -462,6 +354,7 @@ end
 plot!(fig1,Icoils[2:end], 1e3*TheoreticalSimulation.BvsI.(Icoils)[2:end],
     label="SG manual",
     line=(:solid,2,:black));
+display(fig1)
 plot!(fig1,
     xscale=:log10,
     yscale=:log10,
@@ -762,9 +655,8 @@ bottom_margin=2mm,
 
 ########################################################################################
 #+++++++++++++++++++++++++++ Kahraman & Ku +++++++++++++++++++++++++++++++++++++++++++++
-data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303"]
-bzsign = [-1,1,1,-1,1,1]
-colores = palette(:darkrainbow,6)
+data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
+colores = palette(:darkrainbow,8)
 
 fig = plot(
     xlabel="Currents (mA)",
@@ -784,7 +676,7 @@ for (idx,dir) in enumerate(data_directories)
         1000*data.Ic, data.F1[1],
         yerror = data.F1[2],
         seriestype=:scatter,
-        label="$(dir) (degauss = $(round(1e3*data.Ic[1]; digits=6))mA , $(Int(round(1e4*bzsign[idx]*data.Bz[1])))G )",
+        label="$(dir) (degauss = $(round(1e3*data.Ic[1]; digits=6))mA , $(Int(round(1e4*data.Bz[1])))G )",
         marker=(:circle, 2, :white),
         markerstrokecolor=colores[idx],
     )
