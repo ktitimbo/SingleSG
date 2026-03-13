@@ -1244,7 +1244,7 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
         # --- Plots
         fig_raw = plot(
             xlabel=L"$z$ (mm)", ylabel="Intensity (a.u.)",
-            title=L"%$(signal_key) Raw: $I_c = %$(1000*round(I_current[j], digits=3))\ \mathrm{mA}$",
+            title=L"%$(signal_key) Raw: $I_c = %$(round(1000*I_current[j], digits=3))\ \mathrm{mA}$",
         )
         cols = palette(:phase, n_frames)
         for i in 1:n_frames
@@ -1256,7 +1256,7 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
             z_fit, y_fit,
             seriestype=:scatter, marker=(:circle,:white, 2), markerstrokecolor=:gray36, markerstrokewidth=0.8,
             xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
-            title=L"%$(signal_key) Processed: $I_c = %$(1000*round(1e3*I_current[j], digits=3))\ \mathrm{mA}$",
+            title=L"%$(signal_key) Processed: $I_c = %$(round(1000*I_current[j], digits=3))\ \mathrm{mA}$",
             label="$(signal_key) processed", legend=:topleft,
         )
         xs = collect(range(minimum(z_fit), maximum(z_fit), length=2000))
