@@ -2514,28 +2514,562 @@ function curr_error_physical(Ic, δIc, z1, z2;
     return δIc_new, extra_δI, m, a0, i0, σd0, I0_equiv
 end
 
-    # Public API
-    export saveplot, 
-           compute_weights, 
-           normalize_image, 
-           estimate_shift_fft, 
-           estimate_1d_shift_fft, 
-           linear_fit, 
-           pixel_positions, 
-           process_mean_maxima,
-           process_framewise_maxima, 
-           process_maxima,
-           summarize_framewise,
-           stack_data,
-           bin_x_mean,
-           my_process_framewise_maxima,
-           my_process_mean_maxima,
-           build_processed_dict,
-           mean_z_profile,
-           extract_profiles,
-           plot_profiles,
-           post_threshold_mean,
-           mag_factor,
-           curr_error_physical
+
+############################################################################################################
+############################################################################################################
+#+++++++++++++++++++++ SG0 EXPERIMENT ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+function SG0_stack_data(data_directory::AbstractString;
+                    SG1Curr = r"SG1Cur(.*?)A",
+                    SG1Bz   = r"SG1Bz(.*?)G",
+                    SG0Curr = r"SG0Cur(.*?)A",
+                    SG0Bz   = r"SG0Bz(.*?)G",
+                    ampmeter_scale = r"Ran(.*?)A",
+                    error_factor = 0.015,
+                    order::Symbol = :asc,
+                    keynames = ("BG","F1","F2"),
+                    verbose::Bool = true)
+
+    # ----------------------------- -----------------------------------------
+    parse_amp(tok::AbstractString) =
+        endswith(tok, "u") ? parse(Float64, chop(tok; tail=1)) * 1e-6 :
+        endswith(tok, "m") ? parse(Float64, chop(tok; tail=1)) * 1e-3 :
+                            parse(Float64, tok)
+
+    parse_bz(tok::AbstractString) =
+    endswith(tok, "u") ? parse(Float64, chop(tok; tail=1)) * 1e-6 :
+    endswith(tok, "m") ? parse(Float64, chop(tok; tail=1)) * 1e-3 :
+                            parse(Float64, tok)
+    # -----------------------------------------------------------------------
+                    
+    # 1) Collect only .mat files that match the pattern
+    all_files = readdir(data_directory; join=true)
+    files = [f for f in all_files if endswith(lowercase(f), ".mat") && occursin(SG1Curr, f)]
+    @assert !isempty(files) "No matching .mat files found in $data_directory"
+
+    # 2a) Extract current tokens and convert to amperes for SG1
+    tokens_sg1 = Vector{SubString{String}}(undef, length(files))
+    for (i, f) in enumerate(files)
+        m = match(SG1Curr, f)
+        @assert m !== nothing "Couldn't parse current from: $f"
+        tokens_sg1[i] = m.captures[1]  # e.g. "-7u", "117m", "12930u"
+    end
+
+    # 2b) Extract current tokens and convert to amperes for SG0
+    tokens_sg0 = Vector{SubString{String}}(undef, length(files))
+    for (i, f) in enumerate(files)
+        m = match(SG0Curr, f)
+        @assert m !== nothing "Couldn't parse current from: $f"
+        tokens_sg0[i] = m.captures[1]  # e.g. "-7u", "117m", "12930u"
+    end
+
+    # 2c) Extract uncertainties of the currents
+    ran_tokens = Vector{SubString{String}}(undef, length(files))
+    for (i, f) in enumerate(files)
+        mr = match(ampmeter_scale, f)
+        @assert mr !== nothing "Couldn't parse range (Ran...A) from: $f"
+        ran_tokens[i] = mr.captures[1]  # e.g. "10m", "1000m", "500u"
+    end
+
+    # 2d) Extract magnetic field tokens and convert to gauss for SG1
+    tokens_bz1 = Vector{SubString{String}}(undef, length(files))
+    for (i, f) in enumerate(files)
+        m = match(SG1Bz, f)
+        @assert m !== nothing "Couldn't parse current from: $f"
+        tokens_bz1[i] = m.captures[1]  # e.g. "-7u", "117m", "12930u"
+    end
+
+    # 2e) Extract magnetic field tokens and convert to gauss for SG0
+    tokens_bz0 = Vector{SubString{String}}(undef, length(files))
+    for (i, f) in enumerate(files)
+        m = match(SG0Bz, f)
+        @assert m !== nothing "Couldn't parse current from: $f"
+        tokens_bz0[i] = m.captures[1]  # e.g. "-7u", "117m", "12930u"
+    end
+
+    # Convert both Cur and Ran to amps
+    currents_SG0 = parse_amp.(tokens_sg0)
+    currents_SG1 = parse_amp.(tokens_sg1)
+    ran_vals = parse_amp.(ran_tokens)   # amplitude in A (from Ran...)
+    bfield_SG0 = parse_bz.(tokens_bz0) .* 1e-4
+    bfield_SG1 = parse_bz.(tokens_bz1) .* 1e-4
+
+    # 3) Sort by current
+    p = sortperm(currents_SG0)
+    
+    files    = files[p]
+    currents_SG0 = Float64.(currents_SG0[p])
+    currents_SG1 = Float64.(currents_SG1[p])
+    bfield_SG0 = Float64.(bfield_SG0[p])
+    bfield_SG1 = Float64.(bfield_SG1[p])
+    currents_errors = error_factor * Float64.(ran_vals[p])
+
+    
+    # 4) Probe sizes & eltype from first file
+    keyBG, keyF1, keyF2 = keynames
+    sz, T = matopen(files[1]) do fh
+        f1 = read(fh, keyF1)
+        ((size(f1)), eltype(f1))
+    end
+
+    # Sanity check the first file has all keys
+    matopen(files[1]) do fh
+        @assert haskey(fh, keyBG) && haskey(fh, keyF1) && haskey(fh, keyF2) "Missing keys in $(files[1])"
+    end
+
+    N = length(files)
+    F1 = Array{T}(undef, sz[1], sz[2], sz[3], N)
+    F2 = similar(F1)
+    BG = similar(F1)
+    
+    println("\nEach component is organized as (Nx,Nz,Nframes,Nmeasurements)\n")
+    
+    # 5) Load & stack
+    for (i, f) in enumerate(files)
+        matopen(f) do fh
+            f1 = read(fh, keyF1); f2 = read(fh, keyF2); bg = read(fh, keyBG)
+            @assert size(f1) == sz && size(f2) == sz && size(bg) == sz "Inconsistent sizes in $f"
+            F1[:,:,:,i] = f1
+            F2[:,:,:,i] = f2
+            BG[:,:,:,i] = bg
+        end
+        verbose && i % 5 == 0 && @info "Loaded $i / $N" file=f
+    end
+
+    out = OrderedDict(
+        :Directory      => String(data_directory),
+        :Files          => files,
+        :SG0Currents    => currents_SG0,        # amperes
+        :SG1Currents    => currents_SG1,        # amperes
+        :CurrentsError  => currents_errors,     # amperes (0.015 * Ran in A)
+        :SG0Bz          => bfield_SG0,          # teslas
+        :SG1Bz          => bfield_SG1,          # teslas
+
+        :F1_data        => F1,              # 540×2560×number of images× number of currents
+        :F2_data        => F2,              # 540×2560×number of images× number of currents
+        :BG_data        => BG,              # 540×2560×number of images× number of currents
+    )
+
+
+    return out
+end
+
+function SG0_build_processed_dict(raw_data::OrderedDict{Symbol,Any};
+                            T = Float32, epsval = T(1e-12))
+
+    # Promote to Float32 once
+    F1 = T.(raw_data[:F1_data])
+    F2 = T.(raw_data[:F2_data])
+    BG = T.(raw_data[:BG_data])
+
+    @assert size(F1) == size(F2)
+
+    nx, nz = size(F1,1), size(F1,2)
+    ni = size(F1,3)   # 10
+    nj = size(BG,3)   # 10
+    nk = size(F1,4)   # 10
+    pairs = collect(Iterators.product(1:ni, 1:nj))
+
+    # Background subtract
+    F1proc = Array{T}(undef, nx, nz, ni*nj, nk);
+    F2proc = Array{T}(undef, nx, nz, ni*nj, nk);
+    for k in 1:nk
+        for (idx,(i,j)) in enumerate(pairs)
+            @views F1proc[:,:,idx,k] .= F1[:,:,i,k] .- BG[:,:,j,k]
+            @views F2proc[:,:,idx,k] .= F2[:,:,i,k] .- BG[:,:,j,k]
+        end
+    end
+
+    out = OrderedDict(
+        :SG0Currents    => raw_data[:SG0Currents],        # amperes
+        :SG1Currents    => raw_data[:SG1Currents],        # amperes
+        :CurrentsError  => raw_data[:CurrentsError],      # amperes (0.015 * Ran in A)
+        :SG0Bz          => raw_data[:SG0Bz],              # teslas
+        :SG1Bz          => raw_data[:SG1Bz],              # teslas
+
+        :F1ProcessedImages  => F1proc,   # size: 540 × 2560 × number of images permuted × number of currents
+        :F2ProcessedImages  => F2proc,   # size: 540 × 2560 × number of images permuted × number of currents
+    )
+
+    return out
+end
+
+function SG0_mean_maxima(signal_key::String, data, nz_bins::Integer; half_max=false, λ0::Float64=0.01)
+    # ------------------------------------------------------------------
+    # Experimental control parameters
+    # ------------------------------------------------------------------
+    I_SG0 = vec(data[:SG0Currents])
+    I_SG1 = vec(data[:SG1Currents])
+
+    nI0 = length(I_SG0)
+    nI1 = length(I_SG1)
+
+    @assert nI0 == nI1 "SG0 and SG1 current arrays must have the same length"
+    
+    # ------------------------------------------------------------------
+    # Select which processed-image stack to analyze
+    # Each stack is assumed to have shape:
+    #   (Nx, Nz, Nframes, Ncurrents)
+    # ------------------------------------------------------------------
+    signal_label = signal_key == "F1" ? :F1ProcessedImages :
+                   signal_key == "F2" ? :F2ProcessedImages :
+                   error("Invalid signal_key: choose \"F1\" or \"F2\"")
+
+    @info "Processing mean maxima" signal_label=signal_label
+
+    # ------------------------------------------------------------------
+    # z-axis in mm
+    # - z_full_mm   : full-resolution z-grid
+    # - z_binned_mm : z-grid after grouping nz_bins neighboring pixels
+    # ------------------------------------------------------------------
+    z_full_mm   = 1e3 .* pixel_positions(z_pixels, 1,      effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(z_pixels, nz_bins, effective_cam_pixelsize_z)
+
+    Nz_full   = length(z_full_mm)
+    Nz_binned = length(z_binned_mm)
+
+    # ------------------------------------------------------------------
+    # Output containers
+    #
+    # peak_positions[j]        : peak location for current j
+    # mean_profile_mat         : [z_full_mm  y₁  y₂ ... y_nI0]
+    # mean_bin_profile_mat     : [z_binned_mm  ybin₁  ybin₂ ... ybin_nI0]
+    # ------------------------------------------------------------------
+    peak_positions       = fill(NaN, nI0)
+    mean_profile_mat     = Matrix{Float64}(undef, Nz_full,   nI0 + 1)
+    mean_bin_profile_mat = Matrix{Float64}(undef, Nz_binned, nI0 + 1)
+
+    # First column = shared z axis
+    mean_profile_mat[:, 1]     = z_full_mm
+    mean_bin_profile_mat[:, 1] = z_binned_mm
+
+    # ------------------------------------------------------------------
+    # Loop over current setting j
+    # ------------------------------------------------------------------
+
+    for j in 1:nI0
+
+        # --------------------------------------------------------------
+        # Load image stack for the j-th current:
+        #   stack :: Nx × Nz × Nframes
+        # --------------------------------------------------------------
+        stack = Float64.(data[signal_label][:, :, :, j])
+        n_frames = size(stack, 3)
+
+        # --------------------------------------------------------------
+        # Optional: store the per-frame x-averaged profiles only for plotting
+        #
+        # profiles_full[:, i] is the z-profile of frame i obtained by
+        # averaging the 2D image over x.
+        #
+        # Shape:
+        #   profiles_full :: Nz × Nframes
+        # --------------------------------------------------------------
+        profiles_full = dropdims(mean(stack, dims=1), dims=1)
+
+        # --------------------------------------------------------------
+        # Mean profile over both x and frames
+        #
+        # This is equivalent to:
+        #   1) averaging each frame over x
+        #   2) averaging those profiles over all frames
+        #
+        # Result:
+        #   mean_profile :: Vector{Float64} of length Nz_full
+        # --------------------------------------------------------------
+        mean_profile = vec(dropdims(mean(stack, dims=(1, 3)), dims=(1, 3)))
+            # Save full-resolution mean profile in column j+1
+        mean_profile_mat[:, j + 1] = mean_profile
+
+        # --------------------------------------------------------------
+        # Bin along z by grouping consecutive z-pixels into blocks of
+        # length nz_bins and averaging within each block.
+        #
+        # Example:
+        #   Nz_full = 2560, nz_bins = 10  -->  new length = 256
+        # --------------------------------------------------------------
+        Nz = length(mean_profile)
+        @assert Nz % nz_bins == 0 "Signal length Nz=$Nz is not divisible by nz_bins=$nz_bins "
+
+        grouped_signal   = reshape(mean_profile, nz_bins, :)
+        processed_signal = vec(mean(grouped_signal, dims=1))
+
+        # Save binned mean profile in column j+1
+        mean_bin_profile_mat[:, j + 1] = processed_signal
+
+        # --------------------------------------------------------------
+        # Optional restriction to the half-maximum region.
+        # This keeps only the points whose signal is above half of the
+        # peak height, which can help focus the spline fit on the main lobe.
+        # --------------------------------------------------------------
+        z_fit = z_binned_mm
+        y_fit = processed_signal
+
+        if half_max
+            y_max   = maximum(y_fit)
+            keep_ix = findall(>(y_max / 2), y_fit)
+
+            z_fit = z_fit[keep_ix]
+            y_fit = y_fit[keep_ix]
+        end
+        @assert length(z_fit) ≥ 4 "Not enough points for cubic spline fit"
+
+        # --------------------------------------------------------------
+        # Fit a smoothed cubic spline to the processed z-profile
+        # --------------------------------------------------------------
+        weights = compute_weights(z_fit, λ0)
+        S_fit   = BSplineKit.fit(BSplineOrder(4), z_fit, y_fit, λ0; weights=weights)
+
+        # --------------------------------------------------------------
+        # Estimate the peak position by maximizing the spline.
+        #
+        # Current method:
+        #   - minimize the negative spline from several initial guesses
+        #   - deduplicate converged solutions
+        #   - select the candidate with largest spline value
+        # --------------------------------------------------------------
+        negative_spline(x) = -S_fit(x[1])
+        initial_guesses = sort([
+            # ceil(minimum(z_fit)),
+            quantile(z_fit, 0.10),
+            quantile(z_fit, 0.20),
+            quantile(z_fit, 0.30),
+            quantile(z_fit, 0.40),
+            z_fit[argmax(y_fit)],
+            quantile(z_fit, 0.50),
+            quantile(z_fit, 0.60),
+            quantile(z_fit, 0.70),
+            quantile(z_fit, 0.80),
+            quantile(z_fit, 0.90),
+            # floor(maximum(z_fit)),
+        ])
+
+        candidates = Float64[]
+        zmin, zmax = minimum(z_fit), maximum(z_fit)
+
+        for g in initial_guesses
+            res = optimize(negative_spline, [zmin], [zmax], [g], Fminbox(LBFGS()))
+            push!(candidates, Optim.minimizer(res)[1])
+        end
+
+        sort!(candidates)
+
+        # Deduplicate solutions that are numerically identical
+        filtered = [candidates[1]]
+        for c in candidates[2:end]
+            if all(abs(c - x) > 1e-9 for x in filtered)
+                push!(filtered, c)
+            end
+        end
+
+        # Rank by spline height and keep the tallest peak
+        values  = -S_fit.(filtered)
+        best_ix = argmin(values)
+        z_peak  = filtered[best_ix]
+
+        # Store primary peak (mm)
+        peak_positions[j] = z_peak
+
+        # --------------------------------------------------------------
+        # Plot raw per-frame profiles and fitted mean profile
+        # --------------------------------------------------------------
+        fig_raw = plot(
+            xlabel = L"$z\ (\mathrm{mm})$",
+            ylabel = "Intensity (a.u.)",
+            title  = "$(signal_key) Raw",
+        )
+
+        cols = palette(:phase, n_frames)
+        for i in 1:n_frames
+            plot!(fig_raw, z_full_mm, profiles_full[:, i], label=false, line=(:dot, cols[i], 1))
+        end
+        plot!(fig_raw, z_binned_mm, processed_signal,
+              label="mean (bins=$(nz_bins))", line=(:solid, :black, 2))
+
+        fig_fit = plot(
+            z_fit, y_fit,
+            seriestype = :scatter,
+            marker = (:circle, :white, 2),
+            markerstrokecolor = :gray36,
+            markerstrokewidth = 0.8,
+            xlabel = L"$z\ (\mathrm{mm})$",
+            ylabel = "Intensity (a.u.)",
+            title  = "$(signal_key) Processed",
+            label  = "$(signal_key) processed",
+            legend = :bottom,
+        )
+
+        xs = range(minimum(z_fit), maximum(z_fit), length=2000)
+        plot!(fig_fit, xs, S_fit.(xs),
+              line=(:solid, :red, 2),
+              label=L"Spline fit ($n_{z}=%$(nz_bins)$, $\lambda_0=%$(λ0)$)")
+        vline!(fig_fit, [z_peak],
+               line=(:dash, :black, 1),
+               label=L"$z_{\max}=%$(round(z_peak, digits=3))\ \mathrm{mm}$")
+
+        fig = plot(fig_raw, fig_fit;
+                suptitle = L"$I_{c0}=%$(round(1000*I_SG0[j], digits=3))\ \mathrm{mA}$, $I_{c1}=%$(round(1000*I_SG1[j], digits=3))\ \mathrm{mA}$",
+                layout=@layout([a b]),
+                size=(900, 400),
+                left_margin=3mm,
+                bottom_margin=3mm)
+
+        display(fig)
+        saveplot(fig, "mean_$(signal_key)_I$(@sprintf("%02d", j))")
+    end
+
+    return (
+        peak_positions   = peak_positions,
+        mean_profile     = mean_profile_mat,
+        mean_bin_profile = mean_bin_profile_mat,
+    )
+end
+
+function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer; half_max::Bool=false, λ0::Float64=0.01)
+
+    I_SG0   = vec(data[:SG0Currents])
+    nI0     = length(I_SG0) # Number of SG0 currents
+    I_SG1   = vec(data[:SG1Currents])
+    nI1     = length(I_SG1) # Number of SG0 currents
+
+    @assert nI0 == nI1 
+
+    # Validate signal_key → dataset key
+    signal_label = signal_key == "F1" ? :F1ProcessedImages :
+                signal_key == "F2" ? :F2ProcessedImages :
+                error("Invalid signal_key: choose 'F1' or 'F2'")
+
+    # z-axes (mm)
+    z_binned_mm = 1e3 .* pixel_positions(z_pixels, nz_bin, effective_cam_pixelsize_z)
+
+    # Determine max number of frames across currents
+    n_runs_max = maximum(size(data[signal_label][:,:,:,i], 3) for i in 1:nI0)
+    max_position_data = fill(NaN, n_runs_max, nI0)  # (n_runs_max × nI)
+
+    Nz_full = size(data[signal_label][:,:,:,1], 2)
+    @assert Nz_full % nz_bin == 0 "Signal length Nz=$Nz_full is not divisible by nz_bin=$nz_bin"
+
+    # precompute weights for full z-grid if half_max=false
+    full_weights = compute_weights(z_binned_mm, λ0)
+
+    @info "Processing per-frame maxima" signal_label=signal_label
+
+    for j in 1:nI0
+        # Load stack (Nx × Nz × Nframes)
+        stack    = Float64.(data[signal_label][:,:,:,j])
+        n_frames = size(stack, 3)
+
+        # Average over x for all frames at once: Nz × Nframes
+        profiles = dropdims(mean(stack, dims=1), dims=1)
+
+        # Bin along z for all frames at once: (Nz/nz_bin) × Nframes
+        profiles_binned = dropdims(mean(reshape(profiles, nz_bin, :, n_frames), dims=1), dims=1)
+
+        for i in 1:n_frames
+            y_fit = Float64.(view(profiles_binned, :, i))
+            z_fit = z_binned_mm
+
+            # --- Optional half-maximum window
+            if half_max
+                y_max  = maximum(y_fit)
+                keep   = findall(>(y_max/2), y_fit)
+                z_fit  = z_fit[keep]
+                y_fit  = y_fit[keep]
+            end
+
+            # --- Spline fit (cubic) on (z_fit, y_fit)
+            w_fit = half_max ? compute_weights(z_fit, λ0) : full_weights
+            S_fit = BSplineKit.fit(BSplineOrder(4), z_fit, y_fit, λ0; weights=w_fit)
+
+            # --- Maxima via minimizing negative spline from multiple guesses
+            negative_spline(x) = -S_fit(x[1])
+            initial_guesses = sort([
+                # ceil(minimum(z_fit)),
+                quantile(z_fit, 0.20),
+                quantile(z_fit, 0.40),
+                quantile(z_fit, 0.50),
+                z_fit[argmax(y_fit)],
+                quantile(z_fit, 0.60),
+                quantile(z_fit, 0.70),
+                quantile(z_fit, 0.80),
+                quantile(z_fit, 0.90),
+                # floor(maximum(z_fit)),
+            ])
+
+            candidates = Float64[]
+            for g in initial_guesses
+                res = optimize(negative_spline, [minimum(z_fit)], [maximum(z_fit)], [g], Fminbox(LBFGS()))
+                push!(candidates, Optim.minimizer(res)[1])
+            end
+            sort!(candidates)
+
+            # Deduplicate (within 1e-9)
+            dedup = [candidates[1]]
+            for v in candidates[2:end]
+                if all(abs(v - x) > 1e-9 for x in dedup)
+                    push!(dedup, v)
+                end
+            end
+
+            # Rank candidates by actual spline height (largest peak first)
+            @assert !isempty(dedup) "No peak candidates found"
+            vals     = S_fit.(dedup)        # evaluate spline (not negated)
+            best_ix  = argmax(vals)         # tallest peak index
+            max_z    = dedup[best_ix]       # z of tallest peak
+
+            # Store result for this frame/current
+            max_position_data[i, j] = max_z
+
+            # --- Plot per-frame processed profile + spline + peak
+            # fig = plot(
+            #     z_fit, y_fit,
+            #     seriestype=:scatter, marker=(:circle, :white, 2),
+            #     markerstrokecolor=:gray36, markerstrokewidth=0.8,
+            #     xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
+            #     xlims=extrema(z_binned_mm),
+            #     title=L"%$(signal_key) Frame %$(i): $I_{c0}=%$(round(1e3*I_SG0[j], digits=3))\ \mathrm{mA}$ | $I_{c1}=%$(round(1e3*I_SG1[j], digits=3))\ \mathrm{mA}$",
+            #     label="$(signal_key) processed", legend=:topleft,
+            # );
+            # xs = collect(range(minimum(z_fit), maximum(z_fit), length=2001));
+            # plot!(fig, xs, S_fit.(xs), line=(:solid, :red, 2), label=L"Spline fit ($n_{z}=%$(nz_bin)$, $\lambda_{0}=%$(λ0)$)");
+            # vline!(fig, [max_z], line=(:dash, :black, 1), label=L"$z_{\max}=%$(round(max_z, digits=3))\ \mathrm{mm}$");
+            # display(fig)
+            # saveplot(fig, "fw$(i)_$(signal_key)_I$(@sprintf("%02d", j))")            
+        end
+    end
+
+    return max_position_data
+end
+
+
+
+
+
+
+
+
+# Public API
+export saveplot, 
+        compute_weights, 
+        normalize_image, 
+        estimate_shift_fft, 
+        estimate_1d_shift_fft, 
+        linear_fit, 
+        pixel_positions, 
+        process_mean_maxima,
+        process_framewise_maxima, 
+        process_maxima,
+        summarize_framewise,
+        stack_data,
+        bin_x_mean,
+        my_process_framewise_maxima,
+        my_process_mean_maxima,
+        build_processed_dict,
+        mean_z_profile,
+        extract_profiles,
+        plot_profiles,
+        post_threshold_mean,
+        mag_factor,
+        curr_error_physical
 
 end
