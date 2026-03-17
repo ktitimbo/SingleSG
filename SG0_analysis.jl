@@ -80,6 +80,9 @@ MyExperimentalAnalysis.z_pixels                     = z_pixels;
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+T_START   = Dates.now()
+RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
+
 nz = 2
 λ0 = 0.005
 
@@ -90,8 +93,6 @@ z_mm_error  = 1e3 * 0.5 * exp_pixelsize_z * nz # half of the pixel size
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directory = "20260311"
 
-T_START   = Dates.now()
-RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 OUTDIR    = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
@@ -138,7 +139,7 @@ f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=
 f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
 
 
-data = hcat(SG0_current,SG1_current, f1_z_mm, f1_z_sem_mm)
+data = hcat(SG0_current,SG1_current, f1_z_mm, f1_z_sem_mm, f2_z_mm, f2_z_sem_mm)
 cols = palette(:darkrainbow, size(data,1))   # generate colors
 
 
@@ -181,7 +182,7 @@ end
 plot!(fig02,
     legend_title=data_directory,
     legendtitlefontsize=8,
-    legend=:best,
+    legend=:bottomleft,
     foreground_color_legend = nothing,
     background_color_legend = nothing,
     legend_columns=2)
@@ -206,7 +207,7 @@ for i in 1: size(data03,1)
 end
 plot!(fig03,
     yscale=:log10,
-    ylims=(1e-2,1e-1),
+    ylims=(5e-2,1e-1),
     yticks = ([1e-3,1e-2, 1e-1], 
             [L"10^{-3}", L"10^{-2}", L"10^{-1}"]),
     legend_title=L"%$(data_directory): $z_{c}=%$(round(zcenter; digits=3))\mathrm{mm}$",
@@ -290,7 +291,7 @@ end
 plot!(fig06,
     xscale=:log10,
     yscale=:log10,
-    ylims=(3e-2,1e-1),
+    ylims=(5e-2,1e-1),
     yticks = ([1e-3,1e-2, 1e-1], 
             [L"10^{-3}", L"10^{-2}", L"10^{-1}"]),
     legend_title=L"%$(data_directory): $z_{c}=%$(round(zcenter; digits=3))\mathrm{mm}$",
@@ -309,13 +310,10 @@ saveplot(p2,"zvssg0")
 
 
 
-
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directory = "20260312A"
 
-T_START   = Dates.now()
-RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 OUTDIR    = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
@@ -362,7 +360,7 @@ f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=
 f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
 
 
-data = hcat(SG0_current,SG1_current, f1_z_mm, f1_z_sem_mm)
+data = hcat(SG0_current,SG1_current, f1_z_mm, f1_z_sem_mm, f2_z_mm, f2_z_sem_mm)
 cols = palette(:darkrainbow, size(data,1))   # generate colors
 
 
@@ -538,8 +536,6 @@ saveplot(p2,"zvssg0")
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directory = "20260312B"
 
-T_START   = Dates.now()
-RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 OUTDIR    = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
@@ -586,11 +582,16 @@ f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=
 f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
 
 
-data = hcat(SG0_current,SG1_current, f1_z_mm, f1_z_sem_mm)
+data = hcat(SG0_current,SG1_current, f1_z_mm, f1_z_sem_mm, f2_z_mm, f2_z_sem_mm)
 cols = palette(:darkrainbow, size(data,1))   # generate colors
 
+dataA = sortslices(data; dims=1, by = r -> (r[1], r[2]))[1:8,:]
+dataB = sortslices(data; dims=1, by = r -> (r[2], r[1]))[9:end,:]
 
-data01 = sortslices(data; dims=1, by = r -> (r[1], r[2]))
+
+
+data01 = sortslices(dataA; dims=1, by = r -> (r[1], r[2]))
+zcenter = data01[1,3]
 fig01 = plot(xlabel="Current SG1 (mA)",
     ylabel=L"$F=1$ Peak position (mm)")
 for i in 1: size(data01,1)
@@ -603,8 +604,9 @@ for i in 1: size(data01,1)
         yerror=[data01[i,4]],
         label=L"$I_{c0} = %$(round(data01[i,1];digits=3))\mathrm{A}$")
 end
-plot!(fig01,
-    legend_title=data_directory,
+plot!(fig01, 
+    xlims=(-0.1,0.1),
+    legend_title=L"%$(data_directory): $z_{c}=%$(round(zcenter; digits=3))\mathrm{mm}$",
     legendtitlefontsize=8,
     legend=:best,
     foreground_color_legend = nothing,
@@ -612,22 +614,28 @@ plot!(fig01,
     legend_columns=2)
 display(fig01)
 
-data01
-data02 = DataReading.subset_by_cols(data01,[2]; thr = 1e-6, include_equal=true )[3]
+data02 = sortslices(dataA; dims=1, by = r -> (r[1], r[2]))
+zcenter = data02[1,3]
+data02[:,3] = (data02[:,3] .- zcenter)
+data02 = data02[2:end, :]
 fig02 = plot(xlabel="Current SG1 (mA)",
-    ylabel=L"$F=1$ Peak position (mm)")
+    ylabel=L"$F=1$ $z-z_{c,o}$ (mm)")
 for i in 1: size(data02,1)
     plot!(fig02,
-        [1000*data02[i,2]], [data02[i,3]],
+        [1000*data02[i,2]], [abs.(data02[i,3])],
         seriestype=:scatter,
         marker=(:circle,:white,2),
         markerstrokecolor=cols[i],
         markerstrokewidth = 1.5,
-        yerror=[data02[i,4]],
+        # yerror=[data03[i,4]],
         label=L"$I_{c0} = %$(round(data02[i,1];digits=3))\mathrm{A}$")
 end
 plot!(fig02,
-    legend_title=data_directory,
+    yscale=:log10,
+    ylims=(1e-3,1e-2),
+    yticks = ([1e-3,1e-2, 1e-1], 
+            [L"10^{-3}", L"10^{-2}", L"10^{-1}"]),
+    legend_title=L"%$(data_directory): $z_{c}=%$(round(zcenter; digits=3))\mathrm{mm}$",
     legendtitlefontsize=8,
     legend=:best,
     foreground_color_legend = nothing,
@@ -635,13 +643,10 @@ plot!(fig02,
     legend_columns=2)
 display(fig02)
 
-
-data03 = sortslices(data; dims=1, by = r -> (r[1], r[2]))
-zcenter = data03[1,3]
-data03[:,3] = data03[:,3] .- zcenter
-data03 = DataReading.subset_by_cols(data03,[2]; thr = 1e-6, include_equal=true )[3]
+data03 = sortslices(dataB; dims=1, by = r -> (r[2], r[1]))
+zcenter = dataA[1,3]
 fig03 = plot(xlabel="Current SG1 (mA)",
-    ylabel=L"$F=1$ $z-z_{c,o}$ (mm)")
+    ylabel=L"$F=1$ Peak position (mm)")
 for i in 1: size(data03,1)
     plot!(fig03,
         [1000*data03[i,2]], [data03[i,3]],
@@ -652,11 +657,8 @@ for i in 1: size(data03,1)
         yerror=[data03[i,4]],
         label=L"$I_{c0} = %$(round(data03[i,1];digits=3))\mathrm{A}$")
 end
-plot!(fig03,
-    yscale=:log10,
-    # ylims=(1e-2,1e-1),
-    yticks = ([1e-3,1e-2, 1e-1], 
-            [L"10^{-3}", L"10^{-2}", L"10^{-1}"]),
+plot!(fig03, 
+    # xlims=(-0.1,0.1),
     legend_title=L"%$(data_directory): $z_{c}=%$(round(zcenter; digits=3))\mathrm{mm}$",
     legendtitlefontsize=8,
     legend=:best,
@@ -665,14 +667,44 @@ plot!(fig03,
     legend_columns=2)
 display(fig03)
 
-p1 = plot(fig01,fig02,fig03,
-layout=@layout([a ; b ; c]),
+data04 = sortslices(dataB; dims=1, by = r -> (r[2], r[1]))
+zcenter = dataA[1,3]
+data04[:,3] = (data04[:,3] .- zcenter)
+fig04 = plot(xlabel="Current SG1 (A)",
+    ylabel=L"$F=1$ $z-z_{c,o}$ (mm)")
+for i in 1: size(data04,1)
+    plot!(fig04,
+        [data04[i,2]], [abs.(data04[i,3])],
+        seriestype=:scatter,
+        marker=(:circle,:white,2),
+        markerstrokecolor=cols[i],
+        markerstrokewidth = 1.5,
+        # yerror=[data03[i,4]],
+        label=L"$I_{c0} = %$(round(data04[i,1];digits=3))\mathrm{A}$")
+end
+plot!(fig04,
+    xscale=:identity,
+    yscale=:log10,
+    # ylims=(1e-3,1e-2),
+    # yticks = ([1e-3,1e-2, 1e-1], 
+    #         [L"10^{-3}", L"10^{-2}", L"10^{-1}"]),
+    legend_title=L"%$(data_directory): $z_{c}=%$(round(zcenter; digits=3))\mathrm{mm}$",
+    legendtitlefontsize=8,
+    legend=:bottomright,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+    legend_columns=2)
+display(fig04)
+
+
+p1 = plot(fig01,fig02, fig03, fig04,
+layout=@layout([a  b ; c  d ]),
 size=(900,800)
 )
 saveplot(p1,"zvssg1")
 
 
-data04 = sortslices(data; dims=1, by = r -> (r[1], r[2]))
+data04 = sortslices(dataB; dims=1, by = r -> (r[1], r[2]))
 fig04 = plot(xlabel="Current SG0 (A)",
     ylabel=L"$F=1$ Peak position (mm)")
 for i in 1: size(data04,1)
