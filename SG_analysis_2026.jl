@@ -602,6 +602,7 @@ bottom_margin=2mm,
 ########################################################################################
 #+++++++++++++++++++++++++++ Centroid +++++++++++++++++++++++++++++++++++++++++++++
 nz , λ0 = 2, 0.01;
+σw_mm = 0.200
 
 centroid_fw = Matrix{Float64}(undef, no, 2)
 pos_at_zero = Matrix{Float64}(undef, no, 4)
@@ -623,7 +624,7 @@ for (i,dir) in enumerate(data_directories)
 end
 
 plot(data_directories, centroid_fw[:,1],
-label="Computed centroid positions (mm)",
+label="Computed centroid positions (high currents)",
  color=:blue,
  marker=(:circle,:white,4),
  markerstrokecolor=:blue,
@@ -643,6 +644,16 @@ plot!(data_directories,pos_at_zero[:,3],
     marker=(:circle,:white),
     markerstrokecolor=:springgreen2,
     fillalpha=0.2)
+plot!(["20260225","20260226am","20260226pm","20260227","20260303"],[8.8369,8.8440,8.8549,8.8284,8.8292],
+    label="Qihang's fitting 1",
+    marker=(:square,2,:white),
+    markerstrokecolor=:purple,
+    line=(:purple))
+plot!(["20260225","20260226am","20260226pm","20260227","20260303"], [8.811211551,8.790075956,8.796932977,8.84320487,8.8048355],
+    label="Qihang's fitting 2",
+    marker=(:square,2,:white),
+    markerstrokecolor=:green,
+    line=(:green))
 plot!(
     # title = "Std.Dev=$(round(std(centroid_fw[:,1], corrected=false); digits=3))",
     legend=:bottomleft,
@@ -655,8 +666,17 @@ plot!(
     ylabel="peak position (mm)",
     xrotation=75,)
 
+
 ########################################################################################
 #+++++++++++++++++++++++++++ Peak Position +++++++++++++++++++++++++++++++++++++++++++++
+data_qm_path = joinpath(@__DIR__,"simulation_data",
+    "QM_T200_8M",
+    "qm_screen_profiles_f1_table.jld2")
+chosen_qm =  jldopen(data_qm_path,"r") do file
+    file[JLD2_MyTools.make_keypath_qm(nz, σw_mm, λ0)]
+end
+Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][1:end]
+zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][1:end]
 
 
 fig = plot(
@@ -720,8 +740,51 @@ plot!(fig,
 );
 display(fig)
 
-## Recalculation of the 
+## Recalculation of the F=1 peak position with respect to a different centroid
 
+new_data = Vector{NamedTuple}(undef, no)
+
+for (idx, dir) in enumerate(data_directories)
+
+    kk_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary", dir, dir * "_report_summary.jld2")
+
+    new_data[idx] = jldopen(kk_path, "r") do file
+        ic = file["meta/Currents"]
+        bz = file["meta/BzTesla"]
+
+        dd = file[JLD2_MyTools.make_keypath_exp(dir,nz,λ0)]
+
+        (Ic=ic, Bz=bz,
+         F1=dd[:fw_F1_peak_pos_raw],
+         F2=dd[:fw_F2_peak_pos_raw],
+         C0=dd[:centroid_fw_mm])
+    end
+end
+
+new_centroid = [mean([new_data[v].F1[1][1],new_data[v].F2[1][1]]) for v=1:no]
+
+new_data[2].Ic
+new_data[2].F1[1] .- new_centroid[2]
+
+
+plot(xlabel="Current (A)")
+for (idx,dir) in enumerate(data_directories)
+
+    z_table = hcat(new_data[idx].Ic , new_data[idx].F1[1] .- new_centroid[idx] )
+    zz = DataReading.subset_by_cols( z_table , [1,2] ; thr = 1e-3, include_equal=false)[3]
+
+    plot!(zz[:,1], zz[:,2],
+    marker=(:circle,2,:white),
+    markerstrokecolor=colores[idx],
+    line=(colores[idx]),
+    label=dir)
+end
+plot!(
+    xlims=(5e-3,1.1),
+    legend=:topleft,
+    xscale=:log10,
+    yscale=:log10,
+)
 
 
 dir = data_directories[6]
