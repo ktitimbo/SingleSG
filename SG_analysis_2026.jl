@@ -181,6 +181,14 @@ Icoils = [0.00,
             0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
 ];
 nI = length(Icoils);
+
+data_qm_path = joinpath(@__DIR__,"simulation_data",
+    "QM_T200_8M",
+    "qm_screen_profiles_f1_table.jld2")
+data_cqd_path = joinpath(@__DIR__, "simulation_data",
+    "cqd_T200_8M",
+    "cqd_8000000_up_profiles_1_21_bykey.jld2");
+
 ############ phywe magnetic field measurement ##############################
 BvsI_phywe = sort(CSV.read("SG_BvsI_phywe.csv",DataFrame; header=["Ic","Bz"]),1);
 phywe_shift = hcat(BvsI_phywe.Ic .- 0.11021, BvsI_phywe.Bz .- 0.00445);
@@ -669,15 +677,12 @@ plot!(
 
 ########################################################################################
 #+++++++++++++++++++++++++++ Peak Position +++++++++++++++++++++++++++++++++++++++++++++
-data_qm_path = joinpath(@__DIR__,"simulation_data",
-    "QM_T200_8M",
-    "qm_screen_profiles_f1_table.jld2")
+
 chosen_qm =  jldopen(data_qm_path,"r") do file
     file[JLD2_MyTools.make_keypath_qm(nz, σw_mm, λ0)]
 end
 Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
 zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
-
 
 fig = plot(
     xlabel="Currents (mA)",
@@ -775,13 +780,32 @@ for (idx,dir) in enumerate(data_directories)
     line=(colores[idx]),
     label=dir)
 end
-plot!(Ic_QM_sim,zm_QM_sim)
+plot!(Ic_QM_sim,zm_QM_sim,
+    label="Quantum mechanics (T=200C)",
+    line=(:solid,2,:blue))
+for ki in [1.0,1.2,1.4,1.6,1.8,2.0]
+
+    chosen_cqd =  jldopen(data_cqd_path,"r") do file
+        file[JLD2_MyTools.make_keypath_cqd(:up, ki, nz, σw_mm, λ0)]
+    end
+    Ic_CQD_sim = [chosen_cqd[i][:Icoil] for i in eachindex(chosen_cqd)][2:end]
+    zm_CQD_sim = [chosen_cqd[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_cqd)][2:end]
+
+    plot!(Ic_CQD_sim,zm_CQD_sim,
+    label="CQD (T=200C | ki = $(ki)×10^-6)",
+    line=(:solid,2))
+end
 plot!(
-    xlims=(5e-3,1.1),
-    legend=:topleft,
+    xlims=(8e-4,1.1),
+    ylims=(8e-4,2.1),
+    legend=:outerright,
     xscale=:log10,
     yscale=:log10,
 )
+
+
+
+
 
 
 dir = data_directories[6]
