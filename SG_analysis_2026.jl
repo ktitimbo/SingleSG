@@ -675,8 +675,8 @@ data_qm_path = joinpath(@__DIR__,"simulation_data",
 chosen_qm =  jldopen(data_qm_path,"r") do file
     file[JLD2_MyTools.make_keypath_qm(nz, σw_mm, λ0)]
 end
-Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][1:end]
-zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][1:end]
+Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
+zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
 
 
 fig = plot(
@@ -763,10 +763,6 @@ end
 
 new_centroid = [mean([new_data[v].F1[1][1],new_data[v].F2[1][1]]) for v=1:no]
 
-new_data[2].Ic
-new_data[2].F1[1] .- new_centroid[2]
-
-
 plot(xlabel="Current (A)")
 for (idx,dir) in enumerate(data_directories)
 
@@ -779,6 +775,7 @@ for (idx,dir) in enumerate(data_directories)
     line=(colores[idx]),
     label=dir)
 end
+plot!(Ic_QM_sim,zm_QM_sim)
 plot!(
     xlims=(5e-3,1.1),
     legend=:topleft,
