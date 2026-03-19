@@ -2520,13 +2520,13 @@ end
 #+++++++++++++++++++++ SG0 EXPERIMENT ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 function SG0_stack_data(data_directory::AbstractString;
+                    step_count = r"Step(.*?)_",
                     SG1Curr = r"SG1Cur(.*?)A",
                     SG1Bz   = r"SG1Bz(.*?)G",
                     SG0Curr = r"SG0Cur(.*?)A",
                     SG0Bz   = r"SG0Bz(.*?)G",
                     ampmeter_scale = r"Ran(.*?)A",
                     error_factor = 0.015,
-                    order::Symbol = :asc,
                     keynames = ("BG","F1","F2"),
                     verbose::Bool = true)
 
@@ -2587,6 +2587,15 @@ function SG0_stack_data(data_directory::AbstractString;
         tokens_bz0[i] = m.captures[1]  # e.g. "-7u", "117m", "12930u"
     end
 
+    # 2f) Extract step count if present, otherwise use 1
+    Nstep = ones(Int, length(files))
+    for (i, f) in enumerate(files)
+        m = match(step_count, f)
+        if m !== nothing
+            Nstep[i] = parse(Int, m.captures[1])
+        end
+    end
+
     # Convert both Cur and Ran to amps
     currents_SG0 = parse_amp.(tokens_sg0)
     currents_SG1 = parse_amp.(tokens_sg1)
@@ -2595,13 +2604,14 @@ function SG0_stack_data(data_directory::AbstractString;
     bfield_SG1 = parse_bz.(tokens_bz1) .* 1e-4
 
     # 3) Sort by current
-    p = sortperm(currents_SG0)
+    p = sortperm(Nstep)
     
-    files    = files[p]
+    Nstep        = Nstep[p] 
+    files        = files[p]
     currents_SG0 = Float64.(currents_SG0[p])
     currents_SG1 = Float64.(currents_SG1[p])
-    bfield_SG0 = Float64.(bfield_SG0[p])
-    bfield_SG1 = Float64.(bfield_SG1[p])
+    bfield_SG0   = Float64.(bfield_SG0[p])
+    bfield_SG1   = Float64.(bfield_SG1[p])
     currents_errors = error_factor * Float64.(ran_vals[p])
 
     
@@ -2627,7 +2637,9 @@ function SG0_stack_data(data_directory::AbstractString;
     # 5) Load & stack
     for (i, f) in enumerate(files)
         matopen(f) do fh
-            f1 = read(fh, keyF1); f2 = read(fh, keyF2); bg = read(fh, keyBG)
+            f1 = read(fh, keyF1); 
+            f2 = read(fh, keyF2); 
+            bg = read(fh, keyBG)
             @assert size(f1) == sz && size(f2) == sz && size(bg) == sz "Inconsistent sizes in $f"
             F1[:,:,:,i] = f1
             F2[:,:,:,i] = f2
@@ -2639,6 +2651,7 @@ function SG0_stack_data(data_directory::AbstractString;
     out = OrderedDict(
         :Directory      => String(data_directory),
         :Files          => files,
+        :Step           => Nstep, 
         :SG0Currents    => currents_SG0,        # amperes
         :SG1Currents    => currents_SG1,        # amperes
         :CurrentsError  => currents_errors,     # amperes (0.015 * Ran in A)
@@ -2681,6 +2694,7 @@ function SG0_build_processed_dict(raw_data::OrderedDict{Symbol,Any};
     end
 
     out = OrderedDict(
+        :Step           => raw_data[:Step],               # Step count
         :SG0Currents    => raw_data[:SG0Currents],        # amperes
         :SG1Currents    => raw_data[:SG1Currents],        # amperes
         :CurrentsError  => raw_data[:CurrentsError],      # amperes (0.015 * Ran in A)
@@ -2694,7 +2708,7 @@ function SG0_build_processed_dict(raw_data::OrderedDict{Symbol,Any};
     return out
 end
 
-function SG0_mean_maxima(signal_key::String, data, nz_bins::Integer; half_max=false, λ0::Float64=0.01)
+function SG0_mean_maxima(signal_key::String, data, nz_bins::Integer; half_max=false, λ0::Float64=0.01, make_plot::Bool = false)
     # ------------------------------------------------------------------
     # Experimental control parameters
     # ------------------------------------------------------------------
@@ -2873,49 +2887,51 @@ function SG0_mean_maxima(signal_key::String, data, nz_bins::Integer; half_max=fa
         # --------------------------------------------------------------
         # Plot raw per-frame profiles and fitted mean profile
         # --------------------------------------------------------------
-        fig_raw = plot(
-            xlabel = L"$z\ (\mathrm{mm})$",
-            ylabel = "Intensity (a.u.)",
-            title  = "$(signal_key) Raw",
-        )
+        if make_plot
+            fig_raw = plot(
+                xlabel = L"$z\ (\mathrm{mm})$",
+                ylabel = "Intensity (a.u.)",
+                title  = "$(signal_key) Raw",
+            )
 
-        cols = palette(:phase, n_frames)
-        for i in 1:n_frames
-            plot!(fig_raw, z_full_mm, profiles_full[:, i], label=false, line=(:dot, cols[i], 1))
+            cols = palette(:phase, n_frames)
+            for i in 1:n_frames
+                plot!(fig_raw, z_full_mm, profiles_full[:, i], label=false, line=(:dot, cols[i], 1))
+            end
+            plot!(fig_raw, z_binned_mm, processed_signal,
+                label="mean (bins=$(nz_bins))", line=(:solid, :black, 2))
+
+            fig_fit = plot(
+                z_fit, y_fit,
+                seriestype = :scatter,
+                marker = (:circle, :white, 2),
+                markerstrokecolor = :gray36,
+                markerstrokewidth = 0.8,
+                xlabel = L"$z\ (\mathrm{mm})$",
+                ylabel = "Intensity (a.u.)",
+                title  = "$(signal_key) Processed",
+                label  = "$(signal_key) processed",
+                legend = :bottom,
+            )
+
+            xs = range(minimum(z_fit), maximum(z_fit), length=2000)
+            plot!(fig_fit, xs, S_fit.(xs),
+                line=(:solid, :red, 2),
+                label=L"Spline fit ($n_{z}=%$(nz_bins)$, $\lambda_0=%$(λ0)$)")
+            vline!(fig_fit, [z_peak],
+                line=(:dash, :black, 1),
+                label=L"$z_{\max}=%$(round(z_peak, digits=3))\ \mathrm{mm}$")
+
+            fig = plot(fig_raw, fig_fit;
+                    suptitle = L"$I_{c0}=%$(round(1000*I_SG0[j], digits=3))\ \mathrm{mA}$, $I_{c1}=%$(round(1000*I_SG1[j], digits=3))\ \mathrm{mA}$",
+                    layout=@layout([a b]),
+                    size=(900, 400),
+                    left_margin=3mm,
+                    bottom_margin=3mm)
+
+            display(fig)
+            saveplot(fig, "mean_$(signal_key)_I$(@sprintf("%02d", j))")
         end
-        plot!(fig_raw, z_binned_mm, processed_signal,
-              label="mean (bins=$(nz_bins))", line=(:solid, :black, 2))
-
-        fig_fit = plot(
-            z_fit, y_fit,
-            seriestype = :scatter,
-            marker = (:circle, :white, 2),
-            markerstrokecolor = :gray36,
-            markerstrokewidth = 0.8,
-            xlabel = L"$z\ (\mathrm{mm})$",
-            ylabel = "Intensity (a.u.)",
-            title  = "$(signal_key) Processed",
-            label  = "$(signal_key) processed",
-            legend = :bottom,
-        )
-
-        xs = range(minimum(z_fit), maximum(z_fit), length=2000)
-        plot!(fig_fit, xs, S_fit.(xs),
-              line=(:solid, :red, 2),
-              label=L"Spline fit ($n_{z}=%$(nz_bins)$, $\lambda_0=%$(λ0)$)")
-        vline!(fig_fit, [z_peak],
-               line=(:dash, :black, 1),
-               label=L"$z_{\max}=%$(round(z_peak, digits=3))\ \mathrm{mm}$")
-
-        fig = plot(fig_raw, fig_fit;
-                suptitle = L"$I_{c0}=%$(round(1000*I_SG0[j], digits=3))\ \mathrm{mA}$, $I_{c1}=%$(round(1000*I_SG1[j], digits=3))\ \mathrm{mA}$",
-                layout=@layout([a b]),
-                size=(900, 400),
-                left_margin=3mm,
-                bottom_margin=3mm)
-
-        display(fig)
-        saveplot(fig, "mean_$(signal_key)_I$(@sprintf("%02d", j))")
     end
 
     return (
@@ -2925,7 +2941,7 @@ function SG0_mean_maxima(signal_key::String, data, nz_bins::Integer; half_max=fa
     )
 end
 
-function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer; half_max::Bool=false, λ0::Float64=0.01)
+function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer; half_max::Bool=false, λ0::Float64=0.01, make_plot::Bool=false)
 
     I_SG0   = vec(data[:SG0Currents])
     nI0     = length(I_SG0) # Number of SG0 currents
@@ -3021,20 +3037,22 @@ function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer; half_ma
             max_position_data[i, j] = max_z
 
             # --- Plot per-frame processed profile + spline + peak
-            # fig = plot(
-            #     z_fit, y_fit,
-            #     seriestype=:scatter, marker=(:circle, :white, 2),
-            #     markerstrokecolor=:gray36, markerstrokewidth=0.8,
-            #     xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
-            #     xlims=extrema(z_binned_mm),
-            #     title=L"%$(signal_key) Frame %$(i): $I_{c0}=%$(round(1e3*I_SG0[j], digits=3))\ \mathrm{mA}$ | $I_{c1}=%$(round(1e3*I_SG1[j], digits=3))\ \mathrm{mA}$",
-            #     label="$(signal_key) processed", legend=:topleft,
-            # );
-            # xs = collect(range(minimum(z_fit), maximum(z_fit), length=2001));
-            # plot!(fig, xs, S_fit.(xs), line=(:solid, :red, 2), label=L"Spline fit ($n_{z}=%$(nz_bin)$, $\lambda_{0}=%$(λ0)$)");
-            # vline!(fig, [max_z], line=(:dash, :black, 1), label=L"$z_{\max}=%$(round(max_z, digits=3))\ \mathrm{mm}$");
-            # display(fig)
-            # saveplot(fig, "fw$(i)_$(signal_key)_I$(@sprintf("%02d", j))")            
+            if make_plot
+                fig = plot(
+                    z_fit, y_fit,
+                    seriestype=:scatter, marker=(:circle, :white, 2),
+                    markerstrokecolor=:gray36, markerstrokewidth=0.8,
+                    xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
+                    xlims=extrema(z_binned_mm),
+                    title=L"%$(signal_key) Frame %$(i): $I_{c0}=%$(round(1e3*I_SG0[j], digits=3))\ \mathrm{mA}$ | $I_{c1}=%$(round(1e3*I_SG1[j], digits=3))\ \mathrm{mA}$",
+                    label="$(signal_key) processed", legend=:topleft,
+                );
+                xs = collect(range(minimum(z_fit), maximum(z_fit), length=2001));
+                plot!(fig, xs, S_fit.(xs), line=(:solid, :red, 2), label=L"Spline fit ($n_{z}=%$(nz_bin)$, $\lambda_{0}=%$(λ0)$)");
+                vline!(fig, [max_z], line=(:dash, :black, 1), label=L"$z_{\max}=%$(round(max_z, digits=3))\ \mathrm{mm}$");
+                display(fig)
+                saveplot(fig, "fw$(i)_$(signal_key)_I$(@sprintf("%02d", j))")            
+            end
         end
     end
 
