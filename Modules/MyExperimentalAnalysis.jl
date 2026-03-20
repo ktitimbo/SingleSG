@@ -2941,7 +2941,8 @@ function SG0_mean_maxima(signal_key::String, data, nz_bins::Integer; half_max=fa
     )
 end
 
-function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer; half_max::Bool=false, λ0::Float64=0.01, make_plot::Bool=false)
+function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer; 
+        half_max::Bool=false, λ0::Float64=0.01, make_plot::Bool=false)
 
     I_SG0   = vec(data[:SG0Currents])
     nI0     = length(I_SG0) # Number of SG0 currents
@@ -3027,11 +3028,16 @@ function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer; half_ma
                 end
             end
 
-            # Rank candidates by actual spline height (largest peak first)
             @assert !isempty(dedup) "No peak candidates found"
-            vals     = S_fit.(dedup)        # evaluate spline (not negated)
-            best_ix  = argmax(vals)         # tallest peak index
-            max_z    = dedup[best_ix]       # z of tallest peak
+
+            # --- Remove candidates that are way off from the others
+            filtered = copy(dedup)
+            
+            # --- Rank surviving candidates by actual spline height
+            # Rank candidates by actual spline height (largest peak first)            
+            vals    = S_fit.(filtered)      # evaluate spline (not negated)
+            best_ix = argmax(vals)          # tallest peak index
+            max_z   = filtered[best_ix]     # z of tallest peak
 
             # Store result for this frame/current
             max_position_data[i, j] = max_z
