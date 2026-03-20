@@ -679,10 +679,13 @@ plot!(
 #+++++++++++++++++++++++++++ Peak Position +++++++++++++++++++++++++++++++++++++++++++++
 
 chosen_qm =  jldopen(data_qm_path,"r") do file
+    println(file["meta/nx"])
     file[JLD2_MyTools.make_keypath_qm(nz, σw_mm, λ0)]
 end
 Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
 zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
+
+JLD2_MyTools.tree_jld(data_qm_path)
 
 fig = plot(
     xlabel="Currents (mA)",
@@ -780,6 +783,8 @@ for (idx,dir) in enumerate(data_directories)
     line=(colores[idx]),
     label=dir)
 end
+plot!(xlims=(0.030,0.050),
+ylims=(10e-3, 120e-3))
 plot!(Ic_QM_sim,zm_QM_sim,
     label="Quantum mechanics (T=200C)",
     line=(:solid,2,:blue))
@@ -796,6 +801,8 @@ for ki in [1.0,1.2,1.4,1.6,1.8,2.0]
     line=(:solid,2))
 end
 plot!(
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([0.001, 0.01, 0.1, 1, 10], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
     xlims=(8e-4,1.1),
     ylims=(8e-4,2.1),
     legend=:outerright,
