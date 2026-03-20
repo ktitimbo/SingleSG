@@ -88,7 +88,443 @@ nz = 2
 
 # position
 z_mm        = 1e3 .* pixel_positions(z_pixels, nz, exp_pixelsize_z)
-z_mm_error  = 1e3 * 0.5 * exp_pixelsize_z * nz # half of the pixel size
+z_mm_error  = 1/sqrt(12) * 1e3 * exp_pixelsize_z * nz # half of the pixel size
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+data_directories = [
+        "20260318A", 
+        "20260318B", 
+        "20260318C", 
+        "20260318D"
+        ]
+nd = length(data_directories)
+
+for data_directory in data_directories
+    outfile_raw         = joinpath("EXPERIMENTS",data_directory, "data.jld2")
+    outfile_processed   = joinpath("EXPERIMENTS",data_directory, "data_processed.jld2")
+    data_summary_path   = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS","summary",data_directory)
+    isdir(data_summary_path) || mkpath(data_summary_path);
+
+
+    if !isfile(outfile_processed) # check if the processed images exists
+        if !isfile(outfile_raw) # check if the raw data exists
+            @info "Not found → building $outfile_raw"
+            data_in = joinpath(@__DIR__,"EXPERIMENTS", data_directory)
+            data_raw = MyExperimentalAnalysis.SG0_stack_data(data_in)
+            jldsave(outfile_raw, data=data_raw)
+            data_raw = nothing
+        else
+            @info "Found $outfile_raw → skipping build"
+        end
+
+        data_raw = load(outfile_raw)["data"]
+        data_processed = MyExperimentalAnalysis.SG0_build_processed_dict(data_raw)
+        jldsave(outfile_processed, data=data_processed)
+        data_processed = nothing
+        data_raw = nothing
+    else
+        @info "Found $outfile_processed → skipping build"
+    end
+
+end
+
+tables = Vector{DataFrame}(undef, nd)
+for (idx,data_directory) in enumerate(data_directories)
+    data_processed = load(joinpath("EXPERIMENTS",data_directory, "data_processed.jld2"))["data"]
+
+    OUTDIR    = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
+    isdir(OUTDIR) || mkpath(OUTDIR);
+    @info "Created output directory" OUTDIR
+    MyExperimentalAnalysis.OUTDIR   = OUTDIR;
+
+    SG0_current = data_processed[:SG0Currents]
+    SG1_current = data_processed[:SG1Currents]
+    Bz0 = data_processed[:SG0Bz]
+    Bz1 = data_processed[:SG1Bz]
+
+    f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=true,λ0=λ0);
+    f2_max = MyExperimentalAnalysis.SG0_framewise_maxima("F2", data_processed, nz ; half_max=true,λ0=λ0);
+
+    MyExperimentalAnalysis.SG0_mean_maxima("F1", data_processed, nz ; half_max=true,λ0=λ0);
+    MyExperimentalAnalysis.SG0_mean_maxima("F2", data_processed, nz ; half_max=true,λ0=λ0);
+
+    f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ z_mm_error^2 );
+    f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
+
+    Δz_mm = f1_z_mm .- f2_z_mm
+    Δz_sem_mm = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2   )
+
+    data = data = DataFrame(
+        I0        = SG0_current,
+        I1        = SG1_current,
+        B0        = Bz0,
+        B1        = Bz1,
+        zf1       = f1_z_mm,
+        errzf1    = f1_z_sem_mm,
+        zf2       = f2_z_mm,
+        errzf2    = f2_z_sem_mm,
+        split     = Δz_mm,
+        errsplit  = round.(Δz_sem_mm; sigdigits=1)
+    )
+    tables[idx] = data
+    data_pos = data[data.I0 .> 0, :]
+    pretty_table(data;
+            title         = data_directory,
+            formatters    = [ fmt__printf("%8.5f", 1:10)],
+            alignment     = :c,
+            column_labels  = [
+                ["I0 Current", "I1 Current", "B0 field", "B1 field", "F1", "F1 err", "F2", "F2 err", "Δz", "Δz err"], 
+                ["[A]", "[A]" ,"[T]", "[T]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
+            ],
+            table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+            style = TextTableStyle(
+                        first_line_column_label = crayon"yellow bold",
+                        column_label  = crayon"yellow",
+                        table_border  = crayon"blue bold",
+                        title = crayon"bold red"
+                        ),
+            equal_data_column_widths = true,
+    )
+    cols = palette(:darkrainbow, size(data,1))   # generate colors
+
+    fig1 = plot(data.I0, data.zf1, 
+        yerror = data.errzf1,
+        label=L"$F=1$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:red)
+    plot!(fig1, data.I0, data.zf2,
+        yerror = data.errzf2,
+        label=L"$F=2$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:blue)
+    plot!(fig1, data.I0, mean([data.zf1,data.zf2]),
+        label="Centre",
+        marker=(:diamond,:white),
+        markerstrokecolor=:gray47,
+        line=(:dash,1,:gray47)
+    )
+    plot!(fig1,
+        xlabel="SG0 Currents (A)",
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        yformatter = y -> @sprintf("%.3f", y))
+    display(fig1)
+
+
+    fig2 = plot(data_pos.I0, data_pos.zf1, 
+        yerror = data_pos.errzf1,
+        label=L"$F=1$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:red)
+    plot!(fig2, data_pos.I0, data_pos.zf2,
+        yerror = data_pos.errzf2,
+        label=L"$F=2$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:blue)
+    plot!(fig2, data_pos.I0, mean([data_pos.zf1,data_pos.zf2]),
+        label="Centre",
+        marker=(:diamond,:white),
+        markerstrokecolor=:gray47,
+        line=(:dash,1,:gray47)  
+    )
+    plot!(fig2,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        xlabel="SG0 Currents (A)",
+        yformatter = y -> @sprintf("%.3f", y),
+        # xlims=(1e-3,10e-3)
+        xscale=:log10
+    )
+    display(fig2)
+
+
+    fig3 = plot(data.I0, data.split/6.5e-3, 
+        yerror = data.errsplit/6.5e-3,
+        label=L"$\Delta z$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:darkgreen)
+    plot!(fig3,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        xlabel="SG0 Current (A)",
+        ylabel="Split (px)",
+        yminorticks=false,)
+    display(fig3)
+
+    fig4 = plot(data_pos.I0, data_pos.split/6.5e-3, 
+        yerror = data_pos.errsplit/6.5e-3,
+        label=L"$\Delta z$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:darkgreen)
+    plot!(fig4,
+        xscale=:log10,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        xlabel="SG0 Current (A)",
+        ylabel="Split (px)",
+        yminorticks=false,)
+    display(fig4)
+
+    fig = plot(fig1,fig2,fig3,fig4,
+        suptitle = "$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA",
+        layout=(2,2),
+        size=(1000,600),
+        left_margin=5mm,
+        bottom_margin=3mm)
+    display(fig)
+
+end
+
+
+mark_symbol = [:circle, :rect]
+colores = (:darkgreen, :indigo )
+
+plot(xlabel="SG0 Current (A)",
+    ylabel=L"$\Delta z$ (px)")
+for (i,dir) in enumerate(data_directories[1:2])
+    data = tables[i]
+    data_pos = data[data.I0 .> 0, :]
+    plot!(data_pos.I0, data_pos.split/6.5e-3,
+            yerror = data_pos.errsplit/6.5e-3,
+            label=dir,
+            seriestype=:scatter,
+            marker=(mark_symbol[i],2,:white),
+            markerstrokecolor=colores[i]
+    )
+end
+plot!(
+    xscale=:log10,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+    yminorticks=false,)
+
+
+plot(xlabel="SG0 Current (A)",
+    ylabel=L"$\Delta z$ (px)")
+for (i,dir) in enumerate(data_directories[3:4])
+    data = tables[i+2]
+    data_pos = data[data.I0 .> 0, :]
+    plot!(data_pos.I0, data_pos.split/6.5e-3,
+            yerror = data_pos.errsplit/6.5e-3,
+            label=dir,
+            seriestype=:scatter,
+            marker=(mark_symbol[i],2,:white),
+            markerstrokecolor=colores[i]
+    )
+end
+plot!(
+    xscale=:log10,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+    yminorticks=false,)
+
+
+mark_symbol = (:circle, :rect, :diamond, :utriangle )
+colores = ((:red,:blue), (:orangered, :dodgerblue), (:darkgreen, :indigo) , (:sienna, :lime))
+plot(xlabel="SG0 Current (A)",
+    ylabel="position (mm)")
+for (i,dir) in enumerate(data_directories)
+    data = tables[i]
+    data_pos = data[data.I0 .>= 0, :]
+    plot!(data_pos.I0, data_pos.zf1, 
+        yerror = data_pos.errzf1,
+        label=L"$F=1$",
+        seriestype=:scatter,
+        marker=(mark_symbol[i],2,:white),
+        markerstrokecolor=colores[i][1])
+    plot!(data_pos.I0, data_pos.zf2,
+        yerror = data_pos.errzf2,
+        label=L"$F=2$",
+        seriestype=:scatter,
+        marker=(mark_symbol[i],2,:white),
+        markerstrokecolor=colores[i][2])
+    plot!(data_pos.I0, mean([data_pos.zf1,data_pos.zf2]),
+        label="Centre",
+        marker=(:xcross,:gray47),
+        line=(:dash,1,:gray47)  
+    )
+end
+plot!(
+    # xscale=:log10,
+    yformatter = y -> @sprintf("%.3f", y),
+    legend=:outerright,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+    yminorticks=false,)
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+data_directories = ["20260317A", "20260317B", "20260317C"]
+nd = length(data_directories)
+
+for data_directory in data_directories
+    outfile_raw         = joinpath("EXPERIMENTS",data_directory, "data.jld2")
+    outfile_processed   = joinpath("EXPERIMENTS",data_directory, "data_processed.jld2")
+    data_summary_path   = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS","summary",data_directory)
+    isdir(data_summary_path) || mkpath(data_summary_path);
+
+
+    if !isfile(outfile_processed) # check if the processed images exists
+        if !isfile(outfile_raw) # check if the raw data exists
+            @info "Not found → building $outfile_raw"
+            data_in = joinpath(@__DIR__,"EXPERIMENTS", data_directory)
+            data_raw = MyExperimentalAnalysis.SG0_stack_data(data_in)
+            jldsave(outfile_raw, data=data_raw)
+            data_raw = nothing
+        else
+            @info "Found $outfile_raw → skipping build"
+        end
+
+        data_raw = load(outfile_raw)["data"]
+        data_processed = MyExperimentalAnalysis.SG0_build_processed_dict(data_raw)
+        jldsave(outfile_processed, data=data_processed)
+        data_processed = nothing
+        data_raw = nothing
+    else
+        @info "Found $outfile_processed → skipping build"
+    end
+
+end
+
+tables = Vector{DataFrame}(undef, nd)
+for (idx,data_directory) in enumerate(data_directories)
+    data_processed = load(joinpath("EXPERIMENTS",data_directory, "data_processed.jld2"))["data"]
+
+    OUTDIR    = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
+    isdir(OUTDIR) || mkpath(OUTDIR);
+    @info "Created output directory" OUTDIR
+    MyExperimentalAnalysis.OUTDIR   = OUTDIR;
+
+    SG0_current = data_processed[:SG0Currents]
+    SG1_current = data_processed[:SG1Currents]
+    Bz0 = data_processed[:SG0Bz]
+    Bz1 = data_processed[:SG1Bz]
+
+    f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=true,λ0=λ0);
+    f2_max = MyExperimentalAnalysis.SG0_framewise_maxima("F2", data_processed, nz ; half_max=true,λ0=λ0);
+
+    f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ z_mm_error^2 );
+    f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
+
+    Δz_mm = f1_z_mm .- f2_z_mm
+    Δz_sem_mm = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2   )
+
+    data = data = DataFrame(
+        I0        = SG0_current,
+        I1        = SG1_current,
+        B0        = Bz0,
+        B1        = Bz1,
+        zf1       = f1_z_mm,
+        errzf1    = f1_z_sem_mm,
+        zf2       = f2_z_mm,
+        errzf2    = f2_z_sem_mm,
+        split     = Δz_mm,
+        errsplit  = round.(Δz_sem_mm; sigdigits=1)
+    )
+    tables[idx] = data
+    data_pos = data[data.I0 .> 0, :]
+    pretty_table(data)
+    cols = palette(:darkrainbow, size(data,1))   # generate colors
+
+    fig1 = plot(data.I0, data.zf1, 
+        yerror = data.errzf1,
+        label=L"$F=1$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:red)
+    plot!(fig1, data.I0, data.zf2,
+        yerror = data.errzf2,
+        label=L"$F=2$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:blue)
+    plot!(fig1, data.I0, mean([data.zf1,data.zf2]),
+        label="Centre",
+        marker=(:diamond,:white),
+        markerstrokecolor=:gray47,
+        line=(:dash,1,:gray47)
+    )
+    plot!(fig1,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        yformatter = y -> @sprintf("%.3f", y))
+    display(fig1)
+
+
+    fig2 = plot(data_pos.I0, data_pos.zf1, 
+        yerror = data_pos.errzf1,
+        label=L"$F=1$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:red)
+    plot!(fig2, data_pos.I0, data_pos.zf2,
+        yerror = data_pos.errzf2,
+        label=L"$F=2$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:blue)
+    plot!(fig2, data_pos.I0, mean([data_pos.zf1,data_pos.zf2]),
+        label="Centre",
+        marker=(:diamond,:white),
+        markerstrokecolor=:gray47,
+        line=(:dash,1,:gray47)  
+    )
+    plot!(fig2,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        xlabel="Currents (A)",
+        yformatter = y -> @sprintf("%.3f", y),
+        # xlims=(1e-3,10e-3)
+        xscale=:log10
+    )
+    display(fig2)
+
+
+    fig3 = plot(data.I0, data.split/6.5e-3, 
+        yerror = data.errsplit/6.5e-3,
+        label=L"$\Delta z$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:darkgreen)
+    plot!(fig3,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        xlabel="SG0 Current (A)",
+        ylabel="Split (px)",
+        yminorticks=false,)
+    display(fig3)
+
+    fig4 = plot(data_pos.I0, data_pos.split/6.5e-3, 
+        yerror = data_pos.errsplit/6.5e-3,
+        label=L"$\Delta z$",
+        seriestype=:scatter,
+        marker=(:circle,2,:white),
+        markerstrokecolor=:darkgreen)
+    plot!(fig4,
+        xscale=:log10,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        xlabel="SG0 Current (A)",
+        ylabel="Split (px)",
+        yminorticks=false,)
+    display(fig4)
+
+    fig = plot(fig1,fig2,fig3,fig4,
+        suptitle = "$(data_directory) | SG1: $(round(data.I1[end], digits=1))A",
+        layout=(2,2),
+        size=(1000,600))
+    display(fig)
+
+end
+
+
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directory = "20260311"
