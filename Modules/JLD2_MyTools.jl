@@ -75,7 +75,7 @@ info.λ0
 """
 function list_keys_jld_qm(path::AbstractString)
 
-    klist  = Tuple{Int,Float64,Float64}[]
+    keylist  = Tuple{Int,Float64,Float64}[]
     nz_set = Set{Int}()
     σw_set = Set{Float64}()
     λ0_set = Set{Float64}()
@@ -115,7 +115,7 @@ function list_keys_jld_qm(path::AbstractString)
         # Walk the table hierarchy
         # -------------------------
         if !haskey(file, "table")
-            return (keys=klist, nz=Int[], σw=Float64[], λ0=Float64[], meta=meta)
+            return (keys=keylist, nz=Int[], σw=Float64[], λ0=Float64[], meta=meta)
         end
 
         table = file["table"]
@@ -137,18 +137,18 @@ function list_keys_jld_qm(path::AbstractString)
                     λ0 = parse(Float64, split(λ0_grp, "=", limit=2)[2])
                     push!(λ0_set, λ0)
 
-                    push!(klist, (nz, σw, λ0))
+                    push!(keylist, (nz, σw, λ0))
                 end
             end
         end
     end
 
-    sort!(klist)
+    sort!(keylist)
     nz_list     = sort!(collect(nz_set))
     sigmaw_list = sort!(collect(σw_set))
     lambda0_list= sort!(collect(λ0_set))
 
-    return (keys = klist,
+    return (keys = keylist,
             nz   = nz_list,
             σw   = sigmaw_list,
             λ0   = lambda0_list,
@@ -164,6 +164,176 @@ function make_keypath_cqd(branch::Symbol, ki::Float64, nz::Int, gw::Float64, λ0
         "/σw=" * fmt(gw) *
         "/λ0=" * fmt(λ0_raw)
 end
+
+"""
+    list_keys_jld_cqd(path::AbstractString)
+
+Inspect a CQD JLD2 file and extract all parameter combinations stored under
+the hierarchical structure defined by `make_keypath_cqd`, namely
+
+    /<branch>/ki=.../nz=.../σw=.../λ0=...
+
+The function traverses the file, parses parameter values from group names,
+and collects all existing combinations of `(branch, ki, nz, σw, λ0)`. It also
+reads and prints the metadata stored in the `meta` group.
+
+# Behaviour
+- Reads all datasets inside the `meta/` group and prints them.
+- Walks the hierarchy: `branch → ki → nz → σw → λ0`.
+- Parses numerical values directly from group names.
+- Collects only parameter combinations that are physically present in the file.
+- Returns sorted unique lists of all parameters.
+
+# Arguments
+- `path::AbstractString`:
+  Path to the JLD2 file to inspect.
+
+# Returns
+A named tuple containing:
+
+- `keys :: Vector{Tuple{Symbol,Float64,Int,Float64,Float64}}`
+    Sorted list of all parameter tuples `(branch, ki, nz, σw, λ0)` found.
+
+- `branch :: Vector{Symbol}`
+    Sorted list of branch identifiers (e.g. `:up`, `:dw`).
+
+- `ki :: Vector{Float64}`
+    Sorted list of unique current parameters.
+
+- `nz :: Vector{Int}`
+    Sorted list of vertical binning values.
+
+- `σw :: Vector{Float64}`
+    Sorted list of Gaussian widths.
+
+- `λ0 :: Vector{Float64}`
+    Sorted list of smoothing parameters.
+
+- `meta :: OrderedDict{String,Any}`
+    Metadata read from the `meta` group, stored as `"meta/<key>"`.
+
+# Notes
+- The function assumes the naming convention produced by
+  `make_keypath_cqd(branch, ki, nz, σw, λ0)`.
+- The value of `ki` is parsed from strings of the form `"ki=...e-6"`.
+  Depending on the implementation, this may represent a scaled quantity
+  (e.g. micro-units).
+- No assumption is made about completeness of the parameter grid; only
+  existing entries are reported.
+- Large metadata vectors are truncated when printed for readability.
+
+# Example
+julia
+info = list_keys_jld_cqd("cqd_profiles.jld2")
+
+info.keys
+info.ki
+info.nz
+info.σw
+info.λ0
+"""
+function list_keys_jld_cqd(path::AbstractString)
+
+    keylist  = Tuple{Symbol,Float64,Int,Float64,Float64}[]
+    ki_set = Set{Float64}()
+    nz_set = Set{Int}()
+    σw_set = Set{Float64}()
+    λ0_set = Set{Float64}()
+    branch_set = Set{Symbol}()
+
+    meta = OrderedDict{String,Any}()
+
+    jldopen(path, "r") do file
+
+        # -------------------------
+        # Collect meta/* datasets
+        # -------------------------
+        if haskey(file, "meta")
+            meta_group = file["meta"]
+            for k in keys(meta_group)
+                meta["meta/$k"] = meta_group[k]
+            end
+        end
+
+        println("\n================ META ================")
+        if isempty(meta)
+            println("(meta group exists but contains no datasets)")
+        else
+            for k in collect(keys(meta))
+                v = meta[k]
+                if v isa AbstractVector && length(v) > 20
+                    println(k, " = ", v[1:6], " … ", v[end-5:end],
+                            "  (len=", length(v), ")")
+                else
+                    println(k, " = ", v)
+                end
+            end
+        end
+        println("======================================\n")
+
+        # -------------------------
+        # Walk branch hierarchy
+        # -------------------------
+        top_groups = [k for k in keys(file) if k != "meta"]
+
+        for branch_grp in top_groups
+            branch = Symbol(branch_grp)
+            push!(branch_set, branch)
+
+            branch_group = file[branch_grp]
+
+            for ki_grp in keys(branch_group)
+                # ki_grp like "ki=2.2e-6"
+                ki_str = split(ki_grp, "=", limit=2)[2]
+
+                # remove the trailing "e-6" added by make_keypath_cqd
+                ki_base = endswith(ki_str, "e-6") ? ki_str[1:end-3] : ki_str
+                ki = parse(Float64, ki_base)
+
+                push!(ki_set, ki)
+
+                ki_group = branch_group[ki_grp]
+                for nz_grp in keys(ki_group)
+                    # nz_grp like "nz=4"
+                    nz = parse(Int, split(nz_grp, "=", limit=2)[2])
+                    push!(nz_set, nz)
+
+                    nz_group = ki_group[nz_grp]
+                    for σw_grp in keys(nz_group)
+                        # σw_grp like "σw=0.2"
+                        σw = parse(Float64, split(σw_grp, "=", limit=2)[2])
+                        push!(σw_set, σw)
+
+                        σw_group = nz_group[σw_grp]
+                        for λ0_grp in keys(σw_group)
+                            # λ0_grp like "λ0=0.01"
+                            λ0 = parse(Float64, split(λ0_grp, "=", limit=2)[2])
+                            push!(λ0_set, λ0)
+
+                            push!(keylist, (branch, ki, nz, σw, λ0))
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    sort!(keylist)
+    branch_list = sort!(collect(branch_set))
+    ki_list     = sort!(collect(ki_set))
+    nz_list     = sort!(collect(nz_set))
+    sigmaw_list = sort!(collect(σw_set))
+    lambda0_list= sort!(collect(λ0_set))
+
+    return (keys   = keylist,
+            branch = branch_list,
+            ki     = ki_list,
+            nz     = nz_list,
+            σw     = sigmaw_list,
+            λ0     = lambda0_list,
+            meta   = meta)
+end
+
 
 # JLD2 doesn't overwrite datasets by default; delete first.
 function jld_overwrite!(f, path::AbstractString, value)
@@ -376,8 +546,6 @@ function merge_qm_two_runs(run1_path::AbstractString,
     end
 end
 
-
-using JLD2
 
 """
     tree_jld(path; maxdepth=typemax(Int))
