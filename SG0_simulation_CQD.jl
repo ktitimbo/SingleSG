@@ -170,11 +170,7 @@ function theta_wrap(x)
     pi .- abs.( mod.(x,2*pi) .- pi)
 end
 
-theta_wrap(pi/4 + pi)
-
-3pi/4
-
-##################################################################################################
+#################################################################################################
 avg_data = load(joinpath(@__DIR__, "EXPDATA_ANALYSIS", "smoothing_binning","data_averaged_2.jld2"), "data" )
 I_exp  = avg_data[:i_smooth];
 z_exp  = avg_data[:z_smooth];
@@ -185,26 +181,18 @@ z_exp  = avg_data[:z_smooth];
 Icoils = [0.00,
             0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
             0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
-            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
-            0.10,0.15,0.20,0.25,0.30,0.40,0.50,
-            0.60,0.70,0.80,0.90,1.00
-];
-Icoils = [0.00,
-            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
-            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
-            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
-            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
-            0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
+            0.060,0.070,0.080,0.090,
+            0.10,0.20,0.30,0.40,0.50,0.60,0.70,0.80,0.90,1.00
 ];
 nI = length(Icoils)
 
 L0 = 4e-2
-B0_list_mT = [ 0, 1, 5, 10, 20, 50, 80, 100, 200 ]
+B0_list_mT = [ 0, 1, 5, 10, 15, 25, 50, 75, 100, 150, 200, 300 ]
 B0_list = 1e-3 .* B0_list_mT
 
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 100_000 ; 
+const Nss = 1_000_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -328,7 +316,7 @@ line=(:solid,1,:gray22),
 xlims=(1,220),
 xscale=:log10,
 xlabel=L"SG0: $B_{0}$ (mT)",
-ylabel=L"$z$ position (px)",
+ylabel=L"$z$ peak separation (px)",
 yformatter = y -> @sprintf("%.1f", y),
 legend=:right,
 legend_title = "$(Int(1000*Icoils[ni_chosen]))mA",
@@ -337,6 +325,7 @@ background_color_legend = nothing,)
 
 fig = plot(fig01,fig02,
 layout=(2,1))
+savefig(fig,"SG0_change")
 
 
 
