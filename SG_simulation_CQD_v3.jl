@@ -1041,367 +1041,106 @@ alert("script $RUN_STAMP has finished!")
 
 
 
-using JLD2
+# path1 = joinpath("W:\\SternGerlach\\cqd_T200_8Ma","cqd_8000000_up_profiles_1_21_bykey.jld2")
+# path2 = joinpath("W:\\SternGerlach\\cqd_T200_8Mb","cqd_8000000_up_profiles_1_23_bykey.jld2")
+# pathout_up = joinpath("W:\\SternGerlach","cqd_8M_up_profiles.jld2")
+# JLD2_MyTools.merge2_cqd_jld2(path1, path2, pathout_up)
 
-"""
-    merge_cqd_tables(infiles::Vector{String}, outjld::String;
-                     overwrite=false, verbose=true)
-
-Merge several JLD2 CQD-table files into a new JLD2 file with the same hierarchical
-structure.
-
-Compatibility requirements:
-- `meta/N`
-- `meta/T`
-- `meta/branch`
-- `meta/s_spline`
-- `meta/nx`
-
-Union-rebuilt metadata:
-- `meta/nz`
-- `meta/σw`
-- `meta/λ0`
-- `meta/ki`
-- `meta/files`
-
-Ignored metadata:
-- `meta/progress/...`
-
-All non-meta datasets are copied into the output file preserving their original paths.
-
-# Arguments
-- `infiles`: vector of input JLD2 paths
-- `outjld`: output JLD2 path
-
-# Keywords
-- `overwrite`: if `true`, repeated non-meta dataset paths are overwritten by later files.
-               if `false`, repeated paths raise an error.
-- `verbose`: print progress messages
-
-# Notes
-- This function assumes that all actual table entries live outside `meta/...`.
-- It is resume-friendly in the sense that input files may contain partial parameter grids.
-"""
-function merge_cqd_tables(infiles::Vector{String}, outjld::String;
-                          overwrite::Bool=false,
-                          verbose::Bool=true)
-
-    isempty(infiles) && error("`infiles` is empty.")
-
-    # --------------------------------------------------------------------------
-    # Recursively collect all dataset paths (not just top-level keys)
-    # --------------------------------------------------------------------------
-    function collect_dataset_paths(g::JLD2.Group, prefix::String="")
-        out = String[]
-        for k in keys(g)
-            name = String(k)
-            full = isempty(prefix) ? name : string(prefix, "/", name)
-            obj = g[name]
-            if obj isa JLD2.Group
-                append!(out, collect_dataset_paths(obj, full))
-            else
-                push!(out, full)
-            end
-        end
-        return out
-    end
-
-    # Overload for file handle, for convenience
-    collect_dataset_paths(f) = collect_dataset_paths(f.root_group)
-
-    # --------------------------------------------------------------------------
-    # Required scalar metadata that must match exactly
-    # --------------------------------------------------------------------------
-    required_meta = [
-        "meta/N",
-        "meta/T",
-        "meta/branch",
-        "meta/s_spline",
-        "meta/nx",
-    ]
-
-    # --------------------------------------------------------------------------
-    # Read reference metadata from first file
-    # --------------------------------------------------------------------------
-    refmeta = Dict{String,Any}()
-    jldopen(infiles[1], "r") do f
-        for k in required_meta
-            haskey(f, k) || error("Reference file is missing required key `$k`:\n  $(infiles[1])")
-            refmeta[k] = f[k]
-        end
-    end
-
-    # --------------------------------------------------------------------------
-    # Check compatibility + accumulate union metadata
-    # --------------------------------------------------------------------------
-    all_nz    = Any[]
-    all_σw    = Any[]
-    all_λ0    = Any[]
-    all_ki    = Any[]
-    all_files = String[]
-
-    for path in infiles
-        verbose && @info "Scanning metadata" file=path
-
-        jldopen(path, "r") do f
-            # exact-match metadata
-            for k in required_meta
-                haskey(f, k) || error("File is missing required key `$k`:\n  $path")
-                val = f[k]
-                val == refmeta[k] || error(
-                    "Incompatible file:\n  $path\n" *
-                    "Mismatch at `$k`\n" *
-                    "Reference: $(refmeta[k])\n" *
-                    "This file: $(val)"
-                )
-            end
-
-            # union metadata
-            if haskey(f, "meta/nz")
-                append!(all_nz, collect(f["meta/nz"]))
-            end
-            if haskey(f, "meta/σw")
-                append!(all_σw, collect(f["meta/σw"]))
-            end
-            if haskey(f, "meta/λ0")
-                append!(all_λ0, collect(f["meta/λ0"]))
-            end
-            if haskey(f, "meta/ki")
-                append!(all_ki, collect(f["meta/ki"]))
-            end
-            if haskey(f, "meta/files")
-                append!(all_files, String.(collect(f["meta/files"])))
-            end
-        end
-    end
-
-    # Normalize / deduplicate / sort where sensible
-    nz_union    = sort(unique(Int.(all_nz)))
-    σw_union    = sort(unique(Float64.(all_σw)))
-    λ0_union    = sort(unique(Float64.(all_λ0)))
-    ki_union    = sort(unique(Float64.(all_ki)))
-    files_union = unique(all_files)
-
-    # --------------------------------------------------------------------------
-    # Write output
-    # --------------------------------------------------------------------------
-    seen = Set{String}()
-
-    jldopen(outjld, "w") do fout
-        # ---- write fixed required metadata
-        for k in required_meta
-            fout[k] = refmeta[k]
-        end
-
-        # ---- write rebuilt union metadata
-        fout["meta/nz"]    = nz_union
-        fout["meta/σw"]    = σw_union
-        fout["meta/λ0"]    = λ0_union
-        fout["meta/ki"]    = ki_union
-        fout["meta/files"] = files_union
-
-        # ---- merge all non-meta datasets
-        for path in infiles
-            verbose && @info "Merging data entries" file=path
-
-            jldopen(path, "r") do fin
-                for p in collect_dataset_paths(fin)
-                    startswith(p, "meta/") && continue
-
-                    if p in seen
-                        if overwrite
-                            verbose && @warn "Overwriting duplicate dataset path" path=p source=path
-                            fout[p] = fin[p]
-                        else
-                            error(
-                                "Duplicate non-meta dataset path found while merging:\n" *
-                                "  path = $p\n" *
-                                "  source file = $path\n" *
-                                "Set `overwrite=true` if this is intentional."
-                            )
-                        end
-                    else
-                        fout[p] = fin[p]
-                        push!(seen, p)
-                    end
-                end
-            end
-        end
-    end
-
-    verbose && @info "Merged file written" outjld=outjld nfiles=length(infiles)
-    return outjld
-end
-
-function summarize_cqd_jld2(path::String)
-    jldopen(path, "r") do f
-        println("File: ", path)
-        println("  N         = ", f["meta/N"])
-        println("  T         = ", f["meta/T"])
-        println("  branch    = ", f["meta/branch"])
-        println("  s_spline  = ", f["meta/s_spline"])
-        println("  nx        = ", f["meta/nx"])
-        println("  nz        = ", f["meta/nz"])
-        println("  σw        = ", f["meta/σw"])
-        println("  λ0        = ", f["meta/λ0"])
-        println("  ki        = ", f["meta/ki"])
-        println("  nfiles    = ", length(f["meta/files"]))
-    end
-end
-
-list_keys_jld_cqd(path1).meta
+# path1 = joinpath("W:\\SternGerlach\\cqd_T200_8Ma","cqd_8000000_dw_profiles_1_21_bykey.jld2")
+# path2 = joinpath("W:\\SternGerlach\\cqd_T200_8Mb","cqd_8000000_dw_profiles_1_23_bykey.jld2")
+# pathout_dw = joinpath("W:\\SternGerlach","cqd_8M_dw_profiles.jld2")
+# JLD2_MyTools.merge2_cqd_jld2(path1, path2, pathout_dw)
 
 
-path1 = joinpath("W:\\SternGerlach\\cqd_T200_8Ma","cqd_8000000_up_profiles_1_21_bykey.jld2")
-path2 = joinpath("W:\\SternGerlach\\20260319T102204974","cqd_8000000_up_profiles_1_23_bykey.jld2")
-pathout = joinpath("W:\\SternGerlach","cqd_8_profiles.jld2")
+# JLD2_MyTools.summarize_meta_cqd_jld2(pathout_up)
+# JLD2_MyTools.summarize_meta_cqd_jld2(pathout_dw)
 
-summarize_cqd_jld2(path1)
-summarize_cqd_jld2(path2)
+# d1 = JLD2_MyTools.list_keys_jld_cqd(pathout_up)
+# d2 = JLD2_MyTools.list_keys_jld_cqd(pathout_dw)
 
-meta1 = jldopen(path1,"r") do f
-    metakeys = keys(f["meta"])
-    println(metakeys)
-    n1 = f["meta/N"]
-    T1 = f["meta/T"]
-    branch1 = f["meta/branch"]
-    nx1 = f["meta/nx"]
-    smooth1 = f["meta/s_spline"]
-    nz1 = f["meta/nz"]
-    σw1 = f["meta/σw"]
-    λ01 = f["meta/λ0"]
-    ki1 = round.(1e6 * f["meta/ki"], digits = 3)
-    file1 = f["meta/files"]
-    return (N=n1, T=T1, branch=branch1, spline_smooth =smooth1, nx = nx1, nz = nz1, σw = σw1, λ0 = λ01, ki = ki1, files = file1  )
-end
+# colores = palette(:darkrainbow, length(d1.ki))
+# fig = plot(xlabel="Current (A)",
+#     ylabel="Peak position (mm)")
+# split = Matrix{Float64}(undef, nI, length(d1.ki));
+# for (i,ki) in enumerate(d1.ki)
+#     dataup = jldopen(pathout_up,"r") do f
+#         f[JLD2_MyTools.make_keypath_cqd(:up,ki,2,0.2,0.01)]
+#     end
+#     zmm_up = [dataup[j][:z_max_smooth_spline_mm] for j=1:nI]
 
-meta2 = jldopen(path2,"r") do f
-    metakeys = keys(f["meta"])
-    println(metakeys)
-    n1 = f["meta/N"]
-    T1 = f["meta/T"]
-    branch1 = f["meta/branch"]
-    nx1 = f["meta/nx"]
-    smooth1 = f["meta/s_spline"]
-    nz1 = f["meta/nz"]
-    σw1 = f["meta/σw"]
-    λ01 = f["meta/λ0"]
-    ki1 = round.(1e6 * f["meta/ki"], digits = 3)
-    file1 = f["meta/files"]
-    return (N=n1, T=T1, branch=branch1, spline_smooth =smooth1, nx = nx1, nz = nz1, σw = σw1, λ0 = λ01, ki = ki1, files = file1  )
-end
+#     datadw = jldopen(pathout_dw,"r") do f
+#         f[JLD2_MyTools.make_keypath_cqd(:dw,ki,2,0.2,0.01)]
+#     end
+#     zmm_dw = [datadw[j][:z_max_smooth_spline_mm] for j=1:nI]
 
-@assert meta1.T == meta2.T && meta1.N == meta2.N && meta1.branch == meta2.branch && meta1.nx == meta2.nx && meta1.spline_smooth == meta2.spline_smooth
+#     plot!(fig,
+#         Icoils,zmm_up,
+#         label=L"$%$(ki) \times 10^{-6}$",
+#         line=(:solid,1,colores[i])  
+#     )
 
-if meta1.nz 
+#     split[:,i] = zmm_up .- zmm_dw
+# end
+# hspan!([1e-4,6e-3], color=:gray67, fillalpha=0.2, label="pixel size")
+# display(fig)
+# plot!(fig,
+# legend=:outerright,
+# legend_columns=2,
+# xlims=(1e-3,1.05),
+# ylims=(1e-3,2.05),
+# xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+#         [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+# yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+#         [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+# xscale=:log10,
+# yscale=:log10,
+# )
 
-jldopen(path1, "r") do f1
-    jldopen(path2, "r") do f2
-        jldopen(pathout, "w") do ff
+# plot(xlabel="Current (A)")
+# for (i,ki) in enumerate(d1.ki)
+#     plot!(Icoils, split[:,i],
+#         label=L"$%$(ki) \times 10^{-6}$",
+#         line=(:solid,1,colores[i]),
+#     ) 
+# end
+# hspan!([1e-4,6e-3], color=:gray67, fillalpha=0.2, label="pixel size")
+# plot!(ylabel="peak-to-peak separation (mm)",
+#     legend=:outerright,
+#     legend_columns=2,
+# xlims=(1e-3,1.05),
+# ylims=(1e-3,4.05),
+# xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+#         [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+# yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+#         [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+# xscale=:log10,
+# yscale=:log10,    
+# )
 
-            # write meta first
-            ff["meta/N"] = meta1.N
-            ff["meta/T"] = meta1.T
-            ff["meta/branch"] = meta1.branch
-            ff["meta/s_spline"] = meta1.spline_smooth
-            ff["meta/nx"] = meta1.nx
-            ff["meta/nz"] = sort(union(meta1.nz, meta2.nz))
-            ff["meta/σw"] = sort(union(meta1.σw, meta2.σw))
-            ff["meta/λ0"] = sort(union(meta1.λ0, meta2.λ0))
-
-            ki_all = sort(union(meta1.ki, meta2.ki))
-
-            ki_to_file = Dict{Float64,Any}()
-            for (ki, f) in zip(meta1.ki, meta1.files)
-                ki_to_file[ki] = f
-            end
-            for (ki, f) in zip(meta2.ki, meta2.files)
-                ki_to_file[ki] = f
-            end
-
-            ff["meta/ki"] = ki_all
-            ff["meta/files"] = [ki_to_file[ki] for ki in ki_all]
-
-            for ki in meta1.ki, nz in meta1.nz, σw in meta1.σw, λ0 in meta1.λ0
-                key = JLD2_MyTools.make_keypath_cqd(:up, ki, nz, σw, λ0)
-                ff[key] = f1[key]
-            end
-
-            for ki in meta2.ki, nz in meta2.nz, σw in meta2.σw, λ0 in meta2.λ0
-                key = JLD2_MyTools.make_keypath_cqd(:up, ki, nz, σw, λ0)
-                ff[key] = f2[key]
-            end
-        end
-    end
-end
-
-summarize_cqd_jld2(pathout)
+# plot(ones(44), d1.ki*1e-6,
+#     label=L"Sampled $k_{i}$",
+#     legend=:outerbottom,
+#     yscale=:log10,
+#     seriestype=:scatter,
+#     marker=(:circle,2,:white),
+#     markerstrokecolor=:red,
+#     xlims=(0.5,1.5),
+#     ylims=(9e-8,10e-6),
+#     size=(200,600),
+#     xticks=:none,
+#     yticks = ([1e-7, 1e-6, 1e-5, 1e-4], 
+#         [ L"10^{-7}", L"10^{-6}", L"10^{-5}", L"10^{-4}"]),
+#     left_margin=5mm,
+# )
 
 
 
-jldopen(path1,"r") do f
-    keys(f["meta"])
-end
-
-branch1
-
-fig = plot(xlabel="current (A)")
-count = 1
-colores = palette(:darkrainbow,45) 
-ki_list = round.(1e6* [1.0e-7, 1.4e-7, 1.8e-7, 2.2e-7, 2.6e-7, 3.0e-7, 3.4e-7, 3.8e-7, 4.2e-7, 4.6e-7, 5.0e-7, 5.4e-7, 5.8e-7, 6.2e-7, 6.6e-7, 7.0e-7, 7.4e-7, 7.8e-7, 8.2e-7, 8.6e-7, 9.0e-7, 9.4e-7, 9.8e-7], digits=3)
-for (i,ki) in enumerate(ki_list)
-    data_up = jldopen(path2, "r") do f
-        f[JLD2_MyTools.make_keypath_cqd(:up, ki, 2, 0.200, 0.01)]
-    end
-    z_up_ki = [data_up[l][:z_max_smooth_spline_mm] for l in 1:nI]
-
-    plot!(fig,Icoils[2:end],z_up_ki[2:end],
-    line=(:solid, colores[count]),
-    label="$(ki)e-6")
-    count +=1 
-end
-display(fig)
-ki_list = round.(1e6*[1.0e-6, 1.2e-6, 1.4e-6, 1.6e-6, 1.8e-6, 2.0e-6, 2.2e-6, 2.4e-6, 2.6e-6, 2.8e-6, 3.0e-6, 3.2e-6, 3.4e-6, 3.6e-6, 3.8e-6, 4.0e-6, 4.2e-6, 4.4e-6, 4.6e-6, 4.8e-6, 5.0e-6], digits=3)
-for ki in ki_list
-    data_up = jldopen(path1, "r") do f
-        f[JLD2_MyTools.make_keypath_cqd(:up, ki, 2, 0.200, 0.01)]
-    end
-    z_up_ki = [data_up[l][:z_max_smooth_spline_mm] for l in 1:nI]
-
-    plot!(fig,Icoils[2:end],z_up_ki[2:end],
-    line=(:solid,colores[count]),
-    label="$(ki)e-6")
-    count += 1
-end
-display(fig)
-plot!(fig,
-    xscale=:log10,
-    yscale=:log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-        [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-        [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(0.8e-3,1.5),
-    ylims=(0.8e-3,2),
-    legend=:outerright,
-    legend_columns=2)
-
-JLD2_MyTools.make_keypath_cqd(:up, 1.2, 2, 0.200, 0.01)
 
 
 
-merge_cqd_tables([path1,path2], pathout;
-                          overwrite=false,
-                          verbose=true)
 
-JLD2_MyTools.tree_jld(path2)
-aa = JLD2_MyTools.list_keys_jld_cqd(path3)
 
-aa.meta
 
-JLD2_MyTools.list_keys_jld_qm(path2)
-JLD2_MyTools.list_keys_jld_qm(pathout)
-2+2
 
 # using JLD2
 
