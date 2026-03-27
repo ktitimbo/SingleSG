@@ -200,7 +200,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
 
         # position
         z_mm        = 1e3 .* pixel_positions(z_pixels, n_bins, exp_pixelsize_z)
-        z_mm_error  = 1e3 * 0.5 * exp_pixelsize_z * n_bins # half of the pixel size
+        z_mm_error  = 1e3 / sqrt(12) * exp_pixelsize_z * n_bins # assuming uniform distribution within the bin/pixel size
 
         fig_I0 = plot(Icoils, 
             yerror = ΔIcoils,
