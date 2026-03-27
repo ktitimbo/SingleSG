@@ -2435,8 +2435,7 @@ function curr_error_physical(Ic, δIc, z1, z2;
                              weight::Symbol=:gaussian, h=nothing,
                              use_mismatch::Bool=true)
 
-    @assert length(Ic) == length(δIc) == length(z1) == length(z2) \
-        "Ic, δIc, z1, and z2 must all have the same length."
+    @assert length(Ic) == length(δIc) == length(z1) == length(z2) "Ic, δIc, z1, and z2 must all have the same length."
 
     # Convert everything to Float64 for numerical consistency in the fit
     # and in the propagated uncertainty calculations.
@@ -2483,8 +2482,7 @@ function curr_error_physical(Ic, δIc, z1, z2;
 
     # Contribution from the provided position uncertainties at the point closest to zero.
     if δz1 !== nothing && δz2 !== nothing
-        @assert length(δz1) == length(Ic) && length(δz2) == length(Ic) \
-            "δz1 and δz2 must match the length of Ic."
+        @assert length(δz1) == length(Ic) && length(δz2) == length(Ic) "δz1 and δz2 must match the length of Ic."
 
         σd0_meas = 0.5 * sqrt(Float64(δz1[i0])^2 + Float64(δz2[i0])^2)
         push!(σd0_terms, σd0_meas)
