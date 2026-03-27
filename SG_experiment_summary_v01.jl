@@ -159,7 +159,7 @@ for data_directory in data_directories
     end
 
     nz_list = [1,2]
-    λ0_list = [0.001, 0.01, 0.02]
+    λ0_list = [0.001, 0.005, 0.01, 0.02]
     param_grid = vec(collect(Iterators.product(nz_list, λ0_list)))
     sort!(param_grid, by = x -> (x[1], x[2]))
     N_labels = length(param_grid);
