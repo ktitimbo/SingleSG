@@ -548,6 +548,184 @@ end
 
 
 """
+    merge2_cqd_jld2(path1::AbstractString, path2::AbstractString, pathout::AbstractString)
+
+Merge two CQD JLD2 files into a new output file `pathout`.
+
+The first file (`path1`) is treated as the reference dataset. All its CQD
+entries are copied to the output, and only those entries from `path2` whose
+full parameter tuples `(branch, ki, nz, σw, λ0)` are absent from `path1`
+are appended.
+
+The function:
+- summarizes both input files,
+- reads their metadata via `list_keys_jld_cqd`,
+- checks compatibility of global simulation settings,
+- reports differences in sampled `nz`, `σw`, `λ0`, and `ki`,
+- merges missing CQD entries from the second file,
+- rebuilds metadata in the output file.
+
+# Arguments
+- `path1::AbstractString`:
+  Path to the reference CQD JLD2 file.
+
+- `path2::AbstractString`:
+  Path to the second CQD JLD2 file whose missing entries will be added.
+
+- `pathout::AbstractString`:
+  Path where the merged CQD JLD2 file will be written.
+
+# Returns
+- `pathout`
+
+# Notes
+- The files must agree on the global metadata:
+  `N`, `T`, `branch`, `nx`, and `s_spline`.
+- The merge unit is the full tuple
+  `(branch, ki, nz, σw, λ0)`.
+- Existing entries from `path1` are never overwritten.
+"""
+function merge2_cqd_jld2(path1::AbstractString, path2::AbstractString, pathout::AbstractString)
+
+    summarize_meta_cqd_jld2(path1)
+    summarize_meta_cqd_jld2(path2)
+
+    run1 = JLD2_MyTools.list_keys_jld_cqd(path1)
+    run2 = JLD2_MyTools.list_keys_jld_cqd(path2)
+
+    # -------------------------
+    # Extract metadata
+    # -------------------------
+    N1      = run1.meta["meta/N"]
+    T1      = run1.meta["meta/T"]
+    branch1 = run1.meta["meta/branch"]
+    smooth1 = run1.meta["meta/s_spline"]
+    nx1     = run1.meta["meta/nx"]
+    nz1     = run1.meta["meta/nz"]
+    σw1     = run1.meta["meta/σw"]
+    λ01     = run1.meta["meta/λ0"]
+    ki1     = run1.meta["meta/ki"]
+    files1  = run1.meta["meta/files"]
+
+    N2      = run2.meta["meta/N"]
+    T2      = run2.meta["meta/T"]
+    branch2 = run2.meta["meta/branch"]
+    smooth2 = run2.meta["meta/s_spline"]
+    nx2     = run2.meta["meta/nx"]
+    nz2     = run2.meta["meta/nz"]
+    σw2     = run2.meta["meta/σw"]
+    λ02     = run2.meta["meta/λ0"]
+    ki2     = run2.meta["meta/ki"]
+    files2  = run2.meta["meta/files"]
+
+    @assert T1 == T2 && N1 == N2 && branch1 == branch2 && nx1 == nx2 && smooth1 == smooth2
+
+    @info(nz1 == nz2 ?
+        "data 1 and data 2 have the SAME nz sampled: $(nz1)" :
+        "ADDING sets nz: $(setdiff(nz2, nz1))")
+
+    @info(σw1 == σw2 ?
+        "data 1 and data 2 have the SAME σw sampled: $(σw1)" :
+        "ADDING sets σw: $(setdiff(σw2, σw1))")
+
+    @info(λ01 == λ02 ?
+        "data 1 and data 2 have the SAME λ0 sampled: $(λ01)" :
+        "ADDING sets λ0: $(setdiff(λ02, λ01))")
+
+    @info(ki1 == ki2 ?
+        "data 1 and data 2 have the SAME ki sampled: $(ki1)" :
+        "ADDING sets ki: $(setdiff(ki2, ki1))")
+
+    # -------------------------
+    # Find tuples in run2 absent from run1
+    # -------------------------
+    base_set = Set(run1.keys)
+    addition = run2.keys
+    missing_elements = [t for t in addition if !(t in base_set)]
+
+    @info "Number of entries in path1: $(length(run1.keys))"
+    @info "Number of entries in path2: $(length(run2.keys))"
+    @info "Number of new entries to add from path2: $(length(missing_elements))"
+
+    # -------------------------
+    # Merge files
+    # -------------------------
+    jldopen(path1, "r") do f1
+        jldopen(path2, "r") do f2
+            jldopen(pathout, "w") do ff
+
+                # ---- write meta first ----
+                ff["meta/N"] = N1
+                ff["meta/T"] = T1
+                ff["meta/branch"] = branch1
+                ff["meta/s_spline"] = smooth1
+                ff["meta/nx"] = nx1
+                ff["meta/nz"] = sort(union(nz1, nz2))
+                ff["meta/σw"] = sort(union(σw1, σw2))
+                ff["meta/λ0"] = sort(union(λ01, λ02))
+
+                ki_all = sort(union(ki1, ki2))
+                ki_to_file = OrderedDict{Float64,Any}()
+
+                for (ki, f) in zip(ki1, files1)
+                    ki_to_file[ki] = f
+                end
+                for (ki, f) in zip(ki2, files2)
+                    ki_to_file[ki] = f
+                end
+
+                ff["meta/ki"] = ki_all
+                ff["meta/files"] = [ki_to_file[ki] for ki in ki_all]
+
+                # ---- copy all entries from path1 ----
+                for (branch, ki, nz, σw, λ0) in run1.keys
+                    key = JLD2_MyTools.make_keypath_cqd(Symbol(branch), ki, nz, σw, λ0)
+                    ff[key] = f1[key]
+                end
+
+                # ---- append only missing entries from path2 ----
+                for (branch, ki, nz, σw, λ0) in missing_elements
+                    key = JLD2_MyTools.make_keypath_cqd(Symbol(branch), ki, nz, σw, λ0)
+                    ff[key] = f2[key]
+                end
+            end
+        end
+    end
+
+    @info "Merged CQD file written to: $pathout"
+    return pathout
+end
+
+function summarize_meta_cqd_jld2(path::String)
+    jldopen(path, "r") do f
+        println("File: ", path)
+        println("  N         = ", f["meta/N"])
+        println("  T         = ", f["meta/T"])
+        println("  branch    = ", f["meta/branch"])
+        println("  s_spline  = ", f["meta/s_spline"])
+        println("  nx        = ", f["meta/nx"])
+        println("  nz        = ", f["meta/nz"])
+        println("  σw        = ", f["meta/σw"])
+        println("  λ0        = ", f["meta/λ0"])
+        println("  ki        = ", f["meta/ki"])
+        println("  nfiles    = ", length(f["meta/files"]))
+    end
+end
+
+function summarize_meta_qm_jld2(path::String)
+    jldopen(path, "r") do f
+        println("File: ", path)
+        println("  N         = ", f["meta/N"])
+        println("  T         = ", f["meta/T"])
+        println("  s_spline  = ", f["meta/s_spline"])
+        println("  nx        = ", f["meta/nx"])
+        println("  nz        = ", f["meta/nz"])
+        println("  σw        = ", f["meta/σw"])
+        println("  λ0        = ", f["meta/λ0"])
+    end
+end
+
+"""
     tree_jld(path; maxdepth=typemax(Int))
 
 Print the hierarchical structure of a JLD2 file.
