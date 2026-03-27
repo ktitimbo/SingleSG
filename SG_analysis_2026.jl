@@ -119,7 +119,7 @@ SIMULATION INFORMATION
 ***************************************************
 """)
 # Furnace
-T_K = 273.15 + 205 ; # Furnace temperature (K)
+T_K = 273.15 + 200 ; # Furnace temperature (K)
 # Furnace aperture
 const x_furnace = 2.0e-3 ;
 const z_furnace = 100e-6 ;
@@ -182,22 +182,35 @@ Icoils = [0.00,
 ];
 nI = length(Icoils);
 
-data_qm_path = joinpath(@__DIR__,"simulation_data",
+data_qmf1_path = joinpath(@__DIR__,"simulation_data",
     "QM_T200_8M",
-    "qm_screen_profiles_f1_table.jld2")
-data_cqd_path = joinpath(@__DIR__, "simulation_data",
-    "cqd_T200_8M",
-    "cqd_8000000_up_profiles_1_21_bykey.jld2");
-
-############ phywe magnetic field measurement ##############################
-BvsI_phywe = sort(CSV.read("SG_BvsI_phywe.csv",DataFrame; header=["Ic","Bz"]),1);
-phywe_shift = hcat(BvsI_phywe.Ic .- 0.11021, BvsI_phywe.Bz .- 0.00445);
-phywe_shift = DataReading.subset_by_cols(phywe_shift,[1,2]; thr=0.0, include_equal=false)[3]
+    "qm_screen_profiles_f1_table.jld2");
+JLD2_MyTools.summarize_meta_qm_jld2(data_qmf1_path)
+data_qmf2_path = joinpath(@__DIR__,"simulation_data",
+    "QM_T200_8M",
+    "qm_screen_profiles_f2_table.jld2");
+JLD2_MyTools.summarize_meta_qm_jld2(data_qmf2_path)
+data_cqdup_path = joinpath(@__DIR__, "simulation_data",
+    "CQD_T200_8M",
+    "cqd_8M_up_profiles.jld2");
+JLD2_MyTools.summarize_meta_cqd_jld2(data_cqdup_path)
+data_cqddw_path = joinpath(@__DIR__, "simulation_data",
+    "CQD_T200_8M",
+    "cqd_8M_dw_profiles.jld2");
+JLD2_MyTools.summarize_meta_cqd_jld2(data_cqddw_path)
 
 
 data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
 no = length(data_directories);
 colores = palette(:darkrainbow, no);
+
+nz , λ0 = 2, 0.01;
+σw_mm = 0.200
+
+############ phywe magnetic field measurement ##############################
+BvsI_phywe = sort(CSV.read("SG_BvsI_phywe.csv",DataFrame; header=["Ic","Bz"]),1);
+phywe_shift = hcat(BvsI_phywe.Ic .- 0.11021, BvsI_phywe.Bz .- 0.00445);
+phywe_shift = DataReading.subset_by_cols(phywe_shift,[1,2]; thr=0.0, include_equal=false)[3]
 
 exp_data = Vector{Matrix{Float64}}(undef, no)
 for (idx, dir) in enumerate(data_directories)
@@ -585,7 +598,6 @@ plot!(fig5A,legend=:bottomright,
 )
 display(fig5A)
 
-
 plot(fig5,fig5A,
 layout=(1,2),
 size=(1200,600),
@@ -609,9 +621,6 @@ bottom_margin=2mm,
 
 ########################################################################################
 #+++++++++++++++++++++++++++ Centroid +++++++++++++++++++++++++++++++++++++++++++++
-nz , λ0 = 2, 0.01;
-σw_mm = 0.200
-
 centroid_fw = Matrix{Float64}(undef, no, 2)
 pos_at_zero = Matrix{Float64}(undef, no, 4)
 for (i,dir) in enumerate(data_directories)
@@ -621,9 +630,11 @@ for (i,dir) in enumerate(data_directories)
         dd = file[JLD2_MyTools.make_keypath_exp(dir,nz,λ0)]
     end
 
+    # zc ± δzc (computed from the high currents)
     centroid_fw[i,1] = data[:centroid_fw_mm][1]
     centroid_fw[i,2] = round(data[:centroid_fw_mm][2], digits=3)
 
+    # zc ± δzc (for the signal at zero current for F1 and F2)
     pos_at_zero[i,1] = data[:fw_F1_peak_pos_raw][1][1]
     pos_at_zero[i,2] = data[:fw_F1_peak_pos_raw][2][1]
     pos_at_zero[i,3] = data[:fw_F2_peak_pos_raw][1][1]
@@ -678,16 +689,654 @@ plot!(
 ########################################################################################
 #+++++++++++++++++++++++++++ Peak Position +++++++++++++++++++++++++++++++++++++++++++++
 
-chosen_qm =  jldopen(data_qm_path,"r") do file
-    println(file["meta/nx"])
+#+++++++++ QUANTUM MECHANICS +++++++++++++
+chosen_qm_f1 =  jldopen(data_qmf1_path,"r") do file
     file[JLD2_MyTools.make_keypath_qm(nz, σw_mm, λ0)]
 end
-Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
-zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
+chosen_qm_f2 =  jldopen(data_qmf2_path,"r") do file
+    file[JLD2_MyTools.make_keypath_qm(nz, σw_mm, λ0)]
+end
+data_QM = hcat(
+    [v[:Icoil]                  for v in values(chosen_qm_f1)],
+    [v[:z_max_smooth_spline_mm] for v in values(chosen_qm_f1)],
+    [v[:z_max_smooth_spline_mm] for v in values(chosen_qm_f2)],
+)
+data_QM = hcat(data_QM, data_QM[:,2] .- data_QM[:,3]);
+QM_df = DataFrame(data_QM, [:Ic, :F1, :F2, :Δ])
+pretty_table(QM_df; 
+            alignment =:c,
+            row_label_column_alignment  = :c,
+            row_group_label_alignment   = :c,
+            title         = @sprintf("QUANTUM MECHANICS"),
+            formatters = [fmt__printf("%8.3f", [1]), fmt__printf("%8.6f",2:4)],
+            style = TextTableStyle(
+                    first_line_column_label = crayon"yellow bold",
+                    table_border  = crayon"blue bold",
+                    title = crayon"bold red"
+            ),
+            table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+            equal_data_column_widths= true,
+)
 
-JLD2_MyTools.tree_jld(data_qm_path)
 
-fig = plot(
+fig1 = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak position (mm)",
+)
+plot!(fig1,
+    QM_df[!,:Ic],QM_df[!,:F1],
+    label=L"$F=1$",
+    marker=(:circle,2,:white),
+    markerstrokecolor=:red,
+    line=(:red,1),
+)
+plot!(fig1, 
+    QM_df[!,:Ic],QM_df[!,:F2],
+    label=L"$F=2$",
+    marker=(:circle,2,:white),
+    markerstrokecolor=:blue,
+    line=(:blue,1)
+)
+plot!(fig1,
+    xlims=(1e-3,1.05),
+    xscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:topleft,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig1)
+
+fig2 = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak-to-Peak distance (mm)",
+)
+plot!(fig2,
+    QM_df[!,:Ic],QM_df[!,:Δ],
+    label=L"$\Delta z$",
+    marker=(:circle,2,:white),
+    markerstrokecolor=:purple,
+    line=(:purple,1),
+)
+plot!(fig2,
+    xlims=(1e-3,1.05),
+    ylims=(1e-4,5.0),
+    xscale=:log10,
+    yscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:bottomright,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    
+)
+display(fig2)
+
+fig = plot(fig1, fig2,
+layout=(2,1),
+link=:x,)
+
+
+#+++++++++ COQUANTUM DYNAMICS +++++++++++++
+cqd_dt = JLD2_MyTools.list_keys_jld_cqd(data_cqdup_path);
+n_ki = length(cqd_dt.ki);
+colores_ki = palette(:darkrainbow, n_ki)
+up_cqd = Matrix{Float64}(undef, nI, n_ki);
+dw_cqd = Matrix{Float64}(undef, nI, n_ki);
+Δz_cqd = Matrix{Float64}(undef, nI, n_ki);
+
+for (i,ki) in enumerate(cqd_dt.ki)
+    dataup = jldopen(data_cqdup_path,"r") do f
+        f[JLD2_MyTools.make_keypath_cqd(:up,ki,nz,σw_mm,λ0)]
+    end
+    up_cqd[:,i] = [dataup[j][:z_max_smooth_spline_mm] for j=1:nI]
+
+    datadw = jldopen(data_cqddw_path,"r") do f
+        f[JLD2_MyTools.make_keypath_cqd(:dw,ki,nz,σw_mm,λ0)]
+    end
+    dw_cqd[:,i] = [datadw[j][:z_max_smooth_spline_mm] for j=1:nI]
+
+    Δz_cqd[:,i] = up_cqd[:,i] .- dw_cqd[:,i]
+end
+
+fig1 = plot(xlabel="Current (A)",
+    ylabel="Peak position (mm)")
+for (i,ki) in enumerate(cqd_dt.ki)
+    ki_string = @sprintf("%2.2f",ki)
+    plot!(fig1,
+        Icoils, up_cqd[:,i],
+        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+        line=(:solid,1,colores_ki[i]),
+
+    )
+    plot!(fig1,
+        Icoils, dw_cqd[:,i],
+        label=false,
+        line=(:dot,1,colores_ki[i])
+
+    )
+end
+plot!(fig1,
+    xlims=(1e-3,1.05),
+    xscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerright,
+    legendfontsize=6,
+    legend_columns=2,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig1)
+
+
+fig2 = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak-to-Peak distance (mm)",
+)
+for (i,ki) in enumerate(cqd_dt.ki)
+    ki_string = @sprintf("%2.2f",ki)
+    plot!(fig2,
+        Icoils, Δz_cqd[:,i],
+        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+        line=(:solid,1,colores_ki[i]),
+
+    )
+end
+plot!(fig2,
+    xlims=(1e-3,1.05),
+    ylims=(1e-4,5.0),
+    xscale=:log10,
+    yscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerright,
+    legend_columns = 2,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    
+)
+display(fig2)
+
+fig = plot(fig1, fig2,
+size=(1000,600),
+layout=(2,1),
+link=:x,
+left_margin=5mm,
+bottom_margin=2mm,
+)
+
+#+++++++++ QUANTUM MECHANICS & COQUANTUM DYNAMICS +++++++++++++
+fig1 = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak position (mm)",
+)
+plot!(fig1,
+    QM_df[!,:Ic],QM_df[!,:F1],
+    label=L"$F=1$",
+    seriestype=:scatter,
+    marker=(:circle,2,:white),
+    markerstrokecolor=:red,
+    line=(:red,1),
+)
+plot!(fig1, 
+    QM_df[!,:Ic],QM_df[!,:F2],
+    label=L"$F=2$",
+    seriestype=:scatter,
+    marker=(:circle,2,:white),
+    markerstrokecolor=:blue,
+    line=(:blue,1)
+)
+for (i,ki) in enumerate(cqd_dt.ki)
+    ki_string = @sprintf("%2.2f",ki)
+    plot!(fig1,
+        Icoils, up_cqd[:,i],
+        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+        line=(:solid,1,colores_ki[i]),
+
+    )
+    plot!(fig1,
+        Icoils, dw_cqd[:,i],
+        label=false,
+        line=(:dot,1,colores_ki[i])
+
+    )
+end
+plot!(fig1,
+    xlims=(1e-3,1.05),
+    xscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerright,
+    legendfontsize=6,
+    legend_columns=2,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig1)
+
+
+fig2 = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak-to-Peak distance (mm)",
+)
+for (i,ki) in enumerate(cqd_dt.ki)
+    ki_string = @sprintf("%2.2f",ki)
+    plot!(fig2,
+        Icoils, Δz_cqd[:,i],
+        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+        line=(:solid,1,colores_ki[i]),
+
+    )
+end
+plot!(fig2,
+    QM_df[!,:Ic],QM_df[!,:Δ],
+    label=L"QM $\Delta z$",
+    marker=(:circle,2,:white, 0.55),
+    markerstrokecolor=:lime,
+    line=(:lime,1),
+)
+plot!(fig2,
+    xlims=(1e-3,1.05),
+    ylims=(1e-4,5.0),
+    xscale=:log10,
+    yscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerright,
+    legend_columns = 2,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,  
+)
+display(fig2)
+
+
+fig = plot(fig1, fig2,
+size=(1000,600),
+layout=(2,1),
+link=:x,
+left_margin=5mm,
+bottom_margin=2mm,
+)
+
+
+
+#+++++++++++++ EXPERIMENTS ++++++++++++++++++++
+
+EXP_data = OrderedDict{String, NamedTuple}()
+for dir in data_directories
+
+    kk_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS", "summary", dir, dir * "_report_summary.jld2")
+
+    EXP_data[dir] = jldopen(kk_path, "r") do file
+        ic = file["meta/Currents"]
+        bz = file["meta/BzTesla"]
+
+        dd = file[JLD2_MyTools.make_keypath_exp(dir, nz, λ0)]
+
+        F1 = dd[:fw_F1_peak_pos_raw]
+        F2 = dd[:fw_F2_peak_pos_raw]
+
+        zc = 0.5 * (F1[1][1] + F2[1][1])
+        δc = 0.5 * sqrt(F1[2][1]^2 + F2[2][1]^2)
+
+        (
+            Ic = ic,
+            Bz = bz,
+            F1 = F1,
+            F2 = F2,
+            C0 = dd[:centroid_fw_mm],
+            C00 = [zc, δc]
+        )
+    end
+end
+
+
+
+EXP_data_processed = OrderedDict{String, DataFrame}()
+for 𝓁 = 1:8
+# 𝓁 = 3
+
+dir = data_directories[𝓁]
+
+data_dir = DataFrame(hcat(
+        EXP_data[dir].Ic,
+        EXP_data[dir].F1[1] .- EXP_data[dir].C00[1],
+        round.(sqrt.(EXP_data[dir].F1[2].^2 .+ EXP_data[dir].C00[2].^2); sigdigits=1),
+        EXP_data[dir].F2[1] .- EXP_data[dir].C00[1],
+        round.(sqrt.(EXP_data[dir].F2[2].^2 .+ EXP_data[dir].C00[2].^2); sigdigits=1),
+        EXP_data[dir].F1[1] .- EXP_data[dir].F2[1],
+        round.(sqrt.(EXP_data[dir].F1[2].^2 .+ EXP_data[dir].F2[2].^2); sigdigits=1),
+    ),
+    [:Ic, :F1, :ErrF1, :F2, :ErrF2, :Δ, :ErrΔ]
+    )
+EXP_data_processed[dir] = data_dir
+
+pretty_table(data_dir; 
+            alignment =:c,
+            title         = "EXPERIMENT $(data_directories[𝓁])",
+            formatters = [fmt__printf("%8.3f", [1]), fmt__printf("%8.3f",[2,4,6]), fmt__printf("%8.3f",[3,5,7])],
+            style = TextTableStyle(
+                    first_line_column_label = crayon"yellow bold",
+                    table_border  = crayon"blue bold",
+                    title = crayon"bold red"
+            ),
+            table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+            equal_data_column_widths= true,
+)
+
+
+data_f1 = data_dir[data_dir.F1 .> 0, :]
+
+figa = plot(xlabel="Currents (A)",
+ylabel=L"$F=1$ peak position (mm)");
+plot!(figa, data_f1.Ic, data_f1.F1,
+    yerror = data_f1.ErrF1,
+    label="$(data_directories[𝓁])",
+    marker=(:square,2,:white),
+    markerstrokecolor=:black,
+    line=(:solid,:black)
+);
+plot!(figa,
+    QM_df[!,:Ic],QM_df[!,:F1],
+    label=L"$F=1$",
+    marker=(:circle,2,:white),
+    markerstrokecolor=:red,
+    line=(:red,2),
+);
+for (i,ki) in enumerate(cqd_dt.ki)
+    ki_string = @sprintf("%2.2f",ki)
+    plot!(figa,
+        Icoils, up_cqd[:,i],
+        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+        line=(:solid,1,colores_ki[i], 0.5),
+    )
+end
+plot!(figa,
+    xlims=(5e-3,1.05),
+    ylims=(1e-3,2.0),
+    legend=:outerright,
+    legend_columns = 2,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size=(1000,400),
+    left_margin=5mm,
+    bottom_margin=5mm
+);
+figb = deepcopy(figa);
+# display(figb)
+plot!(figa,
+    xscale=:log10,
+    yscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+);
+# display(figa)
+
+fig = plot(figa,figb,
+    layout=(2,1),
+    size=(1000,600),
+    top_margin=5mm)
+display(fig)
+
+
+data_Δz = data_dir[data_dir.Δ .> 0, :];
+
+figc = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak-to-Peak distance (mm)",
+);
+for (i,ki) in enumerate(cqd_dt.ki)
+    ki_string = @sprintf("%2.2f",ki)
+    plot!(figc,
+        Icoils, Δz_cqd[:,i],
+        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+        line=(:solid,1,colores_ki[i]),
+
+    )
+end
+plot!(figc,
+    QM_df[!,:Ic],QM_df[!,:Δ],
+    label=L"QM $\Delta z$",
+    marker=(:circle,2,:white, 0.55),
+    markerstrokecolor=:lime,
+    line=(:lime,1),
+);
+plot!(figc, data_Δz.Ic, data_Δz.Δ,
+    yerror = data_Δz.ErrΔ,
+    label="$(data_directories[𝓁])",
+    marker=(:square,2,:white),
+    markerstrokecolor=:black,
+    line=(:solid,:black)
+);
+plot!(figc,
+    xlims=(5e-6,1.05),
+    ylims=(1e-3,4.2),
+    legend=:outerright,
+    legend_columns = 2,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size=(1000,400),
+    left_margin=5mm,
+    bottom_margin=5mm
+);
+figd = deepcopy(figc);
+# display(figd)
+plot!(figc,
+    xlims=(1e-3,1.05),
+    ylims=(1e-4,5.0),
+    xscale=:log10,
+    yscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerright,
+    legend_columns = 2,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,  
+);
+# display(figc)
+
+fig = plot(figc,figd,
+    layout=(2,1),
+    size=(1000,600),
+    top_margin=7mm)
+display(fig)
+
+end
+
+
+figa = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak position (mm)"
+)
+for (i,dir) in enumerate(data_directories)
+    plot!(figa,
+        EXP_data_processed[dir].Ic, EXP_data_processed[dir].F1,
+        yerror = EXP_data_processed[dir].ErrF1,
+        label= dir,
+        marker=(:circle,2,:white,0.6),
+        markerstrokecolor=colores[i],
+        line=(:solid,1,colores[i])
+    )
+end
+plot!(figa,
+    QM_df[!,:Ic],QM_df[!,:F1],
+    label=L"QM : $F=1$",
+    seriestype=:scatter,
+    marker=(:diamond,2,:white),
+    markerstrokecolor=:red,
+    line=(:red,1),
+)
+plot!(figa,
+    xlims=(10e-3, 1.05),
+    ylims=(1e-3, 2.05))
+plot!(figa,
+    legend=:bottomright,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    xscale=:log10,
+    yscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+)
+
+figb = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak position (mm)"
+)
+for (i,dir) in enumerate(data_directories)
+    plot!(figb,
+        EXP_data_processed[dir].Ic, EXP_data_processed[dir].F2,
+        yerror = EXP_data_processed[dir].ErrF2,
+        label= dir,
+        marker=(:circle,2,:white,0.6),
+        markerstrokecolor=colores[i],
+        line=(:solid,1,colores[i])
+    )
+end
+plot!(figb,
+    QM_df[!,:Ic],QM_df[!,:F2],
+    label=L"QM : $F=2$",
+    seriestype=:scatter,
+    marker=(:diamond,2,:white),
+    markerstrokecolor=:red,
+    line=(:red,1),
+)
+plot!(figb,
+    xlims=(10e-3, 1.05),
+    ylims=(-2.05, -6e-3))
+plot!(figb,
+    legend=:topright,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+
+
+figc = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak-to-Peak position (mm)"
+)
+for (i,dir) in enumerate(data_directories)
+    plot!(figc,
+        EXP_data_processed[dir].Ic, EXP_data_processed[dir].Δ ,
+        yerror = EXP_data_processed[dir].ErrΔ,
+        label= dir,
+        marker=(:circle,2,:white,0.6),
+        markerstrokecolor=colores[i],
+        line=(:solid,1,colores[i])
+    )
+end
+plot!(figc,
+    QM_df[!,:Ic],QM_df[!,:Δ],
+    label=L"QM : $\Delta z$",
+    seriestype=:scatter,
+    marker=(:diamond,2,:white),
+    markerstrokecolor=:red,
+    line=(:red,1),
+)
+plot!(figc,
+    legend=:bottomright,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    xlims=(10e-3, 1.05),
+    ylims=(1e-3, 4.05),
+)
+plot!(figc,xscale=:log10, yscale=:log10,
+ xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+ yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+)
+
+
+plot(figa,figb,figc,
+labelfontsize = 10,
+layout=(3,1),
+size=(1000,600),
+top_margin=2mm,
+left_margin=5mm,
+bottom_margin=3mm,
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+dir = data_directories[1]
+kk_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS", "summary", dir, dir * "_report_summary.jld2")
+EXP_data_dd = jldopen(kk_path, "r") do file
+    ic = file["meta/Currents"]
+    bz = file["meta/BzTesla"]
+
+    dd = file[JLD2_MyTools.make_keypath_exp(dir, nz, λ0)]
+
+    F1 = dd[:fw_F1_peak_pos_raw]
+    F1b = dd[:fw_F1_peak_pos]
+    F2 = dd[:fw_F2_peak_pos_raw]
+
+    zc = 0.5 * (F1[1][1] + F2[1][1])
+    δc = 0.5 * sqrt(F1[2][1]^2 + F2[2][1]^2)
+
+    (
+        Ic = ic,
+        Bz = bz,
+        F1 = F1,
+        F1b = F1b,
+        F2 = F2,
+        C0 = dd[:centroid_fw_mm],
+        C00 = [zc, δc]
+    )
+end
+hcat(EXP_data_dd.F1[1] .- EXP_data_dd.C0[1], EXP_data_dd.F1b[1])
+
+
+
+
+
+
+
+
+2+2
+
+
+
+
+
+
+
+
+
+
+
+
+
+chosen_cqd_up =  jldopen(data_cqdup_path,"r") do file
+    file[JLD2_MyTools.make_keypath_cqd(:up,nz, σw_mm, λ0)]
+end
+
+chosen_cqd_dw =  jldopen(data_cqddw_path,"r") do file
+    file[JLD2_MyTools.make_keypath_qm(nz, σw_mm, λ0)]
+end
+
+
+
+
+!fig = plot(
     xlabel="Currents (mA)",
     ylabel=L"$F=1$ Peak position (mm)",
     title="($nz,$λ0)",
@@ -762,7 +1411,8 @@ for (idx, dir) in enumerate(data_directories)
 
         dd = file[JLD2_MyTools.make_keypath_exp(dir,nz,λ0)]
 
-        (Ic=ic, Bz=bz,
+        (Ic=ic, 
+         Bz=bz,
          F1=dd[:fw_F1_peak_pos_raw],
          F2=dd[:fw_F2_peak_pos_raw],
          C0=dd[:centroid_fw_mm])
