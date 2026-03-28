@@ -1040,15 +1040,14 @@ println("DATA ANALYZED : script $RUN_STAMP has finished!")
 alert("script $RUN_STAMP has finished!")
 
 
-
-# path1 = joinpath("W:\\SternGerlach\\cqd_T200_8Ma","cqd_8000000_up_profiles_1_21_bykey.jld2")
-# path2 = joinpath("W:\\SternGerlach\\cqd_T200_8Mb","cqd_8000000_up_profiles_1_23_bykey.jld2")
-# pathout_up = joinpath("W:\\SternGerlach","cqd_8M_up_profiles.jld2")
+# path1 = joinpath("W:\\SternGerlach\\cqd_T200_8M","cqd_8M_up_profiles.jld2")
+# path2 = joinpath("W:\\cqd_8000000_up_profiles_1_29_bykey.jld2")
+# pathout_up = joinpath("W:\\SternGerlach","cqd_T200_8M","cqd_8M_up_profiles.jld2")
 # JLD2_MyTools.merge2_cqd_jld2(path1, path2, pathout_up)
 
-# path1 = joinpath("W:\\SternGerlach\\cqd_T200_8Ma","cqd_8000000_dw_profiles_1_21_bykey.jld2")
-# path2 = joinpath("W:\\SternGerlach\\cqd_T200_8Mb","cqd_8000000_dw_profiles_1_23_bykey.jld2")
-# pathout_dw = joinpath("W:\\SternGerlach","cqd_8M_dw_profiles.jld2")
+# path1 = joinpath("W:\\cqd_8M_dw_profiles.jld2")
+# path2 = joinpath("W:\\cqd_8000000_dw_profiles_1_29_bykey.jld2")
+# pathout_dw = joinpath("W:\\SternGerlach","cqd_T200_8M","cqd_8M_dw_profiles.jld2")
 # JLD2_MyTools.merge2_cqd_jld2(path1, path2, pathout_dw)
 
 
@@ -1075,19 +1074,29 @@ alert("script $RUN_STAMP has finished!")
 
 #     plot!(fig,
 #         Icoils,zmm_up,
-#         label=L"$%$(ki) \times 10^{-6}$",
+#         label=L"$%$(ki)$",
 #         line=(:solid,1,colores[i])  
 #     )
 
 #     split[:,i] = zmm_up .- zmm_dw
 # end
 # hspan!([1e-4,6e-3], color=:gray67, fillalpha=0.2, label="pixel size")
-# display(fig)
 # plot!(fig,
 # legend=:outerright,
-# legend_columns=2,
+# legendtitle=L"$k_{i}\times 10^{-6}$",
+# legendtitlefont=8,
+# legend_columns=3,
+# legendfontsize=6,
+# foreground_color_legend = nothing,
+# background_color_legend = nothing,
 # xlims=(1e-3,1.05),
 # ylims=(1e-3,2.05),
+# size=(1000,600),
+# left_margin=4mm,
+# bottom_margin=2mm,
+# )
+# display(fig)
+# plot!(
 # xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
 #         [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
 # yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
@@ -1099,25 +1108,33 @@ alert("script $RUN_STAMP has finished!")
 # plot(xlabel="Current (A)")
 # for (i,ki) in enumerate(d1.ki)
 #     plot!(Icoils, split[:,i],
-#         label=L"$%$(ki) \times 10^{-6}$",
+#         label=L"$%$(ki)$",
 #         line=(:solid,1,colores[i]),
 #     ) 
 # end
 # hspan!([1e-4,6e-3], color=:gray67, fillalpha=0.2, label="pixel size")
 # plot!(ylabel="peak-to-peak separation (mm)",
 #     legend=:outerright,
-#     legend_columns=2,
-# xlims=(1e-3,1.05),
-# ylims=(1e-3,4.05),
-# xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-#         [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-# yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-#         [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-# xscale=:log10,
-# yscale=:log10,    
+#     legendtitle=L"$k_{i}\times 10^{-6}$",
+#     legendtitlefont=8,
+#     legend_columns=3,
+#     legendfontsize=6,
+#     foreground_color_legend = nothing, 
+#     background_color_legend = nothing,
+#     size=(1000,600),
+#     xlims=(1e-3,1.05),
+#     ylims=(1e-3,4.05),
+#     xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+#             [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+#     yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+#             [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+#     xscale=:log10,
+#     yscale=:log10,
+#     left_margin=4mm,
+#     bottom_margin=2mm,
 # )
 
-# plot(ones(44), d1.ki*1e-6,
+# plot(ones(73), d1.ki*1e-6,
 #     label=L"Sampled $k_{i}$",
 #     legend=:outerbottom,
 #     yscale=:log10,
@@ -1125,11 +1142,13 @@ alert("script $RUN_STAMP has finished!")
 #     marker=(:circle,2,:white),
 #     markerstrokecolor=:red,
 #     xlims=(0.5,1.5),
-#     ylims=(9e-8,10e-6),
+#     foreground_color_legend = nothing,
+#     background_color_legend = nothing,
+#     # ylims=(9e-8,10e-6),
 #     size=(200,600),
 #     xticks=:none,
-#     yticks = ([1e-7, 1e-6, 1e-5, 1e-4], 
-#         [ L"10^{-7}", L"10^{-6}", L"10^{-5}", L"10^{-4}"]),
+#     yticks = ([1e-9, 1e-8, 1e-7, 1e-6,1e-5, 1e-4, 1e-3, 1e-2], 
+#         [ L"10^{-9}", L"10^{-8}", L"10^{-7}", L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}"]),
 #     left_margin=5mm,
 # )
 
