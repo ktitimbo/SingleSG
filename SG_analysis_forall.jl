@@ -46,7 +46,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20260306r2" ;
+data_directory      = "20260226am" ;
 # Furnace 
 TCelsius = 200
 Temperature = 273.15 + TCelsius
