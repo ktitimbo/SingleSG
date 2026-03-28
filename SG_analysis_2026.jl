@@ -722,21 +722,21 @@ pretty_table(QM_df;
 fig1 = plot(
     xlabel="Currents (A)",
     ylabel="Peak position (mm)",
-)
+);
 plot!(fig1,
     QM_df[!,:Ic],QM_df[!,:F1],
     label=L"$F=1$",
     marker=(:circle,2,:white),
     markerstrokecolor=:red,
     line=(:red,1),
-)
+);
 plot!(fig1, 
     QM_df[!,:Ic],QM_df[!,:F2],
     label=L"$F=2$",
     marker=(:circle,2,:white),
     markerstrokecolor=:blue,
     line=(:blue,1)
-)
+);
 plot!(fig1,
     xlims=(1e-3,1.05),
     xscale=:log10,
@@ -744,20 +744,20 @@ plot!(fig1,
     legend=:topleft,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
-)
+);
 display(fig1)
 
 fig2 = plot(
     xlabel="Currents (A)",
     ylabel="Peak-to-Peak distance (mm)",
-)
+);
 plot!(fig2,
     QM_df[!,:Ic],QM_df[!,:Δ],
     label=L"$\Delta z$",
     marker=(:circle,2,:white),
     markerstrokecolor=:purple,
     line=(:purple,1),
-)
+);
 plot!(fig2,
     xlims=(1e-3,1.05),
     ylims=(1e-4,5.0),
@@ -769,17 +769,21 @@ plot!(fig2,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     
-)
+);
 display(fig2)
 
 fig = plot(fig1, fig2,
 layout=(2,1),
 link=:x,)
+plot!(fig[1], xlabel="", xformatter=_->"");
+display(fig)
+
 
 
 #+++++++++ COQUANTUM DYNAMICS +++++++++++++
 cqd_dt = JLD2_MyTools.list_keys_jld_cqd(data_cqdup_path);
 n_ki = length(cqd_dt.ki);
+@info "CQD simulation for $(n_ki) ki values"
 colores_ki = palette(:darkrainbow, n_ki)
 up_cqd = Matrix{Float64}(undef, nI, n_ki);
 dw_cqd = Matrix{Float64}(undef, nI, n_ki);
@@ -800,7 +804,7 @@ for (i,ki) in enumerate(cqd_dt.ki)
 end
 
 fig1 = plot(xlabel="Current (A)",
-    ylabel="Peak position (mm)")
+    ylabel="Peak position (mm)");
 for (i,ki) in enumerate(cqd_dt.ki)
     ki_string = @sprintf("%2.2f",ki)
     plot!(fig1,
@@ -825,14 +829,14 @@ plot!(fig1,
     legend_columns=2,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
-)
+);
 display(fig1)
 
 
 fig2 = plot(
     xlabel="Currents (A)",
     ylabel="Peak-to-Peak distance (mm)",
-)
+);
 for (i,ki) in enumerate(cqd_dt.ki)
     ki_string = @sprintf("%2.2f",ki)
     plot!(fig2,
@@ -855,7 +859,7 @@ plot!(fig2,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     
-)
+);
 display(fig2)
 
 fig = plot(fig1, fig2,
@@ -864,13 +868,14 @@ layout=(2,1),
 link=:x,
 left_margin=5mm,
 bottom_margin=2mm,
-)
+);
+display(fig)
 
 #+++++++++ QUANTUM MECHANICS & COQUANTUM DYNAMICS +++++++++++++
 fig1 = plot(
     xlabel="Currents (A)",
     ylabel="Peak position (mm)",
-)
+);
 plot!(fig1,
     QM_df[!,:Ic],QM_df[!,:F1],
     label=L"$F=1$",
@@ -878,7 +883,7 @@ plot!(fig1,
     marker=(:circle,2,:white),
     markerstrokecolor=:red,
     line=(:red,1),
-)
+);
 plot!(fig1, 
     QM_df[!,:Ic],QM_df[!,:F2],
     label=L"$F=2$",
@@ -886,7 +891,7 @@ plot!(fig1,
     marker=(:circle,2,:white),
     markerstrokecolor=:blue,
     line=(:blue,1)
-)
+);
 for (i,ki) in enumerate(cqd_dt.ki)
     ki_string = @sprintf("%2.2f",ki)
     plot!(fig1,
@@ -911,14 +916,14 @@ plot!(fig1,
     legend_columns=2,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
-)
+);
 display(fig1)
 
 
 fig2 = plot(
     xlabel="Currents (A)",
     ylabel="Peak-to-Peak distance (mm)",
-)
+);
 for (i,ki) in enumerate(cqd_dt.ki)
     ki_string = @sprintf("%2.2f",ki)
     plot!(fig2,
@@ -934,7 +939,7 @@ plot!(fig2,
     marker=(:circle,2,:white, 0.55),
     markerstrokecolor=:lime,
     line=(:lime,1),
-)
+);
 plot!(fig2,
     xlims=(1e-3,1.05),
     ylims=(1e-4,5.0),
@@ -947,7 +952,7 @@ plot!(fig2,
     legendfontsize=6,
     background_color_legend = nothing,
     foreground_color_legend = nothing,  
-)
+);
 display(fig2)
 
 
@@ -957,15 +962,15 @@ layout=(2,1),
 link=:x,
 left_margin=5mm,
 bottom_margin=2mm,
-)
-
+);
+display(fig)
 
 
 #+++++++++++++ EXPERIMENTS ++++++++++++++++++++
-
 EXP_data = OrderedDict{String, NamedTuple}()
+data_directories
 for dir in data_directories
-
+    println(dir)
     kk_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS", "summary", dir, dir * "_report_summary.jld2")
 
     EXP_data[dir] = jldopen(kk_path, "r") do file
@@ -995,159 +1000,160 @@ end
 
 EXP_data_processed = OrderedDict{String, DataFrame}()
 for 𝓁 = 1:8
-# 𝓁 = 3
+    dir = data_directories[𝓁]
+    println(dir)
 
-dir = data_directories[𝓁]
 
-data_dir = DataFrame(hcat(
-        EXP_data[dir].Ic,
-        EXP_data[dir].F1[1] .- EXP_data[dir].C00[1],
-        round.(sqrt.(EXP_data[dir].F1[2].^2 .+ EXP_data[dir].C00[2].^2); sigdigits=1),
-        EXP_data[dir].F2[1] .- EXP_data[dir].C00[1],
-        round.(sqrt.(EXP_data[dir].F2[2].^2 .+ EXP_data[dir].C00[2].^2); sigdigits=1),
-        EXP_data[dir].F1[1] .- EXP_data[dir].F2[1],
-        round.(sqrt.(EXP_data[dir].F1[2].^2 .+ EXP_data[dir].F2[2].^2); sigdigits=1),
-    ),
-    [:Ic, :F1, :ErrF1, :F2, :ErrF2, :Δ, :ErrΔ]
+    data_dir = DataFrame(hcat(
+            EXP_data[dir].Ic,
+            EXP_data[dir].F1[1] .- EXP_data[dir].C00[1],
+            round.(sqrt.(EXP_data[dir].F1[2].^2 .+ EXP_data[dir].C00[2].^2); sigdigits=1),
+            EXP_data[dir].F2[1] .- EXP_data[dir].C00[1],
+            round.(sqrt.(EXP_data[dir].F2[2].^2 .+ EXP_data[dir].C00[2].^2); sigdigits=1),
+            EXP_data[dir].F1[1] .- EXP_data[dir].F2[1],
+            round.(sqrt.(EXP_data[dir].F1[2].^2 .+ EXP_data[dir].F2[2].^2); sigdigits=1),
+        ),
+        [:Ic, :F1, :ErrF1, :F2, :ErrF2, :Δ, :ErrΔ]
+        )
+    EXP_data_processed[dir] = data_dir
+
+    pretty_table(data_dir; 
+                alignment =:c,
+                title         = "EXPERIMENT $(data_directories[𝓁])",
+                formatters = [fmt__printf("%8.3f", [1]), fmt__printf("%8.3f",[2,4,6]), fmt__printf("%8.3f",[3,5,7])],
+                style = TextTableStyle(
+                        first_line_column_label = crayon"yellow bold",
+                        table_border  = crayon"blue bold",
+                        title = crayon"bold red"
+                ),
+                table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+                equal_data_column_widths= true,
     )
-EXP_data_processed[dir] = data_dir
-
-pretty_table(data_dir; 
-            alignment =:c,
-            title         = "EXPERIMENT $(data_directories[𝓁])",
-            formatters = [fmt__printf("%8.3f", [1]), fmt__printf("%8.3f",[2,4,6]), fmt__printf("%8.3f",[3,5,7])],
-            style = TextTableStyle(
-                    first_line_column_label = crayon"yellow bold",
-                    table_border  = crayon"blue bold",
-                    title = crayon"bold red"
-            ),
-            table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-            equal_data_column_widths= true,
-)
 
 
-data_f1 = data_dir[data_dir.F1 .> 0, :]
+    data_f1 = data_dir[data_dir.F1 .> 0, :]
 
-figa = plot(xlabel="Currents (A)",
-ylabel=L"$F=1$ peak position (mm)");
-plot!(figa, data_f1.Ic, data_f1.F1,
-    yerror = data_f1.ErrF1,
-    label="$(data_directories[𝓁])",
-    marker=(:square,2,:white),
-    markerstrokecolor=:black,
-    line=(:solid,:black)
-);
-plot!(figa,
-    QM_df[!,:Ic],QM_df[!,:F1],
-    label=L"$F=1$",
-    marker=(:circle,2,:white),
-    markerstrokecolor=:red,
-    line=(:red,2),
-);
-for (i,ki) in enumerate(cqd_dt.ki)
-    ki_string = @sprintf("%2.2f",ki)
+    figa = plot(xlabel="Currents (A)",
+    ylabel=L"$F=1$ peak position (mm)");
+    plot!(figa, data_f1.Ic, data_f1.F1,
+        yerror = data_f1.ErrF1,
+        label="$(data_directories[𝓁])",
+        marker=(:square,2,:white),
+        markerstrokecolor=:black,
+        line=(:solid,:black)
+    );
     plot!(figa,
-        Icoils, up_cqd[:,i],
-        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
-        line=(:solid,1,colores_ki[i], 0.5),
-    )
-end
-plot!(figa,
-    xlims=(5e-3,1.05),
-    ylims=(1e-3,2.0),
-    legend=:outerright,
-    legend_columns = 2,
-    legendfontsize=6,
-    background_color_legend = nothing,
-    foreground_color_legend = nothing,
-    size=(1000,400),
-    left_margin=5mm,
-    bottom_margin=5mm
-);
-figb = deepcopy(figa);
-# display(figb)
-plot!(figa,
-    xscale=:log10,
-    yscale=:log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-);
-# display(figa)
+        QM_df[!,:Ic],QM_df[!,:F1],
+        label=L"$F=1$",
+        marker=(:circle,2,:white),
+        markerstrokecolor=:red,
+        line=(:red,2),
+    );
+    for (i,ki) in enumerate(cqd_dt.ki)
+        ki_string = @sprintf("%2.2f",ki)
+        plot!(figa,
+            Icoils, up_cqd[:,i],
+            label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+            line=(:solid,1,colores_ki[i], 0.5),
+        )
+    end
+    plot!(figa,
+        xlims=(5e-3,1.05),
+        ylims=(1e-3,2.0),
+        legend=:outerright,
+        legend_columns = 2,
+        legendfontsize=6,
+        background_color_legend = nothing,
+        foreground_color_legend = nothing,
+        size=(1000,400),
+        left_margin=5mm,
+        bottom_margin=5mm
+    );
+    figb = deepcopy(figa);
+    # display(figb)
+    plot!(figa,
+        xscale=:log10,
+        yscale=:log10,
+        xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    );
+    # display(figa)
 
-fig = plot(figa,figb,
-    layout=(2,1),
-    size=(1000,600),
-    top_margin=5mm)
-display(fig)
+    fig = plot(figa,figb,
+        layout=(2,1),
+        size=(1000,600),
+        top_margin=5mm)
+    display(fig)
 
 
-data_Δz = data_dir[data_dir.Δ .> 0, :];
+    data_Δz = data_dir[data_dir.Δ .> 0, :];
 
-figc = plot(
-    xlabel="Currents (A)",
-    ylabel="Peak-to-Peak distance (mm)",
-);
-for (i,ki) in enumerate(cqd_dt.ki)
-    ki_string = @sprintf("%2.2f",ki)
+    figc = plot(
+        xlabel="Currents (A)",
+        ylabel="Peak-to-Peak distance (mm)",
+    );
+    for (i,ki) in enumerate(cqd_dt.ki)
+        ki_string = @sprintf("%2.2f",ki)
+        plot!(figc,
+            Icoils, Δz_cqd[:,i],
+            label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+            line=(:solid,1,colores_ki[i]),
+
+        )
+    end
     plot!(figc,
-        Icoils, Δz_cqd[:,i],
-        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
-        line=(:solid,1,colores_ki[i]),
+        QM_df[!,:Ic],QM_df[!,:Δ],
+        label=L"QM $\Delta z$",
+        marker=(:circle,2,:white, 0.55),
+        markerstrokecolor=:lime,
+        line=(:lime,1),
+    );
+    plot!(figc, data_Δz.Ic, data_Δz.Δ,
+        yerror = data_Δz.ErrΔ,
+        label="$(data_directories[𝓁])",
+        marker=(:square,2,:white),
+        markerstrokecolor=:black,
+        line=(:solid,:black)
+    );
+    plot!(figc,
+        xlims=(5e-6,1.05),
+        ylims=(1e-3,4.2),
+        legend=:outerright,
+        legend_columns = 2,
+        legendfontsize=6,
+        background_color_legend = nothing,
+        foreground_color_legend = nothing,
+        size=(1000,400),
+        left_margin=5mm,
+        bottom_margin=5mm
+    );
+    figd = deepcopy(figc);
+    # display(figd)
+    plot!(figc,
+        xlims=(1e-3,1.05),
+        ylims=(1e-4,5.0),
+        xscale=:log10,
+        yscale=:log10,
+        xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        legend=:outerright,
+        legend_columns = 2,
+        legendfontsize=6,
+        background_color_legend = nothing,
+        foreground_color_legend = nothing,  
+    );
+    # display(figc)
 
-    )
-end
-plot!(figc,
-    QM_df[!,:Ic],QM_df[!,:Δ],
-    label=L"QM $\Delta z$",
-    marker=(:circle,2,:white, 0.55),
-    markerstrokecolor=:lime,
-    line=(:lime,1),
-);
-plot!(figc, data_Δz.Ic, data_Δz.Δ,
-    yerror = data_Δz.ErrΔ,
-    label="$(data_directories[𝓁])",
-    marker=(:square,2,:white),
-    markerstrokecolor=:black,
-    line=(:solid,:black)
-);
-plot!(figc,
-    xlims=(5e-6,1.05),
-    ylims=(1e-3,4.2),
-    legend=:outerright,
-    legend_columns = 2,
-    legendfontsize=6,
-    background_color_legend = nothing,
-    foreground_color_legend = nothing,
-    size=(1000,400),
-    left_margin=5mm,
-    bottom_margin=5mm
-);
-figd = deepcopy(figc);
-# display(figd)
-plot!(figc,
-    xlims=(1e-3,1.05),
-    ylims=(1e-4,5.0),
-    xscale=:log10,
-    yscale=:log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    legend=:outerright,
-    legend_columns = 2,
-    legendfontsize=6,
-    background_color_legend = nothing,
-    foreground_color_legend = nothing,  
-);
-# display(figc)
-
-fig = plot(figc,figd,
-    layout=(2,1),
-    size=(1000,600),
-    top_margin=7mm)
-display(fig)
+    fig = plot(figc,figd,
+        layout=(2,1),
+        size=(1000,600),
+        top_margin=7mm)
+    display(fig)
 
 end
 
 
+#++++++ DATA COMPARISON
 figa = plot(
     xlabel="Currents (A)",
     ylabel="Peak position (mm)"
@@ -1253,16 +1259,17 @@ plot!(figc,xscale=:log10, yscale=:log10,
 )
 
 
-plot(figa,figb,figc,
+fig = plot(figa,figb,figc,
 labelfontsize = 10,
 layout=(3,1),
 size=(1000,600),
 top_margin=2mm,
 left_margin=5mm,
 bottom_margin=3mm,
-)
+);
+display(fig)
 
-
+#++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 
