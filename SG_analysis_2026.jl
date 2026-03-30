@@ -171,6 +171,251 @@ TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
 function standard_error(x)
     return std(x; corrected=true) ./ sqrt.(length(x))
 end
+
+logspace10(lo, hi; n=50) = 10.0 .^ range(log10(lo), log10(hi); length=n)
+
+function log_mask(x, y)
+    (x .> 0) .& (y .> 0) .& isfinite.(x) .& isfinite.(y)
+end
+
+function fit_ki(data_org, selected_points, ki_list, ki_range)
+    """
+        fit_ki(data_org, selected_points, ki_list, ki_range)
+
+    Fit the induction coefficient `kᵢ` by minimizing a mean-squared error in **log10 space**
+    between the interpolated prediction `ki_itp(x, kᵢ)` and a selected subset of data points.
+    The fit is therefore sensitive to *relative (fractional) deviations* across orders of
+    magnitude.
+
+    Although the optimization is performed in log space, the reported error is evaluated
+    **in linear space** at the best-fit value of `kᵢ`, and is returned as a root-mean-square
+    error (RMSE) in the same physical units as the dependent variable (e.g. millimeters).
+
+    # Arguments
+    - `data_org` :: 2-column array `(x, y)`  
+    Full data set used to compute the coefficient of determination R² in linear space.
+
+    - `selected_points` :: 2-column array `(x, y)`  
+    Subset of points used for the fit. All `y` values must be strictly positive
+    (required for log10 evaluation).
+
+    - `ki_list` :: AbstractVector  
+    Vector of candidate `kᵢ` values defining the search interval.
+
+    - `ki_range` :: Tuple{Int,Int}  
+    Index range `(ki_start, ki_stop)` selecting the portion of `ki_list` used in
+    the bounded 1D optimization.
+
+    # Returns
+    NamedTuple with fields:
+    - `ki`        : Best-fit value of the induction coefficient `kᵢ`
+    - `ki_err`    : Root-mean-square error (RMSE) in **linear space**, evaluated on
+                    `selected_points` at the fitted `kᵢ`
+    - `r2_coeff`  : Coefficient of determination R² computed in linear space on `data_org`
+
+    # Notes
+    - The fit minimizes an error in log10 space, but no uncertainty on `kᵢ` is estimated.
+    The returned `ki_err` is **not** an error bar on `kᵢ`, but a goodness-of-fit measure
+    in real space.
+    - If the dependent variable spans several orders of magnitude, the log-space fit
+    prevents large-amplitude points from dominating the optimization, while the linear
+    RMSE provides a physically interpretable error metric.
+    """
+    ki_start, ki_stop = ki_range
+
+    Ic_fit = selected_points[:, 1]
+    z_fit  = selected_points[:, 3]
+
+    # # --- log-space loss (used ONLY for fitting) ---
+    loss_log(ki) = begin
+        z_pred = ki_itp.(Ic_fit, Ref(ki))
+        mean(abs2, log10.(z_pred) .- log10.(z_fit))
+    end
+
+    # 1D optimization over ki
+    fit_param = optimize(loss_log,
+                         ki_list[ki_start], ki_list[ki_stop],
+                         Brent())
+
+    k_fit = Optim.minimizer(fit_param)
+
+    # --- linear-space error (reported) ---
+    z_pred_sel = ki_itp.(Ic_fit, Ref(k_fit))
+    z_obs_sel  = z_fit
+
+    mse_lin  = mean(abs2, z_pred_sel .- z_obs_sel)
+    rmse_lin = sqrt(mse_lin)   # same units as z (e.g. mm)
+
+    # predictions for the full data set
+    Ic = data_org[:, 1]
+    pred = ki_itp.(Ic, Ref(k_fit))
+    y    = data_org[:, 3]
+    coef_r2 = 1 - sum(abs2, pred .- y) / sum(abs2, y .- mean(y))
+
+    return (ki = k_fit, ki_err = rmse_lin, r2_coeff = coef_r2)
+end
+
+function fit_ki_with_error(itp, data;
+    bounds::Tuple{<:Real,<:Real},
+    conf::Real = 0.95,
+    use_Zse::Bool = false,
+    profile::Bool = true,
+    profile_grid::Int = 400)
+    I  = collect(Float64, data[:, 1])
+    Z  = collect(Float64, data[:, 3])
+    σZ = collect(Float64, data[:, 4])   # only used if use_Zse=true
+
+    # Valid mask (log requires Z>0; σZ>0 if used)
+    m0 = isfinite.(I) .& isfinite.(Z) .& (Z .> 0)
+    if use_Zse
+        m0 .&= isfinite.(σZ) .& (σZ .> 0)
+    end
+    I, Z, σZ = I[m0], Z[m0], σZ[m0]
+
+    # weights in log10 space: Var(log10 Z) ≈ (σZ/(Z ln10))^2
+    w = use_Zse ? ((Z .* log(10.0)) ./ σZ) .^ 2 : ones(length(I))
+
+    ki_min, ki_max = float(bounds[1]), float(bounds[2])
+
+    # RSS objective in log10 space
+    function loss(ki)
+        zpred = itp.(I, Ref(ki))
+        m = isfinite.(zpred) .& (zpred .> 0)
+        any(m) || return Inf
+        r  = log10.(zpred[m]) .- log10.(Z[m])
+        ww = w[m]
+        sum(ww .* (r .^ 2))
+    end
+
+    res = optimize(loss, ki_min, ki_max, Brent())
+    k̂  = Optim.minimizer(res)
+
+    # residuals at optimum (define RSS0 consistently)
+    ẑ = itp.(I, Ref(k̂))
+    m = isfinite.(ẑ) .& (ẑ .> 0)
+    Zu, wu = Z[m], w[m]
+    r0 = log10.(ẑ[m]) .- log10.(Zu)
+
+    p = 1
+    n = length(r0)
+    @assert n > p "Not enough valid points to estimate uncertainty"
+
+    RSS0 = sum(wu .* (r0 .^ 2))
+    dof  = n - p
+    σ²   = RSS0 / dof
+
+    # finite-difference step (always computed)
+    fd_step(k, lo, hi; rel=cbrt(eps(Float64)), absmin=1e-12) = begin
+        hh = max(absmin, rel * max(abs(k), 1.0))
+        room = min(k - lo, hi - k)
+        room > 0 ? min(hh, 0.5 * room) : absmin
+    end
+    h₀ = fd_step(k̂, ki_min, ki_max)
+
+    # derivative dr/dk (central diff, common-valid points)
+    z⁺ = itp.(I[m], Ref(k̂ + h₀))
+    z⁻ = itp.(I[m], Ref(k̂ - h₀))
+    mJ = isfinite.(z⁺) .& isfinite.(z⁻) .& (z⁺ .> 0) .& (z⁻ .> 0)
+    @assert count(mJ) > p "Not enough valid points after derivative filtering"
+
+    Zu2 = Zu[mJ]
+    w2  = wu[mJ]
+    rJ  = r0[mJ]
+
+    r⁺ = log10.(z⁺[mJ]) .- log10.(Zu2)
+    r⁻ = log10.(z⁻[mJ]) .- log10.(Zu2)
+    drdk = (r⁺ .- r⁻) ./ (2h₀)
+
+    # SE from linearization: Var(k̂) ≈ σ² / (J'WJ)
+    SJJ = sum(w2 .* (drdk .^ 2))
+    se  = sqrt(σ² / SJJ)
+
+    tcrit = quantile(TDist(dof), 0.5 + conf/2)
+    k_err = tcrit * se
+    ci_t  = (k̂ - k_err, k̂ + k_err)
+
+    # R² in log10 space (weighted)
+    y  = log10.(Zu2)
+    ŷ  = log10.(ẑ[m][mJ])
+    ȳw = sum(w2 .* y) / sum(w2)
+    TSS = sum(w2 .* (y .- ȳw).^2)
+    R2  = TSS > 0 ? 1 - sum(w2 .* (y .- ŷ).^2) / TSS : NaN
+
+    # Profile interval: ΔRSS = χ²(1,conf) if weighted; else scale by σ²
+    ci_profile = nothing
+    Δtarget = profile ? quantile(Chisq(1), conf) : nothing
+    Δrss = nothing
+    profile_note = nothing
+
+    if profile
+        if use_Zse
+            Δrss = Δtarget
+        else
+            profile_note = :profile_interval_scaled_for_unweighted
+            Δrss = σ² * Δtarget
+        end
+        target = RSS0 + Δrss
+
+        function bracket_side(dir::Int)
+            grid = range(k̂, dir > 0 ? ki_max : ki_min; length=profile_grid)
+            prevk = first(grid)
+            prevL = loss(prevk)
+            for k in Iterators.drop(grid, 1)
+                L = loss(k)
+                if isfinite(L) && (L > target) && isfinite(prevL) && (prevL <= target)
+                    return (prevk, k)
+                end
+                prevk, prevL = k, L
+            end
+            return nothing
+        end
+
+        function bisect_cross(a, b; maxiter=80, tol=1e-10)
+            lo, hi = a, b
+            for _ in 1:maxiter
+                mid = (lo + hi)/2
+                fmid = loss(mid) - target
+                if !isfinite(fmid)
+                    hi = mid
+                    continue
+                end
+                if fmid > 0
+                    hi = mid
+                else
+                    lo = mid
+                end
+                if abs(hi - lo) <= tol*max(1.0, abs(mid))
+                    return (lo + hi)/2
+                end
+            end
+            return (lo + hi)/2
+        end
+
+        left_br  = bracket_side(-1)
+        right_br = bracket_side(+1)
+        k_lo = left_br  === nothing ? ki_min : bisect_cross(left_br[1], left_br[2])
+        k_hi = right_br === nothing ? ki_max : bisect_cross(right_br[1], right_br[2])
+        ci_profile = (k_lo, k_hi)
+    end
+
+    return (
+        ki = k̂,
+        ki_err = k_err,
+        se = se,
+        ci_t = ci_t,
+        ci_profile = ci_profile,
+        delta_target = Δtarget,
+        delta_rss = Δrss,
+        profile_note = profile_note,
+        rss = RSS0,
+        sigma2 = σ²,
+        dof = dof,
+        n_used = length(rJ),
+        r2_coeff = R2,
+        converged = Optim.converged(res),
+        result = res
+    )
+end
 ##################################################################################################
 # Coil currents
 Icoils = [0.00,
@@ -830,12 +1075,8 @@ plot!(fig1,
     legend_columns=3,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
-<<<<<<< HEAD
-);
-=======
     size=(800,600),
 )
->>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 display(fig1)
 
 
@@ -865,13 +1106,8 @@ plot!(fig2,
     legendfontsize=5,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
-<<<<<<< HEAD
-    
-);
-=======
     size=(800,600),
-)
->>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
+);
 display(fig2)
 
 fig = plot(fig1, fig2,
@@ -880,13 +1116,9 @@ layout=(2,1),
 link=:x,
 left_margin=5mm,
 bottom_margin=2mm,
-<<<<<<< HEAD
 );
-display(fig)
-=======
-)
 plot!(fig[2],legend=false)
->>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
+display(fig)
 
 #+++++++++ QUANTUM MECHANICS & COQUANTUM DYNAMICS +++++++++++++
 fig1 = plot(
@@ -933,12 +1165,9 @@ plot!(fig1,
     legend_columns=2,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
-<<<<<<< HEAD
-);
-=======
-    size=(1000,600)
+    size=(1000,600),
+    left_margin=5mm,
 )
->>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 display(fig1)
 
 
@@ -974,12 +1203,10 @@ plot!(fig2,
     legendfontsize=6,
     background_color_legend = nothing,
     foreground_color_legend = nothing,  
-<<<<<<< HEAD
-);
-=======
-    size=(1000,600)
+    size=(1000,600);
+    left_margin=4mm,
+    bottom_margin=2mm,
 )
->>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 display(fig2)
 
 
@@ -995,7 +1222,6 @@ display(fig)
 
 #+++++++++++++ EXPERIMENTS ++++++++++++++++++++
 EXP_data = OrderedDict{String, NamedTuple}()
-data_directories
 for dir in data_directories
     println(dir)
     kk_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS", "summary", dir, dir * "_report_summary.jld2")
@@ -1023,6 +1249,25 @@ for dir in data_directories
     end
 end
 
+
+
+plot(xlabel="Currents (A)",
+ylabel=L"$|z_{1}-z_{2}| $ (mm)")
+hspan!([1e-6,6e-3], color=:gray68, fillalpha=0.8, label="pixel size")
+for i = 1:8
+plot!(EXP_data[data_directories[i]].Ic, abs.(EXP_data[data_directories[i]].F1[1] .- EXP_data[data_directories[i]].F2[1]),
+    label=data_directories[i],
+    seriestype=:scatter,
+    marker=(:square,3,:white),
+    markerstrokewidth=2,
+    markerstrokecolor=colores[i])
+end
+plot!(legend=:topright,
+    xlims=(0,5e-3),
+    ylims=(1e-4,5),
+    # xscale=:log10,
+    yscale=:log10,
+)
 
 
 EXP_data_processed = OrderedDict{String, DataFrame}()
@@ -1106,19 +1351,11 @@ for 𝓁 = 1:8
     );
     # display(figa)
 
-<<<<<<< HEAD
     fig = plot(figa,figb,
         layout=(2,1),
-        size=(1000,600),
+        size=(1200,1000),
         top_margin=5mm)
     display(fig)
-=======
-fig = plot(figa,figb,
-    layout=(2,1),
-    size=(1200,1000),
-    top_margin=5mm)
-display(fig)
->>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 
 
     data_Δz = data_dir[data_dir.Δ .> 0, :];
@@ -1179,64 +1416,11 @@ display(fig)
     );
     # display(figc)
 
-<<<<<<< HEAD
     fig = plot(figc,figd,
         layout=(2,1),
-        size=(1000,600),
+        size=(1200,1000),
         top_margin=7mm)
     display(fig)
-=======
-    )
-end
-plot!(figc,
-    QM_df[!,:Ic],QM_df[!,:Δ],
-    label=L"QM $\Delta z$",
-    marker=(:circle,2,:white, 0.55),
-    markerstrokecolor=:lime,
-    line=(:lime,1),
-);
-plot!(figc, data_Δz.Ic, data_Δz.Δ,
-    yerror = data_Δz.ErrΔ,
-    label="$(data_directories[𝓁])",
-    marker=(:square,2,:white),
-    markerstrokecolor=:black,
-    line=(:solid,:black)
-);
-plot!(figc,
-    xlims=(5e-6,1.05),
-    ylims=(1e-3,4.2),
-    legend=:outerright,
-    legend_columns = 2,
-    legendfontsize=6,
-    background_color_legend = nothing,
-    foreground_color_legend = nothing,
-    size=(1000,400),
-    left_margin=5mm,
-    bottom_margin=5mm
-);
-figd = deepcopy(figc);
-# display(figd)
-plot!(figc,
-    xlims=(1e-3,1.05),
-    ylims=(1e-4,5.0),
-    xscale=:log10,
-    yscale=:log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    legend=:outerright,
-    legend_columns = 2,
-    legendfontsize=6,
-    background_color_legend = nothing,
-    foreground_color_legend = nothing,  
-);
-# display(figc)
-
-fig = plot(figc,figd,
-    layout=(2,1),
-    size=(1200,1000),
-    top_margin=7mm)
-display(fig)
->>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 
 end
 
@@ -1349,11 +1533,7 @@ plot!(figc,xscale=:log10, yscale=:log10,
 )
 
 
-<<<<<<< HEAD
-fig = plot(figa,figb,figc,
-=======
-plot(figa,figa1, figb,figc, figc1,
->>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
+fig = plot(figa,figa1, figb,figc, figc1,
 labelfontsize = 10,
 layout=@layout[ a1 a2 ; a3; a4 a5],
 size=(1200,1000),
@@ -1364,6 +1544,270 @@ bottom_margin=3mm,
 display(fig)
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+# Select a subset of kᵢ values for interpolation
+using Dierckx
+# ki_start , ki_stop = 1 , 109 ;
+ki_start , ki_stop = 1 , 65 ;
+println("Interpolation in the induction term goes from ",
+    round(1e-6*cqd_dt.ki[ki_start]; sigdigits=3),
+    " to ",
+    (1e-6*round(cqd_dt.ki[ki_stop], sigdigits=3)),
+    "")
+# Build 2D cubic spline interpolant: z_max(I, kᵢ)
+# s=0 => exact interpolation (no smoothing)
+ki_itp = Spline2D(Icoils, cqd_dt.ki[ki_start:ki_stop], up_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+
+# -----------------------------------------------------------------------------
+# Create a dense grid for visualization:
+#   - currents from 10 mA to 1 A
+#   - ki from chosen min to max
+# -----------------------------------------------------------------------------
+i_surface = range(10e-3,1.0; length = 101);
+ki_surface = range(cqd_dt.ki[ki_start],cqd_dt.ki[ki_stop]; length = 101);
+# Evaluate surface on a grid.
+Z = [ki_itp(x, y) for y in ki_surface, x in i_surface] ;
+
+# -----------------------------------------------------------------------------
+# 3D surface plot (log10 axes for I and z)
+# -----------------------------------------------------------------------------
+fit_surface = surface(log10.(i_surface), ki_surface, log10.(abs.(Z));
+    title = "Fitting surface",
+    xlabel = L"I_{c}",
+    ylabel = L"$k_{i}\times 10^{-6}$",
+    zlabel = L"$z\ (\mathrm{mm})$",
+    legend = false,
+    color = :viridis,
+    xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+    camera = (20, 25),     # (azimuth, elevation)
+    xlims = log10.((8e-4,2.05)),
+    zlims = log10.((2e-4,10.0)),
+    gridalpha = 0.3,
+)
+
+# -----------------------------------------------------------------------------
+# Contour plot uses log10(z) as the displayed quantity.
+# We clamp |Z| away from zero to avoid log10(0) and produce stable color limits.
+# -----------------------------------------------------------------------------
+Zp   = max.(abs.(Z), 1e-12);
+logZ = log10.(Zp);
+# Choose "decade" ticks for the colorbar based on min/max of logZ
+lo , hi  = floor(minimum(logZ)) , ceil(maximum(logZ)); 
+decades = collect(lo:1:hi) ; # [-4,-3,-2,-1,0] 
+labels = [L"10^{%$k}" for k in decades];
+fit_contour = contourf(i_surface, ki_surface, logZ; 
+    levels=101,
+    title="Fitting contour",
+    xlabel=L"$I_{c}$ (A)", 
+    ylabel=L"$k_{i}\times 10^{-6}$", 
+    color=:viridis, 
+    linewidth=0.2,
+    linestyle=:dash,
+    xaxis=:log10,
+    yaxis=:log10,
+    xlims = (9e-3,1.05),
+    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    clims = (lo, hi),   # optional explicit range
+    colorbar_ticks = (decades, labels),      # show ticks as 10^k
+    colorbar_title = L"$ z \ \mathrm{(mm)}$",   # what the values mean
+);
+
+# Combined display: surface on top, contour below
+fit_figs = plot(fit_surface, fit_contour,
+    layout=@layout([a ; b]),
+    size = (1800,750),
+    bottom_margin = 8mm,
+    top_margin = 3mm,
+);
+display(fit_figs)
+
+# Currents used for scan/plotting of fitted curves (log-spaced)
+I_scan = logspace10(0.020, 1.00; n = 501);
+
+zqm = Spline1D(QM_df[!,:Ic],QM_df[!,:F1],k=3);
+
+# -----------------------------------------------------------------------------
+# 2) Choose which rows to use for the kᵢ fit
+#
+# Available modes:
+#   - fit_ki_mode = :full
+#       Use the full post-threshold current range.
+#
+#   - fit_ki_mode = :low
+#       Use only the low-current window (small-deflection regime).
+#
+#   - fit_ki_mode = :high
+#       Use only the high-current window (asymptotic / large-deflection regime).
+#
+#   - fit_ki_mode = :low_high
+#       Use both low- and high-current windows, excluding the mid-current region.
+#
+# This flexibility allows the fit to emphasize different physical regimes,
+# depending on whether sensitivity to low-current behavior, high-current
+# behavior, or both is desired.
+# -----------------------------------------------------------------------------
+fit_ki_mode = :full   # ← change to :low, :high, or :low_high
+n_front  = 5
+n_back   = 6
+
+for dir in data_directories
+
+dir_chosen = EXP_data_processed[dir]
+
+data_threshold = dir_chosen[dir_chosen.Ic .> 0.020, :]
+
+data = hcat(data_threshold[!,:Ic], 0.02 * data_threshold[!,:Ic] , data_threshold[!,:F1], data_threshold[!,:ErrF1] )
+
+
+low_range  = 1:n_front ;
+high_range = (size(data, 1) - n_back + 1):size(data, 1);
+
+@assert last(low_range) ≤ size(data,1)
+@assert first(high_range) ≥ 1
+
+# Select rows according to the chosen fitting mode
+fit_ki_idx = begin
+    if fit_ki_mode === :full
+        Colon()
+    elseif fit_ki_mode === :low
+        low_range
+    elseif fit_ki_mode === :high
+        high_range
+    elseif fit_ki_mode === :low_high
+        vcat(low_range, high_range)
+    else
+        error("Unknown fit_ki_mode = $fit_ki_mode")
+    end
+end
+
+# -----------------------------------------------------------------------------
+# 3) Compute a global scaling factor for the experimental z-values 
+#   with respect to QM
+#
+# Motivation:
+#   Experimental z may differ from simulated z by an overall scale factor
+#   (e.g., magnification calibration). We estimate a single multiplicative
+#   factor using only the highest-current tail, where SNR is typically best.
+#
+# Scaling convention used:
+#   scaled_mag = (yexp⋅yexp) / (yexp⋅ythe)
+# so that (yexp / scaled_mag) best matches ythe in a least-squares sense.
+# -----------------------------------------------------------------------------
+n_tail = 6  # number of tail points used for scaling
+
+@printf "For the scaling of the experimental data, we use the current range = %.3f A – %.3f A \n" first(last(data[:, 1], n_tail)) last(last(data[:, 1], n_tail))
+yexp = last(data[:, 3], n_tail)              # experimental z-values (tail)
+ythe = last(zqm.(data[:, 1]), n_tail)        # QM reference z-values at same currents
+scaled_mag = dot(yexp, yexp) / dot(yexp, ythe)
+
+# Apply scaling to both z and δz to preserve relative uncertainties
+data_scaled = copy(data);
+data_scaled[:, 3] ./= scaled_mag;
+data_scaled[:, 4] ./= scaled_mag;
+
+# @printf "The re-scaling factor of the experimental data with respect to Quantum Mechanics is %.3f" scaled_mag
+@printf "The re-scaling factor for the high current regime is %.3f" scaled_mag
+println("")
+
+
+
+
+# -----------------------------------------------------------------------------
+# 4) Build fitting subsets and fit kᵢ using CQD interpolant surface
+#
+# Note:
+#   fit_ki minimizes the log-space residual internally, but reports a 
+#   linear-space RMSE as `ki_err`.
+# -----------------------------------------------------------------------------
+data_fitting        = data[fit_ki_idx, :];
+data_scaled_fitting = data_scaled[fit_ki_idx, :];
+fit_original = fit_ki(data, data_fitting, cqd_dt.ki, (ki_start,ki_stop))
+fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, cqd_dt.ki, (ki_start,ki_stop))
+
+@info "Induction term ki = $(round(fit_scaled.ki; sigdigits=4))"
+
+z_qm = zqm.(I_scan);
+m_qm = log_mask(I_scan, z_qm);
+fig = plot(
+    I_scan[m_qm], z_qm[m_qm];
+    label = "Quantum mechanics",
+    line  = (:solid, :red, 1.75),
+)
+plot!(
+    fig,
+    data_scaled[:,1], data_scaled[:,3];
+    color = :gray35,
+    marker = (:circle, :gray35, 4),
+    markerstrokecolor = :gray35,
+    markerstrokewidth = 1,
+    label = dir,
+)
+z_fit_orig = ki_itp.(I_scan, Ref(fit_scaled.ki));
+m_orig = log_mask(I_scan, z_fit_orig);
+plot!(
+    fig,
+    I_scan[m_orig], z_fit_orig[m_orig];
+    label = L"Original : $k_{i}= \left( %$(round(fit_original.ki, sigdigits=3)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
+    line  = (:solid, :blue, 2),
+    marker = (:xcross, :blue, 0.2),
+    markerstrokewidth = 1,
+)
+plot!(
+    fig;
+    # title = dir,
+    xlabel = "Current (A)",
+    ylabel = L"$z_{\mathrm{max}}$ (mm)",
+    xaxis  = :log10,
+    yaxis  = :log10,
+    labelfontsize = 14,
+    tickfontsize  = 12,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0],
+              [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0],
+              [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims = (0.010, 1.05),
+    size  = (900, 800),
+    # legendtitle = L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(1e3*σw_fixed)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$",
+    legendfontsize = 12,
+    left_margin = 3mm,
+)
+display(fig)
+
+
+end
+
+fit_ki_with_error(ki_itp, data_fitting; bounds=(cqd_dt.ki[ki_start], cqd_dt.ki[ki_stop]),)
+fit_ki_with_error(ki_itp, data_scaled_fitting; bounds=(cqd_dt.ki[ki_start], cqd_dt.ki[ki_stop]),)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+cqd_dt = JLD2_MyTools.list_keys_jld_cqd(data_cqdup_path);
+n_ki = length(cqd_dt.ki);
+@info "CQD simulation for $(n_ki) ki values"
+colores_ki = palette(:darkrainbow, n_ki)
+up_cqd = Matrix{Float64}(undef, nI, n_ki);
+dw_cqd = Matrix{Float64}(undef, nI, n_ki);
+Δz_cqd = Matrix{Float64}(undef, nI, n_ki);
+
+
+
+
+
 
 
 
