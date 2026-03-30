@@ -205,7 +205,7 @@ no = length(data_directories);
 colores = palette(:darkrainbow, no);
 
 nz , λ0 = 2, 0.01;
-σw_mm = 0.200
+σw_mm = 0.200;
 
 ############ phywe magnetic field measurement ##############################
 BvsI_phywe = sort(CSV.read("SG_BvsI_phywe.csv",DataFrame; header=["Ic","Bz"]),1);
@@ -806,10 +806,10 @@ end
 fig1 = plot(xlabel="Current (A)",
     ylabel="Peak position (mm)");
 for (i,ki) in enumerate(cqd_dt.ki)
-    ki_string = @sprintf("%2.2f",ki)
+    ki_string = @sprintf("%2.3f",ki)
     plot!(fig1,
         Icoils, up_cqd[:,i],
-        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+        label=L"$%$(ki_string)$",
         line=(:solid,1,colores_ki[i]),
 
     )
@@ -825,11 +825,17 @@ plot!(fig1,
     xscale=:log10,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     legend=:outerright,
+    legendtitle=L"$k_{i} \times 10^{-6}$",
     legendfontsize=6,
-    legend_columns=2,
+    legend_columns=3,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
+<<<<<<< HEAD
 );
+=======
+    size=(800,600),
+)
+>>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 display(fig1)
 
 
@@ -838,10 +844,10 @@ fig2 = plot(
     ylabel="Peak-to-Peak distance (mm)",
 );
 for (i,ki) in enumerate(cqd_dt.ki)
-    ki_string = @sprintf("%2.2f",ki)
+    ki_string = @sprintf("%2.3f",ki)
     plot!(fig2,
         Icoils, Δz_cqd[:,i],
-        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+        label=L"$%$(ki_string)$",
         line=(:solid,1,colores_ki[i]),
 
     )
@@ -854,22 +860,33 @@ plot!(fig2,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     legend=:outerright,
-    legend_columns = 2,
-    legendfontsize=6,
+    legendtitle=L"$k_{i} \times 10^{-6}$",
+    legend_columns = 3,
+    legendfontsize=5,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
+<<<<<<< HEAD
     
 );
+=======
+    size=(800,600),
+)
+>>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 display(fig2)
 
 fig = plot(fig1, fig2,
-size=(1000,600),
+size=(1000,800),
 layout=(2,1),
 link=:x,
 left_margin=5mm,
 bottom_margin=2mm,
+<<<<<<< HEAD
 );
 display(fig)
+=======
+)
+plot!(fig[2],legend=false)
+>>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 
 #+++++++++ QUANTUM MECHANICS & COQUANTUM DYNAMICS +++++++++++++
 fig1 = plot(
@@ -893,7 +910,7 @@ plot!(fig1,
     line=(:blue,1)
 );
 for (i,ki) in enumerate(cqd_dt.ki)
-    ki_string = @sprintf("%2.2f",ki)
+    ki_string = @sprintf("%2.3f",ki)
     plot!(fig1,
         Icoils, up_cqd[:,i],
         label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
@@ -916,7 +933,12 @@ plot!(fig1,
     legend_columns=2,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
+<<<<<<< HEAD
 );
+=======
+    size=(1000,600)
+)
+>>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 display(fig1)
 
 
@@ -952,12 +974,17 @@ plot!(fig2,
     legendfontsize=6,
     background_color_legend = nothing,
     foreground_color_legend = nothing,  
+<<<<<<< HEAD
 );
+=======
+    size=(1000,600)
+)
+>>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 display(fig2)
 
 
 fig = plot(fig1, fig2,
-size=(1000,600),
+size=(1200,1000),
 layout=(2,1),
 link=:x,
 left_margin=5mm,
@@ -1079,11 +1106,19 @@ for 𝓁 = 1:8
     );
     # display(figa)
 
+<<<<<<< HEAD
     fig = plot(figa,figb,
         layout=(2,1),
         size=(1000,600),
         top_margin=5mm)
     display(fig)
+=======
+fig = plot(figa,figb,
+    layout=(2,1),
+    size=(1200,1000),
+    top_margin=5mm)
+display(fig)
+>>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 
 
     data_Δz = data_dir[data_dir.Δ .> 0, :];
@@ -1144,11 +1179,64 @@ for 𝓁 = 1:8
     );
     # display(figc)
 
+<<<<<<< HEAD
     fig = plot(figc,figd,
         layout=(2,1),
         size=(1000,600),
         top_margin=7mm)
     display(fig)
+=======
+    )
+end
+plot!(figc,
+    QM_df[!,:Ic],QM_df[!,:Δ],
+    label=L"QM $\Delta z$",
+    marker=(:circle,2,:white, 0.55),
+    markerstrokecolor=:lime,
+    line=(:lime,1),
+);
+plot!(figc, data_Δz.Ic, data_Δz.Δ,
+    yerror = data_Δz.ErrΔ,
+    label="$(data_directories[𝓁])",
+    marker=(:square,2,:white),
+    markerstrokecolor=:black,
+    line=(:solid,:black)
+);
+plot!(figc,
+    xlims=(5e-6,1.05),
+    ylims=(1e-3,4.2),
+    legend=:outerright,
+    legend_columns = 2,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size=(1000,400),
+    left_margin=5mm,
+    bottom_margin=5mm
+);
+figd = deepcopy(figc);
+# display(figd)
+plot!(figc,
+    xlims=(1e-3,1.05),
+    ylims=(1e-4,5.0),
+    xscale=:log10,
+    yscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerright,
+    legend_columns = 2,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,  
+);
+# display(figc)
+
+fig = plot(figc,figd,
+    layout=(2,1),
+    size=(1200,1000),
+    top_margin=7mm)
+display(fig)
+>>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 
 end
 
@@ -1177,13 +1265,14 @@ plot!(figa,
     line=(:red,1),
 )
 plot!(figa,
-    xlims=(10e-3, 1.05),
-    ylims=(1e-3, 2.05))
-plot!(figa,
     legend=:bottomright,
     legendfontsize=6,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
+    xlims=(10e-3, 1.05),
+    ylims=(1e-3, 2.05))
+figa1= deepcopy(figa)
+plot!(figa,
     xscale=:log10,
     yscale=:log10,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
@@ -1253,16 +1342,21 @@ plot!(figc,
     xlims=(10e-3, 1.05),
     ylims=(1e-3, 4.05),
 )
+figc1 = deepcopy(figc)
 plot!(figc,xscale=:log10, yscale=:log10,
  xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
  yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
 )
 
 
+<<<<<<< HEAD
 fig = plot(figa,figb,figc,
+=======
+plot(figa,figa1, figb,figc, figc1,
+>>>>>>> 41a6e1bd97275ed15d64dadbb23cfd6e082beb39
 labelfontsize = 10,
-layout=(3,1),
-size=(1000,600),
+layout=@layout[ a1 a2 ; a3; a4 a5],
+size=(1200,1000),
 top_margin=2mm,
 left_margin=5mm,
 bottom_margin=3mm,
