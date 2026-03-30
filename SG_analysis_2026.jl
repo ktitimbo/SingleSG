@@ -1252,21 +1252,21 @@ end
 
 
 plot(xlabel="Currents (A)",
-ylabel=L"$|z_{1}-z_{2}| $ (mm)")
-hspan!([1e-6,6e-3], color=:gray68, fillalpha=0.8, label="pixel size")
+ylabel=L"$z_{1}-z_{2}$ (mm)")
+hspan!([-6.5e-3,6.5e-3], color=:gray68, fillalpha=0.8, label="pixel size")
 for i = 1:8
-plot!(EXP_data[data_directories[i]].Ic, abs.(EXP_data[data_directories[i]].F1[1] .- EXP_data[data_directories[i]].F2[1]),
+plot!(EXP_data[data_directories[i]].Ic, EXP_data[data_directories[i]].F1[1] .- EXP_data[data_directories[i]].F2[1],
     label=data_directories[i],
     seriestype=:scatter,
     marker=(:square,3,:white),
     markerstrokewidth=2,
     markerstrokecolor=colores[i])
 end
-plot!(legend=:topright,
-    xlims=(0,5e-3),
-    ylims=(1e-4,5),
+plot!(legend=:outerright,
+    xlims=(-0.1e-3,0.1e-3),
+    ylims=(-10e-3,20e-3),
     # xscale=:log10,
-    yscale=:log10,
+    # yscale=:log10,
 )
 
 
@@ -1655,7 +1655,7 @@ for dir in data_directories
 
 dir_chosen = EXP_data_processed[dir]
 
-data_threshold = dir_chosen[dir_chosen.Ic .> 0.020, :]
+data_threshold = dir_chosen[dir_chosen.Ic .> 0.025, :]
 
 data = hcat(data_threshold[!,:Ic], 0.02 * data_threshold[!,:Ic] , data_threshold[!,:F1], data_threshold[!,:ErrF1] )
 
@@ -1737,6 +1737,7 @@ fig = plot(
 plot!(
     fig,
     data_scaled[:,1], data_scaled[:,3];
+    yerror= data_scaled[:,4],
     color = :gray35,
     marker = (:circle, :gray35, 4),
     markerstrokecolor = :gray35,
@@ -1748,7 +1749,7 @@ m_orig = log_mask(I_scan, z_fit_orig);
 plot!(
     fig,
     I_scan[m_orig], z_fit_orig[m_orig];
-    label = L"Original : $k_{i}= \left( %$(round(fit_original.ki, sigdigits=3)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
+    label = L"CQD : $k_{i}= \left( %$(round(fit_original.ki, sigdigits=3)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
     line  = (:solid, :blue, 2),
     marker = (:xcross, :blue, 0.2),
     markerstrokewidth = 1,
@@ -1782,9 +1783,16 @@ fit_ki_with_error(ki_itp, data_scaled_fitting; bounds=(cqd_dt.ki[ki_start], cqd_
 
 
 
+TheoreticalSimulation.BvsI(1.0)
+TheoreticalSimulation.GvsI(1.0)
+
+6400/130 * 4
 
 
+TheoreticalSimulation.BvsI(0.020)
 
+
+0.0200/0.0275
 
 
 
