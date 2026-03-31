@@ -416,6 +416,39 @@ function fit_ki_with_error(itp, data;
         result = res
     )
 end
+
+function sigdigits_str(x, n=3)
+    x == 0 && return "0"
+
+    xr = round(x; sigdigits=n)
+
+    # number of decimal places needed
+    d = max(0, n - 1 - floor(Int, log10(abs(xr))))
+
+    s = @sprintf("%.*f", d, xr)
+
+    # remove trailing zeros and possible trailing dot
+    s = replace(s, r"(\.\d*?)0+$" => s"\1")
+    s = replace(s, r"\.$" => "")
+
+    return s
+end
+
+function sci_label(x; n=3)
+    x == 0 && return L"$0.0$"
+
+    exp = floor(Int, log10(abs(x)))
+    mant = x / 10.0^exp
+
+    # round mantissa to (n sigdigits → typically 1 decimal for n=3)
+    mant_r = round(mant; sigdigits=n)
+
+    # force exactly ONE decimal place
+    mant_str = @sprintf("%.1f", mant_r)
+
+    return L"$%$(mant_str) \times 10^{%$exp}$"
+end
+
 ##################################################################################################
 # Coil currents
 Icoils = [0.00,
@@ -927,7 +960,7 @@ plot!(
     background_color_legend = nothing,
     xminorticks=false,
     bottom_margin=5mm,
-    ylabel="peak position (mm)",
+    ylabel="Position (mm)",
     xrotation=75,)
 
 
@@ -966,7 +999,7 @@ pretty_table(QM_df;
 
 fig1 = plot(
     xlabel="Currents (A)",
-    ylabel="Peak position (mm)",
+    ylabel="Position (mm)",
 );
 plot!(fig1,
     QM_df[!,:Ic],QM_df[!,:F1],
@@ -994,7 +1027,7 @@ display(fig1)
 
 fig2 = plot(
     xlabel="Currents (A)",
-    ylabel="Peak-to-Peak distance (mm)",
+    ylabel="Peak-to-Peak (mm)",
 );
 plot!(fig2,
     QM_df[!,:Ic],QM_df[!,:Δ],
@@ -1019,22 +1052,23 @@ display(fig2)
 
 fig = plot(fig1, fig2,
 layout=(2,1),
-link=:x,)
-plot!(fig[1], xlabel="", xformatter=_->"");
+link=:x,
+labelfontsize=10)
+plot!(fig[1], xlabel="", xformatter=_->"", bottom_margin=-8mm);
 display(fig)
 
 
 
 #+++++++++ COQUANTUM DYNAMICS +++++++++++++
-cqd_dt = JLD2_MyTools.list_keys_jld_cqd(data_cqdup_path);
-n_ki = length(cqd_dt.ki);
+cqd_sim_data = JLD2_MyTools.list_keys_jld_cqd(data_cqdup_path);
+n_ki = length(cqd_sim_data.ki);
 @info "CQD simulation for $(n_ki) ki values"
-colores_ki = palette(:darkrainbow, n_ki)
+colores_ki = palette(:darkrainbow, n_ki);
 up_cqd = Matrix{Float64}(undef, nI, n_ki);
 dw_cqd = Matrix{Float64}(undef, nI, n_ki);
 Δz_cqd = Matrix{Float64}(undef, nI, n_ki);
 
-for (i,ki) in enumerate(cqd_dt.ki)
+for (i,ki) in enumerate(cqd_sim_data.ki)
     dataup = jldopen(data_cqdup_path,"r") do f
         f[JLD2_MyTools.make_keypath_cqd(:up,ki,nz,σw_mm,λ0)]
     end
@@ -1048,10 +1082,11 @@ for (i,ki) in enumerate(cqd_dt.ki)
     Δz_cqd[:,i] = up_cqd[:,i] .- dw_cqd[:,i]
 end
 
+
 fig1 = plot(xlabel="Current (A)",
-    ylabel="Peak position (mm)");
-for (i,ki) in enumerate(cqd_dt.ki)
-    ki_string = @sprintf("%2.3f",ki)
+    ylabel="Position (mm)");
+for (i,ki) in enumerate(cqd_sim_data.ki)
+    ki_string = sigdigits_str(ki, 2)
     plot!(fig1,
         Icoils, up_cqd[:,i],
         label=L"$%$(ki_string)$",
@@ -1071,21 +1106,24 @@ plot!(fig1,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     legend=:outerright,
     legendtitle=L"$k_{i} \times 10^{-6}$",
+    legendtitlefontsize=8,
     legendfontsize=6,
-    legend_columns=3,
+    legend_columns=4,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     size=(800,600),
+    left_margin=2mm,
 )
 display(fig1)
 
 
 fig2 = plot(
     xlabel="Currents (A)",
-    ylabel="Peak-to-Peak distance (mm)",
+    ylabel="Peak-to-Peak (mm)",
 );
-for (i,ki) in enumerate(cqd_dt.ki)
-    ki_string = @sprintf("%2.3f",ki)
+for (i,ki) in enumerate(cqd_sim_data.ki)
+    # ki_string = @sprintf("%2.3f",ki)
+    ki_string = sigdigits_str(ki, 2)
     plot!(fig2,
         Icoils, Δz_cqd[:,i],
         label=L"$%$(ki_string)$",
@@ -1095,35 +1133,38 @@ for (i,ki) in enumerate(cqd_dt.ki)
 end
 plot!(fig2,
     xlims=(1e-3,1.05),
-    ylims=(1e-4,5.0),
+    ylims=(1e-3,5.0),
     xscale=:log10,
     yscale=:log10,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     legend=:outerright,
     legendtitle=L"$k_{i} \times 10^{-6}$",
-    legend_columns = 3,
-    legendfontsize=5,
+    legendtitlefontsize=8,
+    legendfontsize=6,
+    legend_columns=4,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     size=(800,600),
+    left_margin=2mm,
 );
 display(fig2)
 
 fig = plot(fig1, fig2,
-size=(1000,800),
-layout=(2,1),
-link=:x,
-left_margin=5mm,
-bottom_margin=2mm,
+    size=(1100,900),
+    layout=(2,1),
+    link=:x,
+    left_margin=5mm,
+    bottom_margin=2mm,
 );
-plot!(fig[2],legend=false)
+plot!(fig[1], xlabel="", xformatter=_->"",bottom_margin=-9mm,legend=false);
+plot!(fig[2], bottom_margin=-10mm,legend=:outerbottom, legend_columns=7);
 display(fig)
 
 #+++++++++ QUANTUM MECHANICS & COQUANTUM DYNAMICS +++++++++++++
 fig1 = plot(
     xlabel="Currents (A)",
-    ylabel="Peak position (mm)",
+    ylabel="Position (mm)",
 );
 plot!(fig1,
     QM_df[!,:Ic],QM_df[!,:F1],
@@ -1141,11 +1182,11 @@ plot!(fig1,
     markerstrokecolor=:blue,
     line=(:blue,1)
 );
-for (i,ki) in enumerate(cqd_dt.ki)
-    ki_string = @sprintf("%2.3f",ki)
+for (i,ki) in enumerate(cqd_sim_data.ki)
+    ki_string = sci_label(1e-6*ki; n=2)
     plot!(fig1,
         Icoils, up_cqd[:,i],
-        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+        label=L"$k_{i}=$%$(ki_string)",
         line=(:solid,1,colores_ki[i]),
 
     )
@@ -1173,13 +1214,13 @@ display(fig1)
 
 fig2 = plot(
     xlabel="Currents (A)",
-    ylabel="Peak-to-Peak distance (mm)",
+    ylabel="Peak-to-Peak (mm)",
 );
-for (i,ki) in enumerate(cqd_dt.ki)
-    ki_string = @sprintf("%2.2f",ki)
+for (i,ki) in enumerate(cqd_sim_data.ki)
+    ki_string = sci_label(1e-6*ki; n=2)
     plot!(fig2,
         Icoils, Δz_cqd[:,i],
-        label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+        label=L"$k_{i}=$%$(ki_string)",
         line=(:solid,1,colores_ki[i]),
 
     )
@@ -1188,8 +1229,8 @@ plot!(fig2,
     QM_df[!,:Ic],QM_df[!,:Δ],
     label=L"QM $\Delta z$",
     marker=(:circle,2,:white, 0.55),
-    markerstrokecolor=:lime,
-    line=(:lime,1),
+    markerstrokecolor=:black,
+    line=(:black,2),
 );
 plot!(fig2,
     xlims=(1e-3,1.05),
@@ -1209,7 +1250,6 @@ plot!(fig2,
 )
 display(fig2)
 
-
 fig = plot(fig1, fig2,
 size=(1200,1000),
 layout=(2,1),
@@ -1217,6 +1257,8 @@ link=:x,
 left_margin=5mm,
 bottom_margin=2mm,
 );
+plot!(fig[1], xlabel="", xformatter=_->"",bottom_margin=-9mm,legend=false);
+plot!(fig[2], xlabel="", xformatter=_->"",bottom_margin=-3mm,legend=:outerbottom, legend_columns=7);
 display(fig)
 
 
@@ -1306,7 +1348,7 @@ for 𝓁 = 1:8
     data_f1 = data_dir[data_dir.F1 .> 0, :]
 
     figa = plot(xlabel="Currents (A)",
-    ylabel=L"$F=1$ peak position (mm)");
+    ylabel=L"$F=1$ position (mm)");
     plot!(figa, data_f1.Ic, data_f1.F1,
         yerror = data_f1.ErrF1,
         label="$(data_directories[𝓁])",
@@ -1321,7 +1363,7 @@ for 𝓁 = 1:8
         markerstrokecolor=:red,
         line=(:red,2),
     );
-    for (i,ki) in enumerate(cqd_dt.ki)
+    for (i,ki) in enumerate(cqd_sim_data.ki)
         ki_string = @sprintf("%2.2f",ki)
         plot!(figa,
             Icoils, up_cqd[:,i],
@@ -1362,9 +1404,9 @@ for 𝓁 = 1:8
 
     figc = plot(
         xlabel="Currents (A)",
-        ylabel="Peak-to-Peak distance (mm)",
+        ylabel="Peak-to-Peak (mm)",
     );
-    for (i,ki) in enumerate(cqd_dt.ki)
+    for (i,ki) in enumerate(cqd_sim_data.ki)
         ki_string = @sprintf("%2.2f",ki)
         plot!(figc,
             Icoils, Δz_cqd[:,i],
@@ -1428,7 +1470,7 @@ end
 #++++++ DATA COMPARISON
 figa = plot(
     xlabel="Currents (A)",
-    ylabel="Peak position (mm)"
+    ylabel="Position (mm)"
 )
 for (i,dir) in enumerate(data_directories)
     plot!(figa,
@@ -1465,7 +1507,7 @@ plot!(figa,
 
 figb = plot(
     xlabel="Currents (A)",
-    ylabel="Peak position (mm)"
+    ylabel="Position (mm)"
 )
 for (i,dir) in enumerate(data_directories)
     plot!(figb,
@@ -1498,7 +1540,7 @@ plot!(figb,
 
 figc = plot(
     xlabel="Currents (A)",
-    ylabel="Peak-to-Peak position (mm)"
+    ylabel="Peak-to-position (mm)"
 )
 for (i,dir) in enumerate(data_directories)
     plot!(figc,
@@ -1550,13 +1592,13 @@ using Dierckx
 # ki_start , ki_stop = 1 , 109 ;
 ki_start , ki_stop = 1 , 65 ;
 println("Interpolation in the induction term goes from ",
-    round(1e-6*cqd_dt.ki[ki_start]; sigdigits=3),
+    round(1e-6*cqd_sim_data.ki[ki_start]; sigdigits=3),
     " to ",
-    (1e-6*round(cqd_dt.ki[ki_stop], sigdigits=3)),
+    (1e-6*round(cqd_sim_data.ki[ki_stop], sigdigits=3)),
     "")
 # Build 2D cubic spline interpolant: z_max(I, kᵢ)
 # s=0 => exact interpolation (no smoothing)
-ki_itp = Spline2D(Icoils, cqd_dt.ki[ki_start:ki_stop], up_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+ki_itp = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], up_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
 # -----------------------------------------------------------------------------
 # Create a dense grid for visualization:
@@ -1564,7 +1606,7 @@ ki_itp = Spline2D(Icoils, cqd_dt.ki[ki_start:ki_stop], up_cqd[:,ki_start:ki_stop
 #   - ki from chosen min to max
 # -----------------------------------------------------------------------------
 i_surface = range(10e-3,1.0; length = 101);
-ki_surface = range(cqd_dt.ki[ki_start],cqd_dt.ki[ki_stop]; length = 101);
+ki_surface = range(cqd_sim_data.ki[ki_start],cqd_sim_data.ki[ki_stop]; length = 101);
 # Evaluate surface on a grid.
 Z = [ki_itp(x, y) for y in ki_surface, x in i_surface] ;
 
@@ -1722,8 +1764,8 @@ println("")
 # -----------------------------------------------------------------------------
 data_fitting        = data[fit_ki_idx, :];
 data_scaled_fitting = data_scaled[fit_ki_idx, :];
-fit_original = fit_ki(data, data_fitting, cqd_dt.ki, (ki_start,ki_stop))
-fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, cqd_dt.ki, (ki_start,ki_stop))
+fit_original = fit_ki(data, data_fitting, cqd_sim_data.ki, (ki_start,ki_stop))
+fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, cqd_sim_data.ki, (ki_start,ki_stop))
 
 @info "Induction term ki = $(round(fit_scaled.ki; sigdigits=4))"
 
@@ -1778,8 +1820,8 @@ display(fig)
 
 end
 
-fit_ki_with_error(ki_itp, data_fitting; bounds=(cqd_dt.ki[ki_start], cqd_dt.ki[ki_stop]),)
-fit_ki_with_error(ki_itp, data_scaled_fitting; bounds=(cqd_dt.ki[ki_start], cqd_dt.ki[ki_stop]),)
+fit_ki_with_error(ki_itp, data_fitting; bounds=(cqd_sim_data.ki[ki_start], cqd_sim_data.ki[ki_stop]),)
+fit_ki_with_error(ki_itp, data_scaled_fitting; bounds=(cqd_sim_data.ki[ki_start], cqd_sim_data.ki[ki_stop]),)
 
 
 
@@ -1804,8 +1846,8 @@ TheoreticalSimulation.BvsI(0.020)
 
 
 
-cqd_dt = JLD2_MyTools.list_keys_jld_cqd(data_cqdup_path);
-n_ki = length(cqd_dt.ki);
+cqd_sim_data = JLD2_MyTools.list_keys_jld_cqd(data_cqdup_path);
+n_ki = length(cqd_sim_data.ki);
 @info "CQD simulation for $(n_ki) ki values"
 colores_ki = palette(:darkrainbow, n_ki)
 up_cqd = Matrix{Float64}(undef, nI, n_ki);
@@ -1891,7 +1933,7 @@ end
 
 !fig = plot(
     xlabel="Currents (mA)",
-    ylabel=L"$F=1$ Peak position (mm)",
+    ylabel=L"$F=1$ position (mm)",
     title="($nz,$λ0)",
     size=(950,600),
     left_margin=3mm,
