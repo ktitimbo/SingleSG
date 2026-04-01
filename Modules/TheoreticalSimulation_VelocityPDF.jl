@@ -227,3 +227,355 @@ end
     copyto!(out, tmp)                         # out must accept that eltype
     return out
 end
+
+
+function QM_PDF_profile(Ic::Float64, μ_effective::Float64, z::AbstractVector{T},p::AtomParams, q::EffusionParams) where {T<:Real}
+"""
+    QM_PDF_profile(Ic, μ_effective, z, p, q)
+
+Return the detector-space probability-density profile evaluated on the grid `z`
+for coil current `Ic` and effective magnetic moment `μ_effective`.
+
+The model assumes:
+- a rectangular furnace opening of width `default_z_furnace`,
+- a slit of width `default_z_slit`,
+- ballistic propagation from furnace to slit, slit to SG, through the SG region,
+  and then from SG to the detector,
+- a Stern–Gerlach acceleration determined by `μ_effective * GvsI(Ic) / p.M`.
+
+All lengths are in meters.
+"""
+
+    # --- Geometry (m) ---
+    LOS   = default_y_FurnaceToSlit
+    LSSG  = default_y_SlitToSG
+    LSG   = default_y_SG
+    LSGD  = default_y_SGToScreen
+    @assert LOS  > 0 "Furnace-to-slit distance (LOS) must be > 0."
+    @assert LSSG ≥ 0 "Slit-to-SG distance (LSSG) must be ≥ 0."
+    @assert LSG  ≥ 0 "SG length (LSG) must be ≥ 0."
+    @assert LSGD ≥ 0 "SG-to-screen distance (LSGD) must be ≥ 0."
+
+    Ltot  = LOS + LSSG + LSG + LSGD
+
+    # Aperture sizes (m)
+    wSG1 = default_z_slit
+    wfurnace = default_z_furnace
+    @assert wSG1    > 0 "Slit width must be > 0."
+    @assert wfurnace > 0 "Furnace width must be > 0."
+
+    # ---------------- Kinematics ----------------
+    # SG acceleration in the z direction.
+    aSG = μ_effective * GvsI(Ic) / p.M
+
+    # Thermal velocity scale. If q.α2 = kT/M, then β = sqrt(2α2).
+    β = sqrt(2 * q.α2)
+
+    # ---------------- Derived constants ----------------
+    c1 = Ltot
+    c2 = aSG * LSG * (LSG + 2 * LSGD) / 2
+
+    # Geometric factors from source/slit projection
+    g1 = c1 / LOS - 1
+    g2 = c1 * wSG1 / (2 * LOS)
+
+    z3 = g2 - g1 * wfurnace / 2
+    z4 = g2 + g1 * wfurnace / 2
+
+    # Output array
+    pdf = zeros(promote_type(T, Float64), length(z))
+
+    # Overall normalization
+    prefac = 1 / (2 * g1 * g2 * wfurnace)
+    β² = β^2
+
+    @inbounds for i in eachindex(z)
+        zi = z[i]
+
+        # Helper terms; each contributes only in its allowed support region.
+        f4p = 0.0
+        if zi > -z4
+            u = zi + z4
+            f4p = u * exp(-c2 / u / β²)
+        end
+
+        f3p = 0.0
+        if zi > -z3
+            u = zi + z3
+            f3p = u * exp(-c2 / u / β²)
+        end
+
+        f3m = 0.0
+        if zi > z3
+            u = zi - z3
+            f3m = u * exp(-c2 / u / β²)
+        end
+
+        f4m = 0.0
+        if zi > z4
+            u = zi - z4
+            f4m = u * exp(-c2 / u / β²)
+        end
+
+        pdf[i] = prefac * (f4p - f3p - f3m + f4m)
+    end
+
+    return pdf
+
+end
+
+function QM_PDF_profile_smooth(Ic, μeff, z, p, q, wd)
+    pdf = QM_PDF_profile(Ic, μeff, z, p, q)
+    return smooth_profile(z, pdf, wd)
+end
+
+"""
+    weighted_QM_PDF_profile(Ic, z, p, q; Fsel, weights=nothing, normalize=true)
+
+Compute the weighted Stern–Gerlach detector probability density profile for a
+set of hyperfine sublevels (F, mF).
+
+For each level selected by `Fsel`:
+- The effective magnetic moment μ = μF_effective(Ic, F, mF, p) is computed.
+- The profile is evaluated using abs(μ).
+- If μ < 0, the resulting profile is mirrored (reversed) to account for
+  deflection in the opposite direction.
+- The contribution is multiplied by the corresponding weight.
+
+All contributions are summed to produce the total profile.
+
+Arguments
+---------
+Ic::Real
+    Coil current.
+
+z::AbstractVector
+    Detector coordinate grid (must be uniformly spaced).
+
+p::AtomParams
+    Atomic parameters.
+
+q::EffusionParams
+    Effusion / thermal parameters.
+
+Keyword Arguments
+-----------------
+Fsel::Integer
+    Hyperfine manifold to include (e.g. F = 1 or F = 2).
+
+weights
+    Optional weights for each (F, mF) level. Must have the same length
+    as the number of selected levels. If `nothing`, equal weights are used.
+
+normalize::Bool = true
+    If true, normalize the output so that sum(pdf) * Δz = 1.
+
+Returns
+-------
+Vector{Float64}
+    Weighted probability density evaluated on `z`.
+
+Notes
+-----
+- The grid `z` is assumed to be uniformly spaced; normalization uses Δz = z[2] - z[1].
+- If `weights` are provided, they are internally normalized to sum to 1.
+- The mirroring for μ < 0 enforces the physical symmetry of opposite
+  Stern–Gerlach deflections.
+
+Example
+-------
+pdf = weighted_QM_PDF_profile(Ic, z, p, q; Fsel=2)
+"""
+function weighted_QM_PDF_profile(
+    Ic::Real,
+    z::AbstractVector,
+    p::AtomParams,
+    q::EffusionParams;
+    Fsel::Integer,
+    weights=nothing,
+    normalize::Bool=true,
+)
+
+    @assert length(z) ≥ 2 "z must contain at least two points."
+
+    levels = fmf_levels(p; Fsel=Fsel)
+    nlev = length(levels)
+    @assert nlev > 0 "No levels found for Fsel=$Fsel."
+
+    # Default: equal weights
+    w = weights === nothing ? fill(1.0 / nlev, nlev) : collect(weights)
+
+    @assert length(w) == nlev "weights must have the same length as the number of selected levels."
+
+    sw = sum(w)
+    @assert sw > 0 "Sum of weights must be positive."
+    w ./= sw
+
+    pdf_total = zeros(promote_type(eltype(z), Float64), length(z))
+
+    for (j, v) in enumerate(levels)
+        μ = μF_effective(Ic, v[1], v[2], p)
+        pdf_j = QM_PDF_profile(Ic, abs(μ), z, p, q)
+
+        if μ < 0
+            pdf_total .+= w[j] .* reverse(pdf_j)
+        else
+            pdf_total .+= w[j] .* pdf_j
+        end
+    end
+
+    if normalize
+        Δz = z[2] - z[1]
+        norm = sum(pdf_total) * Δz
+        @assert norm > 0 "Profile normalization is non-positive."
+        pdf_total ./= norm
+    end
+
+    return pdf_total
+end
+
+"""
+    weighted_QM_PDF_profile_smooth(Ic, z, p, q, wd; Fsel, weights=nothing, normalize=true)
+
+Compute a smoothed version of the weighted Stern–Gerlach detector profile.
+
+This function:
+1. Computes the weighted profile using `weighted_QM_PDF_profile` (without normalization),
+2. Applies Gaussian smoothing with width `wd`,
+3. Optionally normalizes the final result.
+
+Arguments
+---------
+Ic::Real
+    Coil current.
+
+z::AbstractVector
+    Detector coordinate grid (must be uniformly spaced).
+
+p::AtomParams
+    Atomic parameters.
+
+q::EffusionParams
+    Effusion / thermal parameters.
+
+wd::Real
+    Gaussian smoothing width (standard deviation, in the same units as `z`).
+
+Keyword Arguments
+-----------------
+Fsel::Integer
+    Hyperfine manifold to include.
+
+weights
+    Optional weights for each (F, mF) level.
+
+normalize::Bool = true
+    If true, normalize the final smoothed profile so that sum(pdf) * Δz = 1.
+
+Returns
+-------
+Vector{Float64}
+    Smoothed and optionally normalized profile.
+
+Notes
+-----
+- Smoothing can slightly change the total integral; normalization is therefore
+  applied after smoothing.
+- The grid `z` must be uniformly spaced.
+
+Example
+-------
+pdf = weighted_QM_PDF_profile_smooth(Ic, z, p, q, 0.2e-3; Fsel=2)
+"""
+function weighted_QM_PDF_profile_smooth(
+    Ic::Real,
+    z::AbstractVector,
+    p::AtomParams,
+    q::EffusionParams,
+    wd::Number;
+    Fsel::Integer,
+    weights=nothing,
+    normalize::Bool=true,
+)
+
+    @assert length(z) ≥ 2 "z must contain at least two points."
+
+    pdf = weighted_QM_PDF_profile(
+        Ic, z, p, q;
+        Fsel=Fsel,
+        weights=weights,
+        normalize=false
+    )
+
+    pdf = smooth_profile(z, pdf, wd)
+
+    if normalize
+        Δz = z[2] - z[1]
+        norm = sum(pdf) * Δz
+        @assert norm > 0 "Smoothed profile normalization is non-positive."
+        pdf ./= norm
+    end
+
+    return pdf
+end
+
+"""
+    normalize_profile(x, y; method = :area)
+
+Normalize a 1D profile `y` defined on a uniformly spaced grid `x`.
+
+# Arguments
+- `x::AbstractVector`: Grid points (must be uniformly spaced and strictly increasing).
+- `y::AbstractVector`: Values of the profile at points `x`.
+- `method::Symbol`: Normalization method. Options are:
+    - `:area` (default): Normalize such that ∫ y(x) dx = 1 using a Riemann sum.
+    - `:max`: Normalize such that `maximum(y) = 1`.
+
+# Returns
+- A vector with the same size as `y`, containing the normalized profile.
+
+# Details
+- For `method = :area`, the normalization is computed as:
+  `norm = sum(y) * Δx`, where `Δx = x[2] - x[1]`.
+- Assumes `x` is uniformly spaced.
+- The function does not modify the input arrays.
+
+# Errors
+- Throws an `AssertionError` if:
+    - `x` and `y` have different lengths.
+    - `length(x) < 2`.
+    - `x` is not strictly increasing (for `:area`).
+    - The normalization factor is non-positive.
+- Throws an error if an unknown normalization method is provided.
+
+# Examples
+julia
+x = range(0, 1, length=100)
+y = exp.(-((x .- 0.5).^2) ./ 0.01)
+
+y_area = normalize_profile(x, y)                # area normalization
+y_max  = normalize_profile(x, y; method=:max)  # max normalization
+"""
+function normalize_profile(x::AbstractVector, y::AbstractVector; method::Symbol = :area)
+    @assert length(x) == length(y) "x and y must have the same length."
+    @assert length(x) ≥ 2 "Need at least two points."
+
+    if method == :area
+        Δx = x[2] - x[1]
+        @assert Δx > 0 "x must be strictly increasing."
+
+        norm = sum(y) * Δx
+        @assert norm > 0 "Normalization is non-positive."
+
+        return y ./ norm
+
+    elseif method == :max
+        m = maximum(y)
+        @assert m > 0 "Maximum is non-positive."
+
+        return y ./ m
+
+    else
+        error("Unknown normalization method: $method. Use :area or :max.")
+    end
+end
