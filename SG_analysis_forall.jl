@@ -46,7 +46,9 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directory      = "20260226am" ;
+data_directories =  ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
+for data_directory in data_directories
+# data_directory      = "20260226pm" ;
 # Furnace 
 TCelsius = 200
 Temperature = 273.15 + TCelsius
@@ -151,6 +153,7 @@ data_processed = load(outfile_processed)["data"]
 if haskey(data_processed, :BzTesla)
     fig = plot(abs.(data_processed[:Currents]), abs.(data_processed[:BzTesla]),
         seriestype=:scatter,
+        label=false,
         marker=(:circle,2,:white),
         markerstrokecolor=:blue,
         xlabel="Coil current (A)",
@@ -166,8 +169,8 @@ Icoils  = data_processed[:Currents]
 nI      = length(Icoils)
 
 # Binning for the analysis
-nbins_list  = (1, 2, 4)
-λ0_list     = (0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
+nbins_list  = (1, 2, 4, 8)
+λ0_list     = (0.0001, 0.001, 0.002, 0.005, 0.007, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
 const Cell = Union{Missing, String, Int, Float64}
 summary_table = Matrix{Cell}(undef, length(nbins_list)*length(λ0_list), 3);
 
@@ -262,9 +265,8 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         display(fig)
         saveplot(fig, "mean_profiles_processed")
 
-        f1_mean_max = my_process_mean_maxima("F1", data_processed, n_bins; half_max=true, λ0=λ0)
-        println("here")
-        f2_mean_max = my_process_mean_maxima("F2", data_processed, n_bins; half_max=true, λ0=λ0)
+        f1_mean_max , f1_mean_spline_profile = my_process_mean_maxima("F1", data_processed, n_bins; half_max=true, λ0=λ0)
+        f2_mean_max , f2_mean_spline_profile = my_process_mean_maxima("F2", data_processed, n_bins; half_max=true, λ0=λ0)
 
         data_centroid_mean  = 0.5 * (f1_mean_max .+ f2_mean_max)
         data_centroid_mean_error = 0.5 * sqrt(2) * z_mm_error * ones(length(data_centroid_mean))
@@ -1411,8 +1413,10 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             # Mean profiles
             :F1_profile             => profiles_F1.mean,
             :F1_err                 => profiles_F1.sem,
+            :F1_profile_spline      => f1_mean_spline_profile,
             :F2_profile             => profiles_F2.mean,
             :F2_err                 => profiles_F2.sem,
+            :F2_profile_spline      => f2_mean_spline_profile,
 
             # Mean analysis
             :mean_F1_peak_pos_raw   => df_mean.F1_z_peak_mm,
@@ -1455,7 +1459,7 @@ JLD2_MyTools.show_exp_summary(path, data_directory)
 println("EXPERIMENTAL ANALYSIS COMPLETED!")
 alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 
-
+end
 
 
 # nz = 2
