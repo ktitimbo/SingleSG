@@ -1165,8 +1165,8 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
     
     # Validate signal_key
     signal_label = signal_key == "F1" ? :F1ProcessedImages :
-                signal_key == "F2" ? :F2ProcessedImages :
-                error("Invalid signal_key: choose 'F1' or 'F2'")
+                   signal_key == "F2" ? :F2ProcessedImages :
+                   error("Invalid signal_key: choose 'F1' or 'F2'")
     @info "Processing mean maxima" signal_label=signal_label
 
     # Precompute z-axes (mm)
@@ -1174,6 +1174,11 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
     z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
 
     peak_positions = zeros(Float64,nI)
+
+    # Matrix: col 1 = z_binned_mm, cols 2:end = spline evaluated for each j
+    spline_matrix = Matrix{Float64}(undef, length(z_binned_mm), nI + 1)
+    spline_matrix[:, 1] = z_binned_mm
+
 
     for j in 1:nI
         # --- Load stack (Nx × Nz × Nframes at j-th current)
@@ -1199,6 +1204,13 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
         # --- Optional half-maximum window
         z_fit = z_binned_mm
         y_fit = processed_signal
+
+        # --- Full Spline fit
+        Spline_fit = BSplineKit.fit(BSplineOrder(4), z_fit, y_fit, λ0;
+                               weights=compute_weights(z_fit, λ0))
+        spline_matrix[:, j+1] = Spline_fit.(z_binned_mm)
+        
+
         if half_max
             ymax    = maximum(y_fit)
             keep_ix = findall(yi -> yi > ymax/2, y_fit)
@@ -1270,7 +1282,7 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
         end
     end
 
-    return peak_positions
+    return peak_positions, spline_matrix
 end
 
 """
