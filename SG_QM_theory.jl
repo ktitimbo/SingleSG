@@ -187,7 +187,7 @@ z_theory = collect(range(-0.00832,0.00832,length=4096))
 data_directories =  ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"];
 n_data = length(data_directories);
 
-selected_current = 1.000
+selected_current = 0.160
 
 ni0 = closest_index(Icoils,selected_current);
 I0 = Icoils[ni0]
@@ -211,7 +211,7 @@ qm_f2 =  jldopen(data_qmf2_path,"r") do file
     file[JLD2_MyTools.make_keypath_qm(nz, σw_mm, λ0)]
 end;
 
-dir_selected = data_directories[8]
+dir_selected = data_directories[1]
 data_exp_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",dir_selected, dir_selected * "_report_summary.jld2");
 JLD2_MyTools.show_exp_summary(data_exp_path,dir_selected)
 exp_data =  jldopen(data_exp_path,"r") do file
@@ -219,12 +219,16 @@ exp_data =  jldopen(data_exp_path,"r") do file
     data = file[JLD2_MyTools.make_keypath_exp(dir_selected,nz,λ0)];
     C00 = 0.5*(data[:mean_F1_peak_pos_raw ][1] + data[:mean_F2_peak_pos_raw ][1])
 
-    return (Ic = Ic, z=collect(data[:z_mm]) .- C00, F1=data[:F1_profile], F2=data[:F2_profile], F1_profile = data[:F1_profile_spline], F2_profile = data[:F2_profile_spline] ) 
+    F1_profile = data[:F1_profile_spline]
+    F1_profile[:,1] .-= C00
+
+    F2_profile = data[:F2_profile_spline]
+    F2_profile[:,1] .-= C00
+
+    return (Ic = Ic, z=collect(data[:z_mm]) .- C00, F1=data[:F1_profile], F2=data[:F2_profile], F1_profile = F1_profile, F2_profile = F2_profile ) 
 end
 
 ni0_exp = closest_index(exp_data.Ic,selected_current)
-
-
 
 ##################################################################################################
 
@@ -249,6 +253,8 @@ plot( vcat(μeff_2, μeff_1)./μB,
 )
 
 
+I0=0.080
+
 pdf_F1 = TheoreticalSimulation.weighted_QM_PDF_profile(
     I0,
     z_theory,
@@ -269,8 +275,8 @@ pdf_F2 = TheoreticalSimulation.weighted_QM_PDF_profile(
     normalize=false,
 );
 
-plot(title=L"Original signal : $n_{z}=%$(nz)$ | $λ_{s}=%$(λ0)$",
-    xlims=(-8,8),
+plot(title="Original signal",
+    xlims=(-4,4),
     xlabel=L"$z \, (\mathrm{mm})$",
     legend=:outerright,
 )
@@ -308,6 +314,24 @@ plot!(exp_data.z , TheoreticalSimulation.normalize_profile(exp_data.z , exp_data
     label=L"%$(dir_selected): $F=2$",
     line=(:solid,1.0, :dodgerblue),
 )
+scatter!([0],[0], marker=(:circle, 0.001,:white), fillalpha=0.01, label="Experiment SplFit:")
+plot!(exp_data.F1_profile[:,1] , TheoreticalSimulation.normalize_profile(exp_data.F1_profile[:,1] , exp_data.F1_profile[:,ni0_exp+1]; method=:max ),
+    label=L"%$(dir_selected): $F=1$",
+    line=(:solid,1.0, :orangered4),
+)
+plot!(exp_data.F2_profile[:,1] , TheoreticalSimulation.normalize_profile(exp_data.F2_profile[:,1] , exp_data.F2_profile[:,ni0_exp+1]; method=:max ),
+    label=L"%$(dir_selected): $F=2$",
+    line=(:solid,1.0, :navy),
+)
+
+
+plot(exp_data.z , exp_data.F1[ni0_exp,:])
+plot!(exp_data.F1_profile[:,1], exp_data.F1_profile[:,ni0_exp+1])
+
+
+
+plot(exp_data.z, TheoreticalSimulation.normalize_profile(exp_data.F1_profile[:,1] , exp_data.F1_profile[:,ni0_exp+1]; method=:max ) .- TheoreticalSimulation.normalize_profile(exp_data.z , exp_data.F1[ni0_exp,:]; method=:max ),
+    label="residuals")
 
 
 
