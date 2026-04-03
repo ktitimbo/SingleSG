@@ -1292,20 +1292,19 @@ for dir in data_directories
 end
 
 
-
 plot(xlabel="Currents (A)",
 ylabel=L"$z_{1}-z_{2}$ (mm)")
 hspan!([-6.5e-3,6.5e-3], color=:gray68, fillalpha=0.8, label="pixel size")
 for i = 1:8
 plot!(EXP_data[data_directories[i]].Ic, EXP_data[data_directories[i]].F1[1] .- EXP_data[data_directories[i]].F2[1],
     label=data_directories[i],
-    seriestype=:scatter,
     marker=(:square,3,:white),
     markerstrokewidth=2,
-    markerstrokecolor=colores[i])
+    markerstrokecolor=colores[i],
+    line=(:dash, 1, colores[i]))
 end
 plot!(legend=:outerright,
-    xlims=(-0.1e-3,0.1e-3),
+    xlims=(-0.1e-3,5e-3),
     ylims=(-10e-3,20e-3),
     # xscale=:log10,
     # yscale=:log10,
