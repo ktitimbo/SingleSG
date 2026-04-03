@@ -47,8 +47,7 @@ MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
 data_directories =  ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
-for data_directory in data_directories
-# data_directory      = "20260226pm" ;
+data_directory      = "20260306r2" ;
 # Furnace 
 TCelsius = 200
 Temperature = 273.15 + TCelsius
@@ -169,8 +168,8 @@ Icoils  = data_processed[:Currents]
 nI      = length(Icoils)
 
 # Binning for the analysis
-nbins_list  = (1, 2, 4, 8)
-λ0_list     = (0.000001, 0.0001, 0.001, 0.002, 0.005, 0.007, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
+nbins_list  = (1, 2, 4)
+λ0_list     = (0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
 const Cell = Union{Missing, String, Int, Float64}
 summary_table = Matrix{Cell}(undef, length(nbins_list)*length(λ0_list), 3);
 
