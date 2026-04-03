@@ -47,7 +47,7 @@ MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
 data_directories =  ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
-data_directory      = "20260306r2" ;
+data_directory      = "20260303" ;
 # Furnace 
 TCelsius = 200
 Temperature = 273.15 + TCelsius
@@ -283,9 +283,6 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             marker=(:circle,3),
             markerstrokecolor = :purple,
             line=(:solid,1),
-            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
-            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-                        [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
             xlim=(1e-3,1),
             yaxis = L"$z_{0} \ (\mathrm{mm})$",
             title="Centroid",
@@ -293,6 +290,11 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         )
         hline!([centroid_mean.mean], label=L"Centroid $z=%$(round(centroid_mean.mean,digits=3))$mm")
         hspan!( [centroid_mean.mean - centroid_mean.sem,centroid_mean.mean + centroid_mean.sem], color=:orangered, alpha=0.30, label=L"Error = $\pm%$(round(centroid_mean.sem,digits=3))$mm")
+        plot!(            
+            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
+            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                        [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        )
         saveplot(fig,"mean_centroid")
 
         jldsave(joinpath(OUTDIR, "profiles_mean.jld2"),
@@ -503,31 +505,14 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             df_mean[!,:Icoil_A], abs.(df_mean[!,:F1_z_centroid_mm])/magnification_factor,
             xerror = df_mean[!,:Icoil_error_A],
             yerror = df_mean[!,:F1_z_centroid_mm_sem],
-            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-            yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
             xlims = (0.001,1.0),
             ylims = (1e-4,2.5),
-            title = "F=1 Peak Position vs Current",
             label = data_directory,
             seriestype = :scatter,
             marker = (:circle, :white, 4),
             markerstrokecolor = :black,
             markerstrokewidth = 2,
-            legend = :bottomright,
-            grid = true,
-            minorgrid = true,
-            gridalpha = 0.5,
-            gridstyle = :dot,
-            minorgridalpha = 0.05,
-            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-                    [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-            yticks = :log10,
-            framestyle = :box,
-            size=(800,600),
-            tickfontsize=11,
-            guidefontsize=14,
-            legendfontsize=10,
-        ) 
+        )
         hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Effective pixel size" )
         plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
         marker=(:cross, :purple, 6),
@@ -549,6 +534,25 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # markerstrokewidth=2,
         # label="10142024: CQD"
         # )
+        plot!(
+            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+            yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+            title = "F=1 Peak Position vs Current",
+            legend = :bottomright,
+            grid = true,
+            minorgrid = true,
+            gridalpha = 0.5,
+            gridstyle = :dot,
+            minorgridalpha = 0.05,
+            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                    [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            yticks = :log10,
+            framestyle = :box,
+            size=(800,600),
+            tickfontsize=11,
+            guidefontsize=14,
+            legendfontsize=10,
+        ) 
         saveplot(fig000, "mean_000")
 
         fig001=plot(
@@ -617,8 +621,6 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             df_mean[pos_mask,:Icoil_A], y_abs[pos_mask]/magnification_factor,
             xerror = df_mean[pos_mask,:Icoil_error_A],
             yerror = df_mean[pos_mask,:F1_z_centroid_mm_sem],
-            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-            yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
             xlims = (0.001,1.0),
             ylims = (1e-4,2.5),
             title = "F=1 Peak Position vs Current",
@@ -672,6 +674,9 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # markerstrokewidth=2,
         # label="10142024: CQD"
         # );
+        plot!(            
+            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+            yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),)
         # saveplot(fig100, "mean_100")
 
         fig101=plot(
@@ -769,9 +774,6 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             marker=(:circle,3),
             markerstrokecolor=:purple,
             line=(:solid,1),
-            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
-            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-                        [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
             xlim=(1e-3,1),
             yaxis = L"$z_{0} \ (\mathrm{mm})$",
             title="Centroid",
@@ -779,6 +781,11 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         )
         hline!([centroid_fw.mean], label=L"Centroid $z=%$(round(centroid_fw.mean,digits=3))$mm")
         hspan!([centroid_fw.mean - centroid_fw.sem, centroid_fw.mean + centroid_fw.sem], color=:orangered, alpha=0.30, label=L"Error = $\pm%$(round(centroid_fw.sem,digits=3))$mm")
+        plot!(           
+            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$"),
+            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                        [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        )
         saveplot(fig,"fw_centroid")
 
 
@@ -944,7 +951,6 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             line=(:solid,:blue,2),
         );
         plot!(
-            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
             yaxis = L"$z_{\mathrm{max}} \ (\mathrm{mm})$",
             xlims = (1e-3,1.0),
             title = "Peak position - Centered at Centroid",
@@ -953,8 +959,6 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             gridalpha = 0.5,
             gridstyle = :dot,
             minorgridalpha = 0.05,
-            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-                    [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
             size=(800,600),
             legend=:topleft,
             tickfontsize=11,
@@ -978,6 +982,10 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             color=:purple,
             label = false,
         );
+        plot!(            
+            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                    [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),)
 
         fig=plot(fig_01, fig_02, fig_03, 
         layout=@layout([a ; b ; c]),
@@ -994,8 +1002,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             df_fw[!,:Icoil_A], abs.(df_fw[!,:F1_z_centroid_mm])/magnification_factor,
             xerror = df_fw[!,:Icoil_error_A],
             yerror = df_fw[!,:F1_z_centroid_se_mm],
-            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-            yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+
             xlims = (0.001,1.0),
             ylims = (1e-6,3.5),
             title = "F=1 Peak Position vs Current",
@@ -1008,9 +1015,6 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             gridalpha = 0.5,
             gridstyle = :dot,
             minorgridalpha = 0.05,
-            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-                    [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-            yticks = :log10,
             size=(800,600),
             tickfontsize=11,
             guidefontsize=14,
@@ -1038,6 +1042,12 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # markerstrokewidth=2,
         # label="10142024: CQD"
         # );
+        plot!(            
+            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+            yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                    [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            yticks = :log10,)
         display(fig_log)
         saveplot(fig_log, "fw_000")
 
@@ -1278,28 +1288,13 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             df_fw[!,:Icoil_A], abs.(df_fw[!,:F1_z_centroid_mm])/magnification_factor,
             xerror = df_fw[!,:Icoil_error_A],
             yerror = df_fw[!,:F1_z_centroid_se_mm],
-            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
-            yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
             xlims = (0.001,1.0),
             ylims = (1e-6,3.5),
-            title = "F=1 Peak Position vs Current",
             label = data_directory,
             seriestype = :scatter,
             marker = (:circle, :white, 4),
             markerstrokecolor = :black,
             markerstrokewidth = 2,
-            legend = :bottomright,
-            gridalpha = 0.5,
-            gridstyle = :dot,
-            minorgridalpha = 0.05,
-            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
-                    [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-            yticks = :log10,
-            size=(800,600),
-            tickfontsize=11,
-            guidefontsize=14,
-            legendfontsize=10,
-            left_margin=3mm,
         ) 
         hspan!([1e-6,1000*n_bins* exp_pixelsize_z], color=:gray, alpha=0.30, label="Effective pixel size" )
         plot!(data_JSF[:exp][:,1], data_JSF[:exp][:,2],
@@ -1322,6 +1317,23 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # markerstrokewidth=2,
         # label="10142024: CQD"
         # )
+        plot!(
+            xaxis = (:log10, L"$I_{c} \ (\mathrm{A})$", :log),
+            yaxis = (:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log),
+            title = "F=1 Peak Position vs Current",
+            legend = :bottomright,
+            gridalpha = 0.5,
+            gridstyle = :dot,
+            minorgridalpha = 0.05,
+            xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], 
+                    [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            yticks = :log10,
+            size=(800,600),
+            tickfontsize=11,
+            guidefontsize=14,
+            legendfontsize=10,
+            left_margin=3mm,
+        ) 
         display(fig_comp)
         saveplot(fig_comp,"comparison")
 
@@ -1458,7 +1470,6 @@ JLD2_MyTools.show_exp_summary(path, data_directory)
 println("EXPERIMENTAL ANALYSIS COMPLETED!")
 alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 
-end
 
 
 # nz = 2
