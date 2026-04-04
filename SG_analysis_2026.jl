@@ -479,8 +479,8 @@ JLD2_MyTools.summarize_meta_cqd_jld2(data_cqddw_path)
 
 
 data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
-no = length(data_directories);
-colores = palette(:darkrainbow, no);
+n_data = length(data_directories);
+colores = palette(:darkrainbow, n_data);
 
 nz , λ0 = 2, 0.01;
 σw_mm = 0.200;
@@ -490,7 +490,7 @@ BvsI_phywe = sort(CSV.read("SG_BvsI_phywe.csv",DataFrame; header=["Ic","Bz"]),1)
 phywe_shift = hcat(BvsI_phywe.Ic .- 0.11021, BvsI_phywe.Bz .- 0.00445);
 phywe_shift = DataReading.subset_by_cols(phywe_shift,[1,2]; thr=0.0, include_equal=false)[3]
 
-exp_data = Vector{Matrix{Float64}}(undef, no)
+exp_data = Vector{Matrix{Float64}}(undef, n_data)
 for (idx, dir) in enumerate(data_directories)
     data = load(joinpath(@__DIR__,"EXPERIMENTS",dir,"data_processed.jld2"),"data")
     Ic = data[:Currents]
@@ -645,7 +645,7 @@ plot!(fig4,
 display(fig4)
 
 # magnetic field measured vs magnetic field manual
-BvsI_comparison = Vector{Matrix{Float64}}(undef, no)
+BvsI_comparison = Vector{Matrix{Float64}}(undef, n_data)
 for (idx, dir) in enumerate(data_directories)
     vs = exp_data[idx]
 
@@ -689,7 +689,7 @@ plot!(fig5,
 display(fig5)
 
 # SHIFTED EXPERIMENTAL DATA TO ZERO FIELD
-exp_data_corr = Vector{Matrix{Float64}}(undef, no)
+exp_data_corr = Vector{Matrix{Float64}}(undef, n_data)
 for (idx, dir) in enumerate(data_directories)
     exp_data_corr[idx] = hcat(exp_data[idx][:,1] , exp_data[idx][:,2] .- exp_data[idx][1,2] )
 end
@@ -829,7 +829,7 @@ plot!(fig4A,
 display(fig4A)
 
 
-BvsI_comparison_corr = Vector{Matrix{Float64}}(undef, no)
+BvsI_comparison_corr = Vector{Matrix{Float64}}(undef, n_data)
 for (idx, dir) in enumerate(data_directories)
     vs = exp_data_corr[idx]
 
@@ -899,8 +899,8 @@ bottom_margin=2mm,
 
 ########################################################################################
 #+++++++++++++++++++++++++++ Centroid +++++++++++++++++++++++++++++++++++++++++++++
-centroid_fw = Matrix{Float64}(undef, no, 2)
-pos_at_zero = Matrix{Float64}(undef, no, 4)
+centroid_fw = Matrix{Float64}(undef, n_data, 2)
+pos_at_zero = Matrix{Float64}(undef, n_data, 4)
 for (i,dir) in enumerate(data_directories)
     kk_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary", dir, dir * "_report_summary.jld2")
 
@@ -1312,7 +1312,7 @@ plot!(legend=:outerright,
 
 
 EXP_data_processed = OrderedDict{String, DataFrame}()
-for 𝓁 = 1:8
+for 𝓁 = 1:n_data
     dir = data_directories[𝓁]
     println(dir)
 
@@ -1816,8 +1816,267 @@ plot!(
 )
 display(fig)
 
-
 end
+
+
+
+Ics = Vector{Vector{Float64}}(undef, n_data);
+tol_grouping = 0.03;
+for (i, dir) in enumerate(data_directories)
+    Ics[i] = EXP_data_processed[dir].Ic
+end
+clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping);
+for s in clusters.summary
+    println("Value group ≈ $(@sprintf("%1.3f", s.mean_val)) ± $(round(s.std_val;sigdigits=1)) \t appears in datasets: ", s.datasets)
+end
+Ic_grouped  = round.([clusters.summary[i].mean_val for i in 1:length(clusters.summary)]; digits=3);
+δIc_grouped = round.([clusters.summary[i].std_val for i in 1:length(clusters.summary)]; sigdigits=1);
+
+plot(Ic_grouped, 
+ribbon=δIc_grouped,
+marker=(:diamond, 2, :white),
+markerstrokecolor=:red,
+line=(:solid,1,:red),
+color=:red,
+fillalpha=0.2,
+label=false,
+xlabel="current number",
+ylabel="Current (A)",
+ylims=(7e-4,1.05),
+)
+plot!(
+yscale=:log10,
+legend=:bottomright,
+)
+
+# helper: first index where column > threshold (skips missings; falls back to 1)
+@inline function first_gt_idx(df::DataFrame, col::Symbol, thr::Real)
+    v = df[!, col]
+    idx = findfirst(x -> !ismissing(x) && x >= thr, v)
+    return idx === nothing ? 1 : idx
+end
+
+
+threshold = 0.015 # lower cut-off for experimental currents
+CURRENT_ROW_START = [first_gt_idx(EXP_data_processed[t], :Ic, threshold) for t in keys(EXP_data_processed)]
+
+ 
+Ic_sets  = [EXP_data_processed[t][i:end, :Ic]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)]
+F1_sets = [EXP_data_processed[t][i:end, :F1]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)]
+F2_sets = [EXP_data_processed[t][i:end, :F2]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)]
+σF1_sets = [EXP_data_processed[t][i:end, :F1]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)]
+σF2_sets = [EXP_data_processed[t][i:end, :F2]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)]
+
+# pick a log-spaced grid across the overall x-range (nice for decades-wide currents)
+i_sampled_length = 1001
+xlo = maximum([minimum(first.(Ic_sets)),1e-3])
+xhi = maximum([maximum(last.(Ic_sets)),1.000])
+xq  = exp10.(range(log10(xlo), log10(xhi), length=i_sampled_length))
+
+using BSplineKit
+# i_sampled_length = 2*i_sampled_length
+# i_xx = round.(range(threshold,1.000,length=i_sampled_length); digits=5)
+i_xx0 = unique(round.(sort(union(xq,Ic_grouped)); digits=6))
+i_xx0 = unique(round.(sort(Ic_grouped); digits=6))
+i_sampled_length = length(i_xx0)
+
+
+fig = plot(
+    xlabel="Current (A)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+    xlims = (10e-3,1.0),
+    ylims = (1e-3, 2),
+)
+z_final = zeros(n_data,i_sampled_length)
+color_data = palette(:darkrainbow, n_data);
+for (i,dir) in enumerate(data_directories)
+    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
+    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F1]
+    spl = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
+    z_final[i,:] = spl.(i_xx0)
+    scatter!(fig,xs, ys,
+        label=data_directories[i],
+        marker=(:circle, :white,3),
+        markerstrokecolor=color_data[i],
+        markerstrokewidth=1,
+        )
+    plot!(fig,i_xx0,spl.(i_xx0),
+        label=false,
+        line=(color_data[i],1))
+end
+# plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
+# display(fig)
+plot!(fig,
+title="Interpolation: cubic splines",
+legend=:bottomright,
+xaxis=:log10, 
+yaxis=:log10,
+xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+)
+zf1 = vec(mean(z_final, dims=1))
+δzf1 = vec(std(z_final; dims=1, corrected=true)/sqrt(n_data))
+data_spline = hcat(i_xx0, zf1, δzf1)
+data_spline_valid = data_spline[data_spline[:, 1] .> threshold, :]
+plot!(fig, data_spline_valid[:,1], data_spline_valid[:,2],
+    ribbon = data_spline_valid[:,3],
+    fillalpha=0.40, 
+    fillcolor=:gray36, 
+    label="Mean",
+    line=(:dash,:black,:2))
+display(fig)
+
+
+fit_ki_mode = :low   # ← change to :low, :high, or :low_high
+n_front  = 15
+n_back   = 2
+
+data = hcat(data_spline_valid[:,1], 0.02 * data_spline_valid[:,1] , data_spline_valid[:,2] , data_spline_valid[:,3] )
+low_range  = 1:n_front ;
+high_range = (size(data, 1) - n_back + 1):size(data, 1);
+
+@assert last(low_range) ≤ size(data,1)
+@assert first(high_range) ≥ 1
+
+# Select rows according to the chosen fitting mode
+fit_ki_idx = begin
+    if fit_ki_mode === :full
+        Colon()
+    elseif fit_ki_mode === :low
+        low_range
+    elseif fit_ki_mode === :high
+        high_range
+    elseif fit_ki_mode === :low_high
+        vcat(low_range, high_range)
+    else
+        error("Unknown fit_ki_mode = $fit_ki_mode")
+    end
+end
+
+n_tail = 8  # number of tail points used for scaling
+@printf "For the scaling of the experimental data, we use the current range = %.3f A – %.3f A \n" first(last(data[:, 1], n_tail)) last(last(data[:, 1], n_tail))
+yexp = last(data[:, 3], n_tail)              # experimental z-values (tail)
+ythe = last(zqm.(data[:, 1]), n_tail)        # QM reference z-values at same currents
+scaled_mag = 1.0 #dot(yexp, yexp) / dot(yexp, ythe)
+
+# Apply scaling to both z and δz to preserve relative uncertainties
+data_scaled = copy(data);
+data_scaled[:, 3] ./= scaled_mag;
+data_scaled[:, 4] ./= scaled_mag;
+
+# @printf "The re-scaling factor of the experimental data with respect to Quantum Mechanics is %.3f" scaled_mag
+@printf "The re-scaling factor for the high current regime is %.3f" scaled_mag
+println("")
+
+# -----------------------------------------------------------------------------
+# 4) Build fitting subsets and fit kᵢ using CQD interpolant surface
+#
+# Note:
+#   fit_ki minimizes the log-space residual internally, but reports a 
+#   linear-space RMSE as `ki_err`.
+# -----------------------------------------------------------------------------
+data_fitting        = data[fit_ki_idx, :];
+data_scaled_fitting = data_scaled[fit_ki_idx, :];
+fit_original = fit_ki(data, data_fitting, cqd_sim_data.ki, (ki_start,ki_stop))
+fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, cqd_sim_data.ki, (ki_start,ki_stop))
+
+@info "Induction term ki = $(round(fit_scaled.ki; sigdigits=4)) × 10^-6"
+
+z_qm = zqm.(I_scan);
+m_qm = log_mask(I_scan, z_qm);
+fig = plot(
+    I_scan[m_qm], z_qm[m_qm];
+    label = "Quantum mechanics",
+    line  = (:solid, :red, 1.75),
+)
+plot!(
+    fig,
+    data_scaled[:,1], data_scaled[:,3];
+    yerror= data_scaled[:,4],
+    label="Combined experiment",
+    color = :gray35,
+    marker = (:circle, :gray35, 4),
+    markerstrokecolor = :gray35,
+    markerstrokewidth = 1,
+)
+z_fit_orig = ki_itp.(I_scan, Ref(fit_scaled.ki));
+m_orig = log_mask(I_scan, z_fit_orig);
+plot!(
+    fig,
+    I_scan[m_orig], z_fit_orig[m_orig];
+    label = L"CQD : $k_{i}= \left( %$(round(fit_original.ki, sigdigits=3)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
+    line  = (:solid, :blue, 2),
+    marker = (:xcross, :blue, 0.2),
+    markerstrokewidth = 1,
+)
+plot!(
+    fig;
+    # title = dir,
+    xlabel = "Current (A)",
+    ylabel = L"$z_{\mathrm{max}}$ (mm)",
+    xaxis  = :log10,
+    yaxis  = :log10,
+    labelfontsize = 14,
+    tickfontsize  = 12,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0],
+              [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0],
+              [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims = (0.010, 1.05),
+    size  = (900, 800),
+    # legendtitle = L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(1e3*σw_fixed)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$",
+    legendfontsize = 12,
+    left_margin = 3mm,
+)
+display(fig)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 fit_ki_with_error(ki_itp, data_fitting; bounds=(cqd_sim_data.ki[ki_start], cqd_sim_data.ki[ki_stop]),)
 fit_ki_with_error(ki_itp, data_scaled_fitting; bounds=(cqd_sim_data.ki[ki_start], cqd_sim_data.ki[ki_stop]),)
@@ -1993,7 +2252,7 @@ display(fig)
 
 ## Recalculation of the F=1 peak position with respect to a different centroid
 
-new_data = Vector{NamedTuple}(undef, no)
+new_data = Vector{NamedTuple}(undef, n_data)
 
 for (idx, dir) in enumerate(data_directories)
 
@@ -2013,7 +2272,7 @@ for (idx, dir) in enumerate(data_directories)
     end
 end
 
-new_centroid = [mean([new_data[v].F1[1][1],new_data[v].F2[1][1]]) for v=1:no]
+new_centroid = [mean([new_data[v].F1[1][1],new_data[v].F2[1][1]]) for v=1:n_data]
 
 plot(xlabel="Current (A)")
 for (idx,dir) in enumerate(data_directories)
