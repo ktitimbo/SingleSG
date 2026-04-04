@@ -49,15 +49,8 @@ hostname = gethostname();
 include("./Modules/TheoreticalSimulation.jl");
 include("./Modules/DataReading.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
+include("./Modules/JLD2_MyTools.jl");
 
-function keypath(branch::Symbol, ki::Float64, nz::Int, gw::Float64, λ0_raw::Float64)
-    fmt(x) = @sprintf("%.12g", x)  # safer than %.6g to reduce collisions
-    return "/" * String(branch) *
-           "/ki=" * fmt(ki) *"e-6" *
-           "/nz=" * string(nz) *
-           "/gw=" * fmt(gw) *
-           "/lam=" * fmt(λ0_raw)
-end
 
 """
 Compute per-particle fluorescence weights for a laser sheet,
@@ -155,8 +148,8 @@ Icoils = [0.00,
 ];
 nI = length(Icoils)
 
-nx_bins, nz_bins = 64, 2 ;
-gaussian_width_mm = 0.200;
+nx_bins, nz_bins = 32, 1 ;
+σw_mm = 0.200;
 λ0_raw            = 0.01;
 λ0_spline         = 0.001;
 ki_idx = 27;
@@ -193,25 +186,42 @@ edges_z = collect((-(kz + 0.5)) * z_bin_size : z_bin_size : ((kz + 0.5) * z_bin_
 # ===================================================
 # ++++++++++++++++++++ EXPERIMENT +++++++++++++++++++
 # ===================================================
-exp_path = joinpath(@__DIR__,"20250919");
+data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
+n_data = length(data_directories);
+colores = palette(:darkrainbow, n_data);
+
+data_dir = data_directories[1]
+
+@info "EXPERIMENTAL DATA : $(data_dir)"
+exp_path = joinpath(@__DIR__,"EXPERIMENTS",data_dir)
 exp_data = load(joinpath(exp_path,"data_processed.jld2"),"data");
-Ic_idx_exp = 26 ;
+exp_data[:Currents]
+Ic_idx_exp = 19 ;
 @info "Electric current chosen from the experimental data $(round(1000*exp_data[:Currents][Ic_idx_exp]; sigdigits=4))mA"
 
-exp_image = mean(exp_data[:F1ProcessedImages], dims=(3)) |> x -> dropdims(x, dims=(3));
-exp_image = exp_image[:,:,Ic_idx_exp];
+exp_image = mean(exp_data[:F1ProcessedImages], dims=(3)) |> x -> dropdims(x, dims=(3))
+exp_image = exp_image[:,:,Ic_idx_exp]
 exp_size = size(exp_image);
-exp_x = 1e3*TheoreticalSimulation.pixel_coordinates(2160, 4, cam_pixelsize);
-exp_z = 1e3*TheoreticalSimulation.pixel_coordinates(2560, 1, cam_pixelsize);
+exp_x = 1e3*TheoreticalSimulation.pixel_coordinates(2160, 4, cam_pixelsize)
+exp_z = 1e3*TheoreticalSimulation.pixel_coordinates(2560, 1, cam_pixelsize)
 
-exp_result = DataReading.find_report_data(
-    joinpath(@__DIR__, "EXPDATA_ANALYSIS");
-    wanted_data_dir = "20250919",
-    wanted_binning  = 1,
-    wanted_smooth   = 0.01,
-);
-exp_profile = vec(mean(exp_image, dims=1));
-exp_z = exp_z .- exp_result[:fw_centroid_mm][1];
+exp_result_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary", data_dir, data_dir * "_report_summary.jld2")
+exp_result = jldopen(exp_result_path, "r") do file
+        Ic = file["meta/Currents"]
+        data = file[JLD2_MyTools.make_keypath_exp(data_dir,nz_bins,λ0_spline)];
+        C00 = 0.5*(data[:mean_F1_peak_pos_raw ][1] + data[:mean_F2_peak_pos_raw ][1])
+
+        F1_profile = data[:F1_profile_spline]
+        F1_profile[:,1] .-= C00
+
+        F2_profile = data[:F2_profile_spline]
+        F2_profile[:,1] .-= C00
+
+        return (Ic = Ic, z=collect(data[:z_mm]) .- C00, F1=data[:F1_profile], F2=data[:F2_profile], F1_profile = F1_profile, F2_profile = F2_profile ) 
+end
+
+exp_profile = vec(mean(exp_image, dims=1))
+exp_z = exp_result.z
 
 img_exp = heatmap(
     exp_x,
@@ -225,7 +235,7 @@ img_exp = heatmap(
     ylims = extrema(exp_z),
     aspect_ratio = :equal,
     colorbar = true
-);
+)
 
 img_exp_prof = plot(exp_z, exp_profile,
     label="Experimental profile",
@@ -237,14 +247,15 @@ img_exp_prof = plot(exp_z, exp_profile,
     legend=:topleft,
     background_color_legend = :transparent,
     foreground_color_legend = nothing,
-);
+)
 
 # ===================================================
 # ++++++++++++++++++++ QM DATA ++++++++++++++++++++++
 # ===================================================
-qm_path = joinpath(@__DIR__,"simulation_data","qm_simulation_7M","qm_screen_data.jld2");
+qm_path = joinpath(@__DIR__,"simulation_data","QM_T200_8M","qm_screen_data.jld2");
 qm_data = jldopen(qm_path, "r") do file
-        file["screen"]["i$(Ic_idx)"]
+    # keys(file["screen"])
+    file["screen"]["I$(Ic_idx)"]
 end
 qm_data = vcat([qm_data[lv]  for lv=6:8]...);
 
@@ -292,36 +303,14 @@ img_qm_prof = plot(centers_z, qm_profile,
     foreground_color_legend = nothing,
 );
 
-table_qm_path = joinpath(@__DIR__,
+data_qmf1_path = joinpath(@__DIR__,
     "simulation_data",
-    "qm_simulation_7M",
-    "qm_7000000_screen_profiles_f1_table.jld2");
-table_qm      = load(table_qm_path)["table"];
+    "QM_T200_8M",
+    "qm_screen_profiles_f1_table.jld2");
+data_qm =  jldopen(data_qmf1_path,"r") do file
+    file[JLD2_MyTools.make_keypath_qm(nz_bins, σw_mm, λ0_spline)]
+end
 @info "QM data loaded"
-qm_meta = let
-    keys_qm = collect(keys(table_qm))  # make it an indexable Vector of tuples
-
-    nz_qm = sort(unique(getindex.(keys_qm, 1)))
-    gw_qm = sort(unique(getindex.(keys_qm, 2)))
-    λ0_qm = sort(unique(getindex.(keys_qm, 3)))
-
-    # --- pretty print aligned ---
-    labels = ["nz_qm", "gw_qm", "λ0_qm"]
-    w = maximum(length.(labels))
-
-    # println(rpad("nz_qm", w), " = ", nz_qm);
-    # println(rpad("gw_qm", w), " = ", gw_qm);
-    # println(rpad("λ0_qm", w), " = ", λ0_qm);
-
-    # --- return renamed container ---
-    OrderedDict(
-        :nz => nz_qm,
-        :gw => gw_qm,
-        :λ0 => λ0_qm,
-        :λs => 0.001
-    );
-end    
-data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)];
 Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)];
 zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)];
 # ===================================================
@@ -371,7 +360,7 @@ ki = cqd_meta[:ki][ki_idx];
 @info "Induction term kᵢ=$(ki)×10⁻⁶ "
 
 data_CQD_up_zmax = jldopen(table_cqd_path, "r") do file
-    file[keypath(:up,ki,nz_bins,gaussian_width_mm,λ0_raw)]
+    file[keypath(:up,ki,nz_bins,σw_mm,λ0_raw)]
 end
 Ic_CQD   = [data_CQD_up_zmax[idx][:Icoil] for idx=1:nI];
 zmax_CQD = [data_CQD_up_zmax[idx][:z_max_smooth_spline_mm] for idx=1:nI];
@@ -415,7 +404,7 @@ img_cqd_prof = plot(centers_z, cqd_profile,
 # ======================================================================================================
 # ======================================================================================================
 
-plot(img_exp, img_exp_prof, img_qm, img_qm_prof, img_cqd, img_cqd_prof, 
+plot(img_exp, img_exp_prof, img_qm, img_qm_prof,# img_cqd, img_cqd_prof, 
     layout=(3,2),
     suptitle = "Original",
     left_margin=10mm,
@@ -746,7 +735,7 @@ plot!(Icoils[15:end], [out_qm[idx][2][2] for idx=15:nI],
 );
 plot!(Icoils[15:end], zmax_QM[15:end],
     line=(:red,1,:dash),
-    label=L"QM+Smoothing ($\sigma_{w} = %$(Int(1e3*gaussian_width_mm))\mathrm{\mu m}$)"
+    label=L"QM+Smoothing ($\sigma_{w} = %$(Int(1e3*σw_mm))\mathrm{\mu m}$)"
 );
 plot!(Icoils[15:end], [out_qm[idx][2][3] for idx=15:nI],
     line=(:orangered,1.2,:dot),
@@ -758,7 +747,7 @@ plot!(Icoils[15:end], [out_cqd[idx][2][2] for idx=15:nI],
 );
 plot!(Icoils[15:end], zmax_CQD[15:end],
     line=(:blue,1,:dash),
-    label=L"CQD+Smoothing ($\sigma_{w} = %$(Int(1e3*gaussian_width_mm))\mathrm{\mu m}$)"
+    label=L"CQD+Smoothing ($\sigma_{w} = %$(Int(1e3*σw_mm))\mathrm{\mu m}$)"
 );
 plot!(Icoils[15:end], [out_cqd[idx][2][3] for idx=15:nI],
     line=(:purple2,1.2,:dot),
