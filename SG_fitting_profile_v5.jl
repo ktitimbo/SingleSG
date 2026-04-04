@@ -146,12 +146,12 @@ norm_mode = :none ;
 nrange_z = 20001;
 
 dir_list = [
-    "20250814" , "20250820" , "20250825",
-    "20250919" , 
+    # "20250814" , "20250820" , "20250825",
+    # "20250919" , 
     # "20251002" , "20251003", "20251006",
     # "20251109",
     # "20260211" , "20260213",
-    # "20260220", "20260225", "20260226am","20260226pm","20260227"
+    "20260220", "20260225", "20260226am","20260226pm","20260227","20260303","20260306r1","20260306r2"
 ]
 
 hdr_top = Any[
@@ -161,12 +161,15 @@ hdr_top = Any[
 ];
 hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * ProfileFitTools.sub(k) for k in 0:P_DEGREE]);
 
+
+
+
 for wanted_data_dir in dir_list
     # wanted_data_dir = dir_list[1]
 
     # Data loading
     read_exp_info = DataReading.find_report_data(
-            joinpath(@__DIR__, "EXPDATA_ANALYSIS");
+            joinpath(@__DIR__, "EXPDATA_ANALYSIS",wanted_data_dir);
             wanted_data_dir=wanted_data_dir,
             wanted_binning=wanted_binning,
             wanted_smooth=wanted_smooth
@@ -193,9 +196,11 @@ for wanted_data_dir in dir_list
     #     file[JLD2_MyTools.make_keypath_exp(wanted_data_dir, wanted_binning, wanted_smooth)]
     # end
     Ic_sampled = abs.(exp_data[:Icoils]);
-    nI = length(Ic_sampled);
+    nI = length(Ic_sampled)
 
-    chosen_currents_idx = [1]
+    println(nI)
+
+    chosen_currents_idx = [nI]
 
     println("Target currents in A: (", 
             join(map(x -> @sprintf("%.3f", x), Ic_sampled[chosen_currents_idx]), ", "),
