@@ -486,10 +486,12 @@ nz , λ0 = 2, 0.01;
 σw_mm = 0.200;
 
 ############ phywe magnetic field measurement ##############################
+# PhyWe Calibration
 BvsI_phywe = sort(CSV.read("SG_BvsI_phywe.csv",DataFrame; header=["Ic","Bz"]),1);
 phywe_shift = hcat(BvsI_phywe.Ic .- 0.11021, BvsI_phywe.Bz .- 0.00445);
 phywe_shift = DataReading.subset_by_cols(phywe_shift,[1,2]; thr=0.0, include_equal=false)[3]
 
+# Experimental measurements while acquiring SG1 data
 exp_data = Vector{Matrix{Float64}}(undef, n_data)
 for (idx, dir) in enumerate(data_directories)
     data = load(joinpath(@__DIR__,"EXPERIMENTS",dir,"data_processed.jld2"),"data")
@@ -498,6 +500,7 @@ for (idx, dir) in enumerate(data_directories)
     exp_data[idx] = hcat(Ic,Bz)
 end
 
+BvsI_optimal = CSV.read("SG_BzinGauss_Iscan.csv", DataFrame; header=["Ic","Bz"])
 
 ## magnetic field: log-log scale
 fig1 = plot(xlabel="Currents (A)",
@@ -508,37 +511,42 @@ fig1 = plot(xlabel="Currents (A)",
     background_color_legend = nothing,
     left_margin=5mm,
     bottom_margin=3mm,);
-for (idx, dir) in enumerate(data_directories)
-    data = exp_data[idx]
-    Ic = data[:,1]
-    Bz = data[:,2]
+# for (idx, dir) in enumerate(data_directories)
+#     data = exp_data[idx]
+#     Ic = data[:,1]
+#     Bz = data[:,2]
 
-    plot!(fig1, Ic, 1000*Bz,
-        label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
-        marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
-        line=(:dot, colores[idx], 1)
-    )
+#     plot!(fig1, Ic, 1000*Bz,
+#         label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
+#         marker=(:circle, 2, :white),
+#         markerstrokecolor=colores[idx],
+#         line=(:dot, colores[idx], 1)
+#     )
 
-end
+# end
 plot!(fig1,Icoils[2:end], 1e3*TheoreticalSimulation.BvsI.(Icoils)[2:end],
     label="SG manual",
     line=(:solid,2,:black));
-plot!(fig1,BvsI_phywe.Ic, 1000*BvsI_phywe.Bz,
-    label="SG PHYWE calibration",
-    line=(:solid,2,:dodgerblue4));
-plot!(fig1,phywe_shift[:,1], 1000*phywe_shift[:,2],
-    label="SG PHYWE calibration (adjusted)",
-    line=(:dot,2,:dodgerblue4));
+# plot!(fig1,BvsI_phywe.Ic, 1000*BvsI_phywe.Bz,
+#     label="SG PHYWE calibration",
+#     line=(:solid,2,:dodgerblue4));
+# plot!(fig1,phywe_shift[:,1], 1000*phywe_shift[:,2],
+#     label="SG PHYWE calibration (adjusted)",
+#     line=(:dot,2,:dodgerblue4))
+plot!(fig1,1e-3*BvsI_optimal.Ic[4:end], 1e3*1e-4*BvsI_optimal.Bz[4:end],
+    line=(:dashdot,2,:purple),
+    marker=(:diamond, 3, :white),
+    markerstrokecolor=:purple,
+    label="New setup arrangement",
+)
 plot!(fig1,
     xscale=:log10,
     yscale=:log10,
     xlims=(1e-3,1.02),
     ylims=(1e-2,1e3),
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([0.01, 0.1, 1, 10, 100], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
-    legendfontsize = 6,
-
+    yticks = ([0.01, 0.1, 1, 10, 100, 1000], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}", L"10^{3}"]),
+    legendfontsize = 8,
 );
 display(fig1)
 
@@ -552,28 +560,34 @@ fig2 = plot(xlabel="Currents (A)",
     left_margin=5mm,
     bottom_margin=3mm,
     legendfontsize = 8,);
-for (idx, dir) in enumerate(data_directories)
-    data = exp_data[idx]
-    Ic = data[:,1]
-    Bz = data[:,2]
+# for (idx, dir) in enumerate(data_directories)
+#     data = exp_data[idx]
+#     Ic = data[:,1]
+#     Bz = data[:,2]
 
-    plot!(fig2, Ic, 1000*Bz,
-        label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
-        marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
-        line=(:dot, colores[idx], 1)
-    )
+#     plot!(fig2, Ic, 1000*Bz,
+#         label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
+#         marker=(:circle, 2, :white),
+#         markerstrokecolor=colores[idx],
+#         line=(:dot, colores[idx], 1)
+#     )
 
-end
+# end
 plot!(fig2,Icoils, 1e3*TheoreticalSimulation.BvsI.(Icoils),
     label="SG manual",
     line=(:solid,2,:black));
-plot!(fig2,BvsI_phywe.Ic, 1000*BvsI_phywe.Bz,
-    label="SG PHYWE calibration",
-    line=(:solid,2,:dodgerblue4));
-plot!(fig2,phywe_shift[:,1], 1000*phywe_shift[:,2],
-    label="SG PHYWE calibration (adjusted)",
-    line=(:dot,2,:dodgerblue4));
+# plot!(fig2,BvsI_phywe.Ic, 1000*BvsI_phywe.Bz,
+#     label="SG PHYWE calibration",
+#     line=(:solid,2,:dodgerblue4));
+# plot!(fig2,phywe_shift[:,1], 1000*phywe_shift[:,2],
+#     label="SG PHYWE calibration (adjusted)",
+#     line=(:dot,2,:dodgerblue4));
+plot!(fig2,1e-3*BvsI_optimal.Ic, 1e3*1e-4*BvsI_optimal.Bz,
+    line=(:dashdot,2,:purple),
+    marker=(:diamond, 3, :white),
+    markerstrokecolor=:purple,
+    label="New setup arrangement",
+);
 display(fig2)
 
 ##magnetic field: low currents
@@ -596,6 +610,12 @@ end
 plot!(fig3,Icoils, 1e3*TheoreticalSimulation.BvsI.(Icoils),
     label="SG manual",
     line=(:solid,2,:black));
+plot!(fig2,1e-3*BvsI_optimal.Ic, 1e3*1e-4*BvsI_optimal.Bz,
+    line=(:dashdot,2,:purple),
+    marker=(:diamond, 3, :white),
+    markerstrokecolor=:purple,
+    label="New setup arrangement",
+)
 plot!(fig3,
     xlims=(0.0,15e-3),
     ylims=(-5,15),
@@ -688,6 +708,28 @@ plot!(fig5,
 )
 display(fig5)
 
+fig5a = plot(xlabel="Currents (A)",
+    ylabel=L"$B_{\mathrm{exp}} / B_{\mathrm{manual}}$")
+plot!(1e-3*BvsI_optimal.Ic[4:end] , (1e-4*(BvsI_optimal.Bz) ./ TheoreticalSimulation.BvsI.(1e-3*BvsI_optimal.Ic))[4:end],
+    label=false,
+    marker=(:square,2,:white),
+    markerstrokecolor=:red,
+    line=(:solid,1,:red))
+plot!(fig5a,
+    legend=:bottomright,
+    xscale=:log10,
+    yscale=:log10,
+    xlims=(1e-3,1.05),
+    ylims=(1e-1,2),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([0.01, 0.1, 1, 10], [L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+    legendfontsize = 6,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+)
+
+
+BvsI_optimal.Ic
 # SHIFTED EXPERIMENTAL DATA TO ZERO FIELD
 exp_data_corr = Vector{Matrix{Float64}}(undef, n_data)
 for (idx, dir) in enumerate(data_directories)
