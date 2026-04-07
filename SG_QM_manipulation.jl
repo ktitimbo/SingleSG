@@ -259,12 +259,18 @@ qm_data = jldopen(qm_path, "r") do file
 end
 qm_data = vcat([qm_data[lv]  for lv=6:8]...);
 
+qm_data
+
 xf_qm = 1e3* view(qm_data,:,7);
 zf_qm = 1e3* view(qm_data,:,8);
 
 vxf_qm = view(qm_data,:,4);
+extrema(vxf_qm)
 vyf_qm = view(qm_data,:,5);
+extrema(vyf_qm)
 vzf_qm = view(qm_data,:,9);
+extrema(vzf_qm)
+
 
 if norm_type === :none
     h_qm = fit(Histogram, (xf_qm, zf_qm), (edges_x, edges_z))                    # raw counts (no normalization)
@@ -316,7 +322,8 @@ zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)];
 # ===================================================
 # +++++++++++++++++++++ CQD DATA ++++++++++++++++++++
 # ===================================================
-data_CQD_up  = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_6M","cqd_6000000_ki0$(ki_idx)_up_screen.jld2"),"screen")[:data];
+# data_CQD_up  = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_6M","cqd_6000000_ki0$(ki_idx)_up_screen.jld2"),"screen")[:data];
+data_CQD_up  = load(joinpath(@__DIR__,"simulation_data","CQD_T200_8M","cqd20260304T185235747_8000000_ki001_up_screen.jld2"),"screen")[:data];
 data_cqd = data_CQD_up[Ic_idx];
 
 xf_cqd = 1e3* view(data_cqd,:,9);
@@ -328,10 +335,12 @@ vzf_cqd =view(data_cqd,:,11);
 
 table_cqd_path = joinpath(@__DIR__,
     "simulation_data",
-    "cqd_simulation_6M",
-    "cqd_6000000_up_profiles_bykey.jld2");
+    "CQD_T200_8M",
+    "cqd_8M_up_profiles.jld2");
 cqd_meta = jldopen(table_cqd_path, "r") do file
     meta = file["meta"]
+    
+    keys(file["meta"])
 
     # mapping: original key (String) → new Symbol
     rename = OrderedDict(
@@ -345,16 +354,16 @@ cqd_meta = jldopen(table_cqd_path, "r") do file
     # alignment width (use original names for printing)
     w = maximum(length.(keys(rename)))
 
-    out = OrderedDict{Symbol,Any}()
+    # out = OrderedDict{Symbol,Any}()
 
-    for (k_old, k_new) in rename
-        val = round.(meta[k_old], digits=3)
+    # for (k_old, k_new) in rename
+    #     val = round.(meta[k_old], digits=3)
 
-        # println(rpad(k_old, w), " = ", val)
+    #     # println(rpad(k_old, w), " = ", val)
 
-        out[k_new] = val
-    end
-    out;
+    #     out[k_new] = val
+    # end
+    # out;
 end
 ki = cqd_meta[:ki][ki_idx];
 @info "Induction term kᵢ=$(ki)×10⁻⁶ "
