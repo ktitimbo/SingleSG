@@ -178,12 +178,393 @@ function log_mask(x, y)
     (x .> 0) .& (y .> 0) .& isfinite.(x) .& isfinite.(y)
 end
 
+# helper: first index where column > threshold (skips missings; falls back to 1)
+@inline function first_gt_idx(df::DataFrame, col::Symbol, thr::Real)
+    v = df[!, col]
+    idx = findfirst(x -> !ismissing(x) && x >= thr, v)
+    return idx === nothing ? 1 : idx
+end
+
+"""
+    combine_on_grid_mc_weighted(xsets, ysets;
+                                σxsets=nothing,
+                                σysets=nothing,
+                                xq=:union,
+                                B::Int=400,
+                                outside::Symbol=:mask,
+                                rel_x::Bool=false,
+                                min_datasets::Int=1,
+                                rng=Random.default_rng())
+
+Weighted Monte-Carlo combination of multiple noisy 1D datasets onto a common grid,
+propagating uncertainties in both x and y.
+
+For each Monte-Carlo replicate, each dataset is perturbed according to its supplied
+uncertainties, linearly interpolated onto a shared query grid, and then combined
+pointwise across datasets using inverse-variance weights.
+
+This is a weighted version of the user's earlier `average_on_grid_mc(...)`, which
+performed an unweighted average after interpolation. Here, datasets with smaller
+uncertainty contribute more strongly to the final combined curve. :contentReference[oaicite:1]{index=1}
+
+# Arguments
+- `xsets`, `ysets`:
+    Collections of x- and y-vectors, one per dataset.
+    Must satisfy `length(xsets) == length(ysets)` and each pair must have matching lengths.
+
+# Keyword arguments
+- `σxsets=nothing`:
+    Per-dataset x uncertainties. If `nothing`, x is not perturbed.
+- `σysets=nothing`:
+    Per-dataset y uncertainties. If `nothing`, all datasets are combined with equal weights.
+    If provided, these are also propagated onto the query grid and used for weighting.
+- `rel_x=false`:
+    If `true`, interpret `σxsets[i]` as relative uncertainties, i.e. `Δx = σx .* x`.
+    Otherwise treat them as absolute.
+- `xq=:union`:
+    Query grid specification.
+    - `:union`  → sorted union of all x-values
+    - vector    → explicit query grid
+- `B=400`:
+    Number of Monte-Carlo replicates.
+- `outside=:mask`:
+    Extrapolation policy:
+    - `:mask`   → outside each dataset's x-range return `NaN` and weight 0
+    - `:linear` → linear extrapolation
+    - `:flat`   → constant extrapolation
+- `min_datasets=1`:
+    Minimum number of contributing datasets required at a grid point in a replicate.
+    If fewer contribute, that replicate gives `NaN` there.
+- `rng`:
+    Random number generator.
+
+# Returns
+A named tuple with fields:
+- `xq`      : common query grid
+- `μ`       : final Monte-Carlo mean combined curve
+- `σ_mc`    : replicate-to-replicate Monte-Carlo standard deviation of the combined curve
+- `σ_w`     : average weighted standard error from the inverse-variance combine step
+- `σ_tot`   : total uncertainty, `sqrt(σ_mc^2 + σ_w^2)`
+- `n_eff`   : average number of datasets contributing at each query point
+- `preds`   : matrix of combined predictions, size `(B, length(xq))`
+
+# Notes
+- Linear interpolation is used for both `y` and `σy`.
+- If `σysets` is provided, the local variance used for weighting is obtained by
+  linearly interpolating `σy^2` onto the query grid.
+- Repeated x-values after x-jittering are merged before interpolation.
+- `σ_tot` is often the most useful final uncertainty to plot/use.
+
+# Interpretation of uncertainties
+At each grid point, the final uncertainty is split into two pieces:
+
+1. `σ_mc`:
+   variation of the final combined curve across Monte-Carlo replicates
+2. `σ_w`:
+   the typical inverse-variance combination uncertainty within each replicate
+
+These are combined in quadrature as
+
+    σ_tot = sqrt(σ_mc^2 + σ_w^2)
+
+This is usually more informative than only reporting the Monte-Carlo spread.
+"""
+function combine_on_grid_mc_weighted(xsets, ysets;
+                                     σxsets=nothing,
+                                     σysets=nothing,
+                                     xq=:union,
+                                     B::Int=400,
+                                     outside::Symbol=:mask,
+                                     rel_x::Bool=false,
+                                     min_datasets::Int=1,
+                                     rng=Random.default_rng())
+
+    @assert length(xsets) == length(ysets) "xsets and ysets must have the same number of datasets"
+    nset = length(xsets)
+    @assert nset > 0 "At least one dataset is required"
+    @assert B > 0 "B must be positive"
+    @assert outside in (:mask, :linear, :flat) "outside must be :mask, :linear, or :flat"
+    @assert min_datasets ≥ 1 "min_datasets must be at least 1"
+
+
+    function get_σx_for_dataset(σxsets, x, i)
+        if σxsets === nothing
+            return nothing
+        elseif σxsets isa Real
+            # same scalar for every point in every dataset
+            return fill(Float64(σxsets), length(x))
+        else
+            # original behavior: one entry per dataset
+            return collect(σxsets[i])
+        end
+    end
+
+    if σxsets !== nothing && !(σxsets isa Real)
+        @assert length(σxsets) == nset "σxsets must be either: nothing , a scalar, or one entry per dataset"
+    end
+    if σysets !== nothing
+        @assert length(σysets) == nset "σysets must have one entry per dataset"
+    end
+
+    # ----------------------------
+    # Build common query grid
+    # ----------------------------
+    xq_vec = xq === :union ? sort!(unique(vcat(map(collect, xsets)...))) : collect(xq)
+    m = length(xq_vec)
+    @assert m > 0 "Query grid is empty"
+
+    # Combined prediction for each MC replicate
+    preds   = fill(NaN, B, m)
+
+    # Weighted standard error inside each replicate:
+    #   σ_w(b, j) = sqrt(1 / sum_i w_i(j))
+    σw_repl = fill(NaN, B, m)
+
+    # Number of datasets contributing per replicate / grid point
+    neff_repl = zeros(Int, B, m)
+
+    # ----------------------------
+    # Helper: merge repeated x after jittering
+    # ----------------------------
+    function merge_duplicate_x(x::AbstractVector, y::AbstractVector, σy::Union{Nothing,AbstractVector})
+        p = sortperm(x)
+        xs = collect(x[p])
+        ys = collect(y[p])
+        σs = σy === nothing ? nothing : collect(σy[p])
+
+        xout = Float64[]
+        yout = Float64[]
+        σout = σs === nothing ? nothing : Float64[]
+
+        i = 1
+        n = length(xs)
+        while i ≤ n
+            j = i
+            xi = xs[i]
+            while j < n && isapprox(xs[j+1], xi; atol=0.0, rtol=0.0)
+                j += 1
+            end
+
+            # block i:j has same x
+            push!(xout, xi)
+
+            if σs === nothing
+                push!(yout, mean(@view ys[i:j]))
+            else
+                # inverse-variance merge at identical x
+                v = (@view σs[i:j]).^2
+                w = 1.0 ./ v
+                ȳ = sum((@view ys[i:j]) .* w) / sum(w)
+                σ̄ = sqrt(1.0 / sum(w))
+                push!(yout, ȳ)
+                push!(σout, σ̄)
+            end
+
+            i = j + 1
+        end
+
+        return xout, yout, σout
+    end
+
+    # ----------------------------
+    # Helper: build interpolation / extrapolation
+    # ----------------------------
+    function build_interp(xb::AbstractVector, yb::AbstractVector)
+        itp = Interpolations.interpolate((xb,), yb, Gridded(Interpolations.Linear()))
+        if outside === :linear
+            return Interpolations.extrapolate(itp, Line())
+        elseif outside === :flat
+            return Interpolations.extrapolate(itp, Flat())
+        else
+            return itp
+        end
+    end
+
+    # ----------------------------
+    # Helper: evaluate y and local variance on xq
+    # ----------------------------
+    function eval_dataset_on_grid(xb, yb, σyb, xqv)
+        xlo, xhi = first(xb), last(xb)
+
+        yvals = fill(NaN, length(xqv))
+        vvals = fill(NaN, length(xqv))
+
+        yitp = build_interp(xb, yb)
+
+        vitp = nothing
+        if σyb !== nothing
+            # interpolate variance, not σ itself
+            vb = σyb.^2
+            vitp = build_interp(xb, vb)
+        end
+
+        if outside === :mask
+            mask = (xqv .>= xlo) .& (xqv .<= xhi)
+            yvals[mask] .= yitp.(xqv[mask])
+            if vitp !== nothing
+                vvals[mask] .= vitp.(xqv[mask])
+            else
+                vvals[mask] .= 1.0
+            end
+        else
+            yvals .= yitp.(xqv)
+            if vitp !== nothing
+                vvals .= vitp.(xqv)
+            else
+                vvals .= 1.0
+            end
+        end
+
+        # Numerical safety
+        @inbounds for j in eachindex(vvals)
+            if !isnan(vvals[j]) && vvals[j] ≤ 0
+                vvals[j] = NaN
+            end
+        end
+
+        return yvals, vvals
+    end
+
+    # ----------------------------
+    # Monte-Carlo loop
+    # ----------------------------
+    for b in 1:B
+        curves = Vector{Vector{Float64}}(undef, nset)
+        vars   = Vector{Vector{Float64}}(undef, nset)
+
+        for i in 1:nset
+            x = collect(xsets[i])
+            y = collect(ysets[i])
+            @assert length(x) == length(y) "Dataset $i has mismatched x/y lengths"
+
+            σx = get_σx_for_dataset(σxsets, x, i)
+            σy = σysets === nothing ? nothing : collect(σysets[i])
+
+            if σx !== nothing
+                @assert length(σx) == length(x) "Dataset $i has mismatched x/σx lengths"
+            end
+            if σy !== nothing
+                @assert length(σy) == length(y) "Dataset $i has mismatched y/σy lengths"
+            end
+
+            # Jitter x
+            xb = if σx === nothing
+                copy(x)
+            else
+                dx = rel_x ? σx .* x : σx
+                x .+ randn(rng, length(x)) .* dx
+            end
+
+            # Jitter y
+            yb = if σy === nothing
+                copy(y)
+            else
+                y .+ randn(rng, length(y)) .* σy
+            end
+
+            # Need at least 2 points for interpolation
+            if length(xb) < 2
+                curves[i] = fill(NaN, m)
+                vars[i]   = fill(NaN, m)
+                continue
+            end
+
+            # Merge exact duplicates after jitter/sort
+            xb2, yb2, σy2 = merge_duplicate_x(xb, yb, σy)
+
+            if length(xb2) < 2
+                curves[i] = fill(NaN, m)
+                vars[i]   = fill(NaN, m)
+                continue
+            end
+
+            curves[i], vars[i] = eval_dataset_on_grid(xb2, yb2, σy2, xq_vec)
+        end
+
+        # Weighted combine across datasets at each xq
+        for j in 1:m
+            num = 0.0
+            den = 0.0
+            ncontrib = 0
+
+            @inbounds for i in 1:nset
+                yij = curves[i][j]
+                vij = vars[i][j]
+
+                if !isnan(yij) && !isnan(vij) && vij > 0
+                    wij = 1.0 / vij
+                    num += wij * yij
+                    den += wij
+                    ncontrib += 1
+                end
+            end
+
+            neff_repl[b, j] = ncontrib
+
+            if ncontrib ≥ min_datasets && den > 0
+                preds[b, j]   = num / den
+                σw_repl[b, j] = sqrt(1.0 / den)
+            else
+                preds[b, j]   = NaN
+                σw_repl[b, j] = NaN
+            end
+        end
+    end
+
+    # ----------------------------
+    # Final summary across MC replicates
+    # ----------------------------
+    μ      = fill(NaN, m)
+    σ_mc   = fill(NaN, m)
+    σ_w    = fill(NaN, m)
+    σ_tot  = fill(NaN, m)
+    n_eff  = fill(NaN, m)
+
+    for j in 1:m
+        vals_pred = [v for v in @view(preds[:, j]) if !isnan(v)]
+        vals_σw   = [v for v in @view(σw_repl[:, j]) if !isnan(v)]
+        vals_neff = [v for v in @view(neff_repl[:, j]) if v > 0]
+
+        if !isempty(vals_pred)
+            μ[j] = mean(vals_pred)
+            σ_mc[j] = length(vals_pred) > 1 ? std(vals_pred; corrected=true) : 0.0
+        end
+
+        if !isempty(vals_σw)
+            # Typical within-replicate weighted SE
+            σ_w[j] = mean(vals_σw)
+        end
+
+        if !isnan(σ_mc[j]) && !isnan(σ_w[j])
+            σ_tot[j] = hypot(σ_mc[j], σ_w[j])
+        elseif !isnan(σ_mc[j])
+            σ_tot[j] = σ_mc[j]
+        elseif !isnan(σ_w[j])
+            σ_tot[j] = σ_w[j]
+        end
+
+        if !isempty(vals_neff)
+            n_eff[j] = mean(vals_neff)
+        end
+    end
+
+    return (
+        xq    = xq_vec,
+        μ     = μ,
+        σ_mc  = σ_mc,
+        σ_w   = σ_w,
+        σ_tot = σ_tot,
+        n_eff = n_eff,
+        preds = preds,
+    )
+end
+
 function fit_ki(data_org, selected_points, ki_list, ki_range)
     """
         fit_ki(data_org, selected_points, ki_list, ki_range)
 
     Fit the induction coefficient `kᵢ` by minimizing a mean-squared error in **log10 space**
-    between the interpolated prediction `ki_itp(x, kᵢ)` and a selected subset of data points.
+    between the interpolated prediction `ki_up_itp(x, kᵢ)` and a selected subset of data points.
     The fit is therefore sensitive to *relative (fractional) deviations* across orders of
     magnitude.
 
@@ -228,7 +609,7 @@ function fit_ki(data_org, selected_points, ki_list, ki_range)
 
     # # --- log-space loss (used ONLY for fitting) ---
     loss_log(ki) = begin
-        z_pred = ki_itp.(Ic_fit, Ref(ki))
+        z_pred = ki_up_itp.(Ic_fit, Ref(ki))
         mean(abs2, log10.(z_pred) .- log10.(z_fit))
     end
 
@@ -240,7 +621,7 @@ function fit_ki(data_org, selected_points, ki_list, ki_range)
     k_fit = Optim.minimizer(fit_param)
 
     # --- linear-space error (reported) ---
-    z_pred_sel = ki_itp.(Ic_fit, Ref(k_fit))
+    z_pred_sel = ki_up_itp.(Ic_fit, Ref(k_fit))
     z_obs_sel  = z_fit
 
     mse_lin  = mean(abs2, z_pred_sel .- z_obs_sel)
@@ -248,7 +629,7 @@ function fit_ki(data_org, selected_points, ki_list, ki_range)
 
     # predictions for the full data set
     Ic = data_org[:, 1]
-    pred = ki_itp.(Ic, Ref(k_fit))
+    pred = ki_up_itp.(Ic, Ref(k_fit))
     y    = data_org[:, 3]
     coef_r2 = 1 - sum(abs2, pred .- y) / sum(abs2, y .- mean(y))
 
@@ -459,6 +840,7 @@ Icoils = [0.00,
             0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
 ];
 nI = length(Icoils);
+colores_current = palette(:darktest,nI);
 
 data_qmf1_path = joinpath(@__DIR__,"simulation_data",
     "QM_T200_8M",
@@ -478,9 +860,12 @@ data_cqddw_path = joinpath(@__DIR__, "simulation_data",
 JLD2_MyTools.summarize_meta_cqd_jld2(data_cqddw_path)
 
 
-data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
+data_directories = ["20260220", "20260225", 
+                    "20260226am","20260226pm",
+                    "20260227", "20260303", 
+                    "20260306r1", "20260306r2"]
 n_data = length(data_directories);
-colores = palette(:darkrainbow, n_data);
+colores_data = palette(:darkrainbow, n_data);
 
 nz , λ0 = 2, 0.01;
 σw_mm = 0.200;
@@ -538,7 +923,7 @@ plot!(fig1,1e-3*BvsI_optimal.Ic[4:end], 1e3*1e-4*BvsI_optimal.Bz[4:end],
     marker=(:diamond, 3, :white),
     markerstrokecolor=:purple,
     label="New setup arrangement",
-)
+);
 plot!(fig1,
     xscale=:log10,
     yscale=:log10,
@@ -602,15 +987,15 @@ for (idx, dir) in enumerate(data_directories)
     plot!(fig3, Ic, 1000*Bz,
         label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
         marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
-        line=(:dot, colores[idx], 1)
+        markerstrokecolor=colores_data[idx],
+        line=(:dot, colores_data[idx], 1)
     )
 
 end
 plot!(fig3,Icoils, 1e3*TheoreticalSimulation.BvsI.(Icoils),
     label="SG manual",
     line=(:solid,2,:black));
-plot!(fig2,1e-3*BvsI_optimal.Ic, 1e3*1e-4*BvsI_optimal.Bz,
+plot!(fig3,1e-3*BvsI_optimal.Ic, 1e3*1e-4*BvsI_optimal.Bz,
     line=(:dashdot,2,:purple),
     marker=(:diamond, 3, :white),
     markerstrokecolor=:purple,
@@ -638,8 +1023,8 @@ for (idx, dir) in enumerate(data_directories)
     plot!(fig4, Ic, 1000*Bz,
         label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
         marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
-        line=(:dot, colores[idx], 1)
+        markerstrokecolor=colores_data[idx],
+        line=(:dot, colores_data[idx], 1)
     )
 
 end
@@ -680,17 +1065,17 @@ for (idx, dir) in enumerate(data_directories)
     plot!(fig5,  BvsI_comparison[idx][:,1] , B_ratio,
         label=data_directories[idx],
         marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
-        line=(:solid,1,colores[idx])
+        markerstrokecolor=colores_data[idx],
+        line=(:solid,1,colores_data[idx])
     )
     y0 , σ0 = mean(B_ratio), standard_error(B_ratio)
 
     x = range(1e-3, 1.1, length=200)
     plot!(fig5, x, fill(y0, length(x)),
      ribbon = σ0,
-     color = colores[idx],
+     color = colores_data[idx],
      fillalpha = 0.25,
-     line=(:dash,0.5,colores[idx]),
+     line=(:dash,0.5,colores_data[idx]),
      label = "$(round(y0; digits=3)) ± $(round(σ0; sigdigits=1))")
     # hline!([y0], ine=(:dot,0.5,colores[idx]), label= "")
 end
@@ -729,7 +1114,6 @@ plot!(fig5a,
 )
 
 
-BvsI_optimal.Ic
 # SHIFTED EXPERIMENTAL DATA TO ZERO FIELD
 exp_data_corr = Vector{Matrix{Float64}}(undef, n_data)
 for (idx, dir) in enumerate(data_directories)
@@ -747,8 +1131,8 @@ for (idx, dir) in enumerate(data_directories)
     plot!(fig1A, Ic, 1000*Bz,
         label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
         marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
-        line=(:dot, colores[idx], 1)
+        markerstrokecolor=colores_data[idx],
+        line=(:dot, colores_data[idx], 1)
     )
 
 end
@@ -780,8 +1164,8 @@ for (idx, dir) in enumerate(data_directories)
     plot!(fig2A, Ic, 1000*Bz,
         label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
         marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
-        line=(:dot, colores[idx], 1)
+        markerstrokecolor=colores_data[idx],
+        line=(:dot, colores_data[idx], 1)
     )
 
 end
@@ -807,8 +1191,8 @@ for (idx, dir) in enumerate(data_directories)
     plot!(fig3A, Ic, 1000*Bz,
         label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
         marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
-        line=(:dot, colores[idx], 1)
+        markerstrokecolor=colores_data[idx],
+        line=(:dot, colores_data[idx], 1)
     )
 
 end
@@ -846,8 +1230,8 @@ for (idx, dir) in enumerate(data_directories)
     plot!(fig4A, Ic, 1000*Bz,
         label="$(dir) (degauss = $(round(1e3*Ic[1]; digits=6))mA , $(Int(round(1e4*Bz[1])))G )",
         marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
-        line=(:dot, colores[idx], 1)
+        markerstrokecolor=colores_data[idx],
+        line=(:dot, colores_data[idx], 1)
     )
 
 end
@@ -890,8 +1274,8 @@ for (idx, dir) in enumerate(data_directories)
         BvsI_comparison_corr[idx][:,1] , B_ratio,
         label=data_directories[idx],
         marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
-        line=(:solid,1,colores[idx])
+        markerstrokecolor=colores_data[idx],
+        line=(:solid,1,colores_data[idx])
     )
     y0 , σ0 = mean(B_ratio), standard_error(B_ratio)
 
@@ -899,9 +1283,9 @@ for (idx, dir) in enumerate(data_directories)
     plot!(fig5A,
     x, fill(y0, length(x)),
     ribbon = σ0,
-    color = colores[idx],
+    color = colores_data[idx],
     fillalpha = 0.25,
-    line=(:dash,0.5,colores[idx]),
+    line=(:dash,0.5,colores_data[idx]),
     label = "$(round(y0; digits=3)) ± $(round(σ0; sigdigits=1))")
 end
 plot!(fig5A,legend=:bottomright,
@@ -1038,6 +1422,93 @@ pretty_table(QM_df;
             equal_data_column_widths= true,
 )
 
+r = QM_df[!,:F2] ./ QM_df[!,:F1];
+fig0a = plot(QM_df[!,:Ic], r,
+    marker=(:square,2,:white),
+    markerstrokecolor=:orangered,
+    line=(:solid,1,:orangered),
+    xlims=(1e-3,1.05),
+    label=L"$I_{c}=%$(QM_df[1,:Ic])\mathrm{A}$, $r=%$(r[1])$",
+);
+plot!(fig0a, 
+    xscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+);
+plot!(fig0a,
+    xlabel="Current (A)",
+    ylabel=L"$z_{\mathrm{max}}(F=2)/z_{\mathrm{max}}(F=1)$"
+);
+display(fig0a)
+
+rc = 0.5*(QM_df[!,:F1] .+ QM_df[!,:F2]);
+fig0b=plot(QM_df[!,:Ic], 1000*rc,
+    marker=(:square,2,:white),
+    markerstrokecolor=:orangered,
+    line=(:solid,1,:orangered),
+    label=L"$I_{c}=%$(QM_df[1,:Ic])\mathrm{A}$, $z_{c}=%$(1e6 * round(rc[1]; sigdigits=1))\times 10^{-3}\mathrm{\mu m}$",
+    xlims=(1e-3,1.05),
+)
+plot!(fig0b, 
+    xscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+);
+plot!(fig0b,
+    xlabel="Current (A)",
+    ylabel=L"$\frac{1}{2}\left(z_{\mathrm{max}}(F=1) + z_{\mathrm{max}}(F=2)\right) \ \mathrm{\mu m}$",
+    left_margin=3mm,
+    legend=:topleft,
+);
+display(fig0b)
+
+fig0 = plot(fig0a, fig0b,
+layout=(2,1),
+link=:x,
+size=(1000,700),
+left_margin=4mm,)
+plot!(fig0[1], xlabel="", xformatter=_->"", bottom_margin=-8mm)
+
+
+fig00 = plot(xlabel=L"$z \ (\mathrm{mm})$")
+for i=1:2:nI
+    data = chosen_qm_f1[i][:z_profile][:,[1,3]]
+    plot!(fig00,
+        data[:,1], data[:,2],
+        label=L"$I_{c}=%$(1000*Icoils[i])\mathrm{mA}$",
+        line=(:solid,2,colores_current[i]))
+end
+plot!(fig00,
+    yformatter = y -> @sprintf("%.1e", y),
+    xlims=(-5,5),
+    legend=:outertop,
+    legend_columns=5,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,)
+display(fig00)
+
+fig01 = plot(xlabel=L"$z \ (\mathrm{mm})$")
+for i=1:2:nI
+    data = chosen_qm_f2[i][:z_profile][:,[1,3]]
+    plot!(fig01,
+        data[:,1], data[:,2],
+        # label=L"$I_{c}=%$(1000*Icoils[i])\mathrm{mA}$",
+        line=(:solid,2,colores_current[i]))
+end
+plot!(fig01,
+    yformatter = y -> @sprintf("%.1e", y),
+    xlims=(-5,5),
+    legend=false,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig01)
+
+fig=plot(fig00, fig01,
+layout=(2,1),
+size=(900,600),
+)
+plot!(fig[1], xlabel="", xformatter=_->"", bottom_margin=-5mm)
+display(fig)
+
 
 fig1 = plot(
     xlabel="Currents (A)",
@@ -1150,7 +1621,7 @@ plot!(fig1,
     legendtitle=L"$k_{i} \times 10^{-6}$",
     legendtitlefontsize=8,
     legendfontsize=6,
-    legend_columns=4,
+    legend_columns=3,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     size=(800,600),
@@ -1184,7 +1655,7 @@ plot!(fig2,
     legendtitle=L"$k_{i} \times 10^{-6}$",
     legendtitlefontsize=8,
     legendfontsize=6,
-    legend_columns=4,
+    legend_columns=2,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     size=(800,600),
@@ -1342,8 +1813,8 @@ plot!(EXP_data[data_directories[i]].Ic, EXP_data[data_directories[i]].F1[1] .- E
     label=data_directories[i],
     marker=(:square,3,:white),
     markerstrokewidth=2,
-    markerstrokecolor=colores[i],
-    line=(:dash, 1, colores[i]))
+    markerstrokecolor=colores_data[i],
+    line=(:dash, 1, colores_data[i]))
 end
 plot!(legend=:outerright,
     xlims=(-0.1e-3,5e-3),
@@ -1356,9 +1827,6 @@ plot!(legend=:outerright,
 EXP_data_processed = OrderedDict{String, DataFrame}()
 for 𝓁 = 1:n_data
     dir = data_directories[𝓁]
-    println(dir)
-
-
     data_dir = DataFrame(hcat(
             EXP_data[dir].Ic,
             EXP_data[dir].F1[1] .- EXP_data[dir].C00[1],
@@ -1375,7 +1843,7 @@ for 𝓁 = 1:n_data
     pretty_table(data_dir; 
                 alignment =:c,
                 title         = "EXPERIMENT $(data_directories[𝓁])",
-                formatters = [fmt__printf("%8.3f", [1]), fmt__printf("%8.3f",[2,4,6]), fmt__printf("%8.3f",[3,5,7])],
+                formatters = [fmt__printf("%8.4f", [1]), fmt__printf("%8.4f",[2,4,6]), fmt__printf("%8.3f",[3,5,7])],
                 style = TextTableStyle(
                         first_line_column_label = crayon"yellow bold",
                         table_border  = crayon"blue bold",
@@ -1519,8 +1987,8 @@ for (i,dir) in enumerate(data_directories)
         yerror = EXP_data_processed[dir].ErrF1,
         label= dir,
         marker=(:circle,2,:white,0.6),
-        markerstrokecolor=colores[i],
-        line=(:solid,1,colores[i])
+        markerstrokecolor=colores_data[i],
+        line=(:solid,1,colores_data[i])
     )
 end
 plot!(figa,
@@ -1528,8 +1996,8 @@ plot!(figa,
     label=L"QM : $F=1$",
     seriestype=:scatter,
     marker=(:diamond,2,:white),
-    markerstrokecolor=:red,
-    line=(:red,1),
+    markerstrokecolor=:black,
+    line=(:black,1),
 )
 plot!(figa,
     legend=:bottomright,
@@ -1556,8 +2024,8 @@ for (i,dir) in enumerate(data_directories)
         yerror = EXP_data_processed[dir].ErrF2,
         label= dir,
         marker=(:circle,2,:white,0.6),
-        markerstrokecolor=colores[i],
-        line=(:solid,1,colores[i])
+        markerstrokecolor=colores_data[i],
+        line=(:solid,1,colores_data[i])
     )
 end
 plot!(figb,
@@ -1565,8 +2033,8 @@ plot!(figb,
     label=L"QM : $F=2$",
     seriestype=:scatter,
     marker=(:diamond,2,:white),
-    markerstrokecolor=:red,
-    line=(:red,1),
+    markerstrokecolor=:black,
+    line=(:black,1),
 )
 plot!(figb,
     xlims=(10e-3, 1.05),
@@ -1589,8 +2057,8 @@ for (i,dir) in enumerate(data_directories)
         yerror = EXP_data_processed[dir].ErrΔ,
         label= dir,
         marker=(:circle,2,:white,0.6),
-        markerstrokecolor=colores[i],
-        line=(:solid,1,colores[i])
+        markerstrokecolor=colores_data[i],
+        line=(:solid,1,colores_data[i])
     )
 end
 plot!(figc,
@@ -1598,8 +2066,8 @@ plot!(figc,
     label=L"QM : $\Delta z$",
     seriestype=:scatter,
     marker=(:diamond,2,:white),
-    markerstrokecolor=:red,
-    line=(:red,1),
+    markerstrokecolor=:black,
+    line=(:black,1),
 )
 plot!(figc,
     legend=:bottomright,
@@ -1627,11 +2095,337 @@ bottom_margin=3mm,
 display(fig)
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++
-#++++++++++++++++++++++++++++++++++++++++++++++++++
+#+++++++++++++++++++++++++++++++++++++++++++++++++
+threshold = 0.020 ; # lower cut-off for experimental currents
+
+tol_grouping = 0.04;
+Ics = [EXP_data_processed[dir].Ic for dir in data_directories];
+clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping);
+for s in clusters.summary
+    println("Value group ≈ $(@sprintf("%1.3f", s.mean_val)) ± $(round(s.std_val; sigdigits=1)) \t appears in datasets: ", s.datasets)
+end
+Ic_grouped  = round.(getproperty.(clusters.summary, :mean_val); digits=6);
+δIc_grouped = round.(getproperty.(clusters.summary, :std_val);  sigdigits=2);
+mask = Ic_grouped .>= threshold;
+grouped_exp_current = DataFrame(
+    Ic  = Ic_grouped[mask],
+    δIc = δIc_grouped[mask],
+)
+
+fig=plot(grouped_exp_current.Ic, 
+    ribbon=grouped_exp_current.δIc,
+    marker=(:diamond, 2, :white),
+    markerstrokecolor=:red,
+    line=(:solid,1,:red),
+    color=:red,
+    fillalpha=0.2,
+    label=false,
+    xlabel="current number",
+    ylabel="Current (A)",
+    ylims=(7e-4,1.05),
+);
+plot!(
+    yscale=:log10,
+    legend=:bottomright,
+);
+display(fig)
+
+CURRENT_ROW_START = [first_gt_idx(EXP_data_processed[t], :Ic, threshold) for t in keys(EXP_data_processed)];
+Ic_sets  = [EXP_data_processed[t][i:end, :Ic]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
+F1_sets  = [EXP_data_processed[t][i:end, :F1]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
+F2_sets  = [EXP_data_processed[t][i:end, :F2]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
+σF1_sets = [EXP_data_processed[t][i:end, :ErrF1]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
+σF2_sets = [EXP_data_processed[t][i:end, :ErrF2]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
+
+# pick a log-spaced grid across the overall I-range (nice for decades-wide currents)
+i_sampled_length = 65 ;
+xlo, xhi = maximum([minimum(first.(Ic_sets)),threshold]) ,  maximum([maximum(last.(Ic_sets)),1.01]);
+Ic_sampling  = exp10.(range(log10(xlo), log10(xhi), length=i_sampled_length))
+
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Monte Carlo analysis
+MC_data_F1 = combine_on_grid_mc_weighted(Ic_sets, F1_sets; σxsets=nothing, σysets=σF1_sets, B=5000, xq=grouped_exp_current.Ic);
+MC_data_F2 = combine_on_grid_mc_weighted(Ic_sets, F2_sets; σxsets=nothing, σysets=σF2_sets, B=5000, xq=grouped_exp_current.Ic);
+
+fig = plot(
+    xlabel="Current (A)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+    xlims = (10e-3,1.0),
+    ylims = (1e-3, 2),
+    legend=:bottomright,
+)
+for (i,dir) in enumerate(data_directories)
+    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
+    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F1]
+    δys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:ErrF1]
+    scatter!(fig,xs,ys,
+        yerror= δys,
+        label=data_directories[i],
+        marker=(:circle, :white,3),
+        markerstrokecolor=colores_data[i],
+        markerstrokewidth=1,
+        )
+end
+plot!(fig, QM_df[!,:Ic], QM_df[!,:F1], label="QM", line=(:black,:dashdot,2));
+plot!(fig, MC_data_F1.xq, MC_data_F1.μ; 
+    ribbon=MC_data_F1.σ_tot,
+    label=false,
+    color=:maroon1,
+)
+plot!(fig,
+    xscale=:log10,
+    yscale=:log10, 
+    title = "Weighted Monte Carlo combiner",
+    color=:black,
+)
+display(fig)
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Spline interpolation
+
+# i_xx0 = unique(round.(sort(union(Ic_sampling,grouped_exp_current.Ic)); digits=6))
+i_xx0 = unique(round.(sort(grouped_exp_current.Ic); digits=6))
+i_sampled_length = length(i_xx0)
+
+fig = plot(
+    xlabel="Current (A)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+    xlims = (10e-3,1.0),
+    ylims = (1e-3, 2),
+)
+z1_final = zeros(n_data,i_sampled_length)
+z2_final = zeros(n_data,i_sampled_length)
+for (i,dir) in enumerate(data_directories)
+    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
+    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F1]
+    δys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:ErrF1]
+    splF1 = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
+    z1_final[i,:] = splF1.(i_xx0)
+    scatter!(fig,xs, ys,
+        yerror= δys,
+        label=data_directories[i],
+        marker=(:circle, :white,3),
+        markerstrokecolor=colores_data[i],
+        markerstrokewidth=1,
+        )
+    plot!(fig,i_xx0,splF1.(i_xx0),
+        label=false,
+        line=(colores_data[i],1))
+
+    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
+    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F2]
+    δys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:ErrF2]
+    splF2 = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
+    z2_final[i,:] = splF2.(i_xx0)
+end
+plot!(fig, QM_df[!,:Ic], QM_df[!,:F1], label="QM", line=(:black,:dashdot,2));
+display(fig)
+plot!(fig,
+title="Interpolation: cubic splines",
+legend=:bottomright,
+xaxis=:log10, 
+yaxis=:log10,
+xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+)
+spl_zf1 = vec(mean(z1_final, dims=1))
+spl_δzf1 = vec(std(z1_final; dims=1, corrected=true))/sqrt(n_data)
+spl_zf2 = vec(mean(z2_final, dims=1))
+spl_δzf2 = vec(std(z2_final; dims=1, corrected=true))/sqrt(n_data)
+data_spl = hcat(i_xx0, spl_zf1, spl_δzf1, spl_zf2, spl_δzf2)
+plot!(fig, data_spl[:,1], data_spl[:,2],
+    ribbon = data_spl[:,3],
+    fillalpha=0.40, 
+    fillcolor=:green3, 
+    label=false,
+    line=(:dash,:green3,2))
+display(fig)
+
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Fit Spline interpolation
+fig = plot(
+    xlabel="Current (A)",
+    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+)
+z1_final_fit = zeros(n_data,i_sampled_length)
+z2_final_fit = zeros(n_data,i_sampled_length)
+for (i,dir) in enumerate(data_directories)
+    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
+    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F1]
+    δys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:ErrF1]
+    splF1 = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.005, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
+    z1_final_fit[i,:] = splF1.(i_xx0)
+    scatter!(fig,xs, ys,
+        label=data_directories[i],
+        marker=(:circle, :white,3),
+        markerstrokecolor=colores_data[i],
+        markerstrokewidth=1,
+        )
+    plot!(fig,i_xx0,splF1.(i_xx0),
+        label=false,
+        line=(colores_data[i],1))
+
+    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
+    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F2]
+    δys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:ErrF2]
+    splF2 = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.005, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
+    z2_final_fit[i,:] = splF2.(i_xx0)
+
+end
+plot!(fig, QM_df[!,:Ic], QM_df[!,:F1], label="QM", line=(:black,:dashdot,2));
+display(fig)
+plot!(fig,
+title = "Fit smoothing cubic spline",
+xaxis=:log10, 
+yaxis=:log10,
+xticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+xlims = (10e-3,1.0),
+ylims = (8e-3, 2),
+)
+display(fig)
+zf1_fit = vec(mean(z1_final_fit, dims=1))
+δzf1_fit = vec(std(z1_final_fit; dims=1, corrected=true)/sqrt(n_data))
+zf2_fit = vec(mean(z2_final_fit, dims=1))
+δzf2_fit = vec(std(z2_final_fit; dims=1, corrected=true)/sqrt(n_data))
+data_fit = hcat(i_xx0, zf1_fit, δzf1_fit, zf2_fit, δzf2_fit)
+plot!(fig,i_xx0, zf1_fit,
+    ribbon = δzf1_fit,
+    fillalpha=0.40, 
+    fillcolor=:goldenrod, 
+    label=false,
+    line=(:dash,:goldenrod,2))
+display(fig)
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Combined results
+
+combined_result = OrderedDict(
+    :Current => (
+        Ic  = grouped_exp_current.Ic,
+        σIc = grouped_exp_current.δIc,
+    ),
+
+    :MonteCarlo => (
+        zF1      = MC_data_F1.μ,
+        σzF1     = MC_data_F1.σ_tot,
+        zF2      = MC_data_F2.μ,
+        σzF2     = MC_data_F2.σ_tot,
+        Δz       = MC_data_F1.μ .- MC_data_F2.μ,
+        σΔz      = sqrt.( (MC_data_F1.σ_tot).^2 .+ (MC_data_F2.σ_tot).^2 )
+    ),
+
+    :SplineInter => (
+        zF1      = data_spl[:,2],
+        σzF1     = data_spl[:,3],
+        zF2      = data_spl[:,4],
+        σzF2     = data_spl[:,5],
+        Δz       = data_spl[:,2] .- data_spl[:,4],
+        σΔz      = sqrt.( (data_spl[:,3]).^2 .+ (data_spl[:,5]).^2 )
+    ),
+
+    :SplineFit => (
+        zF1      = data_fit[:,2],
+        σzF1     = data_fit[:,3],
+        zF2      = data_fit[:,4],
+        σzF2     = data_fit[:,5],
+        Δz       = data_fit[:,2] .- data_fit[:,4],
+        σΔz      = sqrt.( (data_fit[:,3]).^2 .+ (data_fit[:,5]).^2 )
+    ),
+
+)
+
+fig1 = plot(xlabel="Currents (A)", 
+    ylabel=L"z_{\mathrm{peak}}^{F=1} \qquad (\mathrm{mm})")
+plot!(fig1, combined_result[:Current].Ic, combined_result[:MonteCarlo].zF1,
+    ribbon= combined_result[:MonteCarlo].σzF1,
+    label= "Monte Carlo",
+    color=:red )
+plot!(fig1,
+    combined_result[:Current].Ic, combined_result[:SplineInter].zF1 ,
+    ribbon= combined_result[:SplineInter].σzF1,
+    label="Spl. Interpolation",
+    color=:blue)
+plot!(fig1,
+    combined_result[:Current].Ic, combined_result[:SplineFit].zF1 ,
+    ribbon= combined_result[:SplineFit].σzF1,
+    label="Spl. Fit",
+    color=:darkgreen )
+plot!(fig1,
+    xlims=(10e-3,1.05),
+    ylims=(10e-3,2.05),
+    xscale=:log10,yscale=:log10,
+    xticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),)
+
+fig2 = plot(xlabel="Currents (A)", ylabel=L"z_{\mathrm{peak}}^{F=2}  \qquad (\mathrm{mm})")    
+plot!(fig2,
+    combined_result[:Current].Ic, combined_result[:MonteCarlo].zF2,
+    ribbon= combined_result[:MonteCarlo].σzF2,
+    label= "Monte Carlo",
+    color=:red )
+plot!(fig2,
+    combined_result[:Current].Ic, combined_result[:SplineInter].zF2 ,
+    ribbon= combined_result[:SplineInter].σzF2,
+    label="Spl. Interpolation",
+    color=:blue)
+plot!(fig2,
+    combined_result[:Current].Ic, combined_result[:SplineFit].zF2 ,
+    ribbon= combined_result[:SplineFit].σzF2,
+    label="Spl. Fit",
+    color=:darkgreen )
+plot!(fig2,
+    legend=:bottomleft,
+    xlims=(10e-3,1.05),
+    xticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xscale=:log10)
+
+fig3 = plot(xlabel="Currents (A)", ylabel=L"z_{\mathrm{peak-peak}} \qquad (\mathrm{mm})")    
+plot!(fig3,
+    combined_result[:Current].Ic, combined_result[:MonteCarlo].Δz ,
+    ribbon= combined_result[:MonteCarlo].σΔz,
+    label= "Monte Carlo",
+    color=:red )
+plot!(fig3,
+    combined_result[:Current].Ic, combined_result[:SplineInter].Δz ,
+    ribbon= combined_result[:SplineInter].σΔz,
+    label="Spl. Interpolation",
+    color=:blue)
+plot!(fig3,
+    combined_result[:Current].Ic, combined_result[:SplineFit].Δz ,
+    ribbon= combined_result[:SplineFit].σΔz,
+    label="Spl. Fit",
+    color=:darkgreen )
+plot!(fig3,
+    legend=:topleft,
+    xlims=(10e-3,1.05),
+    ylims=(10e-3,4.05),
+    xscale=:log10,yscale=:log10,
+    xticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+)
+
+fig = plot(fig1, fig2, fig3,
+    layout=(3,1),
+    link=:x,
+    size=(800,600),
+    left_margin=4mm,)
+plot!(fig[1], xlabel="", xformatter=_->"", bottom_margin=-9mm)
+plot!(fig[2], xlabel="", xformatter=_->"", bottom_margin=-9mm)
+display(fig)
+
+
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Select a subset of kᵢ values for interpolation
 using Dierckx
 # ki_start , ki_stop = 1 , 109 ;
-ki_start , ki_stop = 1 , 65 ;
+ki_start , ki_stop = 16 , 65 ;
 println("Interpolation in the induction term goes from ",
     round(1e-6*cqd_sim_data.ki[ki_start]; sigdigits=3),
     " to ",
@@ -1639,7 +2433,9 @@ println("Interpolation in the induction term goes from ",
     "")
 # Build 2D cubic spline interpolant: z_max(I, kᵢ)
 # s=0 => exact interpolation (no smoothing)
-ki_itp = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], up_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+ki_up_itp = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], up_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+ki_dw_itp = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], dw_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+ki_Δ_itp  = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], Δz_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
 # -----------------------------------------------------------------------------
 # Create a dense grid for visualization:
@@ -1649,37 +2445,39 @@ ki_itp = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], up_cqd[:,ki_start:k
 i_surface = range(10e-3,1.0; length = 101);
 ki_surface = range(cqd_sim_data.ki[ki_start],cqd_sim_data.ki[ki_stop]; length = 101);
 # Evaluate surface on a grid.
-Z = [ki_itp(x, y) for y in ki_surface, x in i_surface] ;
+Zup = [ki_up_itp(x, y) for y in ki_surface, x in i_surface] ;
+Zdw = [ki_dw_itp(x, y) for y in ki_surface, x in i_surface] ;
+ΔZ_cqd = [ki_Δ_itp(x, y) for y in ki_surface, x in i_surface] ;
 
 # -----------------------------------------------------------------------------
 # 3D surface plot (log10 axes for I and z)
 # -----------------------------------------------------------------------------
-fit_surface = surface(log10.(i_surface), ki_surface, log10.(abs.(Z));
-    title = "Fitting surface",
-    xlabel = L"I_{c}",
-    ylabel = L"$k_{i}\times 10^{-6}$",
-    zlabel = L"$z\ (\mathrm{mm})$",
-    legend = false,
-    color = :viridis,
-    xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
-    camera = (20, 25),     # (azimuth, elevation)
-    xlims = log10.((8e-4,2.05)),
-    zlims = log10.((2e-4,10.0)),
-    gridalpha = 0.3,
-)
+# fit_surface = surface(log10.(i_surface), ki_surface, log10.(abs.(Z));
+#     title = "Fitting surface",
+#     xlabel = L"I_{c}",
+#     ylabel = L"$k_{i}\times 10^{-6}$",
+#     zlabel = L"$z\ (\mathrm{mm})$",
+#     legend = false,
+#     color = :viridis,
+#     xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+#     zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+#     camera = (20, 25),     # (azimuth, elevation)
+#     xlims = log10.((8e-4,2.05)),
+#     zlims = log10.((2e-4,10.0)),
+#     gridalpha = 0.3,
+# );
 
 # -----------------------------------------------------------------------------
 # Contour plot uses log10(z) as the displayed quantity.
 # We clamp |Z| away from zero to avoid log10(0) and produce stable color limits.
 # -----------------------------------------------------------------------------
-Zp   = max.(abs.(Z), 1e-12);
+Zp   = max.(Zup, 1e-12);
 logZ = log10.(Zp);
 # Choose "decade" ticks for the colorbar based on min/max of logZ
 lo , hi  = floor(minimum(logZ)) , ceil(maximum(logZ)); 
 decades = collect(lo:1:hi) ; # [-4,-3,-2,-1,0] 
 labels = [L"10^{%$k}" for k in decades];
-fit_contour = contourf(i_surface, ki_surface, logZ; 
+fit_contour_up = contourf(i_surface, ki_surface, logZ; 
     levels=101,
     title="Fitting contour",
     xlabel=L"$I_{c}$ (A)", 
@@ -1689,291 +2487,211 @@ fit_contour = contourf(i_surface, ki_surface, logZ;
     linestyle=:dash,
     xaxis=:log10,
     yaxis=:log10,
-    xlims = (9e-3,1.05),
+    xlims = (10e-3,1.05),
     xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     clims = (lo, hi),   # optional explicit range
     colorbar_ticks = (decades, labels),      # show ticks as 10^k
-    colorbar_title = L"$ z \ \mathrm{(mm)}$",   # what the values mean
+    colorbar_title = L"$ \log(z_{\mathrm{peak}}^{\mathrm{up}}\ \mathrm{(mm)}) $",   # what the values mean
 );
+display(fit_contour_up)
 
-# Combined display: surface on top, contour below
-fit_figs = plot(fit_surface, fit_contour,
-    layout=@layout([a ; b]),
-    size = (1800,750),
-    bottom_margin = 8mm,
-    top_margin = 3mm,
+Zp   = Zdw;
+# Choose "decade" ticks for the colorbar based on min/max of logZ
+lo , hi  = floor(minimum(Zp)) , ceil(maximum(Zp))
+decades = collect(lo:1:hi) ; # [-4,-3,-2,-1,0] 
+labels = [L"10^{%$k}" for k in decades];
+fit_contour_dw = contourf(i_surface, ki_surface, Zp; 
+    levels=101,
+    title="Fitting contour",
+    xlabel=L"$I_{c}$ (A)", 
+    ylabel=L"$k_{i}\times 10^{-6}$", 
+    color=:viridis, 
+    linewidth=0.2,
+    linestyle=:dash,
+    xaxis=:log10,
+    yaxis=:log10,
+    xlims = (10e-3,1.05),
+    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    clims = (lo, hi),   # optional explicit range
+    colorbar_ticks = (decades, labels),      # show ticks as 10^k
+    colorbar_title = L"$ z_{\mathrm{peak}}^{\mathrm{dw}} \ \mathrm{(mm)}$",   # what the values mean
 );
-display(fit_figs)
+display(fit_contour_dw)
 
+Zp   = max.(ΔZ_cqd, 1e-12);
+logZ = log10.(Zp);
+# Choose "decade" ticks for the colorbar based on min/max of logZ
+lo , hi  = floor(minimum(logZ)) , ceil(maximum(logZ)); 
+decades = collect(lo:1:hi) ; # [-4,-3,-2,-1,0] 
+labels = [L"10^{%$k}" for k in decades];
+fit_contour_Δ = contourf(i_surface, ki_surface, logZ; 
+    levels=101,
+    title="Fitting contour",
+    xlabel=L"$I_{c}$ (A)", 
+    ylabel=L"$k_{i}\times 10^{-6}$", 
+    color=:viridis, 
+    linewidth=0.2,
+    linestyle=:dash,
+    xaxis=:log10,
+    yaxis=:log10,
+    xlims = (10e-3,1.05),
+    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    clims = (lo, hi),   # optional explicit range
+    colorbar_ticks = (decades, labels),      # show ticks as 10^k
+    colorbar_title = L"$ \log(z_{\mathrm{p-p}}\ \mathrm{(mm)}) $",   # what the values mean
+);
+display(fit_contour_Δ )
+
+plot(fit_contour_up, fit_contour_dw, fit_contour_Δ,
+    layout=@layout([a1 a2; a3]);
+    title="",
+    size=(900,500),
+    left_margin=4mm,
+)
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Currents used for scan/plotting of fitted curves (log-spaced)
 I_scan = logspace10(0.020, 1.00; n = 501);
-
 zqm = Spline1D(QM_df[!,:Ic],QM_df[!,:F1],k=3);
 
-# -----------------------------------------------------------------------------
-# 2) Choose which rows to use for the kᵢ fit
-#
-# Available modes:
-#   - fit_ki_mode = :full
-#       Use the full post-threshold current range.
-#
-#   - fit_ki_mode = :low
-#       Use only the low-current window (small-deflection regime).
-#
-#   - fit_ki_mode = :high
-#       Use only the high-current window (asymptotic / large-deflection regime).
-#
-#   - fit_ki_mode = :low_high
-#       Use both low- and high-current windows, excluding the mid-current region.
-#
-# This flexibility allows the fit to emphasize different physical regimes,
-# depending on whether sensitivity to low-current behavior, high-current
-# behavior, or both is desired.
-# -----------------------------------------------------------------------------
-fit_ki_mode = :full   # ← change to :low, :high, or :low_high
-n_front  = 5
-n_back   = 6
 
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Fitting for induction factor for each individual data set
+fit_ki_mode = :full ; # ← change to :low, :high, or :low_high
+n_front  = 6 ;
+n_back   = 6 ;
 for dir in data_directories
 
-dir_chosen = EXP_data_processed[dir]
+    dir_chosen = EXP_data_processed[dir]
+    data_threshold = dir_chosen[(0.025 .< dir_chosen.Ic) .& (dir_chosen.Ic .< 0.850), :]
+    data = hcat(data_threshold[!,:Ic], 0.02 * data_threshold[!,:Ic] , data_threshold[!,:F1], data_threshold[!,:ErrF1] )
 
-data_threshold = dir_chosen[dir_chosen.Ic .> 0.025, :]
+    low_range  = 1:n_front ;
+    high_range = (size(data, 1) - n_back + 1):size(data, 1);
 
-data = hcat(data_threshold[!,:Ic], 0.02 * data_threshold[!,:Ic] , data_threshold[!,:F1], data_threshold[!,:ErrF1] )
+    @assert last(low_range) ≤ size(data,1)
+    @assert first(high_range) ≥ 1
 
-
-low_range  = 1:n_front ;
-high_range = (size(data, 1) - n_back + 1):size(data, 1);
-
-@assert last(low_range) ≤ size(data,1)
-@assert first(high_range) ≥ 1
-
-# Select rows according to the chosen fitting mode
-fit_ki_idx = begin
-    if fit_ki_mode === :full
-        Colon()
-    elseif fit_ki_mode === :low
-        low_range
-    elseif fit_ki_mode === :high
-        high_range
-    elseif fit_ki_mode === :low_high
-        vcat(low_range, high_range)
-    else
-        error("Unknown fit_ki_mode = $fit_ki_mode")
+    # Select rows according to the chosen fitting mode
+    fit_ki_idx = begin
+        if fit_ki_mode === :full
+            Colon()
+        elseif fit_ki_mode === :low
+            low_range
+        elseif fit_ki_mode === :high
+            high_range
+        elseif fit_ki_mode === :low_high
+            vcat(low_range, high_range)
+        else
+            error("Unknown fit_ki_mode = $fit_ki_mode")
+        end
     end
-end
 
-# -----------------------------------------------------------------------------
-# 3) Compute a global scaling factor for the experimental z-values 
-#   with respect to QM
-#
-# Motivation:
-#   Experimental z may differ from simulated z by an overall scale factor
-#   (e.g., magnification calibration). We estimate a single multiplicative
-#   factor using only the highest-current tail, where SNR is typically best.
-#
-# Scaling convention used:
-#   scaled_mag = (yexp⋅yexp) / (yexp⋅ythe)
-# so that (yexp / scaled_mag) best matches ythe in a least-squares sense.
-# -----------------------------------------------------------------------------
-n_tail = 6  # number of tail points used for scaling
+    # -----------------------------------------------------------------------------
+    # Compute a global scaling factor for the experimental z-values 
+    # with respect to QM
+    #
+    # Motivation:
+    #   Experimental z may differ from simulated z by an overall scale factor
+    #   (e.g., magnification calibration). We estimate a single multiplicative
+    #   factor using only the highest-current tail, where SNR is typically best.
+    #
+    # Scaling convention used:
+    #   scaled_mag = (yexp⋅yexp) / (yexp⋅ythe)
+    # so that (yexp / scaled_mag) best matches ythe in a least-squares sense.
+    # -----------------------------------------------------------------------------
+    n_tail = 6  # number of tail points used for scaling
 
-@printf "For the scaling of the experimental data, we use the current range = %.3f A – %.3f A \n" first(last(data[:, 1], n_tail)) last(last(data[:, 1], n_tail))
-yexp = last(data[:, 3], n_tail)              # experimental z-values (tail)
-ythe = last(zqm.(data[:, 1]), n_tail)        # QM reference z-values at same currents
-scaled_mag = dot(yexp, yexp) / dot(yexp, ythe)
+    @printf "For the scaling of the experimental data, we use the current range = %.3f A – %.3f A \n" first(last(data[:, 1], n_tail)) last(last(data[:, 1], n_tail))
+    yexp = last(data[:, 3], n_tail)              # experimental z-values (tail)
+    ythe = last(zqm.(data[:, 1]), n_tail)        # QM reference z-values at same currents
+    scaled_mag = dot(yexp, yexp) / dot(yexp, ythe)
 
-# Apply scaling to both z and δz to preserve relative uncertainties
-data_scaled = copy(data);
-data_scaled[:, 3] ./= scaled_mag;
-data_scaled[:, 4] ./= scaled_mag;
+    # Apply scaling to both z and δz to preserve relative uncertainties
+    data_scaled = copy(data);
+    data_scaled[:, 3] ./= scaled_mag;
+    data_scaled[:, 4] ./= scaled_mag;
 
-# @printf "The re-scaling factor of the experimental data with respect to Quantum Mechanics is %.3f" scaled_mag
-@printf "The re-scaling factor for the high current regime is %.3f" scaled_mag
-println("")
+    # @printf "The re-scaling factor of the experimental data with respect to Quantum Mechanics is %.3f" scaled_mag
+    @printf "The re-scaling factor for the high current regime is %.3f" scaled_mag
+    println("")
 
+    # -----------------------------------------------------------------------------
+    # 4) Build fitting subsets and fit kᵢ using CQD interpolant surface
+    #
+    # Note:
+    #   fit_ki minimizes the log-space residual internally, but reports a 
+    #   linear-space RMSE as `ki_err`.
+    # -----------------------------------------------------------------------------
+    data_fitting        = data[fit_ki_idx, :];
+    data_scaled_fitting = data_scaled[fit_ki_idx, :];
+    fit_original = fit_ki(data, data_fitting, cqd_sim_data.ki, (ki_start,ki_stop))
+    fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, cqd_sim_data.ki, (ki_start,ki_stop))
 
+    @info "Induction term ki = $(round(fit_scaled.ki; sigdigits=4))"
 
-
-# -----------------------------------------------------------------------------
-# 4) Build fitting subsets and fit kᵢ using CQD interpolant surface
-#
-# Note:
-#   fit_ki minimizes the log-space residual internally, but reports a 
-#   linear-space RMSE as `ki_err`.
-# -----------------------------------------------------------------------------
-data_fitting        = data[fit_ki_idx, :];
-data_scaled_fitting = data_scaled[fit_ki_idx, :];
-fit_original = fit_ki(data, data_fitting, cqd_sim_data.ki, (ki_start,ki_stop))
-fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, cqd_sim_data.ki, (ki_start,ki_stop))
-
-@info "Induction term ki = $(round(fit_scaled.ki; sigdigits=4))"
-
-z_qm = zqm.(I_scan);
-m_qm = log_mask(I_scan, z_qm);
-fig = plot(
-    I_scan[m_qm], z_qm[m_qm];
-    label = "Quantum mechanics",
-    line  = (:solid, :red, 1.75),
-)
-plot!(
-    fig,
-    data_scaled[:,1], data_scaled[:,3];
-    yerror= data_scaled[:,4],
-    color = :gray35,
-    marker = (:circle, :gray35, 4),
-    markerstrokecolor = :gray35,
-    markerstrokewidth = 1,
-    label = dir,
-)
-z_fit_orig = ki_itp.(I_scan, Ref(fit_scaled.ki));
-m_orig = log_mask(I_scan, z_fit_orig);
-plot!(
-    fig,
-    I_scan[m_orig], z_fit_orig[m_orig];
-    label = L"CQD : $k_{i}= \left( %$(round(fit_original.ki, sigdigits=3)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
-    line  = (:solid, :blue, 2),
-    marker = (:xcross, :blue, 0.2),
-    markerstrokewidth = 1,
-)
-plot!(
-    fig;
-    # title = dir,
-    xlabel = "Current (A)",
-    ylabel = L"$z_{\mathrm{max}}$ (mm)",
-    xaxis  = :log10,
-    yaxis  = :log10,
-    labelfontsize = 14,
-    tickfontsize  = 12,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0],
-              [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0],
-              [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims = (0.010, 1.05),
-    size  = (900, 800),
-    # legendtitle = L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(1e3*σw_fixed)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$",
-    legendfontsize = 12,
-    left_margin = 3mm,
-)
-display(fig)
+    z_qm = zqm.(I_scan);
+    m_qm = log_mask(I_scan, z_qm);
+    fig = plot(
+        I_scan[m_qm], z_qm[m_qm];
+        label = "Quantum mechanics",
+        line  = (:solid, :red, 1.75),
+    )
+    plot!(
+        fig,
+        data_scaled[:,1], data_scaled[:,3];
+        yerror= data_scaled[:,4],
+        color = :gray35,
+        marker = (:circle, :gray35, 4),
+        markerstrokecolor = :gray35,
+        markerstrokewidth = 1,
+        label = dir,
+    )
+    z_fit_orig = ki_up_itp.(I_scan, Ref(fit_scaled.ki));
+    m_orig = log_mask(I_scan, z_fit_orig);
+    plot!(
+        fig,
+        I_scan[m_orig], z_fit_orig[m_orig];
+        label = L"CQD : $k_{i}= \left( %$(round(fit_original.ki, sigdigits=3)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
+        line  = (:solid, :blue, 2),
+        marker = (:xcross, :blue, 0.2),
+        markerstrokewidth = 1,
+    )
+    plot!(
+        fig;
+        # title = dir,
+        xlabel = "Current (A)",
+        ylabel = L"$z_{\mathrm{max}}$ (mm)",
+        xaxis  = :log10,
+        yaxis  = :log10,
+        labelfontsize = 14,
+        tickfontsize  = 12,
+        xticks = ([1e-3, 1e-2, 1e-1, 1.0],
+                [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        yticks = ([1e-3, 1e-2, 1e-1, 1.0],
+                [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        xlims = (0.010, 1.05),
+        size  = (900, 800),
+        # legendtitle = L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(1e3*σw_fixed)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$",
+        legendfontsize = 12,
+        left_margin = 3mm,
+    )
+    display(fig)
 
 end
 
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
-Ics = Vector{Vector{Float64}}(undef, n_data);
-tol_grouping = 0.03;
-for (i, dir) in enumerate(data_directories)
-    Ics[i] = EXP_data_processed[dir].Ic
-end
-clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping);
-for s in clusters.summary
-    println("Value group ≈ $(@sprintf("%1.3f", s.mean_val)) ± $(round(s.std_val;sigdigits=1)) \t appears in datasets: ", s.datasets)
-end
-Ic_grouped  = round.([clusters.summary[i].mean_val for i in 1:length(clusters.summary)]; digits=3);
-δIc_grouped = round.([clusters.summary[i].std_val for i in 1:length(clusters.summary)]; sigdigits=1);
+fit_ki_mode = :full   # ← change to :low, :high, or :low_high
+n_front  = 8
+n_back   = 6
 
-plot(Ic_grouped, 
-ribbon=δIc_grouped,
-marker=(:diamond, 2, :white),
-markerstrokecolor=:red,
-line=(:solid,1,:red),
-color=:red,
-fillalpha=0.2,
-label=false,
-xlabel="current number",
-ylabel="Current (A)",
-ylims=(7e-4,1.05),
-)
-plot!(
-yscale=:log10,
-legend=:bottomright,
-)
-
-# helper: first index where column > threshold (skips missings; falls back to 1)
-@inline function first_gt_idx(df::DataFrame, col::Symbol, thr::Real)
-    v = df[!, col]
-    idx = findfirst(x -> !ismissing(x) && x >= thr, v)
-    return idx === nothing ? 1 : idx
-end
-
-
-threshold = 0.015 # lower cut-off for experimental currents
-CURRENT_ROW_START = [first_gt_idx(EXP_data_processed[t], :Ic, threshold) for t in keys(EXP_data_processed)]
-
- 
-Ic_sets  = [EXP_data_processed[t][i:end, :Ic]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)]
-F1_sets = [EXP_data_processed[t][i:end, :F1]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)]
-F2_sets = [EXP_data_processed[t][i:end, :F2]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)]
-σF1_sets = [EXP_data_processed[t][i:end, :F1]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)]
-σF2_sets = [EXP_data_processed[t][i:end, :F2]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)]
-
-# pick a log-spaced grid across the overall x-range (nice for decades-wide currents)
-i_sampled_length = 1001
-xlo = maximum([minimum(first.(Ic_sets)),1e-3])
-xhi = maximum([maximum(last.(Ic_sets)),1.000])
-xq  = exp10.(range(log10(xlo), log10(xhi), length=i_sampled_length))
-
-using BSplineKit
-# i_sampled_length = 2*i_sampled_length
-# i_xx = round.(range(threshold,1.000,length=i_sampled_length); digits=5)
-i_xx0 = unique(round.(sort(union(xq,Ic_grouped)); digits=6))
-i_xx0 = unique(round.(sort(Ic_grouped); digits=6))
-i_sampled_length = length(i_xx0)
-
-
-fig = plot(
-    xlabel="Current (A)",
-    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
-    xlims = (10e-3,1.0),
-    ylims = (1e-3, 2),
-)
-z_final = zeros(n_data,i_sampled_length)
-color_data = palette(:darkrainbow, n_data);
-for (i,dir) in enumerate(data_directories)
-    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
-    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F1]
-    spl = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
-    z_final[i,:] = spl.(i_xx0)
-    scatter!(fig,xs, ys,
-        label=data_directories[i],
-        marker=(:circle, :white,3),
-        markerstrokecolor=color_data[i],
-        markerstrokewidth=1,
-        )
-    plot!(fig,i_xx0,spl.(i_xx0),
-        label=false,
-        line=(color_data[i],1))
-end
-# plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
-# display(fig)
-plot!(fig,
-title="Interpolation: cubic splines",
-legend=:bottomright,
-xaxis=:log10, 
-yaxis=:log10,
-xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-)
-zf1 = vec(mean(z_final, dims=1))
-δzf1 = vec(std(z_final; dims=1, corrected=true)/sqrt(n_data))
-data_spline = hcat(i_xx0, zf1, δzf1)
-data_spline_valid = data_spline[data_spline[:, 1] .> threshold, :]
-plot!(fig, data_spline_valid[:,1], data_spline_valid[:,2],
-    ribbon = data_spline_valid[:,3],
-    fillalpha=0.40, 
-    fillcolor=:gray36, 
-    label="Mean",
-    line=(:dash,:black,:2))
-display(fig)
-
-
-fit_ki_mode = :low   # ← change to :low, :high, or :low_high
-n_front  = 15
-n_back   = 2
-
-data = hcat(data_spline_valid[:,1], 0.02 * data_spline_valid[:,1] , data_spline_valid[:,2] , data_spline_valid[:,3] )
+data = hcat(combined_result[:Current].Ic, combined_result[:Current].σIc , combined_result[:MonteCarlo].zF1 , combined_result[:MonteCarlo].σzF1 )
 low_range  = 1:n_front ;
 high_range = (size(data, 1) - n_back + 1):size(data, 1);
 
@@ -1999,12 +2717,12 @@ n_tail = 8  # number of tail points used for scaling
 @printf "For the scaling of the experimental data, we use the current range = %.3f A – %.3f A \n" first(last(data[:, 1], n_tail)) last(last(data[:, 1], n_tail))
 yexp = last(data[:, 3], n_tail)              # experimental z-values (tail)
 ythe = last(zqm.(data[:, 1]), n_tail)        # QM reference z-values at same currents
-scaled_mag = 1.0 #dot(yexp, yexp) / dot(yexp, ythe)
+scaled_mag = dot(yexp, yexp) / dot(yexp, ythe)
 
 # Apply scaling to both z and δz to preserve relative uncertainties
 data_scaled = copy(data);
-data_scaled[:, 3] ./= scaled_mag;
-data_scaled[:, 4] ./= scaled_mag;
+data_scaled[:, 3] ./= 1 #scaled_mag;
+data_scaled[:, 4] ./= 1 #scaled_mag;
 
 # @printf "The re-scaling factor of the experimental data with respect to Quantum Mechanics is %.3f" scaled_mag
 @printf "The re-scaling factor for the high current regime is %.3f" scaled_mag
@@ -2027,7 +2745,7 @@ fit_scaled   = fit_ki(data_scaled, data_scaled_fitting, cqd_sim_data.ki, (ki_sta
 z_qm = zqm.(I_scan);
 m_qm = log_mask(I_scan, z_qm);
 fig = plot(
-    I_scan[m_qm], z_qm[m_qm];
+    I_scan[m_qm], scaled_mag .* z_qm[m_qm];
     label = "Quantum mechanics",
     line  = (:solid, :red, 1.75),
 )
@@ -2041,7 +2759,7 @@ plot!(
     markerstrokecolor = :gray35,
     markerstrokewidth = 1,
 )
-z_fit_orig = ki_itp.(I_scan, Ref(fit_scaled.ki));
+z_fit_orig = ki_up_itp.(I_scan, Ref(fit_scaled.ki));
 m_orig = log_mask(I_scan, z_fit_orig);
 plot!(
     fig,
@@ -2120,8 +2838,8 @@ display(fig)
 
 
 
-fit_ki_with_error(ki_itp, data_fitting; bounds=(cqd_sim_data.ki[ki_start], cqd_sim_data.ki[ki_stop]),)
-fit_ki_with_error(ki_itp, data_scaled_fitting; bounds=(cqd_sim_data.ki[ki_start], cqd_sim_data.ki[ki_stop]),)
+fit_ki_with_error(ki_up_itp, data_fitting; bounds=(cqd_sim_data.ki[ki_start], cqd_sim_data.ki[ki_stop]),)
+fit_ki_with_error(ki_up_itp, data_scaled_fitting; bounds=(cqd_sim_data.ki[ki_start], cqd_sim_data.ki[ki_stop]),)
 
 
 
@@ -2258,14 +2976,14 @@ for (idx,dir) in enumerate(data_directories)
         seriestype=:scatter,
         label="$(dir) (degauss = $(round(1e3*data.Ic[1]; digits=6))mA , $(Int(round(1e4*data.Bz[1])))G )",
         marker=(:circle, 2, :white),
-        markerstrokecolor=colores[idx],
+        markerstrokecolor=colores_data[idx],
     )
     plot!(fig,
         1000*data.Ic, data.F1[1],
         seriestype=:line,
         label= nothing,
-        line=(:solid,0.3,colores[idx]),
-        color = colores[idx],
+        line=(:solid,0.3,colores_data[idx]),
+        color = colores_data[idx],
         fillalpha=0.10,
     )
 
