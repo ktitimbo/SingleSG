@@ -1718,7 +1718,7 @@ function plot_combined_cqd_profiles_dict(
         fig1 = plot(xlabel = L"$z \ (\mathrm{mm})$",
             title = L"$k_{i}=$ "*sci_label(ki_test/1e6, n=6),
         )
-        for ii in 1:nI
+        for ii in 1:2:nI
             z_new     = dat_branch_up[ii][:z_profile][:, 1]
             ampli_new = dat_branch_up[ii][:z_profile][:, 3]
             plot!(
@@ -1759,6 +1759,7 @@ function plot_combined_cqd_profiles_dict(
 
             zmax_vec[ii] = z_max_new[1]         
 
+            if ii%2
             plot!(
                 fig2,
                 z_new,
@@ -1766,6 +1767,7 @@ function plot_combined_cqd_profiles_dict(
                 label = "$(Int(1000 * Icoils[ii])) mA",
                 color = colores_current[ii],
             )
+            end
         end        
         plot!(
             fig2;
@@ -1778,8 +1780,6 @@ function plot_combined_cqd_profiles_dict(
             foreground_color_legend = nothing,
         )
         # display(fig2)
-
-
 
 
         fig = plot(fig1, fig2,
