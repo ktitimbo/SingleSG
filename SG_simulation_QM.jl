@@ -985,6 +985,10 @@ else
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
   
+    # Total combinations (diagnostic only)
+    Ntot = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
+    @info "Total combinations : Nnz × Nσ × Nλ0 × Nλs = $(Ntot)"
+
     param_grid = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list));
     
     clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list))
