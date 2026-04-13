@@ -184,7 +184,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 10_000 ; 
+const Nss = 5_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -244,17 +244,6 @@ end
 #     println("meta:  ", collect(keys(f["meta"])))
 #     println("screen:", collect(keys(f["screen"])))
 # end
-
-# clean memory
-crossing_slit           = nothing
-particles_flag          = nothing
-particles_trajectories  = nothing
-data_alive_screen       = nothing
-alive_screen            = nothing
-GC.gc()
-@info "Memory cleaned after QM data acquired"
-@info "Free system memory $(round(Sys.free_memory() / 1024^3,sigdigits=6)) GiB"
-
 
 println("Profiles F=$(K39_params.Ispin+0.5)")
 profiles_top    = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
@@ -683,6 +672,16 @@ savefig(fig,joinpath(OUTDIR,"qm_comparison_w_n.$(FIG_EXT)"))
 
 
 #########################################################################################
+# clean memory
+crossing_slit           = nothing
+particles_flag          = nothing
+particles_trajectories  = nothing
+data_alive_screen       = nothing
+# alive_screen            = nothing
+GC.gc()
+@info "Memory cleaned after QM data acquired"
+@info "Free system memory $(round(Sys.free_memory() / 1024^3,sigdigits=6)) GiB"
+
 T_END = Dates.now()
 T_RUN = Dates.canonicalize(T_END-T_START)
 report = """
@@ -981,8 +980,8 @@ else
 
     nx_bins = 32 ;
     nz_bins = [1,2,4,8];  # try different nz_bins
-    gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
-    λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
+    gaussian_width_mm = [0.001, 0.010, 0.025, 0.050]#, 0.065, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
+    λ0_raw_list       = [0.001, 0.005, 0.01, 0.02]#, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
   
     # Total combinations (diagnostic only)
@@ -996,8 +995,10 @@ else
     
     # ============================== F=1 manifold ==============================
     outpath_1 = joinpath(OUTDIR, "qm_screen_profiles_f1_table.jld2")
+    f_level = K39_params.Ispin-0.5
+    @info "QM approach : analyzing screen profiles for F=$(f_level) manifold"
 
-    jldopen(outpath_1, "w") do file
+    @time jldopen(outpath_1, "w") do file
         file["meta/N"]  = Ns
         file["meta/T"]  = T_K
         file["meta/s_spline"] = λ0_spline
@@ -1006,8 +1007,7 @@ else
         file["meta/σw"] = sort(gaussian_width_mm)
         file["meta/λ0"] = sort(λ0_raw_list)
 
-        f_level = K39_params.Ispin-0.5
-        @info "QM approach : analyzing screen profiles for F=$(f_level) manifold"
+
 
         # @time for nz in nz_bins, gw in gaussian_width_mm, λ0 in λ0_raw_list
         @time for (nz, gw, λ0) in param_grid
@@ -1033,7 +1033,172 @@ else
             
         end
     end
-    
+  
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+
+"""
+    load_screen_batch(jld_path, js) -> OrderedDict(:Icoils => ..., :data => ...)
+
+Load only a small batch of currents `js` from the large JLD2 file.
+This is serial I/O on purpose.
+"""
+function load_screen_batch(jld_path::AbstractString, js::AbstractVector{<:Integer})
+    jldopen(jld_path, "r") do f
+        Iall = f["meta/Icoils"]
+        data = Vector{Any}(undef, length(js))
+        @inbounds for (k, j) in enumerate(js)
+            data[k] = f["screen/I$(j)"]
+        end
+        return OrderedDict{Symbol,Any}(
+            :Icoils => Iall[js],
+            :data   => data,
+        )
+    end
+end
+
+"""
+    remap_profile_indices(batch_out, js)
+
+Convert the local batch indices 1:length(js) returned by
+QM_analyze_profiles_to_dict(batch_data, ...) into the original global current
+indices `js`.
+"""
+function remap_profile_indices(
+    batch_out::OrderedDict{Int,<:Any},
+    js::AbstractVector{<:Integer},
+)
+    out = OrderedDict{Int,Any}()
+    @inbounds for (k, j) in enumerate(js)
+        out[j] = batch_out[k]
+    end
+    return out
+end
+
+"""
+    merge_profile_dicts!(dest, src)
+
+Merge `src` into `dest`, preserving current-index keys.
+"""
+function merge_profile_dicts!(
+    dest::OrderedDict{Int,<:Any},
+    src::OrderedDict{Int,<:Any},
+)
+    for (k, v) in src
+        dest[k] = v
+    end
+    return dest
+end
+
+# -----------------------------------------------------------------------------
+# Replacement for the threaded block
+# -----------------------------------------------------------------------------
+
+batchsize = 2   # tune this: 1, 2, 4, maybe 8 depending on RAM
+tmpdir = joinpath(OUTDIR, "qm_screen_profiles_f1_batches")
+mkpath(tmpdir)
+
+# current indices 1:nI in small batches
+batches = [collect(a:min(a + batchsize - 1, nI)) for a in 1:batchsize:nI]
+
+@time begin
+    # ---------------------------------------------------------
+    # Pass 1: read one small batch from the huge file at a time,
+    #         then compute parameter sweeps in parallel in memory,
+    #         and save a temp file per batch.
+    # ---------------------------------------------------------
+    for (ib, js) in enumerate(batches)
+        @info "Loading batch $ib / $(length(batches)) with current indices $(first(js)) : $(last(js))"
+
+        batch_data = load_screen_batch(data_screen_path, js)
+
+        tmpfile = joinpath(tmpdir, "batch_$(@sprintf("%03d", ib)).jld2")
+
+        jldopen(tmpfile, "w") do tf
+            tf["meta/js"] = js
+
+            for nz in nz_bins
+                for gw in gaussian_width_mm
+                    nλ = length(λ0_raw_list)
+                    results = Vector{Any}(undef, nλ)
+
+                    @info "Batch $ib | nz=$nz, σ=$(Int(round(1e3*gw))) μm | threading over λ0"
+
+                    Threads.@threads for iλ in eachindex(λ0_raw_list)
+                        λ0 = λ0_raw_list[iλ]
+
+                        # IMPORTANT:
+                        # This uses the in-memory overload:
+                        # QM_analyze_profiles_to_dict(data::OrderedDict, ...)
+                        local_out = QM_analyze_profiles_to_dict(
+                            batch_data,
+                            K39_params;
+                            manifold    = :F_bottom,
+                            n_bins      = (nx_bins, nz),
+                            width_mm    = gw,
+                            add_plot    = false,
+                            plot_xrange = :all,
+                            λ_raw       = λ0,
+                            λ_smooth    = λ0_spline,
+                            mode        = :probability,
+                        )
+
+                        # Remap local batch indices back to global current indices
+                        results[iλ] = remap_profile_indices(local_out, js)
+                    end
+
+                    # Save this batch's partial results
+                    for iλ in eachindex(λ0_raw_list)
+                        λ0 = λ0_raw_list[iλ]
+                        keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0)
+                        tf[keypath] = results[iλ]
+                    end
+                end
+            end
+        end
+
+        batch_data = nothing
+        GC.gc()
+    end
+
+    # ---------------------------------------------------------
+    # Pass 2: merge the per-batch temp files into the final file
+    #         using the SAME keypaths as your original serial code.
+    # ---------------------------------------------------------
+    jldopen(outpath_1b, "w") do file
+        file["meta/N"]        = Ns
+        file["meta/T"]        = T_K
+        file["meta/s_spline"] = λ0_spline
+        file["meta/nx"]       = nx_bins
+        file["meta/nz"]       = sort(nz_bins)
+        file["meta/σw"]       = sort(gaussian_width_mm)
+        file["meta/λ0"]       = sort(λ0_raw_list)
+
+        for nz in nz_bins
+            for gw in gaussian_width_mm
+                for λ0 in λ0_raw_list
+                    keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0)
+
+                    merged = OrderedDict{Int,Any}()
+
+                    for ib in eachindex(batches)
+                        tmpfile = joinpath(tmpdir, "batch_$(@sprintf("%03d", ib)).jld2")
+                        batch_piece = jldopen(tmpfile, "r") do tf
+                            tf[keypath]
+                        end
+                        merge_profile_dicts!(merged, batch_piece)
+                    end
+
+                    file[keypath] = merged
+                end
+            end
+        end
+    end
+end
+
+
+
     fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
     jldopen(outpath_1, "r") do file
         color_idx = 1
@@ -1073,6 +1238,8 @@ else
 
     # ============================== F=2 manifold ==============================
     outpath_2 = joinpath(OUTDIR, "qm_screen_profiles_f2_table.jld2")
+    f_level = K39_params.Ispin+0.5
+    @info "QM approach : analyzing screen profiles for F=$(f_level) manifold"
 
     jldopen(outpath_2, "w") do file
         file["meta/N"]  = Ns
@@ -1082,9 +1249,6 @@ else
         file["meta/nz"] = sort(nz_bins)
         file["meta/σw"] = sort(gaussian_width_mm)
         file["meta/λ0"] = sort(λ0_raw_list)
-
-        f_level = K39_params.Ispin+0.5
-        @info "QM approach : analyzing screen profiles for F=$(f_level) manifold"
 
         # @time for nz in nz_bins, gw in gaussian_width_mm, λ0 in λ0_raw_list
         @time for (nz, gw, λ0) in param_grid
