@@ -976,20 +976,19 @@ else
             color=:white, opacity=0.65, linealpha=0, label=false);
         annotate!(fige, xpos, ypos, text("Screen", 10, :black, :bold, :center, "Helvetica"));
 
-        fig = plot(figa,figb,figc,figd,figf,fige,
+        fig_full = plot(figa,figb,figc,figd,figf,fige,
         layout=(6,1),
         suptitle = L"$I_{0} = %$(Int(1000*Icoils[j]))\,\mathrm{mA}$",
         size=(750,850),
         right_margin=2mm,
         bottom_margin=-2mm,
         )
-        plot!(fig[1], xlabel="", bottom_margin=-3mm);
-        plot!(fig[2], xlabel="", bottom_margin=-3mm);
-        plot!(fig[3], xlabel="", bottom_margin=-3mm);
-        plot!(fig[4], xlabel="", bottom_margin=-3mm);
-        plot!(fig[5], xlabel="", bottom_margin=-3mm);
-        display(fig)
-        savefig(fig, joinpath(OUTDIR,"QM_time_evolution_$(@sprintf("%02d", j)).$(FIG_EXT)"))
+        plot!(fig_full[1], xlabel="", bottom_margin=-3mm);
+        plot!(fig_full[2], xlabel="", bottom_margin=-3mm);
+        plot!(fig_full[3], xlabel="", bottom_margin=-3mm);
+        plot!(fig_full[4], xlabel="", bottom_margin=-3mm);
+        plot!(fig_full[5], xlabel="", bottom_margin=-3mm);
+        savefig(fig_full, joinpath(OUTDIR,"QM_time_evolution_$(@sprintf("%02d", j)).$(FIG_EXT)"))
     end
     GC.gc()
 
