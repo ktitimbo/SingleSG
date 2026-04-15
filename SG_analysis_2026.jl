@@ -830,6 +830,931 @@ function sci_label(x; n=3)
     return L"$%$(mant_str) \times 10^{%$exp}$"
 end
 
+function plot_combined_cqd_profiles_dict(
+    ki_values,
+    data_cqdup_path::AbstractString,
+    data_cqddw_path::AbstractString;
+    nz::Integer,
+    σw_mm::Real,
+    λ0::Real,
+    nI::Integer,
+    Icoils,
+    colores_current,
+    λ0_peak::Real = 1e-6,
+    show_plots::Bool = true,
+    show_table::Bool = true,
+)
+    results = OrderedDict{Float64, Vector{Float64}}()
+
+    @assert length(Icoils) == nI
+    @assert length(colores_current) >= nI
+
+    make_profile_plot(; title::Union{Nothing,String}=nothing) = plot(
+        xlabel = L"$z \ (\mathrm{mm})$",
+        title = isnothing(title) ? "" : title,
+        yformatter = y -> @sprintf("%.1e", y),
+        xlims = (-5, 5),
+    )
+
+    @inline function maybe_plot_profile!(fig, ii, z, amp, Icoils, colores_current)
+        if isodd(ii)
+            plot!(
+                fig,
+                z,
+                amp,
+                label = "$(Int(round(1000 * Icoils[ii]))) mA",
+                color = colores_current[ii],
+            )
+        end
+        return nothing
+    end
+
+    function load_branch(path::AbstractString, branch::Symbol, ki, nz, σw_mm, λ0)
+        key = JLD2_MyTools.make_keypath_cqd(branch, ki, nz, σw_mm, λ0)
+        return jldopen(path, "r") do f
+            f[key]
+        end
+    end
+
+    nlegend = count(isodd, eachindex(Icoils))
+
+    for ki_test in ki_values
+        dat_branch_up = load_branch(data_cqddw_path, :dw, ki_test, nz, σw_mm, λ0)
+        dat_branch_dw = load_branch(data_cqdup_path, :up, ki_test, nz, σw_mm, λ0)
+
+        fig0 = fig1 = fig2 = nothing
+        if show_plots
+            fig0 = make_profile_plot(title = L"$k_{i}=$ " * sci_label(ki_test / 1e6, n=6))
+            fig1 = make_profile_plot()
+            fig2 = make_profile_plot()
+        end
+
+        zmax_vec = Vector{Float64}(undef, nI)
+        z_old    = Vector{Float64}(undef, nI)
+
+        amp_combined = nothing
+
+        for ii in eachindex(Icoils)
+            up_prof = dat_branch_up[ii][:z_profile]
+            dw_prof = dat_branch_dw[ii][:z_profile]
+
+            z_up   = @views up_prof[:, 1]
+            amp_up = @views up_prof[:, 3]
+
+            z_dw   = @views dw_prof[:, 1]
+            amp_dw = @views dw_prof[:, 3]
+
+            z_old[ii] = dat_branch_up[ii][:z_max_smooth_spline_mm]
+
+            if amp_combined === nothing
+                amp_combined = similar(amp_up)
+            end
+            @. amp_combined = amp_up + 0.25 * amp_dw
+
+            z_max_new, _ = TheoreticalSimulation.max_of_bspline_positions(
+                z_up, amp_combined; λ0 = λ0_peak
+            )
+            zmax_vec[ii] = z_max_new[1]
+
+            if show_plots
+                maybe_plot_profile!(fig0, ii, z_dw, amp_dw, Icoils, colores_current)
+                maybe_plot_profile!(fig1, ii, z_up, amp_up, Icoils, colores_current)
+                maybe_plot_profile!(fig2, ii, z_up, amp_combined, Icoils, colores_current)
+            end
+        end
+
+        if show_plots
+            plot!(fig0; legend = false)
+            plot!(fig1; legend = false)
+            plot!(
+                fig2;
+                legend = :outerbottom,
+                legend_columns = min(7, nlegend),
+                legend_fontsize = 6,
+                background_color_legend = nothing,
+                foreground_color_legend = nothing,
+            )
+
+            fig = plot(
+                fig0, fig1, fig2;
+                layout = (3, 1),
+                labelfontsize = 10,
+                size = (900, 1000),
+                left_margin=2mm,
+                bottom_margin=-12mm,
+            )
+            plot!(fig[1], xlabel = "", xformatter = _ -> "", bottom_margin=-7.5mm)
+            plot!(fig[2], xlabel = "", xformatter = _ -> "", bottom_margin=-7.5mm)
+            display(fig)
+        end
+
+        if show_table
+            pct = 100 .* (zmax_vec ./ z_old .- 1)
+
+            pretty_table(
+                hcat(
+                    Int.(round.(1000 .* Icoils)),
+                    round.(zmax_vec; digits = 3),
+                    round.(z_old; digits = 3),
+                    round.(pct; digits = 1),
+                );
+                column_labels = [
+                    ["Ic", "CQD F2", "CQD down", "RelError"],
+                    ["(mA)", "(mm)", "(mm)", "(%)"]
+                ],
+                alignment = :c,
+                row_label_column_alignment = :c,
+                row_group_label_alignment = :c,
+                title = @sprintf("CQD EQUIVALENT TO F2: %.3fe-6", ki_test),
+                formatters = [
+                    fmt__printf("%d", [1]),
+                    fmt__printf("%8.3f", 2:3),
+                    fmt__printf("%8.1f", [4]),
+                ],
+                style = TextTableStyle(
+                    first_line_column_label = crayon"yellow bold",
+                    table_border = crayon"blue bold",
+                    title = crayon"bold red",
+                ),
+                table_format = TextTableFormat(
+                    borders = text_table_borders__unicode_rounded
+                ),
+                equal_data_column_widths = true,
+            )
+        end
+
+        results[ki_test] = copy(zmax_vec)
+    end
+
+    return results
+end
+
+"""
+    fit_QM_scale_model(x, y, model;
+        σy=nothing,
+        mask=nothing,
+        idx=nothing,
+        xmin=nothing,
+        xmax=nothing,
+        offset::Bool=false,
+        fitspace::Symbol=:log10,
+        project::Symbol=:model_to_y)
+
+Fit a scaled model to data, with optional offset, subset selection, and
+choice of fitting space.
+
+The model is first evaluated on the experimental x-grid:
+
+    z = model.(x)
+
+and then one of the following relations is fit.
+
+Zero-offset modes
+-----------------
+If `offset=false`:
+
+- `project=:model_to_y`
+    Fits
+        y ≈ α z
+- `project=:y_to_model`
+    Fits
+        z ≈ α y
+
+For zero offset, both `fitspace=:log10` and `fitspace=:linear` are supported.
+
+Offset modes
+------------
+If `offset=true`:
+
+- `project=:model_to_y`
+    Fits
+        y ≈ α z + β
+- `project=:y_to_model`
+    Fits
+        z ≈ α y + β
+
+For nonzero offset, only `fitspace=:linear` is supported.
+
+Subset selection
+----------------
+You may restrict the fit using any combination of:
+- `mask` : boolean mask of same length as `x`
+- `idx`  : vector/range of selected indices
+- `xmin` : keep only `x >= xmin`
+- `xmax` : keep only `x <= xmax`
+
+Important note on uncertainties
+-------------------------------
+The weighted fit is statistically meaningful only when the supplied uncertainty
+matches the residual being minimized.
+
+Therefore:
+
+- `project=:model_to_y` naturally uses `σy`
+- `project=:y_to_model` should use `σy = nothing`
+
+In other words, for `project=:y_to_model`, this function enforces `σy === nothing`.
+
+Arguments
+---------
+- `x`     : experimental x-values
+- `y`     : experimental y-values
+- `model` : callable object so that `model.(x)` returns model values on the x-grid
+
+Keyword arguments
+-----------------
+- `σy`       : uncertainty on `y`; only allowed for `project=:model_to_y`
+- `mask`     : boolean mask for selecting points
+- `idx`      : indices for selecting points
+- `xmin`     : minimum x to include
+- `xmax`     : maximum x to include
+- `offset`   : if `false`, fit only a scale factor; if `true`, fit scale + offset
+- `fitspace` : `:log10` or `:linear`
+- `project`  : `:model_to_y` or `:y_to_model`
+
+Returns
+-------
+A named tuple containing the fitted parameters and diagnostics. Depending on the
+mode, this may include:
+- `α`, `β`
+- `σα`, `σβ`
+- `used_mask`
+- `x_used`, `y_used`, `z_used`
+- residuals in linear and/or log space
+- `rss_linear`, `rss_log`
+- `χ2`, `χ2red`, `χ2_log`, `χ2red_log`
+- `dof`
+
+Examples
+--------
+Zero-offset log-space fit, model projected onto data:
+
+julia
+Zero-offset linear fit, data projected onto model:
+fit = fit_QM_scale_model(Ic, F1, zqm;
+    σy=σF1,
+    offset=false,
+    fitspace=:log10,
+    project=:model_to_y)
+
+Linear fit with offset:
+fit = fit_QM_scale_model(Ic, F1, zqm;
+    σy=σF1,
+    offset=true,
+    fitspace=:linear,
+    project=:model_to_y)
+"""
+function fit_QM_scale_model(x, y, model;
+    σy=nothing,
+    mask=nothing,
+    idx=nothing,
+    xmin=nothing,
+    xmax=nothing,
+    offset::Bool=false,
+    fitspace::Symbol=:log10,              # :log10 or :linear
+    project::Symbol=:model_to_y,        # :model_to_y or :y_to_model
+    )
+
+    @assert fitspace in (:log10, :linear) "fitspace must be :log10 or :linear"
+    @assert project in (:model_to_y, :y_to_model) "project must be :model_to_y or :y_to_model"
+
+    # IMPORTANT:
+    # If project = :y_to_model, the residual is defined in z-space,
+    # not in y-space. Therefore σy must be nothing.
+    @assert !(project == :y_to_model && σy !== nothing) "project=:y_to_model must use σy = nothing"
+
+    z = model.(x)
+
+    # -----------------------------
+    # Build selection mask
+    # -----------------------------
+    sel = trues(length(x))
+
+    if mask !== nothing
+        @assert length(mask) == length(x)
+        sel .&= mask
+    end
+
+    if idx !== nothing
+        tmp = falses(length(x))
+        tmp[idx] .= true
+        sel .&= tmp
+    end
+
+    if xmin !== nothing
+        sel .&= x .>= xmin
+    end
+
+    if xmax !== nothing
+        sel .&= x .<= xmax
+    end
+
+    # ============================================================
+    # ZERO OFFSET: y ≈ αz   or   z ≈ αy
+    # ============================================================
+    if !offset
+
+        # =========================
+        # LOG-SPACE
+        # =========================
+        if fitspace == :log10
+
+            sel_fit = sel .& (y .> 0) .& (z .> 0)
+            if σy !== nothing
+                sel_fit .&= (σy .> 0)
+            end
+
+            xx = x[sel_fit]
+            yy = y[sel_fit]
+            zz = z[sel_fit]
+
+            @assert length(xx) > 1
+
+            if project == :model_to_y
+                Δ = log10.(yy) .- log10.(zz)
+
+                if σy === nothing
+                    logα = mean(Δ)
+                    α = 10^(logα)
+                    σα = nothing
+                else
+                    ss = σy[sel_fit]
+                    w = yy.^2 ./ ss.^2
+                    logα = sum(w .* Δ) / sum(w)
+                    σα = 10^logα * sqrt(1 / sum(w))
+                    α = 10^logα
+                end
+
+                pred = α .* zz
+                rlog = log10.(yy) .- log10.(pred)
+                rlin = yy .- pred
+
+            else
+                Δ = log10.(zz) .- log10.(yy)
+                logα = mean(Δ)
+                α = 10^(logα)
+                σα = nothing
+
+                pred = α .* yy
+                rlog = log10.(zz) .- log10.(pred)
+                rlin = zz .- pred
+            end
+
+            return (
+                α=α, β=0.0, σα=σα, σβ=nothing,
+                mode=:zero_offset_log10,
+                fitspace=:log10,
+                project=project,
+                used_mask=sel_fit,
+                x_used=xx, y_used=yy, z_used=zz,
+                residuals_log=rlog,
+                residuals_linear=rlin,
+                rss_log=sum(rlog.^2),
+                rss_linear=sum(rlin.^2),
+                dof=length(yy)-1
+            )
+
+        # =========================
+        # LINEAR SPACE
+        # =========================
+        else
+            xx = x[sel]
+            yy = y[sel]
+            zz = z[sel]
+
+            @assert length(xx) > 1
+
+            if project == :model_to_y
+                if σy === nothing
+                    α = dot(yy, zz) / dot(zz, zz)
+                    σα = nothing
+                else
+                    ss = σy[sel]
+                    w = 1.0 ./ ss.^2
+                    α = sum(w .* yy .* zz) / sum(w .* zz.^2)
+                    σα = sqrt(1 / sum(w .* zz.^2))
+                end
+
+                pred = α .* zz
+                rlin = yy .- pred
+
+            else
+                α = dot(zz, yy) / dot(yy, yy)
+                σα = nothing
+
+                pred = α .* yy
+                rlin = zz .- pred
+            end
+
+            return (
+                α=α, β=0.0, σα=σα, σβ=nothing,
+                mode=:zero_offset_linear,
+                fitspace=:linear,
+                project=project,
+                used_mask=sel,
+                x_used=xx, y_used=yy, z_used=zz,
+                residuals_linear=rlin,
+                rss_linear=sum(rlin.^2),
+                dof=length(yy)-1
+            )
+        end
+
+    # ============================================================
+    # OFFSET: y ≈ αz + β  or  z ≈ αy + β
+    # ============================================================
+    else
+        @assert fitspace == :linear "offset=true only supports linear fit"
+
+        xx = x[sel]
+        yy = y[sel]
+        zz = z[sel]
+
+        @assert length(xx) > 2
+
+        if project == :model_to_y
+            A = hcat(zz, ones(length(zz)))
+            target = yy
+        else
+            A = hcat(yy, ones(length(yy)))
+            target = zz
+        end
+
+        if σy === nothing
+            p = A \ target
+            α, β = p
+            pred = A * p
+            r = target .- pred
+
+            return (
+                α=α, β=β,
+                σα=nothing, σβ=nothing,
+                mode=:linear_offset,
+                fitspace=:linear,
+                project=project,
+                used_mask=sel,
+                x_used=xx, y_used=yy, z_used=zz,
+                residuals_linear=r,
+                rss_linear=sum(r.^2),
+                dof=length(target)-2
+            )
+        else
+            ss = σy[sel]
+            w = 1.0 ./ ss.^2
+            W = Diagonal(w)
+
+            ATA = A' * W * A
+            ATb = A' * W * target
+
+            p = ATA \ ATb
+            α, β = p
+
+            Cov = inv(ATA)
+            σα = sqrt(Cov[1,1])
+            σβ = sqrt(Cov[2,2])
+
+            pred = A * p
+            r = target .- pred
+
+            return (
+                α=α, β=β,
+                σα=σα, σβ=σβ,
+                mode=:linear_offset,
+                fitspace=:linear,
+                project=project,
+                used_mask=sel,
+                x_used=xx, y_used=yy, z_used=zz,
+                residuals_linear=r,
+                χ2=sum(w .* r.^2),
+                χ2red=sum(w .* r.^2)/(length(target)-2),
+                rss_linear=sum(r.^2),
+                dof=length(target)-2
+            )
+        end
+    end
+end
+
+function fit_scale_and_k(x, y, model;
+    bounds::Tuple,
+    σy=nothing,
+    mask=nothing,
+    idx_k=nothing,
+    idx_alpha=nothing,
+    xmin=nothing,
+    xmax=nothing,
+    offset::Bool=false,
+    fitspace::Symbol=:log10,          # :log10 or :linear
+    project::Symbol=:model_to_y,      # :model_to_y or :y_to_model
+    fit_alpha::Bool=true,
+)
+
+    @assert fitspace in (:log10, :linear) "fitspace must be :log10 or :linear"
+    @assert project in (:model_to_y, :y_to_model) "project must be :model_to_y or :y_to_model"
+    @assert !(project == :y_to_model && σy !== nothing) "project=:y_to_model must use σy = nothing"
+    @assert !(offset && fitspace != :linear) "offset=true only supports linear fit"
+
+    n = length(x)
+    @assert length(y) == n
+    if σy !== nothing
+        @assert length(σy) == n
+    end
+    if mask !== nothing
+        @assert length(mask) == n
+    end
+
+    # --------------------------------------------------------
+    # Base selection mask, same spirit as fit_QM_scale_model
+    # --------------------------------------------------------
+    sel = trues(n)
+
+    if mask !== nothing
+        sel .&= mask
+    end
+    if xmin !== nothing
+        sel .&= x .>= xmin
+    end
+    if xmax !== nothing
+        sel .&= x .<= xmax
+    end
+
+    # indices used for k-objective
+    sel_k = copy(sel)
+    if idx_k !== nothing
+        tmp = falses(n)
+        tmp[idx_k] .= true
+        sel_k .&= tmp
+    end
+
+    # indices used for alpha/beta estimation
+    sel_a = copy(sel)
+    if idx_alpha !== nothing
+        tmp = falses(n)
+        tmp[idx_alpha] .= true
+        sel_a .&= tmp
+    else
+        sel_a .= sel_k
+    end
+
+    @assert count(sel_k) > 1 "Need at least 2 points for k-fit selection."
+    @assert count(sel_a) > 0 "Need at least 1 point for alpha selection."
+
+    xk = x[sel_k]
+    yk = y[sel_k]
+    σk = σy === nothing ? nothing : σy[sel_k]
+
+    xa = x[sel_a]
+    ya = y[sel_a]
+    σa = σy === nothing ? nothing : σy[sel_a]
+
+    # --------------------------------------------------------
+    # Helpers
+    # --------------------------------------------------------
+    z_of_k_all(k) = model.(x, Ref(k))
+    z_of_k_k(k)   = model.(xk, Ref(k))
+    z_of_k_a(k)   = model.(xa, Ref(k))
+
+    function solve_alpha_beta_linear(k)
+        za = z_of_k_a(k)
+
+        if project == :model_to_y
+            target = ya
+            basis  = za
+            ssa    = σa
+        else
+            target = za
+            basis  = ya
+            ssa    = nothing
+        end
+
+        if !offset
+            if !fit_alpha
+                α = 1.0
+                β = 0.0
+                σα = nothing
+                σβ = nothing
+            else
+                if ssa === nothing
+                    α = dot(target, basis) / dot(basis, basis)
+                    σα = nothing
+                else
+                    w = 1.0 ./ ssa.^2
+                    α = sum(w .* target .* basis) / sum(w .* basis.^2)
+                    σα = sqrt(1 / sum(w .* basis.^2))
+                end
+                β = 0.0
+                σβ = nothing
+            end
+            return (α=α, β=β, σα=σα, σβ=σβ)
+        end
+
+        # offset=true, linear only
+        if project == :model_to_y
+            A = hcat(za, ones(length(za)))
+        else
+            A = hcat(ya, ones(length(ya)))
+        end
+
+        if !fit_alpha
+            # α fixed to 1, fit only β
+            if project == :model_to_y
+                resid0 = ya .- za
+            else
+                resid0 = za .- ya
+            end
+
+            if ssa === nothing
+                β = mean(resid0)
+                σβ = nothing
+            else
+                w = 1.0 ./ ssa.^2
+                β = sum(w .* resid0) / sum(w)
+                σβ = sqrt(1 / sum(w))
+            end
+            return (α=1.0, β=β, σα=nothing, σβ=σβ)
+        end
+
+        if ssa === nothing
+            p = A \ target
+            α, β = p
+            return (α=α, β=β, σα=nothing, σβ=nothing)
+        else
+            w = 1.0 ./ ssa.^2
+            W = Diagonal(w)
+            ATA = A' * W * A
+            ATb = A' * W * target
+            p = ATA \ ATb
+            α, β = p
+            Cov = inv(ATA)
+            σα = sqrt(Cov[1,1])
+            σβ = sqrt(Cov[2,2])
+            return (α=α, β=β, σα=σα, σβ=σβ)
+        end
+    end
+
+    function solve_alpha_log(k)
+        @assert !offset "offset=true is not supported in log fit"
+        za = z_of_k_a(k)
+
+        if project == :model_to_y
+            valid = (ya .> 0) .& (za .> 0)
+            if σa !== nothing
+                valid .&= (σa .> 0)
+            end
+            @assert count(valid) > 1 "Need >1 positive points for log fit."
+            yy = ya[valid]
+            zz = za[valid]
+
+            if !fit_alpha
+                α = 1.0
+                σα = nothing
+            else
+                Δ = log10.(yy) .- log10.(zz)
+                if σa === nothing
+                    logα = mean(Δ)
+                    α = 10.0^logα
+                    σα = nothing
+                else
+                    ss = σa[valid]
+                    w = yy.^2 ./ ss.^2
+                    logα = sum(w .* Δ) / sum(w)
+                    α = 10.0^logα
+                    σα = 10.0^logα * sqrt(1 / sum(w))
+                end
+            end
+            return (α=α, β=0.0, σα=σα, σβ=nothing, valid=valid)
+        else
+            valid = (ya .> 0) .& (za .> 0)
+            @assert count(valid) > 1 "Need >1 positive points for log fit."
+            yy = ya[valid]
+            zz = za[valid]
+
+            if !fit_alpha
+                α = 1.0
+            else
+                Δ = log10.(zz) .- log10.(yy)
+                logα = mean(Δ)
+                α = 10.0^logα
+            end
+            return (α=α, β=0.0, σα=nothing, σβ=nothing, valid=valid)
+        end
+    end
+
+    function objective(k)
+        if fitspace == :linear
+            pars = solve_alpha_beta_linear(k)
+            α, β = pars.α, pars.β
+            zk = z_of_k_k(k)
+
+            if project == :model_to_y
+                pred = α .* zk .+ β
+                r = yk .- pred
+                if σk === nothing
+                    return sum(r.^2)
+                else
+                    w = 1.0 ./ σk.^2
+                    return sum(w .* r.^2)
+                end
+            else
+                pred = α .* yk .+ β
+                r = zk .- pred
+                return sum(r.^2)
+            end
+
+        else
+            pars = solve_alpha_log(k)
+            α = pars.α
+            zk = z_of_k_k(k)
+
+            if project == :model_to_y
+                valid = (yk .> 0) .& (zk .> 0)
+                if σk !== nothing
+                    valid .&= (σk .> 0)
+                end
+                if count(valid) <= 1
+                    return Inf
+                end
+                yy = yk[valid]
+                zz = zk[valid]
+                pred = α .* zz
+                r = log10.(yy) .- log10.(pred)
+
+                if σk === nothing
+                    return sum(r.^2)
+                else
+                    ss = σk[valid]
+                    w = yy.^2 ./ ss.^2
+                    return sum(w .* r.^2)
+                end
+            else
+                valid = (yk .> 0) .& (zk .> 0)
+                if count(valid) <= 1
+                    return Inf
+                end
+                yy = yk[valid]
+                zz = zk[valid]
+                pred = α .* yy
+                r = log10.(zz) .- log10.(pred)
+                return sum(r.^2)
+            end
+        end
+    end
+
+    # --------------------------------------------------------
+    # Optimize k
+    # --------------------------------------------------------
+    res = optimize(objective, bounds[1], bounds[2], Brent())
+    kbest = Optim.minimizer(res)
+
+    # --------------------------------------------------------
+    # Final parameters at optimum
+    # --------------------------------------------------------
+    if fitspace == :linear
+        pars = solve_alpha_beta_linear(kbest)
+        αbest, βbest = pars.α, pars.β
+        σα, σβ = pars.σα, pars.σβ
+        zall = z_of_k_all(kbest)
+
+        if project == :model_to_y
+            pred_all = αbest .* zall .+ βbest
+            rlin_all = y .- pred_all
+
+            used_mask = sel
+            xx = x[used_mask]
+            yy = y[used_mask]
+            zz = zall[used_mask]
+            pred_used = αbest .* zz .+ βbest
+            rlin = yy .- pred_used
+
+            out = (
+                k=kbest,
+                α=αbest, β=βbest, σα=σα, σβ=σβ,
+                mode=offset ? :linear_offset_k : :zero_offset_linear_k,
+                fitspace=:linear,
+                project=project,
+                used_mask=used_mask,
+                used_mask_k=sel_k,
+                used_mask_alpha=sel_a,
+                x_used=xx, y_used=yy, z_used=zz,
+                y_fit=pred_all,
+                residuals_linear=rlin,
+                residuals_linear_all=rlin_all,
+                rss_linear=sum(rlin.^2),
+                dof=length(yy) - (offset ? 3 : (fit_alpha ? 2 : 1)),
+                optimizer=res,
+            )
+
+            if σy !== nothing
+                ss = σy[used_mask]
+                w = 1.0 ./ ss.^2
+                χ2 = sum(w .* rlin.^2)
+                dof = length(yy) - (offset ? 3 : (fit_alpha ? 2 : 1))
+                out = merge(out, (
+                    χ2=χ2,
+                    χ2red=χ2 / dof,
+                ))
+            end
+            return out
+        else
+            pred_all = αbest .* y .+ βbest
+            rlin_all = zall .- pred_all
+
+            used_mask = sel
+            xx = x[used_mask]
+            yy = y[used_mask]
+            zz = zall[used_mask]
+            pred_used = αbest .* yy .+ βbest
+            rlin = zz .- pred_used
+
+            return (
+                k=kbest,
+                α=αbest, β=βbest, σα=σα, σβ=σβ,
+                mode=offset ? :linear_offset_k : :zero_offset_linear_k,
+                fitspace=:linear,
+                project=project,
+                used_mask=used_mask,
+                used_mask_k=sel_k,
+                used_mask_alpha=sel_a,
+                x_used=xx, y_used=yy, z_used=zz,
+                z_fit=pred_all,
+                residuals_linear=rlin,
+                residuals_linear_all=rlin_all,
+                rss_linear=sum(rlin.^2),
+                dof=length(yy) - (offset ? 3 : (fit_alpha ? 2 : 1)),
+                optimizer=res,
+            )
+        end
+
+    else
+        pars = solve_alpha_log(kbest)
+        αbest = pars.α
+        βbest = 0.0
+        σα, σβ = pars.σα, pars.σβ
+        zall = z_of_k_all(kbest)
+
+        if project == :model_to_y
+            sel_fit = sel .& (y .> 0) .& (zall .> 0)
+            if σy !== nothing
+                sel_fit .&= (σy .> 0)
+            end
+
+            xx = x[sel_fit]
+            yy = y[sel_fit]
+            zz = zall[sel_fit]
+
+            pred = αbest .* zz
+            rlog = log10.(yy) .- log10.(pred)
+            rlin = yy .- pred
+
+            return (
+                k=kbest,
+                α=αbest, β=0.0, σα=σα, σβ=σβ,
+                mode=:zero_offset_log10_k,
+                fitspace=:log10,
+                project=project,
+                used_mask=sel_fit,
+                used_mask_k=sel_k,
+                used_mask_alpha=sel_a,
+                x_used=xx, y_used=yy, z_used=zz,
+                y_fit=αbest .* zall,
+                residuals_log=rlog,
+                residuals_linear=rlin,
+                rss_log=sum(rlog.^2),
+                rss_linear=sum(rlin.^2),
+                dof=length(yy) - (fit_alpha ? 2 : 1),
+                optimizer=res,
+            )
+        else
+            sel_fit = sel .& (y .> 0) .& (zall .> 0)
+
+            xx = x[sel_fit]
+            yy = y[sel_fit]
+            zz = zall[sel_fit]
+
+            pred = αbest .* yy
+            rlog = log10.(zz) .- log10.(pred)
+            rlin = zz .- pred
+
+            return (
+                k=kbest,
+                α=αbest, β=0.0, σα=σα, σβ=σβ,
+                mode=:zero_offset_log10_k,
+                fitspace=:log10,
+                project=project,
+                used_mask=sel_fit,
+                used_mask_k=sel_k,
+                used_mask_alpha=sel_a,
+                x_used=xx, y_used=yy, z_used=zz,
+                z_fit=αbest .* y,
+                residuals_log=rlog,
+                residuals_linear=rlin,
+                rss_log=sum(rlog.^2),
+                rss_linear=sum(rlin.^2),
+                dof=length(yy) - (fit_alpha ? 2 : 1),
+                optimizer=res,
+            )
+        end
+    end
+end
+
 ##################################################################################################
 # Coil currents
 Icoils = [0.00,
@@ -861,13 +1786,13 @@ JLD2_MyTools.summarize_meta_cqd_jld2(data_cqddw_path)
 
 
 data_directories = [
-                    "20260220", 
-                    "20260225", 
+                    # "20260220", 
+                    # "20260225", 
                     "20260226am",
-                    "20260226pm",
+                    # "20260226pm",
                     "20260227", 
                     "20260303", 
-                    "20260306r1", 
+                    # "20260306r1", 
                     "20260306r2",
 ]
 n_data = length(data_directories);
@@ -1445,6 +2370,7 @@ fig0a = plot(QM_df[!,:Ic], r,
     markerstrokecolor=:orangered,
     line=(:solid,1,:orangered),
     xlims=(1e-3,1.05),
+    ylims=(-2,2),
     label=L"$I_{c}=%$(QM_df[1,:Ic])\mathrm{A}$, $r=%$(r[1])$",
 );
 plot!(fig0a, 
@@ -1593,9 +2519,26 @@ cqd_sim_data = JLD2_MyTools.list_keys_jld_cqd(data_cqdup_path)
 n_ki = length(cqd_sim_data.ki);
 @info "CQD simulation for $(n_ki) ki values"
 colores_ki = palette(:darkrainbow, n_ki);
+
+mixdw_cqd = plot_combined_cqd_profiles_dict(
+    cqd_sim_data[:ki],
+    data_cqdup_path,
+    data_cqddw_path;
+    nz = nz,
+    σw_mm = σw_mm,
+    λ0 = λ0,
+    nI = nI,
+    Icoils = Icoils,
+    colores_current = colores_current,
+    show_plots = false,
+    show_table = false,
+);
+dw_mix_cqd = hcat(values(mixdw_cqd)...);  # size (nI, nki)
+
 up_cqd = Matrix{Float64}(undef, nI, n_ki);
 dw_cqd = Matrix{Float64}(undef, nI, n_ki);
 Δz_cqd = Matrix{Float64}(undef, nI, n_ki);
+Δz_mix_cqd = Matrix{Float64}(undef, nI, n_ki);
 
 for (i,ki) in enumerate(cqd_sim_data.ki)
     dataup = jldopen(data_cqdup_path,"r") do f
@@ -1609,6 +2552,8 @@ for (i,ki) in enumerate(cqd_sim_data.ki)
     dw_cqd[:,i] = [datadw[j][:z_max_smooth_spline_mm] for j=1:nI]
 
     Δz_cqd[:,i] = up_cqd[:,i] .- dw_cqd[:,i]
+
+    Δz_mix_cqd[:,i] = up_cqd[:,i] .- dw_mix_cqd[:,i] 
 end
 
 fig1 = plot(xlabel="Current (A)",
@@ -1628,15 +2573,19 @@ for (i,ki) in enumerate(cqd_sim_data.ki)
 
     )
 end
+annotate!(fig1, [
+    (0.05, 1.0, text(L"$\vec{\mu}_{e}=\Uparrow $", :black, 10)),
+    (0.05, -1.0, text(L"$\vec{\mu}_{e}=\Downarrow$", :black, 10))
+]);
 plot!(fig1,
     xlims=(1e-3,1.05),
     xscale=:log10,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    legend=:outerright,
+    legend=:outerbottom,
     legendtitle=L"$k_{i} \times 10^{-6}$",
     legendtitlefontsize=8,
     legendfontsize=6,
-    legend_columns=3,
+    legend_columns=7,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     size=(800,600),
@@ -1659,6 +2608,9 @@ for (i,ki) in enumerate(cqd_sim_data.ki)
 
     )
 end
+annotate!(fig2, [
+    (0.05, 1.0, text(L"$\Delta z_{\mathrm{p}-\mathrm{p}}$", :black, 10))
+]);
 plot!(fig2,
     xlims=(1e-3,1.05),
     ylims=(1e-3,5.0),
@@ -1666,11 +2618,11 @@ plot!(fig2,
     yscale=:log10,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    legend=:outerright,
+    legend=:outerbottom,
     legendtitle=L"$k_{i} \times 10^{-6}$",
     legendtitlefontsize=8,
     legendfontsize=6,
-    legend_columns=2,
+    legend_columns=7,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     size=(800,600),
@@ -1678,197 +2630,91 @@ plot!(fig2,
 );
 display(fig2)
 
-fig = plot(fig1, fig2,
-    size=(1100,900),
-    layout=(2,1),
+fig3 = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak-to-Peak (mm)",
+);
+for (i,ki) in enumerate(cqd_sim_data.ki)
+    # ki_string = @sprintf("%2.3f",ki)
+    ki_string = sigdigits_str(ki, 2)
+    plot!(fig3,
+        Icoils, Δz_mix_cqd[:,i],
+        label=L"$%$(ki_string)$",
+        line=(:solid,1,colores_ki[i]),
+
+    )
+end
+annotate!(fig3, [
+    (0.05, 1.0, text(L"$\Delta z^{\mathrm{mix}}_{\mathrm{p}-\mathrm{p}}$", :black, 10))
+]);
+plot!(fig3,
+    xlims=(1e-3,1.05),
+    ylims=(1e-3,5.0),
+    xscale=:log10,
+    yscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerbottom,
+    legendtitle=L"$k_{i} \times 10^{-6}$",
+    legendtitlefontsize=8,
+    legendfontsize=6,
+    legend_columns=7,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size=(800,600),
+    left_margin=2mm,
+);
+display(fig3)
+
+fig4 = plot(xlabel="Current (A)",
+    ylabel="Position (mm)");
+for (i,ki) in enumerate(cqd_sim_data.ki)
+    ki_string = sigdigits_str(ki, 2)
+    plot!(fig4,
+        Icoils, up_cqd[:,i],
+        label=L"$%$(ki_string)$",
+        line=(:solid,1,colores_ki[i]),
+
+    )
+end
+annotate!(fig4, [
+    (0.05, 1.0, text(L"$\vec{\mu}_{e}=\Uparrow $", :black, 10))
+]);
+plot!(fig4,
+    xlims=(1e-3,1.05),
+    ylims=(1e-3,5.0),
+    xscale=:log10,
+    yscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerbottom,
+    # legendtitle=L"$k_{i} \times 10^{-6}$",
+    # legendtitlefontsize=8,
+    legendfontsize=6,
+    legend_columns=7,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size=(800,600),
+    left_margin=2mm,
+);
+display(fig4)
+
+
+
+fig = plot(fig1, fig4, fig2, fig3,
+    size=(1600,1300),
+    layout=(2,2),
     link=:x,
     left_margin=5mm,
-    bottom_margin=2mm,
+    bottom_margin=5mm,
 );
 plot!(fig[1], xlabel="", xformatter=_->"",bottom_margin=-9mm,legend=false);
-plot!(fig[2], bottom_margin=-10mm,legend=:outerbottom, legend_columns=7);
+plot!(fig[2], xlabel="", xformatter=_->"",bottom_margin=-9mm,legend=false);
+plot!(fig[3], bottom_margin=-10mm);
+plot!(fig[4], bottom_margin=2mm,legend=false);
 display(fig)
 
 
-
-function plot_combined_cqd_profiles_dict(
-    ki_values,
-    data_cqdup_path::AbstractString,
-    data_cqddw_path::AbstractString;
-    nz::Integer,
-    σw_mm::Real,
-    λ0::Real,
-    nI::Integer,
-    Icoils,
-    colores_current,
-    λ0_peak::Real = 1e-6,
-)
-    results = OrderedDict{Float64, Vector{Float64}}()
-
-    for ki_test in ki_values
-
-        dat_branch_up = jldopen(data_cqddw_path, "r") do f
-            f[JLD2_MyTools.make_keypath_cqd(:dw, ki_test, nz, σw_mm, λ0)]
-        end
-
-        dat_branch_dw = jldopen(data_cqdup_path, "r") do f
-            f[JLD2_MyTools.make_keypath_cqd(:up, ki_test, nz, σw_mm, λ0)]
-        end
-
-        fig1 = plot(xlabel = L"$z \ (\mathrm{mm})$",
-            title = L"$k_{i}=$ "*sci_label(ki_test/1e6, n=6),
-        )
-        for ii in 1:2:nI
-            z_new     = dat_branch_up[ii][:z_profile][:, 1]
-            ampli_new = dat_branch_up[ii][:z_profile][:, 3]
-            plot!(
-                fig1,
-                z_new,
-                ampli_new,
-                label = "$(Int(1000 * Icoils[ii])) mA",
-                color = colores_current[ii],
-            )
-        end
-        plot!(
-            fig1;
-            yformatter = y -> @sprintf("%.1e", y),
-            xlims = (-5, 5),
-            legend = false,
-            legend_columns = 6,
-            background_color_legend = nothing,
-            foreground_color_legend = nothing,
-        )
-        # display(fig1)
-
-
-
-        zmax_vec = Vector{Float64}(undef, nI)
-
-        fig2 = plot(
-            xlabel = L"$z \ (\mathrm{mm})$",
-            # title = L"$k_{i}=$ "*sci_label(ki_test/1e6, n=6),
-        );
-        for ii in 1:nI
-            z_new     = dat_branch_up[ii][:z_profile][:, 1]
-            ampli_new = dat_branch_up[ii][:z_profile][:, 3] .+
-                        0.25 .* dat_branch_dw[ii][:z_profile][:, 3]
-
-            z_max_new, _ = TheoreticalSimulation.max_of_bspline_positions(
-                z_new, ampli_new; λ0 = λ0_peak
-            )
-
-            zmax_vec[ii] = z_max_new[1]         
-
-            if ii%2
-            plot!(
-                fig2,
-                z_new,
-                ampli_new,
-                label = "$(Int(1000 * Icoils[ii])) mA",
-                color = colores_current[ii],
-            )
-            end
-        end        
-        plot!(
-            fig2;
-            yformatter = y -> @sprintf("%.1e", y),
-            xlims = (-5, 5),
-            legend = :outerbottom,
-            legend_columns = 7,
-            legend_fontsize = 6,
-            background_color_legend = nothing,
-            foreground_color_legend = nothing,
-        )
-        # display(fig2)
-
-
-        fig = plot(fig1, fig2,
-        layout=(2,1),
-        # link=:x,
-        labelfontsize=10,
-        size=(900,600),
-        )
-        plot!(fig[1], xlabel="", xformatter=_->"", bottom_margin=-2mm);
-        display(fig)
-
-        z_old = [dat_branch_up[ix][:z_max_smooth_spline_mm] for ix=1:nI]
-        pct   = 100 * (zmax_vec ./ z_old .- 1)
-        pretty_table( hcat(
-            Int.(1000 * Icoils), 
-            round.(zmax_vec; digits = 3), 
-            round.(z_old; digits = 3),
-            round.(pct; digits = 1)
-        );
-            column_labels = [["Ic", "CQD F2", "CQD down ", "RelError"],["(A)","(mm)","(mm)","(mm)"]],
-            alignment =:c,
-            row_label_column_alignment  = :c,
-            row_group_label_alignment   = :c,
-            title         = @sprintf("CQD EQUIVALENT TO F2"),
-            formatters = [fmt__printf("%d", [1]), fmt__printf("%8.3f",2:3), fmt__printf("%8.3f", [4])],
-            style = TextTableStyle(
-                    first_line_column_label = crayon"yellow bold",
-                    table_border  = crayon"blue bold",
-                    title = crayon"bold red"
-            ),
-            table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-            equal_data_column_widths= true,
-        )
-
-        results[ki_test] = zmax_vec
-    end
-
-    return results
-end
-
-zmax_dict = plot_combined_cqd_profiles_dict(
-    cqd_sim_data[:ki][1:2],
-    data_cqdup_path,
-    data_cqddw_path;
-    nz = nz,
-    σw_mm = σw_mm,
-    λ0 = λ0,
-    nI = nI,
-    Icoils = Icoils,
-    colores_current = colores_current,
-)
-
-
-
-
-for ki_test in cqd_sim_data[:ki]
-dat_branch_dw = jldopen(data_cqdup_path,"r") do f
-    f[JLD2_MyTools.make_keypath_cqd(:up,ki_test,nz,σw_mm,λ0)]
-end
-
-dat_branch_up = jldopen(data_cqddw_path,"r") do f
-    f[JLD2_MyTools.make_keypath_cqd(:dw,ki_test,nz,σw_mm,λ0)]
-end
-
-fig = plot(xlabel=L"$z \ (\mathrm{mm})$")
-for ii = 1:nI
-z_new = dat_branch_up[ii][:z_profile][:,1]
-ampli_new = dat_branch_up[ii][:z_profile][:,3] .+ 0.25*dat_branch_dw[ii][:z_profile][:,3]
-z_max_new, _ = TheoreticalSimulation.max_of_bspline_positions(z_new,ampli_new;λ0=1e-6)
-
-
-println(Int(1000*Icoils[ii]),"\t\t",
-    round(z_max_new[1]; digits=3), 
-    "\t\t ", 
-    round(dat_branch_up[ii][:z_max_smooth_spline_mm]; digits=3),
-    "\t\t",
-    round(100 * (z_max_new[1] ./ dat_branch_up[ii][:z_max_smooth_spline_mm] .- 1) ; digits=1)
-)
-
-plot!(z_new, ampli_new,
-    label="$(Int(1000*Icoils[ii])) mA",
-    color=colores_current[ii])
-end
-plot!(
-    xlims=(-5,5),
-    legend=:outerright,
-    legend_columns=2)
-display(fig)
-end
 
 #+++++++++ QUANTUM MECHANICS & COQUANTUM DYNAMICS +++++++++++++
 fig1 = plot(
@@ -1956,18 +2802,59 @@ plot!(fig2,
     size=(1000,600);
     left_margin=4mm,
     bottom_margin=2mm,
-)
+);
 display(fig2)
 
-fig = plot(fig1, fig2,
+
+fig3 = plot(
+    xlabel="Currents (A)",
+    ylabel="Peak-to-Peak (mm)",
+);
+for (i,ki) in enumerate(cqd_sim_data.ki)
+    ki_string = sci_label(1e-6*ki; n=2)
+    plot!(fig3,
+        Icoils, Δz_mix_cqd[:,i],
+        label=L"$k_{i}=$%$(ki_string)",
+        line=(:solid,1,colores_ki[i]),
+
+    )
+end
+plot!(fig3,
+    QM_df[!,:Ic],QM_df[!,:Δ],
+    label=L"QM $\Delta z$",
+    marker=(:circle,2,:white, 0.55),
+    markerstrokecolor=:black,
+    line=(:black,2),
+);
+plot!(fig3,
+    xlims=(1e-3,1.05),
+    ylims=(1e-4,5.0),
+    xscale=:log10,
+    yscale=:log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:outerright,
+    legend_columns = 2,
+    legendfontsize=6,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,  
+    size=(1000,600);
+    left_margin=4mm,
+    bottom_margin=2mm,
+);
+display(fig3)
+
+
+fig = plot(fig1, fig2, fig3,
 size=(1200,1000),
-layout=(2,1),
+layout=(3,1),
 link=:x,
 left_margin=5mm,
 bottom_margin=2mm,
 );
 plot!(fig[1], xlabel="", xformatter=_->"",bottom_margin=-9mm,legend=false);
-plot!(fig[2], xlabel="", xformatter=_->"",bottom_margin=-3mm,legend=:outerbottom, legend_columns=7);
+plot!(fig[2], xlabel="", xformatter=_->"",bottom_margin=-9mm,legend=false);
+plot!(fig[3], xlabel="", xformatter=_->"",bottom_margin=-3mm,legend=:outerbottom, legend_columns=7);
 display(fig)
 
 
@@ -2068,10 +2955,10 @@ for 𝓁 = 1:n_data
         line=(:red,2),
     );
     for (i,ki) in enumerate(cqd_sim_data.ki)
-        ki_string = @sprintf("%2.2f",ki)
+        ki_string = sci_label(1e-6*ki; n=2)
         plot!(figa,
             Icoils, up_cqd[:,i],
-            label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+            label=L"%$(ki_string)",
             line=(:solid,1,colores_ki[i], 0.5),
         )
     end
@@ -2111,10 +2998,10 @@ for 𝓁 = 1:n_data
         ylabel="Peak-to-Peak (mm)",
     );
     for (i,ki) in enumerate(cqd_sim_data.ki)
-        ki_string = @sprintf("%2.2f",ki)
+        ki_string = sci_label(1e-6*ki; n=2)
         plot!(figc,
-            Icoils, Δz_cqd[:,i],
-            label=L"$k_{i}=%$(ki_string)\times 10^{-6}$",
+            Icoils, Δz_mix_cqd[:,i],
+            label=L"%$(ki_string)",
             line=(:solid,1,colores_ki[i]),
 
         )
@@ -2534,7 +3421,7 @@ combined_result = OrderedDict(
 )
 
 fig1 = plot(xlabel="Currents (A)", 
-    ylabel=L"z_{\mathrm{peak}}^{F=1} \qquad (\mathrm{mm})")
+    ylabel=L"z_{\mathrm{peak}}^{F=1} \ (\mathrm{mm})")
 plot!(fig1, combined_result[:Current].Ic, combined_result[:MonteCarlo].zF1,
     ribbon= combined_result[:MonteCarlo].σzF1,
     label= "Monte Carlo",
@@ -2550,13 +3437,13 @@ plot!(fig1,
     label="Spl. Fit",
     color=:darkgreen )
 plot!(fig1,
-    xlims=(10e-3,1.05),
+    xlims=(0.80*threshold,1.05),
     ylims=(10e-3,2.05),
     xscale=:log10,yscale=:log10,
     xticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),)
 
-fig2 = plot(xlabel="Currents (A)", ylabel=L"z_{\mathrm{peak}}^{F=2}  \qquad (\mathrm{mm})")    
+fig2 = plot(xlabel="Currents (A)", ylabel=L"z_{\mathrm{peak}}^{F=2}  \ (\mathrm{mm})")    
 plot!(fig2,
     combined_result[:Current].Ic, combined_result[:MonteCarlo].zF2,
     ribbon= combined_result[:MonteCarlo].σzF2,
@@ -2574,11 +3461,11 @@ plot!(fig2,
     color=:darkgreen )
 plot!(fig2,
     legend=:bottomleft,
-    xlims=(10e-3,1.05),
+    xlims=(0.80*threshold,1.05),
     xticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     xscale=:log10)
 
-fig3 = plot(xlabel="Currents (A)", ylabel=L"z_{\mathrm{peak-peak}} \qquad (\mathrm{mm})")    
+fig3 = plot(xlabel="Currents (A)", ylabel=L"z_{\mathrm{peak-peak}} \ (\mathrm{mm})")    
 plot!(fig3,
     combined_result[:Current].Ic, combined_result[:MonteCarlo].Δz ,
     ribbon= combined_result[:MonteCarlo].σΔz,
@@ -2596,7 +3483,7 @@ plot!(fig3,
     color=:darkgreen )
 plot!(fig3,
     legend=:topleft,
-    xlims=(10e-3,1.05),
+    xlims=(0.80*threshold,1.05),
     ylims=(10e-3,4.05),
     xscale=:log10,yscale=:log10,
     xticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
@@ -2629,6 +3516,7 @@ println("Interpolation in the induction term goes from ",
 ki_up_itp = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], up_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 ki_dw_itp = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], dw_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 ki_Δ_itp  = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], Δz_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+ki_Δmix_itp  = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], Δz_mix_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
 
 # -----------------------------------------------------------------------------
 # Create a dense grid for visualization:
@@ -2641,24 +3529,7 @@ ki_surface = range(cqd_sim_data.ki[ki_start],cqd_sim_data.ki[ki_stop]; length = 
 Zup     = [ki_up_itp(x, y) for y in ki_surface, x in i_surface] ;
 Zdw     = [ki_dw_itp(x, y) for y in ki_surface, x in i_surface] ;
 ΔZ_cqd  = [ki_Δ_itp(x, y) for y in ki_surface, x in i_surface] ;
-
-# -----------------------------------------------------------------------------
-# 3D surface plot (log10 axes for I and z)
-# -----------------------------------------------------------------------------
-# fit_surface = surface(log10.(i_surface), ki_surface, log10.(abs.(Z));
-#     title = "Fitting surface",
-#     xlabel = L"I_{c}",
-#     ylabel = L"$k_{i}\times 10^{-6}$",
-#     zlabel = L"$z\ (\mathrm{mm})$",
-#     legend = false,
-#     color = :viridis,
-#     xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
-#     camera = (20, 25),     # (azimuth, elevation)
-#     xlims = log10.((8e-4,2.05)),
-#     zlims = log10.((2e-4,10.0)),
-#     gridalpha = 0.3,
-# );
+ΔZ_mix_cqd  = [ki_Δmix_itp(x, y) for y in ki_surface, x in i_surface] ;
 
 # -----------------------------------------------------------------------------
 # Contour plot uses log10(z) as the displayed quantity.
@@ -2735,10 +3606,35 @@ fit_contour_Δ = contourf(i_surface, ki_surface, logZ;
 );
 display(fit_contour_Δ )
 
-plot(fit_contour_up, fit_contour_dw, fit_contour_Δ,
-    layout=@layout([a1 a2; a3]);
+Zp   = max.(ΔZ_mix_cqd, 1e-12);
+logZ = log10.(Zp);
+# Choose "decade" ticks for the colorbar based on min/max of logZ
+lo , hi  = floor(minimum(logZ)) , ceil(maximum(logZ)); 
+decades = collect(lo:1:hi) ; # [-4,-3,-2,-1,0] 
+labels = [L"10^{%$k}" for k in decades];
+fit_contour_Δmix = contourf(i_surface, ki_surface, logZ; 
+    levels=101,
+    title="Fitting contour",
+    xlabel=L"$I_{c}$ (A)", 
+    ylabel=L"$k_{i}\times 10^{-6}$", 
+    color=:viridis, 
+    linewidth=0.2,
+    linestyle=:dash,
+    xaxis=:log10,
+    yaxis=:log10,
+    xlims = (10e-3,1.05),
+    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    clims = (lo, hi),   # optional explicit range
+    colorbar_ticks = (decades, labels),      # show ticks as 10^k
+    colorbar_title = L"$ \log(z^{\mathrm{mix}}_{\mathrm{p-p}}\ \mathrm{(mm)}) $",   # what the values mean
+);
+display(fit_contour_Δmix )
+
+
+plot(fit_contour_up, fit_contour_dw, fit_contour_Δ, fit_contour_Δmix,
+    layout=@layout([a1 a2; a3 a4]);
     title="",
-    size=(900,500),
+    size=(800,600),
     left_margin=4mm,
 )
 
@@ -2757,363 +3653,31 @@ data_exp = DataFrame(
     F1  = combined_result[combined_method].zF1, 
     σF1 = combined_result[combined_method].σzF1,
     F2  = combined_result[combined_method].zF2, 
-    σF2 = combined_result[combined_method].σzF2
+    σF2 = combined_result[combined_method].σzF2,
+    Δz  = combined_result[combined_method].Δz, 
+    σΔz = combined_result[combined_method].σΔz
 )
 
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-# FITTING : QUANTUM MECHANICS vs EXPERIMENTAL DATA
-
-"""
-    fit_QM_scale_model(x, y, model;
-        σy=nothing,
-        mask=nothing,
-        idx=nothing,
-        xmin=nothing,
-        xmax=nothing,
-        offset::Bool=false,
-        fitspace::Symbol=:log10,
-        project::Symbol=:model_to_y)
-
-Fit a scaled model to data, with optional offset, subset selection, and
-choice of fitting space.
-
-The model is first evaluated on the experimental x-grid:
-
-    z = model.(x)
-
-and then one of the following relations is fit.
-
-Zero-offset modes
------------------
-If `offset=false`:
-
-- `project=:model_to_y`
-    Fits
-        y ≈ α z
-- `project=:y_to_model`
-    Fits
-        z ≈ α y
-
-For zero offset, both `fitspace=:log10` and `fitspace=:linear` are supported.
-
-Offset modes
-------------
-If `offset=true`:
-
-- `project=:model_to_y`
-    Fits
-        y ≈ α z + β
-- `project=:y_to_model`
-    Fits
-        z ≈ α y + β
-
-For nonzero offset, only `fitspace=:linear` is supported.
-
-Subset selection
-----------------
-You may restrict the fit using any combination of:
-- `mask` : boolean mask of same length as `x`
-- `idx`  : vector/range of selected indices
-- `xmin` : keep only `x >= xmin`
-- `xmax` : keep only `x <= xmax`
-
-Important note on uncertainties
--------------------------------
-The weighted fit is statistically meaningful only when the supplied uncertainty
-matches the residual being minimized.
-
-Therefore:
-
-- `project=:model_to_y` naturally uses `σy`
-- `project=:y_to_model` should use `σy = nothing`
-
-In other words, for `project=:y_to_model`, this function enforces `σy === nothing`.
-
-Arguments
----------
-- `x`     : experimental x-values
-- `y`     : experimental y-values
-- `model` : callable object so that `model.(x)` returns model values on the x-grid
-
-Keyword arguments
------------------
-- `σy`       : uncertainty on `y`; only allowed for `project=:model_to_y`
-- `mask`     : boolean mask for selecting points
-- `idx`      : indices for selecting points
-- `xmin`     : minimum x to include
-- `xmax`     : maximum x to include
-- `offset`   : if `false`, fit only a scale factor; if `true`, fit scale + offset
-- `fitspace` : `:log10` or `:linear`
-- `project`  : `:model_to_y` or `:y_to_model`
-
-Returns
--------
-A named tuple containing the fitted parameters and diagnostics. Depending on the
-mode, this may include:
-- `α`, `β`
-- `σα`, `σβ`
-- `used_mask`
-- `x_used`, `y_used`, `z_used`
-- residuals in linear and/or log space
-- `rss_linear`, `rss_log`
-- `χ2`, `χ2red`, `χ2_log`, `χ2red_log`
-- `dof`
-
-Examples
---------
-Zero-offset log-space fit, model projected onto data:
-
-julia
-Zero-offset linear fit, data projected onto model:
-fit = fit_QM_scale_model(Ic, F1, zqm;
-    σy=σF1,
-    offset=false,
-    fitspace=:log10,
-    project=:model_to_y)
-
-Linear fit with offset:
-fit = fit_QM_scale_model(Ic, F1, zqm;
-    σy=σF1,
-    offset=true,
-    fitspace=:linear,
-    project=:model_to_y)
-"""
-function fit_QM_scale_model(x, y, model;
-    σy=nothing,
-    mask=nothing,
-    idx=nothing,
-    xmin=nothing,
-    xmax=nothing,
-    offset::Bool=false,
-    fitspace::Symbol=:log10,              # :log10 or :linear
-    project::Symbol=:model_to_y,        # :model_to_y or :y_to_model
-    )
-
-    @assert fitspace in (:log10, :linear) "fitspace must be :log10 or :linear"
-    @assert project in (:model_to_y, :y_to_model) "project must be :model_to_y or :y_to_model"
-
-    # IMPORTANT:
-    # If project = :y_to_model, the residual is defined in z-space,
-    # not in y-space. Therefore σy must be nothing.
-    @assert !(project == :y_to_model && σy !== nothing) "project=:y_to_model must use σy = nothing"
-
-    z = model.(x)
-
-    # -----------------------------
-    # Build selection mask
-    # -----------------------------
-    sel = trues(length(x))
-
-    if mask !== nothing
-        @assert length(mask) == length(x)
-        sel .&= mask
-    end
-
-    if idx !== nothing
-        tmp = falses(length(x))
-        tmp[idx] .= true
-        sel .&= tmp
-    end
-
-    if xmin !== nothing
-        sel .&= x .>= xmin
-    end
-
-    if xmax !== nothing
-        sel .&= x .<= xmax
-    end
-
-    # ============================================================
-    # ZERO OFFSET: y ≈ αz   or   z ≈ αy
-    # ============================================================
-    if !offset
-
-        # =========================
-        # LOG-SPACE
-        # =========================
-        if fitspace == :log10
-
-            sel_fit = sel .& (y .> 0) .& (z .> 0)
-            if σy !== nothing
-                sel_fit .&= (σy .> 0)
-            end
-
-            xx = x[sel_fit]
-            yy = y[sel_fit]
-            zz = z[sel_fit]
-
-            @assert length(xx) > 1
-
-            if project == :model_to_y
-                Δ = log10.(yy) .- log10.(zz)
-
-                if σy === nothing
-                    logα = mean(Δ)
-                    α = 10^(logα)
-                    σα = nothing
-                else
-                    ss = σy[sel_fit]
-                    w = yy.^2 ./ ss.^2
-                    logα = sum(w .* Δ) / sum(w)
-                    σα = 10^logα * sqrt(1 / sum(w))
-                    α = 10^logα
-                end
-
-                pred = α .* zz
-                rlog = log10.(yy) .- log10.(pred)
-                rlin = yy .- pred
-
-            else
-                Δ = log10.(zz) .- log10.(yy)
-                logα = mean(Δ)
-                α = 10^(logα)
-                σα = nothing
-
-                pred = α .* yy
-                rlog = log10.(zz) .- log10.(pred)
-                rlin = zz .- pred
-            end
-
-            return (
-                α=α, β=0.0, σα=σα, σβ=nothing,
-                mode=:zero_offset_log10,
-                fitspace=:log10,
-                project=project,
-                used_mask=sel_fit,
-                x_used=xx, y_used=yy, z_used=zz,
-                residuals_log=rlog,
-                residuals_linear=rlin,
-                rss_log=sum(rlog.^2),
-                rss_linear=sum(rlin.^2),
-                dof=length(yy)-1
-            )
-
-        # =========================
-        # LINEAR SPACE
-        # =========================
-        else
-            xx = x[sel]
-            yy = y[sel]
-            zz = z[sel]
-
-            @assert length(xx) > 1
-
-            if project == :model_to_y
-                if σy === nothing
-                    α = dot(yy, zz) / dot(zz, zz)
-                    σα = nothing
-                else
-                    ss = σy[sel]
-                    w = 1.0 ./ ss.^2
-                    α = sum(w .* yy .* zz) / sum(w .* zz.^2)
-                    σα = sqrt(1 / sum(w .* zz.^2))
-                end
-
-                pred = α .* zz
-                rlin = yy .- pred
-
-            else
-                α = dot(zz, yy) / dot(yy, yy)
-                σα = nothing
-
-                pred = α .* yy
-                rlin = zz .- pred
-            end
-
-            return (
-                α=α, β=0.0, σα=σα, σβ=nothing,
-                mode=:zero_offset_linear,
-                fitspace=:linear,
-                project=project,
-                used_mask=sel,
-                x_used=xx, y_used=yy, z_used=zz,
-                residuals_linear=rlin,
-                rss_linear=sum(rlin.^2),
-                dof=length(yy)-1
-            )
-        end
-
-    # ============================================================
-    # OFFSET: y ≈ αz + β  or  z ≈ αy + β
-    # ============================================================
-    else
-        @assert fitspace == :linear "offset=true only supports linear fit"
-
-        xx = x[sel]
-        yy = y[sel]
-        zz = z[sel]
-
-        @assert length(xx) > 2
-
-        if project == :model_to_y
-            A = hcat(zz, ones(length(zz)))
-            target = yy
-        else
-            A = hcat(yy, ones(length(yy)))
-            target = zz
-        end
-
-        if σy === nothing
-            p = A \ target
-            α, β = p
-            pred = A * p
-            r = target .- pred
-
-            return (
-                α=α, β=β,
-                σα=nothing, σβ=nothing,
-                mode=:linear_offset,
-                fitspace=:linear,
-                project=project,
-                used_mask=sel,
-                x_used=xx, y_used=yy, z_used=zz,
-                residuals_linear=r,
-                rss_linear=sum(r.^2),
-                dof=length(target)-2
-            )
-        else
-            ss = σy[sel]
-            w = 1.0 ./ ss.^2
-            W = Diagonal(w)
-
-            ATA = A' * W * A
-            ATb = A' * W * target
-
-            p = ATA \ ATb
-            α, β = p
-
-            Cov = inv(ATA)
-            σα = sqrt(Cov[1,1])
-            σβ = sqrt(Cov[2,2])
-
-            pred = A * p
-            r = target .- pred
-
-            return (
-                α=α, β=β,
-                σα=σα, σβ=σβ,
-                mode=:linear_offset,
-                fitspace=:linear,
-                project=project,
-                used_mask=sel,
-                x_used=xx, y_used=yy, z_used=zz,
-                residuals_linear=r,
-                χ2=sum(w .* r.^2),
-                χ2red=sum(w .* r.^2)/(length(target)-2),
-                rss_linear=sum(r.^2),
-                dof=length(target)-2
-            )
-        end
-    end
+fig = plot(xlabel="Currents (A)", ylabel=L"$z^{F=1}_{p} \ (\mathrm{mm})$")
+scatter!(data_exp.Ic, data_exp.F1; yerror=data_exp.σF1, 
+    label="Experimental data ($(length(data_exp.Ic)))",
+    marker=(:circle, 3, :white),
+    markerstrokecolor=:black)
+for (i, (x, y)) in enumerate(zip(data_exp.Ic, data_exp.F1))
+    annotate!(fig, x, y-0.05, text(L"$\mathbf{%$i}$", :red, 8))
 end
+display(fig)
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Ic, yexp, σy = data_exp.Ic, data_exp.F1, data_exp.σF1
+# FITTING : QUANTUM MECHANICS vs EXPERIMENTAL DATA
 
 # fit_idx = vcat(28:30, 32:33)
 # fit_idx = vcat(31:33,36)
-# fit_idx = vcat(27:30,33)
-fit_idx = vcat(21:26)
-Ic, yexp, σy = data_exp.Ic, data_exp.F1, data_exp.σF1
-yqm = QM_itp_zF1.(Ic)
+fit_idx = vcat(27:30,33)    #** 25 26am 27 03 r2
+fit_idx = vcat(23:26)       #** 26am 27 03 r2
+y_QM = QM_itp_zF1.(Ic)
 
 fitQM = fit_QM_scale_model(
     Ic,
@@ -3126,14 +3690,25 @@ fitQM = fit_QM_scale_model(
     project = :model_to_y,
 )
 
-α, σα, β = fitQM.α, fitQM.σα, fitQM.β;
-ymod = α .* yqm .+ β;
-relerr1 = 100 .* (yexp .- yqm) ./ yqm;
-relerr2 = 100 .* (yexp .- ymod) ./ ymod;
+α, σα, β, σβ = fitQM.α, fitQM.σα, fitQM.β, fitQM.σβ
+y_QM_model = α .* yqm .+ β;
+relerr1 = 100 .* (yexp .- y_QM) ./ y_QM;
+relerr2 = 100 .* (yexp .- y_QM_model) ./ y_QM_model;
 
-@info @sprintf("Fitting parameters F1: Experiment = (%.3f ± %.3f ) * QM + %.3f", α, σα, β)
+if σβ !== nothing
+    @info @sprintf(
+        "Fitting parameters F1: Experiment = (%.3f ± %.3f) * QM + (%.3f ± %.3f)",
+        α, σα, β, σβ
+    )
+else
+    @info @sprintf(
+        "Fitting parameters F1: Experiment = (%.3f ± %.3f) * QM",
+        α, σα
+    )
+end
+
 pretty_table(
-    hcat(Ic, yexp, yqm, relerr1, ymod, relerr2);
+    hcat(Ic, yexp, yqm, relerr1, y_QM_model, relerr2);
     column_labels = [
         ["Current", "F1 exp", "F1 QM", "Rel. Error", "F1 model QM", "Rel. Error"],
         ["[A]", "[mm]", "[mm]", "[%]", "[mm]", "[%]"]
@@ -3158,439 +3733,15 @@ pretty_table(
 
 scatter(Ic, yexp; yerror=σy, label="Experimental data")
 scatter!(Ic[fitQM.used_mask], yexp[fitQM.used_mask]; label="Used in fit", marker=:diamond)
-plot!(Ic, yqm; lw=2, label="QM")
-plot!(Ic, ymod; lw=2, label="α × QM + β")
+plot!(Ic, y_QM; lw=2, label="QM")
+plot!(Ic, y_QM_model; lw=2, label="$(@sprintf("%.3f",α)) × QM + $(@sprintf("%.3f",β))")
 plot!(xlabel="Current (A)", ylabel=L"$z^{F=1}_{\mathrm{peak}}$ (mm)")
 
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # FITTING : COQUANTUM DYNAMICS vs EXPERIMENTAL DATA
-
-function fit_scale_and_k(x, y, model;
-    bounds::Tuple,
-    σy=nothing,
-    mask=nothing,
-    idx_k=nothing,
-    idx_alpha=nothing,
-    xmin=nothing,
-    xmax=nothing,
-    offset::Bool=false,
-    fitspace::Symbol=:log10,          # :log10 or :linear
-    project::Symbol=:model_to_y,      # :model_to_y or :y_to_model
-    fit_alpha::Bool=true,
-)
-
-    @assert fitspace in (:log10, :linear) "fitspace must be :log10 or :linear"
-    @assert project in (:model_to_y, :y_to_model) "project must be :model_to_y or :y_to_model"
-    @assert !(project == :y_to_model && σy !== nothing) "project=:y_to_model must use σy = nothing"
-    @assert !(offset && fitspace != :linear) "offset=true only supports linear fit"
-
-    n = length(x)
-    @assert length(y) == n
-    if σy !== nothing
-        @assert length(σy) == n
-    end
-    if mask !== nothing
-        @assert length(mask) == n
-    end
-
-    # --------------------------------------------------------
-    # Base selection mask, same spirit as fit_QM_scale_model
-    # --------------------------------------------------------
-    sel = trues(n)
-
-    if mask !== nothing
-        sel .&= mask
-    end
-    if xmin !== nothing
-        sel .&= x .>= xmin
-    end
-    if xmax !== nothing
-        sel .&= x .<= xmax
-    end
-
-    # indices used for k-objective
-    sel_k = copy(sel)
-    if idx_k !== nothing
-        tmp = falses(n)
-        tmp[idx_k] .= true
-        sel_k .&= tmp
-    end
-
-    # indices used for alpha/beta estimation
-    sel_a = copy(sel)
-    if idx_alpha !== nothing
-        tmp = falses(n)
-        tmp[idx_alpha] .= true
-        sel_a .&= tmp
-    else
-        sel_a .= sel_k
-    end
-
-    @assert count(sel_k) > 1 "Need at least 2 points for k-fit selection."
-    @assert count(sel_a) > 0 "Need at least 1 point for alpha selection."
-
-    xk = x[sel_k]
-    yk = y[sel_k]
-    σk = σy === nothing ? nothing : σy[sel_k]
-
-    xa = x[sel_a]
-    ya = y[sel_a]
-    σa = σy === nothing ? nothing : σy[sel_a]
-
-    # --------------------------------------------------------
-    # Helpers
-    # --------------------------------------------------------
-    z_of_k_all(k) = model.(x, Ref(k))
-    z_of_k_k(k)   = model.(xk, Ref(k))
-    z_of_k_a(k)   = model.(xa, Ref(k))
-
-    function solve_alpha_beta_linear(k)
-        za = z_of_k_a(k)
-
-        if project == :model_to_y
-            target = ya
-            basis  = za
-            ssa    = σa
-        else
-            target = za
-            basis  = ya
-            ssa    = nothing
-        end
-
-        if !offset
-            if !fit_alpha
-                α = 1.0
-                β = 0.0
-                σα = nothing
-                σβ = nothing
-            else
-                if ssa === nothing
-                    α = dot(target, basis) / dot(basis, basis)
-                    σα = nothing
-                else
-                    w = 1.0 ./ ssa.^2
-                    α = sum(w .* target .* basis) / sum(w .* basis.^2)
-                    σα = sqrt(1 / sum(w .* basis.^2))
-                end
-                β = 0.0
-                σβ = nothing
-            end
-            return (α=α, β=β, σα=σα, σβ=σβ)
-        end
-
-        # offset=true, linear only
-        if project == :model_to_y
-            A = hcat(za, ones(length(za)))
-        else
-            A = hcat(ya, ones(length(ya)))
-        end
-
-        if !fit_alpha
-            # α fixed to 1, fit only β
-            if project == :model_to_y
-                resid0 = ya .- za
-            else
-                resid0 = za .- ya
-            end
-
-            if ssa === nothing
-                β = mean(resid0)
-                σβ = nothing
-            else
-                w = 1.0 ./ ssa.^2
-                β = sum(w .* resid0) / sum(w)
-                σβ = sqrt(1 / sum(w))
-            end
-            return (α=1.0, β=β, σα=nothing, σβ=σβ)
-        end
-
-        if ssa === nothing
-            p = A \ target
-            α, β = p
-            return (α=α, β=β, σα=nothing, σβ=nothing)
-        else
-            w = 1.0 ./ ssa.^2
-            W = Diagonal(w)
-            ATA = A' * W * A
-            ATb = A' * W * target
-            p = ATA \ ATb
-            α, β = p
-            Cov = inv(ATA)
-            σα = sqrt(Cov[1,1])
-            σβ = sqrt(Cov[2,2])
-            return (α=α, β=β, σα=σα, σβ=σβ)
-        end
-    end
-
-    function solve_alpha_log(k)
-        @assert !offset "offset=true is not supported in log fit"
-        za = z_of_k_a(k)
-
-        if project == :model_to_y
-            valid = (ya .> 0) .& (za .> 0)
-            if σa !== nothing
-                valid .&= (σa .> 0)
-            end
-            @assert count(valid) > 1 "Need >1 positive points for log fit."
-            yy = ya[valid]
-            zz = za[valid]
-
-            if !fit_alpha
-                α = 1.0
-                σα = nothing
-            else
-                Δ = log10.(yy) .- log10.(zz)
-                if σa === nothing
-                    logα = mean(Δ)
-                    α = 10.0^logα
-                    σα = nothing
-                else
-                    ss = σa[valid]
-                    w = yy.^2 ./ ss.^2
-                    logα = sum(w .* Δ) / sum(w)
-                    α = 10.0^logα
-                    σα = 10.0^logα * sqrt(1 / sum(w))
-                end
-            end
-            return (α=α, β=0.0, σα=σα, σβ=nothing, valid=valid)
-        else
-            valid = (ya .> 0) .& (za .> 0)
-            @assert count(valid) > 1 "Need >1 positive points for log fit."
-            yy = ya[valid]
-            zz = za[valid]
-
-            if !fit_alpha
-                α = 1.0
-            else
-                Δ = log10.(zz) .- log10.(yy)
-                logα = mean(Δ)
-                α = 10.0^logα
-            end
-            return (α=α, β=0.0, σα=nothing, σβ=nothing, valid=valid)
-        end
-    end
-
-    function objective(k)
-        if fitspace == :linear
-            pars = solve_alpha_beta_linear(k)
-            α, β = pars.α, pars.β
-            zk = z_of_k_k(k)
-
-            if project == :model_to_y
-                pred = α .* zk .+ β
-                r = yk .- pred
-                if σk === nothing
-                    return sum(r.^2)
-                else
-                    w = 1.0 ./ σk.^2
-                    return sum(w .* r.^2)
-                end
-            else
-                pred = α .* yk .+ β
-                r = zk .- pred
-                return sum(r.^2)
-            end
-
-        else
-            pars = solve_alpha_log(k)
-            α = pars.α
-            zk = z_of_k_k(k)
-
-            if project == :model_to_y
-                valid = (yk .> 0) .& (zk .> 0)
-                if σk !== nothing
-                    valid .&= (σk .> 0)
-                end
-                if count(valid) <= 1
-                    return Inf
-                end
-                yy = yk[valid]
-                zz = zk[valid]
-                pred = α .* zz
-                r = log10.(yy) .- log10.(pred)
-
-                if σk === nothing
-                    return sum(r.^2)
-                else
-                    ss = σk[valid]
-                    w = yy.^2 ./ ss.^2
-                    return sum(w .* r.^2)
-                end
-            else
-                valid = (yk .> 0) .& (zk .> 0)
-                if count(valid) <= 1
-                    return Inf
-                end
-                yy = yk[valid]
-                zz = zk[valid]
-                pred = α .* yy
-                r = log10.(zz) .- log10.(pred)
-                return sum(r.^2)
-            end
-        end
-    end
-
-    # --------------------------------------------------------
-    # Optimize k
-    # --------------------------------------------------------
-    res = optimize(objective, bounds[1], bounds[2], Brent())
-    kbest = Optim.minimizer(res)
-
-    # --------------------------------------------------------
-    # Final parameters at optimum
-    # --------------------------------------------------------
-    if fitspace == :linear
-        pars = solve_alpha_beta_linear(kbest)
-        αbest, βbest = pars.α, pars.β
-        σα, σβ = pars.σα, pars.σβ
-        zall = z_of_k_all(kbest)
-
-        if project == :model_to_y
-            pred_all = αbest .* zall .+ βbest
-            rlin_all = y .- pred_all
-
-            used_mask = sel
-            xx = x[used_mask]
-            yy = y[used_mask]
-            zz = zall[used_mask]
-            pred_used = αbest .* zz .+ βbest
-            rlin = yy .- pred_used
-
-            out = (
-                k=kbest,
-                α=αbest, β=βbest, σα=σα, σβ=σβ,
-                mode=offset ? :linear_offset_k : :zero_offset_linear_k,
-                fitspace=:linear,
-                project=project,
-                used_mask=used_mask,
-                used_mask_k=sel_k,
-                used_mask_alpha=sel_a,
-                x_used=xx, y_used=yy, z_used=zz,
-                y_fit=pred_all,
-                residuals_linear=rlin,
-                residuals_linear_all=rlin_all,
-                rss_linear=sum(rlin.^2),
-                dof=length(yy) - (offset ? 3 : (fit_alpha ? 2 : 1)),
-                optimizer=res,
-            )
-
-            if σy !== nothing
-                ss = σy[used_mask]
-                w = 1.0 ./ ss.^2
-                χ2 = sum(w .* rlin.^2)
-                dof = length(yy) - (offset ? 3 : (fit_alpha ? 2 : 1))
-                out = merge(out, (
-                    χ2=χ2,
-                    χ2red=χ2 / dof,
-                ))
-            end
-            return out
-        else
-            pred_all = αbest .* y .+ βbest
-            rlin_all = zall .- pred_all
-
-            used_mask = sel
-            xx = x[used_mask]
-            yy = y[used_mask]
-            zz = zall[used_mask]
-            pred_used = αbest .* yy .+ βbest
-            rlin = zz .- pred_used
-
-            return (
-                k=kbest,
-                α=αbest, β=βbest, σα=σα, σβ=σβ,
-                mode=offset ? :linear_offset_k : :zero_offset_linear_k,
-                fitspace=:linear,
-                project=project,
-                used_mask=used_mask,
-                used_mask_k=sel_k,
-                used_mask_alpha=sel_a,
-                x_used=xx, y_used=yy, z_used=zz,
-                z_fit=pred_all,
-                residuals_linear=rlin,
-                residuals_linear_all=rlin_all,
-                rss_linear=sum(rlin.^2),
-                dof=length(yy) - (offset ? 3 : (fit_alpha ? 2 : 1)),
-                optimizer=res,
-            )
-        end
-
-    else
-        pars = solve_alpha_log(kbest)
-        αbest = pars.α
-        βbest = 0.0
-        σα, σβ = pars.σα, pars.σβ
-        zall = z_of_k_all(kbest)
-
-        if project == :model_to_y
-            sel_fit = sel .& (y .> 0) .& (zall .> 0)
-            if σy !== nothing
-                sel_fit .&= (σy .> 0)
-            end
-
-            xx = x[sel_fit]
-            yy = y[sel_fit]
-            zz = zall[sel_fit]
-
-            pred = αbest .* zz
-            rlog = log10.(yy) .- log10.(pred)
-            rlin = yy .- pred
-
-            return (
-                k=kbest,
-                α=αbest, β=0.0, σα=σα, σβ=σβ,
-                mode=:zero_offset_log10_k,
-                fitspace=:log10,
-                project=project,
-                used_mask=sel_fit,
-                used_mask_k=sel_k,
-                used_mask_alpha=sel_a,
-                x_used=xx, y_used=yy, z_used=zz,
-                y_fit=αbest .* zall,
-                residuals_log=rlog,
-                residuals_linear=rlin,
-                rss_log=sum(rlog.^2),
-                rss_linear=sum(rlin.^2),
-                dof=length(yy) - (fit_alpha ? 2 : 1),
-                optimizer=res,
-            )
-        else
-            sel_fit = sel .& (y .> 0) .& (zall .> 0)
-
-            xx = x[sel_fit]
-            yy = y[sel_fit]
-            zz = zall[sel_fit]
-
-            pred = αbest .* yy
-            rlog = log10.(zz) .- log10.(pred)
-            rlin = zz .- pred
-
-            return (
-                k=kbest,
-                α=αbest, β=0.0, σα=σα, σβ=σβ,
-                mode=:zero_offset_log10_k,
-                fitspace=:log10,
-                project=project,
-                used_mask=sel_fit,
-                used_mask_k=sel_k,
-                used_mask_alpha=sel_a,
-                x_used=xx, y_used=yy, z_used=zz,
-                z_fit=αbest .* y,
-                residuals_log=rlog,
-                residuals_linear=rlin,
-                rss_log=sum(rlog.^2),
-                rss_linear=sum(rlin.^2),
-                dof=length(yy) - (fit_alpha ? 2 : 1),
-                optimizer=res,
-            )
-        end
-    end
-end
-
-model = (I, k) -> ki_up_itp(I, k)
-Ic, yexp, σy = data_exp.Ic, data_exp.F1, data_exp.σF1
+CQDmodel = (I, k) -> ki_up_itp(I, k)
 kmin = minimum(cqd_sim_data.ki[ki_start:ki_stop])
 kmax = maximum(cqd_sim_data.ki[ki_start:ki_stop])
 idx_k = findall(data_exp.Ic .< 0.060)
@@ -3598,13 +3749,13 @@ idx_k = findall(data_exp.Ic .< 0.060)
 fit = fit_scale_and_k(
     Ic,
     yexp,
-    model,;
+    CQDmodel,;
     σy = σy,
     bounds      = (kmin, kmax),
     idx_k       = idx_k,
     offset      = false,   
     fit_alpha   = true,
-    idx_alpha   = nothing,
+    idx_alpha   = fit_idx,
     fitspace    = :linear
 )
 
@@ -3612,12 +3763,12 @@ kbest = fit.k
 αbest = fit.α
 βbest = fit.β
 
-y_model = αbest .* model.(data_exp.Ic, Ref(kbest)) .+ βbest
-relerr = 100 .* (yexp .- y_model) ./ y_model;
+y_CQD_model = αbest .* CQDmodel.(Ic, Ref(kbest)) .+ βbest
+relerr = 100 .* (yexp .- y_CQD_model) ./ y_CQD_model;
 
 @info @sprintf("Fitting parameters F1: α = %.3f , β = %.3f,  ki = %.3f", αbest, βbest, kbest)
 pretty_table(
-    hcat(Ic, yexp, y_model, relerr);
+    hcat(Ic, yexp, y_CQD_model, relerr);
     column_labels = [
         ["Current", "F1 exp", "UP CQD", "Rel. Error"],
         ["[A]", "[mm]", "[mm]", "[%]"]
@@ -3654,7 +3805,7 @@ fig = scatter(
 plot!(
     fig,
     data_exp.Ic,
-    y_model;
+    y_CQD_model;
     label = L"Fit: $\alpha f(I,k)$",
     lw = 2,
     lc = :blue,
@@ -3675,17 +3826,44 @@ fig_log = scatter(
 plot!(
     fig_log,
     data_exp.Ic,
-    y_model;
+    y_CQD_model;
     lw = 2,
     lc = :blue,
     label = L"Fit: $\alpha=%$(round(αbest, digits=3))$, $k_{i}=%$(round(kbest; digits=2))\times 10^{-6}$ "
 )
 
 plot(fig, fig_log,
-    layout=(2,1))
+    layout=(2,1),
+    size=(800,800))
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+fit_ki_mode = :full   # ← change to :low, :high, or :low_high
+n_front  = 8
+n_back   = 8
+
+data = hcat(combined_result[:Current].Ic, combined_result[:Current].σIc , combined_result[:MonteCarlo].zF1 , combined_result[:MonteCarlo].σzF1 )
+low_range  = 1:n_front ;
+high_range = (size(data, 1) - n_back + 1):size(data, 1);
+
+@assert last(low_range) ≤ size(data,1)
+@assert first(high_range) ≥ 1
+
+# Select rows according to the chosen fitting mode
+fit_ki_idx = begin
+    if fit_ki_mode === :full
+        Colon()
+    elseif fit_ki_mode === :low
+        low_range
+    elseif fit_ki_mode === :high
+        high_range
+    elseif fit_ki_mode === :low_high
+        vcat(low_range, high_range)
+    else
+        error("Unknown fit_ki_mode = $fit_ki_mode")
+    end
+end
+
 function fit_ki_joint_scaling_fitsubset(
     data,
     zqm,
@@ -4033,8 +4211,8 @@ result = fit_ki_joint_scaling_fitsubset(
     0.750,                                  # tail threshold
     (cqd_sim_data[:ki][ki_start], cqd_sim_data[:ki][ki_stop]); # bracket
     fit_ki_mode=:full,
-    n_front = 8,
-    n_back  = 8,
+    n_front = n_front,
+    n_back  = n_back,
     w       = 0.50,
     ref_type=:geom,
 )
@@ -4042,8 +4220,6 @@ result = fit_ki_joint_scaling_fitsubset(
 data_scaled = copy(M_data_exp)
 data_scaled[:, 3] ./= result.scale_factor    # scale z
 data_scaled[:, 4] ./= result.scale_factor    # scale δz
-
-global_mag_factor = scale_mag 
 
 data_fitting        = M_data_exp[fit_ki_idx, :]
 data_scaled_fitting = data_scaled[fit_ki_idx, :]
@@ -4063,7 +4239,7 @@ fig=plot(
 plot!(fig,
     data_scaled[:,1],data_scaled[:,3],
     yerror = data_scaled[:,4],
-    label=L"Experimental data (magnif.factor $m = %$(round(global_mag_factor, digits=4))$)",
+    label=L"Experimental data (magnif.factor $m = %$(round(result.scale_factor, digits=4))$)",
     marker=(:circle,3,:white),
     markerstrokecolor=:darkgreen,
     line=(:solid,2,:darkgreen),
@@ -4108,9 +4284,9 @@ plot!(fig,
 )
 display(fig)
 
-relerr = 100*(yexp./scale_mag .- ki_up_itp.(Ic, Ref(fit_scaled.ki))) ./ ki_up_itp.(Ic, Ref(fit_scaled.ki))
+relerr = 100*(yexp./result.scale_factor .- ki_up_itp.(Ic, Ref(fit_scaled.ki))) ./ ki_up_itp.(Ic, Ref(fit_scaled.ki))
 pretty_table(
-    hcat(Ic, yexp ./ scale_mag, ki_up_itp.(Ic, Ref(fit_scaled.ki)), relerr);
+    hcat(Ic, yexp ./ result.scale_factor, ki_up_itp.(Ic, Ref(fit_scaled.ki)), relerr);
     column_labels = [
         ["Current", "F1 exp", "UP CQD", "Rel. Error"],
         ["[A]", "[mm]", "[mm]", "[%]"]
@@ -4134,6 +4310,158 @@ pretty_table(
 )
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# GOODNESS OF FITS
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+struct FitStats
+    logMSE::Float64
+    logRMSE::Float64
+    R2_log::Float64
+    chi2_log::Float64
+    chi2_red::Float64
+    p_chi2::Float64
+    AIC::Float64
+    BIC::Float64
+    NMAD::Float64
+end
+
+
+function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
+    @assert length(x) == length(y) == length(ypred)
+
+    N = length(y)
+
+    # --- residuals in log-space ---
+    logy    = log.(y)
+    logpred = log.(ypred)
+    r       = logy .- logpred
+
+    # --- core metrics in log-space ---
+    logMSE  = mean(r .^ 2)
+    logRMSE = sqrt(logMSE)
+    R2_log  = 1 - sum(r .^ 2) / sum((logy .- mean(logy)) .^ 2)
+
+    # --- robust scatter (NMAD) ---
+    NMAD = 1.4826 * median(abs.(r))
+
+    # --- χ², p-value, AIC, BIC ---
+    if isnothing(σ)
+        # No uncertainties: we cannot do a proper χ² test
+        chi2_log = NaN
+        chi2_red = NaN
+        p_chi2   = NaN
+        # Use logMSE as a surrogate for variance in "likelihood"
+        AIC = 2k + N * log(logMSE)
+        BIC = k * log(N) + N * log(logMSE)
+    else
+        @assert length(σ) == N
+        # Propagate σ into log-space: σ_log ≈ σ / y
+        σlog    = σ ./ y
+        chi2_log = sum((r ./ σlog) .^ 2)
+        dof      = max(N - k, 1)  # degrees of freedom
+        chi2_red = chi2_log / dof
+
+        # p-value: P(χ² >= observed χ² | dof)
+        dist   = Chisq(dof)
+        p_chi2 = ccdf(dist, chi2_log)  # 1 - cdf(dist, chi2_log)
+
+        # AIC/BIC using χ² (Gaussian likelihood)
+        AIC = 2k + chi2_log
+        BIC = k * log(N) + chi2_log
+    end
+
+    return FitStats(logMSE, logRMSE, R2_log, chi2_log, chi2_red, p_chi2, AIC, BIC, NMAD)
+end
+
+
+x_exp = data[:,1]
+y_exp = data[:,3] 
+σ_exp = data[:,4] 
+y_CQD = y_CQD_model
+y_QM  = y_QM_model 
+
+stats_CQD = goodness_of_fit(x_exp, y_exp, y_CQD; σ = σ_exp, k = 2)
+stats_QM  = goodness_of_fit(x_exp, y_exp, y_QM;  σ = σ_exp, k = 1)
+
+metrics = [
+    "logMSE",
+    "logRMSE",
+    "R2_log",
+    "chi2_log",
+    "chi2_red",
+    "p_chi2",
+    "AIC",
+    "BIC",
+    "NMAD",
+]
+
+data = [
+    stats_CQD.logMSE   stats_QM.logMSE
+    stats_CQD.logRMSE  stats_QM.logRMSE
+    stats_CQD.R2_log   stats_QM.R2_log
+    stats_CQD.chi2_log stats_QM.chi2_log
+    stats_CQD.chi2_red stats_QM.chi2_red
+    stats_CQD.p_chi2   stats_QM.p_chi2
+    stats_CQD.AIC      stats_QM.AIC
+    stats_CQD.BIC      stats_QM.BIC
+    stats_CQD.NMAD     stats_QM.NMAD
+]
+
+lower_is_better  = Set(["logMSE", "logRMSE", "chi2_log", "chi2_red", "AIC", "BIC", "NMAD"])
+higher_is_better = Set(["R2_log", "p_chi2"])
+
+hl_best = TextHighlighter(
+    (tbl, i, j) -> begin
+        # Only evaluate columns 1 (CQD) and 2 (QM)
+        if !(j == 1 || j == 2)
+            return false
+        end
+
+        metric = metrics[i]   # row label from your vector
+        v_CQD = tbl[i, 1]
+        v_QM  = tbl[i, 2]
+
+        # safety: both numeric
+        if !(isa(v_CQD, Number) && isa(v_QM, Number))
+            return false
+        end
+
+        if metric in lower_is_better
+            best = min(v_CQD, v_QM)
+            return tbl[i, j] == best
+
+        elseif metric in higher_is_better
+            best = max(v_CQD, v_QM)
+            return tbl[i, j] == best
+        end
+
+        return false
+    end,
+    crayon"fg:black bg:#fff7a1"
+);
+
+
+pretty_table(
+    data;
+    column_labels = ["CQD", "QM"],
+    row_labels    = metrics,
+    row_label_column_alignment = :l,
+    highlighters  = [hl_best],
+    alignment     = [:c,:c],
+    style         = TextTableStyle(
+                first_line_column_label = crayon"yellow bold",
+                table_border  = crayon"blue bold",
+                column_label  = crayon"yellow bold",
+                ),
+    table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    equal_data_column_widths= true,
+)
+
+
+
+
+
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Fitting for induction factor for each individual data set
 fit_ki_mode = :full ; # ← change to :low, :high, or :low_high
