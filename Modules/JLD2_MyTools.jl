@@ -1,4 +1,5 @@
 module JLD2_MyTools
+    using Dates
     using Printf
     using JLD2
     using DataStructures: OrderedDict
@@ -773,5 +774,22 @@ function tree_jld(path::AbstractString; maxdepth::Int=typemax(Int))
 
     return nothing
 end
+
+
+
+function save_script_copy(outdir::AbstractString; timestamp=Dates.format(now(), "yyyymmdd_HHMMSSsss"))
+    if isempty(PROGRAM_FILE)
+        @warn "PROGRAM_FILE is empty (likely running from REPL/VSCode). Script not saved."
+        return
+    end
+
+    mkpath(outdir)
+    dest = joinpath(outdir, "script_$timestamp.jl")
+
+    cp(PROGRAM_FILE, dest; force=true)
+
+    @info "Saved script copy to $dest"
+end
+
 
 end
