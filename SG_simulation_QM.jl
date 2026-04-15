@@ -468,7 +468,7 @@ anim = @animate for j in iter
     data_set = jldopen(data_screen_path,"r") do file
         file["screen/I$j"][lvl]
     end
-    n = Int(round(size(data_set, 1)/10)) ; 
+    n = Int(round(size(data_set, 1) / 10)) ; 
     
     # --- preallocate arrays for histograms (scaled units) ---
     xs_a = Vector{Float64}(undef, n); zs_a = Vector{Float64}(undef, n)  # furnace (mm, μm)
