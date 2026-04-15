@@ -184,7 +184,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 2_000 ; 
+const Nss = 800 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -254,10 +254,10 @@ profiles_bottom = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
 println("Profiles F=$(K39_params.Ispin+0.5), mf=$(-(K39_params.Ispin+0.5))")
 profiles_5      = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=5,         n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-println("Profiles ms=$((K39_params.Ispin))")
+println("Profiles ms=$(Sspin)")
 profiles_Sup    = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=:S_up,     n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
-println("Profiles ms=$(-(K39_params.Ispin))")
+println("Profiles ms=$(-(Sspin))")
 profiles_Sdown  = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                     manifold=:S_down,   n_bins= (nx_bins , nz_bins), width_mm=gaussian_width_mm, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 println("Profiles F=1, ms=-1,+1")
@@ -1015,7 +1015,7 @@ else
         file["meta/σw"]         = sort(gaussian_width_mm)
         file["meta/λ0"]         = sort(λ0_raw_list)
 
-        @time for (nz, gw, λ0) in param_grid
+        for (nz, gw, λ0) in param_grid
 
             println("Profiles $(state.family)=$(state.val), nz=$nz, σ=$(Int(round(1e3*gw)))μm, λ₀=$λ0")
 
@@ -1069,19 +1069,22 @@ else
         xlims=(8e-3, 2), ylims=(8e-3, 2),
         xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
         yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        size=(850, 650),
+        size=(1050, 650),
         rightmargin=5mm,
         legend=:outerright,
+        legend_fontsize=4,
         legend_columns=length(nz_bins),
+        background_color_legend = nothing,
+        foreground_color_legend = nothing,
     )
     savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
 
     # ============================== F=2 manifold ==============================
-    state_chosen= states_groups_dict[:F2]
+    state = states_groups_dict[:F2]
     outpath_2 = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
     @info "QM approach : analyzing screen profiles for $(state.family)=$(state.val) manifold"
 
-    jldopen(outpath_2, "w") do file
+    @time jldopen(outpath_2, "w") do file
         file["meta/N"]          = Ns
         file["meta/state"]      = (state.family, state.val)
         file["meta/T"]          = T_K
@@ -1091,7 +1094,7 @@ else
         file["meta/σw"]         = sort(gaussian_width_mm)
         file["meta/λ0"]         = sort(λ0_raw_list)
 
-        @time for (nz, gw, λ0) in param_grid
+        for (nz, gw, λ0) in param_grid
 
             println("Profiles $(state.family)=$(state.val), nz=$nz, σ=$(Int(round(1e3*gw)))μm, λ₀=$λ0")
 
@@ -1145,10 +1148,13 @@ else
         xlims=(8e-3, 2), ylims=(8e-3, 2),
         xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
         yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        size=(850, 650),
+        size=(1050, 650),
         rightmargin=5mm,
-        legend=:outerbottom,
+        legend=:outerright,
+        legend_fontsize=4,
         legend_columns=length(nz_bins),
+        background_color_legend = nothing,
+        foreground_color_legend = nothing,
     )
     savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
 
@@ -1213,7 +1219,7 @@ else
     alert("script $RUN_STAMP has finished!")
 end
 
-JLD2_MyTools.save_script_copy(OUTDIR; timestamp=RUN_STAMP)
+JLD2_MyTools.save_script_copy(OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP);
 
 #########################################################################################
 # run1_path = joinpath(dirname(OUTDIR),"QM_T205_8M","run1","qm_screen_profiles_f1_table.jld2")
