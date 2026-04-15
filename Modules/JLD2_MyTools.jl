@@ -777,18 +777,31 @@ end
 
 
 
-function save_script_copy(outdir::AbstractString; timestamp=Dates.format(now(), "yyyymmdd_HHMMSSsss"))
-    if isempty(PROGRAM_FILE)
-        @warn "PROGRAM_FILE is empty (likely running from REPL/VSCode). Script not saved."
-        return
-    end
+function save_script_copy(outdir::AbstractString;
+                         script_path::Union{Nothing,String}=nothing,
+                         timestamp = Dates.format(now(), "yyyymmdd_HHMMSSsss"))
 
     mkpath(outdir)
+
+    src = if script_path !== nothing
+        abspath(script_path)
+    elseif !isempty(PROGRAM_FILE)
+        abspath(PROGRAM_FILE)
+    else
+        abspath(@__FILE__)
+    end
+
+    if !isfile(src)
+        @warn "Could not determine valid script path."
+        return nothing
+    end
+
     dest = joinpath(outdir, "script_$timestamp.jl")
+    cp(src, dest; force=true)
 
-    cp(PROGRAM_FILE, dest; force=true)
+    @info "Saved script copy" src=src dest=dest
 
-    @info "Saved script copy to $dest"
+    return dest
 end
 
 
