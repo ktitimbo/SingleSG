@@ -184,13 +184,13 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 800 ; 
+const Nss = 8_000_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
-nx_bins , nz_bins = 32 , 2
-gaussian_width_mm = 0.270
-λ0_raw            = 0.01
-λ0_spline         = 0.001
+nx_bins , nz_bins = 32 , 2 ; 
+gaussian_width_mm = 0.270 ;
+λ0_raw            = 0.01 ;
+λ0_spline         = 0.001 ;
 
 # Monte Carlo generation of particles traversing the filtering slit [x0 y0 z0 v0x v0y v0z]
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
@@ -219,15 +219,25 @@ end
                                 K39_params
 );
 TheoreticalSimulation.travelling_particles_summary(Icoils, quantum_numbers, particles_trajectories)
-jldsave( joinpath(OUTDIR,"qm_$(Nss)_valid_particles_data.jld2"), data = OrderedDict(:Icoils => Icoils, :levels => quantum_numbers , :data => particles_trajectories))
+############### data saved in block format for easier access ###############
+jldopen(joinpath(OUTDIR,"qm_particles_data.jld2"), "w") do file
+    file["meta/N"]          = Nss
+    file["meta/T"]          = T_K
+    file["meta/Icoils"]     = Icoils
+    file["meta/levels"]     = quantum_numbers 
+    for i in 1:nI
+        for j in eachindex(quantum_numbers)
+            file["screen/I$(i)/lvl$(j)"] = particles_trajectories[i][j]
+        end
+    end
+end
 
 data_alive_screen = TheoreticalSimulation.QM_select_flagged(particles_trajectories,:screen);
-alive_screen = OrderedDict(:Icoils=>Icoils, :levels => quantum_numbers , :data => data_alive_screen);
-jldsave(joinpath(OUTDIR,"qm_$(Nss)_screen_data.jld2"), alive = alive_screen)
-
 ############### data saved in block format for easier access ###############
 data_screen_path = joinpath(OUTDIR,"qm_screen_data.jld2")
 jldopen(data_screen_path, "w") do file
+    file["meta/N"]          = Nss
+    file["meta/T"]          = T_K
     file["meta/Icoils"] = Icoils
     file["meta/levels"] = quantum_numbers 
     for i in 1:nI
@@ -377,34 +387,34 @@ anim = @animate for j in eachindex(Icoils)
     display(fig)
 end
 gif_path = joinpath(OUTDIR, "QM_profiles.gif");
-gif(anim, gif_path, fps=2)  # adjust fps 
+gif(anim, gif_path, fps=2) ; # adjust fps 
 @info "Saved GIF" gif_path ;
 anim = nothing
 
 # Peak position (mm) : lower branch
-i_idx = findall(>(0.010), Icoils)[1]
-fig=plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
+i_idx = findall(>(0.010), Icoils)[1] ;
+fig=plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)");
 plot!(fig,Icoils[i_idx:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $\vert 2,-2\rangle$",
-    line=(:solid,:red,2))
+    line=(:solid,:red,2));
 plot!(fig,Icoils[i_idx:end], [profiles_bottom[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $F=1$",
-    line=(:solid,:blue,2))
+    line=(:solid,:blue,2));
 plot!(fig,Icoils[i_idx:end], [profiles_Sdown[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $m_{s}=-1/2$",
-    line=(:solid,:purple,2))
+    line=(:solid,:purple,2));
 plot!(fig,Icoils[i_idx:end], [profiles_6_8[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $F=1$, $m_{F}=-1,+1$",
-    line=(:solid,:darkgreen,2))
+    line=(:solid,:darkgreen,2));
 plot!(fig,Icoils[i_idx:end], [profiles_6[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $F=1$, $m_{F}=-1$",
-    line=(:dash,:cyan4,2))
+    line=(:dash,:cyan4,2));
 plot!(fig,Icoils[i_idx:end], [profiles_7[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $F=1$, $m_{F}=0$",
-    line=(:dash,:slateblue3,2))
+    line=(:dash,:slateblue3,2));
 plot!(fig,Icoils[i_idx:end], [profiles_8[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $F=1$, $m_{F}=+1$",
-    line=(:dash,:sienna3,2))
+    line=(:dash,:sienna3,2));
 plot!(fig,xaxis=:log10,
     yaxis=:log10,
     xlims=(10e-3,1.05),
@@ -417,7 +427,7 @@ plot!(fig,xaxis=:log10,
     foreground_color_legend=nothing,
     background_color_legend=nothing,
     left_margin =2mm,
-)
+);
 savefig(fig,joinpath(OUTDIR,"QM_results_comparison_a.$(FIG_EXT)"))
 plot!(fig,I_exp[12:end],z_exp[12:end],
     ribbon=δz_exp[12:end],
@@ -425,15 +435,14 @@ plot!(fig,I_exp[12:end],z_exp[12:end],
     line=(:black,:dot,2),
     fillalpha=0.23, 
     fillcolor=:black, 
-    )
-display(fig)
+);
 savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
 
 # ATOMS PROPAGATION
 r = 1:1:nI;
 iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
-lvl = 5 #Int(4*K39_params.Ispin+2)
-f,mf=quantum_numbers[lvl]
+lvl = 5 ; #Int(4*K39_params.Ispin+2)
+f,mf=quantum_numbers[lvl] ;
 # =========================
 # Precompute geometry overlays (constant)
 # =========================
@@ -456,7 +465,9 @@ y_aper   = y_sg_out + y_SGToAperture ;
 y_scr    = y_sg_out + y_SGToScreen ;
 
 anim = @animate for j in iter
-    data_set = alive_screen[:data][j][lvl];
+    data_set = jldopen(data_screen_path,"r") do file
+        file["screen/I$j"][lvl]
+    end
     n = Int(round(size(data_set, 1)/10)) ; 
     
     # --- preallocate arrays for histograms (scaled units) ---
@@ -613,7 +624,7 @@ anim = @animate for j in iter
     display(fig)
 end
 gif_path = joinpath(OUTDIR, "QM_time_evolution.gif");
-gif(anim, gif_path, fps=2)  # adjust fps
+gif(anim, gif_path, fps=2) ; # adjust fps
 @info "Saved GIF" gif_path ;
 anim = nothing
 
@@ -625,7 +636,7 @@ for (jdx,nz) in enumerate(nz_bins_list)
     for (idx,val) in enumerate(gaussian_width_mm_list)
         @info "Binning nz = $(nz)   |   Gaussian σw = $(Int(1e3*val))μm"
 
-        profiles_bottom_temp = QM_analyze_profiles_to_dict(alive_screen, K39_params;
+        profiles_bottom_temp = QM_analyze_profiles_to_dict(data_screen_path, K39_params;
                         manifold=:F_bottom, n_bins= (nx_bins , nz), width_mm=val, add_plot=false, plot_xrange=:all, λ_raw=λ0_raw, λ_smooth = λ0_spline, mode=:probability);
 
 
@@ -653,7 +664,7 @@ plot!(fig,I_exp[2:end], 1.28/1.20* z_exp[2:end],
     line=(:black,:dash,2),
     fillalpha=0.23, 
     fillcolor=:black, 
-    )
+    );
 plot!(fig,
     xaxis=:log10,
     yaxis=:log10,
@@ -666,7 +677,7 @@ plot!(fig,
     size=(1250,650),
     rightmargin=5mm,
     legend=:outerbottom,
-    legend_columns = 5,)
+    legend_columns = 5,);
 display(fig)
 savefig(fig,joinpath(OUTDIR,"qm_comparison_w_n.$(FIG_EXT)"))
 
@@ -677,7 +688,6 @@ crossing_slit           = nothing
 particles_flag          = nothing
 particles_trajectories  = nothing
 data_alive_screen       = nothing
-# alive_screen            = nothing
 GC.gc()
 @info "Memory cleaned after QM data acquired"
 @info "Free system memory $(round(Sys.free_memory() / 1024^3,sigdigits=6)) GiB"
@@ -751,18 +761,30 @@ data_screen_path    = joinpath(OUTDIR,"qm_screen_data.jld2")
 if !isfile(data_screen_path)
     @info "Analyzing data arriving to the screen"
 
-    dataQM = load(joinpath(OUTDIR,"qm_$(Ns)_valid_particles_data.jld2"))["data"]
-    data_alive_screen = TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen)
+    dataQM = jldopen(joinpath(OUTDIR,"qm_particles_data.jld2"), "r") do file
+        Icoils_loaded = file["meta/Icoils"]
+        levels_loaded = file["meta/levels"]
 
-    @time alive_screen = OrderedDict(
-                :Icoils => dataQM[:Icoils],
-                :levels => dataQM[:levels], 
-                :data   => data_alive_screen);
-    # jldsave(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"), alive = alive_screen)
-    
+        nI = length(Icoils_loaded)
+        nlevels = length(levels_loaded)
+
+        particles_trajectories_loaded = OrderedDict{Int8, Vector{Matrix{Float64}}}()
+
+        for i in 1:nI
+            particles_trajectories_loaded[Int8(i)] = [
+                file["screen/I$(i)/lvl$(j)"] for j in 1:nlevels
+            ]
+        end
+
+        return OrderedDict(:Icoils => Icoils_loaded, :levels => levels_loaded, :data => particles_trajectories_loaded)
+    end
+
+    data_alive_screen = TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen)   
     jldopen(data_screen_path , "w") do file
-        file["meta/Icoils"] = dataQM[:Icoils]
-        file["meta/levels"] = dataQM[:levels] 
+        file["meta/N"]          = Ns
+        file["meta/T"]          = T_K
+        file["meta/Icoils"]     = dataQM[:Icoils]
+        file["meta/levels"]     = dataQM[:levels] 
         for i in 1:nI
             file["screen/I$(i)"] = data_alive_screen[i]  
         end
@@ -809,7 +831,7 @@ else
     y_aper   = y_sg_out + y_SGToAperture;
     y_scr    = y_sg_out + y_SGToScreen;
 
-    anim = @animate for j in iter
+    for j in iter
         data_set = jldopen(data_screen_path  , "r") do fname
                     fname["screen/I$(j)"][lvl]
         end
@@ -969,14 +991,7 @@ else
         display(fig)
         savefig(fig, joinpath(OUTDIR,"QM_time_evolution_$(@sprintf("%02d", j)).$(FIG_EXT)"))
     end
-    # gif_path = joinpath(OUTDIR, "QM_time_evolution.gif");
-    # gif(anim, gif_path, fps=2)  # adjust fps
-    # @info "Saved GIF" gif_path ;
-    anim = nothing
     GC.gc()
-
-    # alive_screen = load(joinpath(OUTDIR,"qm_$(Ns)_screen_data.jld2"))["alive"];
-    # @info "file loaded"
 
     states_groups_dict = OrderedDict(
         :F2  => (branch=:F_top,    tag="f2",  val=2,    family="F"),
@@ -1076,7 +1091,8 @@ else
         legend_columns=length(nz_bins),
         background_color_legend = nothing,
         foreground_color_legend = nothing,
-    )
+    );
+    display(fig)
     savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
 
     # ============================== F=2 manifold ==============================
@@ -1155,7 +1171,8 @@ else
         legend_columns=length(nz_bins),
         background_color_legend = nothing,
         foreground_color_legend = nothing,
-    )
+    );
+    display(fig)
     savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
 
     #########################################################################################
