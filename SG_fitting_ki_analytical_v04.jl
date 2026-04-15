@@ -641,7 +641,7 @@ end
 #   - dz/dI is the spline derivative evaluated at xq
 #   - δz_interp is the interpolated z-uncertainty at xq
 # =============================================================================
-exp_avg = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning_2026","data_averaged_2.jld2"))["data"];
+exp_avg = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning_2025","data_averaged_2.jld2"))["data"];
 i_threshold = 0.030 ; 
 # Select only those entries of the *smooth grid* i_smooth that coincide with the
 # grouped-current locations stored in Ic_grouped[:,1]. This mask is used to
@@ -664,7 +664,7 @@ data_experiment = Spline1D(
 #    Here we keep only the i_smooth entries that match the grouped-current grid,
 #    together with their associated current uncertainties δI.
 Ichosen  = exp_avg[:i_smooth][mask]
-δIchosen = exp_avg[:δi_smooth][mask]
+δIchosen = 0.02*exp_avg[:i_smooth][mask]
 # 3) Compute the local slope dz/dI at those chosen currents using the spline derivative.
 #    This slope is used to propagate current uncertainty δI into an additional
 #    vertical (position) uncertainty via (dz/dI)*δI.
@@ -961,7 +961,7 @@ i_start = searchsortedfirst(exp_avg[:i_smooth], i_threshold) ;
 I_scan = logspace10(i_threshold, 1.00; n = 501);
 
 # Build a convenient N×4 array: [I, δI, z, δz] and keep only I ≥ i_threshold
-data = hcat(exp_avg[:i_smooth],exp_avg[:δi_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :];
+data = hcat(exp_avg[:i_smooth],0.02*exp_avg[:i_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :];
 pretty_table(data;
         alignment     = :c,
         title         = @sprintf("EXPERIMENTAL DATA (continuous)"),
@@ -1752,7 +1752,7 @@ for wanted_data_dir in wanted_data_dirs
     # 1) Locate the matching experimental analysis output (report + paths)
     # --------------------------------------------------------------------------
     res = DataReading.find_report_data(
-        joinpath(@__DIR__, "EXPDATA_ANALYSIS");
+        joinpath(@__DIR__, "EXPDATA_ANALYSIS",wanted_data_dir);
         wanted_data_dir = wanted_data_dir,
         wanted_binning  = wanted_binning,
         wanted_smooth   = wanted_smooth,
@@ -2235,7 +2235,7 @@ end
 i_start = searchsortedfirst(exp_avg[:i_smooth], i_threshold)
 data     = hcat(
     exp_avg[:i_smooth],
-    round.(exp_avg[:δi_smooth]; sigdigits=1),
+    round.(0.02*exp_avg[:i_smooth]; sigdigits=1),
     exp_avg[:z_smooth],
     exp_avg[:δz_smooth]
 )[i_start:end,:]
