@@ -2,7 +2,9 @@ module FittingDataCQDQM
 
 using Plots; gr()
 using Plots.PlotMeasures
+using LinearAlgebra
 using Optim
+using Statistics
 using Distributions
 using PrettyTables
 using OrderedCollections
@@ -1067,9 +1069,895 @@ function plot_combined_cqd_profiles_dict(
 end
 
 
+"""
+    fit_QM_scale_model(x, y, model;
+        σy=nothing,
+        mask=nothing,
+        idx=nothing,
+        xmin=nothing,
+        xmax=nothing,
+        offset::Bool=false,
+        fitspace::Symbol=:log10,
+        project::Symbol=:model_to_y)
 
+Fit a scaled model to data, with optional offset, subset selection, and
+choice of fitting space.
 
+The model is first evaluated on the experimental x-grid:
 
+    z = model.(x)
+
+and then one of the following relations is fit.
+
+Zero-offset modes
+-----------------
+If `offset=false`:
+
+- `project=:model_to_y`
+    Fits
+        y ≈ α z
+- `project=:y_to_model`
+    Fits
+        z ≈ α y
+
+For zero offset, both `fitspace=:log10` and `fitspace=:linear` are supported.
+
+Offset modes
+------------
+If `offset=true`:
+
+- `project=:model_to_y`
+    Fits
+        y ≈ α z + β
+- `project=:y_to_model`
+    Fits
+        z ≈ α y + β
+
+For nonzero offset, only `fitspace=:linear` is supported.
+
+Subset selection
+----------------
+You may restrict the fit using any combination of:
+- `mask` : boolean mask of same length as `x`
+- `idx`  : vector/range of selected indices
+- `xmin` : keep only `x >= xmin`
+- `xmax` : keep only `x <= xmax`
+
+Important note on uncertainties
+-------------------------------
+The weighted fit is statistically meaningful only when the supplied uncertainty
+matches the residual being minimized.
+
+Therefore:
+
+- `project=:model_to_y` naturally uses `σy`
+- `project=:y_to_model` should use `σy = nothing`
+
+In other words, for `project=:y_to_model`, this function enforces `σy === nothing`.
+
+Arguments
+---------
+- `x`     : experimental x-values
+- `y`     : experimental y-values
+- `model` : callable object so that `model.(x)` returns model values on the x-grid
+
+Keyword arguments
+-----------------
+- `σy`       : uncertainty on `y`; only allowed for `project=:model_to_y`
+- `mask`     : boolean mask for selecting points
+- `idx`      : indices for selecting points
+- `xmin`     : minimum x to include
+- `xmax`     : maximum x to include
+- `offset`   : if `false`, fit only a scale factor; if `true`, fit scale + offset
+- `fitspace` : `:log10` or `:linear`
+- `project`  : `:model_to_y` or `:y_to_model`
+
+Returns
+-------
+A named tuple containing the fitted parameters and diagnostics. Depending on the
+mode, this may include:
+- `α`, `β`
+- `σα`, `σβ`
+- `used_mask`
+- `x_used`, `y_used`, `z_used`
+- residuals in linear and/or log space
+- `rss_linear`, `rss_log`
+- `χ2`, `χ2red`, `χ2_log`, `χ2red_log`
+- `dof`
+
+Examples
+--------
+Zero-offset log-space fit, model projected onto data:
+
+julia
+Zero-offset linear fit, data projected onto model:
+fit = fit_QM_scale_model(Ic, F1, zqm;
+    σy=σF1,
+    offset=false,
+    fitspace=:log10,
+    project=:model_to_y)
+
+Linear fit with offset:
+fit = fit_QM_scale_model(Ic, F1, zqm;
+    σy=σF1,
+    offset=true,
+    fitspace=:linear,
+    project=:model_to_y)
+"""
+function fit_QM_scale_model(x, y, model;
+    σy=nothing,
+    mask=nothing,
+    idx=nothing,
+    xmin=nothing,
+    xmax=nothing,
+    offset::Bool=false,
+    fitspace::Symbol=:log10,              # :log10 or :linear
+    project::Symbol=:model_to_y,        # :model_to_y or :y_to_model
+    )
+
+    @assert fitspace in (:log10, :linear) "fitspace must be :log10 or :linear"
+    @assert project in (:model_to_y, :y_to_model) "project must be :model_to_y or :y_to_model"
+
+    # IMPORTANT:
+    # If project = :y_to_model, the residual is defined in z-space,
+    # not in y-space. Therefore σy must be nothing.
+    @assert !(project == :y_to_model && σy !== nothing) "project=:y_to_model must use σy = nothing"
+
+    z = model.(x)
+
+    # -----------------------------
+    # Build selection mask
+    # -----------------------------
+    sel = trues(length(x))
+
+    if mask !== nothing
+        @assert length(mask) == length(x)
+        sel .&= mask
+    end
+
+    if idx !== nothing
+        tmp = falses(length(x))
+        tmp[idx] .= true
+        sel .&= tmp
+    end
+
+    if xmin !== nothing
+        sel .&= x .>= xmin
+    end
+
+    if xmax !== nothing
+        sel .&= x .<= xmax
+    end
+
+    # ============================================================
+    # ZERO OFFSET: y ≈ αz   or   z ≈ αy
+    # ============================================================
+    if !offset
+
+        # =========================
+        # LOG-SPACE
+        # =========================
+        if fitspace == :log10
+
+            sel_fit = sel .& (y .> 0) .& (z .> 0)
+            if σy !== nothing
+                sel_fit .&= (σy .> 0)
+            end
+
+            xx = x[sel_fit]
+            yy = y[sel_fit]
+            zz = z[sel_fit]
+
+            @assert length(xx) > 1
+
+            if project == :model_to_y
+                Δ = log10.(yy) .- log10.(zz)
+
+                if σy === nothing
+                    logα = mean(Δ)
+                    α = 10^(logα)
+                    σα = nothing
+                else
+                    ss = σy[sel_fit]
+                    w = yy.^2 ./ ss.^2
+                    logα = sum(w .* Δ) / sum(w)
+                    σα = 10^logα * sqrt(1 / sum(w))
+                    α = 10^logα
+                end
+
+                pred = α .* zz
+                rlog = log10.(yy) .- log10.(pred)
+                rlin = yy .- pred
+
+            else
+                Δ = log10.(zz) .- log10.(yy)
+                logα = mean(Δ)
+                α = 10^(logα)
+                σα = nothing
+
+                pred = α .* yy
+                rlog = log10.(zz) .- log10.(pred)
+                rlin = zz .- pred
+            end
+
+            return (
+                α=α, β=0.0, σα=σα, σβ=nothing,
+                mode=:zero_offset_log10,
+                fitspace=:log10,
+                project=project,
+                used_mask=sel_fit,
+                x_used=xx, y_used=yy, z_used=zz,
+                residuals_log=rlog,
+                residuals_linear=rlin,
+                rss_log=sum(rlog.^2),
+                rss_linear=sum(rlin.^2),
+                dof=length(yy)-1
+            )
+
+        # =========================
+        # LINEAR SPACE
+        # =========================
+        else
+            xx = x[sel]
+            yy = y[sel]
+            zz = z[sel]
+
+            @assert length(xx) > 1
+
+            if project == :model_to_y
+                if σy === nothing
+                    α = dot(yy, zz) / dot(zz, zz)
+                    σα = nothing
+                else
+                    ss = σy[sel]
+                    w = 1.0 ./ ss.^2
+                    α = sum(w .* yy .* zz) / sum(w .* zz.^2)
+                    σα = sqrt(1 / sum(w .* zz.^2))
+                end
+
+                pred = α .* zz
+                rlin = yy .- pred
+
+            else
+                α = dot(zz, yy) / dot(yy, yy)
+                σα = nothing
+
+                pred = α .* yy
+                rlin = zz .- pred
+            end
+
+            return (
+                α=α, β=0.0, σα=σα, σβ=nothing,
+                mode=:zero_offset_linear,
+                fitspace=:linear,
+                project=project,
+                used_mask=sel,
+                x_used=xx, y_used=yy, z_used=zz,
+                residuals_linear=rlin,
+                rss_linear=sum(rlin.^2),
+                dof=length(yy)-1
+            )
+        end
+
+    # ============================================================
+    # OFFSET: y ≈ αz + β  or  z ≈ αy + β
+    # ============================================================
+    else
+        @assert fitspace == :linear "offset=true only supports linear fit"
+
+        xx = x[sel]
+        yy = y[sel]
+        zz = z[sel]
+
+        @assert length(xx) > 2
+
+        if project == :model_to_y
+            A = hcat(zz, ones(length(zz)))
+            target = yy
+        else
+            A = hcat(yy, ones(length(yy)))
+            target = zz
+        end
+
+        if σy === nothing
+            p = A \ target
+            α, β = p
+            pred = A * p
+            r = target .- pred
+
+            return (
+                α=α, β=β,
+                σα=nothing, σβ=nothing,
+                mode=:linear_offset,
+                fitspace=:linear,
+                project=project,
+                used_mask=sel,
+                x_used=xx, y_used=yy, z_used=zz,
+                residuals_linear=r,
+                rss_linear=sum(r.^2),
+                dof=length(target)-2
+            )
+        else
+            ss = σy[sel]
+            w = 1.0 ./ ss.^2
+            W = Diagonal(w)
+
+            ATA = A' * W * A
+            ATb = A' * W * target
+
+            p = ATA \ ATb
+            α, β = p
+
+            Cov = inv(ATA)
+            σα = sqrt(Cov[1,1])
+            σβ = sqrt(Cov[2,2])
+
+            pred = A * p
+            r = target .- pred
+
+            return (
+                α=α, β=β,
+                σα=σα, σβ=σβ,
+                mode=:linear_offset,
+                fitspace=:linear,
+                project=project,
+                used_mask=sel,
+                x_used=xx, y_used=yy, z_used=zz,
+                residuals_linear=r,
+                χ2=sum(w .* r.^2),
+                χ2red=sum(w .* r.^2)/(length(target)-2),
+                rss_linear=sum(r.^2),
+                dof=length(target)-2
+            )
+        end
+    end
+end
+
+"""
+    fit_scale_and_k(x, y, model;
+        bounds,
+        σy=nothing,
+        mask=nothing,
+        idx_k=nothing,
+        idx_alpha=nothing,
+        xmin=nothing,
+        xmax=nothing,
+        offset=false,
+        fitspace=:log10,
+        project=:model_to_y,
+        fit_alpha=true)
+
+Fit a model of the form
+
+    model(x, k)
+
+to experimental data by optimizing the parameter `k`, while optionally
+fitting a scale factor `α` and offset `β`.
+
+The fitting procedure separates:
+- optimization of `k` (global nonlinear parameter)
+- estimation of `α` and `β` (linear or log-linear parameters)
+
+This allows flexible fitting strategies where different subsets of the data
+can be used for estimating `k` and for estimating `α` and `β`.
+
+Arguments
+---------
+- `x`:
+    Vector of independent variable values.
+
+- `y`:
+    Vector of observed data values.
+
+- `model`:
+    Callable function such that `model(x, k)` returns predictions.
+
+Keyword arguments
+-----------------
+- `bounds`:
+    Tuple `(kmin, kmax)` specifying the optimization interval for `k`.
+
+- `σy`:
+    Optional uncertainties on `y`. Used only for weighted fits when
+    `project = :model_to_y`.
+
+- `mask`:
+    Boolean mask selecting a subset of data.
+
+- `idx_k`:
+    Indices used for fitting the parameter `k`.
+
+- `idx_alpha`:
+    Indices used for estimating `α` and `β`. If not provided, defaults to `idx_k`.
+
+- `xmin`, `xmax`:
+    Restrict the data to `xmin ≤ x ≤ xmax`.
+
+- `offset`:
+    If `false`, fit only a scale factor `α`.
+    If `true`, fit both `α` and offset `β` (linear space only).
+
+- `fitspace`:
+    `:linear` or `:log10`. Determines the fitting metric.
+
+- `project`:
+    `:model_to_y` or `:y_to_model`.
+    Controls whether the model is projected onto the data or vice versa.
+
+- `fit_alpha`:
+    If `false`, fixes `α = 1` and only fits `k` (and optionally `β`).
+
+Returns
+-------
+A named tuple containing:
+- `k`:
+    Best-fit parameter value.
+
+- `α`, `β`:
+    Fitted scale and offset.
+
+- `σα`, `σβ`:
+    Estimated uncertainties on `α` and `β` (if available).
+
+- `mode`:
+    Symbol describing the fit type.
+
+- `fitspace`, `project`:
+    Fitting configuration.
+
+- `used_mask`, `used_mask_k`, `used_mask_alpha`:
+    Masks defining which data points were used.
+
+- `x_used`, `y_used`, `z_used`:
+    Data used in the final evaluation.
+
+- `y_fit` or `z_fit`:
+    Model prediction over the full dataset.
+
+- `residuals_linear`, `residuals_log`:
+    Residuals in linear and/or log space.
+
+- `rss_linear`, `rss_log`:
+    Residual sums of squares.
+
+- `χ2`, `χ2red`:
+    Weighted chi-square statistics (if `σy` is provided).
+
+- `dof`:
+    Degrees of freedom.
+
+- `optimizer`:
+    Full optimization result object.
+
+Notes
+-----
+- Log-space fitting requires strictly positive `y` and model predictions.
+- When `project = :y_to_model`, uncertainties `σy` must not be provided.
+- Offset fitting is only supported in linear space.
+- The optimization of `k` is performed using a 1D Brent method.
+
+"""
+function fit_scale_and_k(x, y, model;
+    bounds::Tuple,
+    σy=nothing,
+    mask=nothing,
+    idx_k=nothing,
+    idx_alpha=nothing,
+    xmin=nothing,
+    xmax=nothing,
+    offset::Bool=false,
+    fitspace::Symbol=:log10,          # :log10 or :linear
+    project::Symbol=:model_to_y,      # :model_to_y or :y_to_model
+    fit_alpha::Bool=true,
+)
+
+    @assert fitspace in (:log10, :linear) "fitspace must be :log10 or :linear"
+    @assert project in (:model_to_y, :y_to_model) "project must be :model_to_y or :y_to_model"
+    @assert !(project == :y_to_model && σy !== nothing) "project=:y_to_model must use σy = nothing"
+    @assert !(offset && fitspace != :linear) "offset=true only supports linear fit"
+
+    n = length(x)
+    @assert length(y) == n
+    if σy !== nothing
+        @assert length(σy) == n
+    end
+    if mask !== nothing
+        @assert length(mask) == n
+    end
+
+    # --------------------------------------------------------
+    # Base selection mask, same spirit as fit_QM_scale_model
+    # --------------------------------------------------------
+    sel = trues(n)
+
+    if mask !== nothing
+        sel .&= mask
+    end
+    if xmin !== nothing
+        sel .&= x .>= xmin
+    end
+    if xmax !== nothing
+        sel .&= x .<= xmax
+    end
+
+    # indices used for k-objective
+    sel_k = copy(sel)
+    if idx_k !== nothing
+        tmp = falses(n)
+        tmp[idx_k] .= true
+        sel_k .&= tmp
+    end
+
+    # indices used for alpha/beta estimation
+    sel_a = copy(sel)
+    if idx_alpha !== nothing
+        tmp = falses(n)
+        tmp[idx_alpha] .= true
+        sel_a .&= tmp
+    else
+        sel_a .= sel_k
+    end
+
+    @assert count(sel_k) > 1 "Need at least 2 points for k-fit selection."
+    @assert count(sel_a) > 0 "Need at least 1 point for alpha selection."
+
+    xk = x[sel_k]
+    yk = y[sel_k]
+    σk = σy === nothing ? nothing : σy[sel_k]
+
+    xa = x[sel_a]
+    ya = y[sel_a]
+    σa = σy === nothing ? nothing : σy[sel_a]
+
+    # --------------------------------------------------------
+    # Helpers
+    # --------------------------------------------------------
+    z_of_k_all(k) = model.(x, Ref(k))
+    z_of_k_k(k)   = model.(xk, Ref(k))
+    z_of_k_a(k)   = model.(xa, Ref(k))
+
+    function solve_alpha_beta_linear(k)
+        za = z_of_k_a(k)
+
+        if project == :model_to_y
+            target = ya
+            basis  = za
+            ssa    = σa
+        else
+            target = za
+            basis  = ya
+            ssa    = nothing
+        end
+
+        if !offset
+            if !fit_alpha
+                α = 1.0
+                β = 0.0
+                σα = nothing
+                σβ = nothing
+            else
+                if ssa === nothing
+                    α = dot(target, basis) / dot(basis, basis)
+                    σα = nothing
+                else
+                    w = 1.0 ./ ssa.^2
+                    α = sum(w .* target .* basis) / sum(w .* basis.^2)
+                    σα = sqrt(1 / sum(w .* basis.^2))
+                end
+                β = 0.0
+                σβ = nothing
+            end
+            return (α=α, β=β, σα=σα, σβ=σβ)
+        end
+
+        # offset=true, linear only
+        if project == :model_to_y
+            A = hcat(za, ones(length(za)))
+        else
+            A = hcat(ya, ones(length(ya)))
+        end
+
+        if !fit_alpha
+            # α fixed to 1, fit only β
+            if project == :model_to_y
+                resid0 = ya .- za
+            else
+                resid0 = za .- ya
+            end
+
+            if ssa === nothing
+                β = mean(resid0)
+                σβ = nothing
+            else
+                w = 1.0 ./ ssa.^2
+                β = sum(w .* resid0) / sum(w)
+                σβ = sqrt(1 / sum(w))
+            end
+            return (α=1.0, β=β, σα=nothing, σβ=σβ)
+        end
+
+        if ssa === nothing
+            p = A \ target
+            α, β = p
+            return (α=α, β=β, σα=nothing, σβ=nothing)
+        else
+            w = 1.0 ./ ssa.^2
+            W = Diagonal(w)
+            ATA = A' * W * A
+            ATb = A' * W * target
+            p = ATA \ ATb
+            α, β = p
+            Cov = inv(ATA)
+            σα = sqrt(Cov[1,1])
+            σβ = sqrt(Cov[2,2])
+            return (α=α, β=β, σα=σα, σβ=σβ)
+        end
+    end
+
+    function solve_alpha_log(k)
+        @assert !offset "offset=true is not supported in log fit"
+        za = z_of_k_a(k)
+
+        if project == :model_to_y
+            valid = (ya .> 0) .& (za .> 0)
+            if σa !== nothing
+                valid .&= (σa .> 0)
+            end
+            @assert count(valid) > 1 "Need >1 positive points for log fit."
+            yy = ya[valid]
+            zz = za[valid]
+
+            if !fit_alpha
+                α = 1.0
+                σα = nothing
+            else
+                Δ = log10.(yy) .- log10.(zz)
+                if σa === nothing
+                    logα = mean(Δ)
+                    α = 10.0^logα
+                    σα = nothing
+                else
+                    ss = σa[valid]
+                    w = yy.^2 ./ ss.^2
+                    logα = sum(w .* Δ) / sum(w)
+                    α = 10.0^logα
+                    σα = 10.0^logα * sqrt(1 / sum(w))
+                end
+            end
+            return (α=α, β=0.0, σα=σα, σβ=nothing, valid=valid)
+        else
+            valid = (ya .> 0) .& (za .> 0)
+            @assert count(valid) > 1 "Need >1 positive points for log fit."
+            yy = ya[valid]
+            zz = za[valid]
+
+            if !fit_alpha
+                α = 1.0
+            else
+                Δ = log10.(zz) .- log10.(yy)
+                logα = mean(Δ)
+                α = 10.0^logα
+            end
+            return (α=α, β=0.0, σα=nothing, σβ=nothing, valid=valid)
+        end
+    end
+
+    function objective(k)
+        if fitspace == :linear
+            pars = solve_alpha_beta_linear(k)
+            α, β = pars.α, pars.β
+            zk = z_of_k_k(k)
+
+            if project == :model_to_y
+                pred = α .* zk .+ β
+                r = yk .- pred
+                if σk === nothing
+                    return sum(r.^2)
+                else
+                    w = 1.0 ./ σk.^2
+                    return sum(w .* r.^2)
+                end
+            else
+                pred = α .* yk .+ β
+                r = zk .- pred
+                return sum(r.^2)
+            end
+
+        else
+            pars = solve_alpha_log(k)
+            α = pars.α
+            zk = z_of_k_k(k)
+
+            if project == :model_to_y
+                valid = (yk .> 0) .& (zk .> 0)
+                if σk !== nothing
+                    valid .&= (σk .> 0)
+                end
+                if count(valid) <= 1
+                    return Inf
+                end
+                yy = yk[valid]
+                zz = zk[valid]
+                pred = α .* zz
+                r = log10.(yy) .- log10.(pred)
+
+                if σk === nothing
+                    return sum(r.^2)
+                else
+                    ss = σk[valid]
+                    w = yy.^2 ./ ss.^2
+                    return sum(w .* r.^2)
+                end
+            else
+                valid = (yk .> 0) .& (zk .> 0)
+                if count(valid) <= 1
+                    return Inf
+                end
+                yy = yk[valid]
+                zz = zk[valid]
+                pred = α .* yy
+                r = log10.(zz) .- log10.(pred)
+                return sum(r.^2)
+            end
+        end
+    end
+
+    # --------------------------------------------------------
+    # Optimize k
+    # --------------------------------------------------------
+    res = Optim.optimize(objective, bounds[1], bounds[2], Brent())
+    kbest = Optim.minimizer(res)
+
+    # --------------------------------------------------------
+    # Final parameters at optimum
+    # --------------------------------------------------------
+    if fitspace == :linear
+        pars = solve_alpha_beta_linear(kbest)
+        αbest, βbest = pars.α, pars.β
+        σα, σβ = pars.σα, pars.σβ
+        zall = z_of_k_all(kbest)
+
+        if project == :model_to_y
+            pred_all = αbest .* zall .+ βbest
+            rlin_all = y .- pred_all
+
+            used_mask = sel
+            xx = x[used_mask]
+            yy = y[used_mask]
+            zz = zall[used_mask]
+            pred_used = αbest .* zz .+ βbest
+            rlin = yy .- pred_used
+
+            out = (
+                k=kbest,
+                α=αbest, β=βbest, σα=σα, σβ=σβ,
+                mode=offset ? :linear_offset_k : :zero_offset_linear_k,
+                fitspace=:linear,
+                project=project,
+                used_mask=used_mask,
+                used_mask_k=sel_k,
+                used_mask_alpha=sel_a,
+                x_used=xx, y_used=yy, z_used=zz,
+                y_fit=pred_all,
+                residuals_linear=rlin,
+                residuals_linear_all=rlin_all,
+                rss_linear=sum(rlin.^2),
+                dof=length(yy) - (offset ? 3 : (fit_alpha ? 2 : 1)),
+                optimizer=res,
+            )
+
+            if σy !== nothing
+                ss = σy[used_mask]
+                w = 1.0 ./ ss.^2
+                χ2 = sum(w .* rlin.^2)
+                dof = length(yy) - (offset ? 3 : (fit_alpha ? 2 : 1))
+                out = merge(out, (
+                    χ2=χ2,
+                    χ2red=χ2 / dof,
+                ))
+            end
+            return out
+        else
+            pred_all = αbest .* y .+ βbest
+            rlin_all = zall .- pred_all
+
+            used_mask = sel
+            xx = x[used_mask]
+            yy = y[used_mask]
+            zz = zall[used_mask]
+            pred_used = αbest .* yy .+ βbest
+            rlin = zz .- pred_used
+
+            return (
+                k=kbest,
+                α=αbest, β=βbest, σα=σα, σβ=σβ,
+                mode=offset ? :linear_offset_k : :zero_offset_linear_k,
+                fitspace=:linear,
+                project=project,
+                used_mask=used_mask,
+                used_mask_k=sel_k,
+                used_mask_alpha=sel_a,
+                x_used=xx, y_used=yy, z_used=zz,
+                z_fit=pred_all,
+                residuals_linear=rlin,
+                residuals_linear_all=rlin_all,
+                rss_linear=sum(rlin.^2),
+                dof=length(yy) - (offset ? 3 : (fit_alpha ? 2 : 1)),
+                optimizer=res,
+            )
+        end
+
+    else
+        pars = solve_alpha_log(kbest)
+        αbest = pars.α
+        βbest = 0.0
+        σα, σβ = pars.σα, pars.σβ
+        zall = z_of_k_all(kbest)
+
+        if project == :model_to_y
+            sel_fit = sel .& (y .> 0) .& (zall .> 0)
+            if σy !== nothing
+                sel_fit .&= (σy .> 0)
+            end
+
+            xx = x[sel_fit]
+            yy = y[sel_fit]
+            zz = zall[sel_fit]
+
+            pred = αbest .* zz
+            rlog = log10.(yy) .- log10.(pred)
+            rlin = yy .- pred
+
+            return (
+                k=kbest,
+                α=αbest, β=0.0, σα=σα, σβ=σβ,
+                mode=:zero_offset_log10_k,
+                fitspace=:log10,
+                project=project,
+                used_mask=sel_fit,
+                used_mask_k=sel_k,
+                used_mask_alpha=sel_a,
+                x_used=xx, y_used=yy, z_used=zz,
+                y_fit=αbest .* zall,
+                residuals_log=rlog,
+                residuals_linear=rlin,
+                rss_log=sum(rlog.^2),
+                rss_linear=sum(rlin.^2),
+                dof=length(yy) - (fit_alpha ? 2 : 1),
+                optimizer=res,
+            )
+        else
+            sel_fit = sel .& (y .> 0) .& (zall .> 0)
+
+            xx = x[sel_fit]
+            yy = y[sel_fit]
+            zz = zall[sel_fit]
+
+            pred = αbest .* yy
+            rlog = log10.(zz) .- log10.(pred)
+            rlin = zz .- pred
+
+            return (
+                k=kbest,
+                α=αbest, β=0.0, σα=σα, σβ=σβ,
+                mode=:zero_offset_log10_k,
+                fitspace=:log10,
+                project=project,
+                used_mask=sel_fit,
+                used_mask_k=sel_k,
+                used_mask_alpha=sel_a,
+                x_used=xx, y_used=yy, z_used=zz,
+                z_fit=αbest .* y,
+                residuals_log=rlog,
+                residuals_linear=rlin,
+                rss_log=sum(rlog.^2),
+                rss_linear=sum(rlin.^2),
+                dof=length(yy) - (fit_alpha ? 2 : 1),
+                optimizer=res,
+            )
+        end
+    end
+end
 
 
 end
