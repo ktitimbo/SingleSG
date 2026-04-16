@@ -116,7 +116,7 @@ SIMULATION INFORMATION
 ***************************************************
 """)
 # Furnace
-T_K = 273.15 + 200 ; # Furnace temperature (K)
+T_K = 273.15 + 205 ; # Furnace temperature (K)
 # Furnace aperture
 const x_furnace = 2.0e-3 ;
 const z_furnace = 100e-6 ;
@@ -166,10 +166,10 @@ TheoreticalSimulation.default_c_aperture        = R_aper;
 TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
 
 ##################################################################################################
-avg_data = load(joinpath(@__DIR__, "EXPDATA_ANALYSIS", "smoothing_binning","data_averaged_2.jld2"), "data" );
-I_exp  = avg_data[:i_smooth];
-z_exp  = avg_data[:z_smooth];
-δz_exp = avg_data[:δz_smooth];
+# avg_data = load(joinpath(@__DIR__, "EXPDATA_ANALYSIS", "smoothing_binning","data_averaged_2.jld2"), "data" );
+# I_exp  = avg_data[:i_smooth];
+# z_exp  = avg_data[:z_smooth];
+# δz_exp = avg_data[:δz_smooth];
 ##################################################################################################
 
 ## Coil currents
