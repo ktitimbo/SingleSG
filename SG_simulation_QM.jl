@@ -238,8 +238,8 @@ data_screen_path = joinpath(OUTDIR,"qm_screen_data.jld2")
 jldopen(data_screen_path, "w") do file
     file["meta/N"]          = Nss
     file["meta/T"]          = T_K
-    file["meta/Icoils"] = Icoils
-    file["meta/levels"] = quantum_numbers 
+    file["meta/Icoils"]     = Icoils
+    file["meta/levels"]     = quantum_numbers 
     for i in 1:nI
         file["screen/I$(i)"] = data_alive_screen[i]  
     end
