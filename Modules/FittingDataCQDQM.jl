@@ -4,6 +4,7 @@ using Plots; gr()
 using Plots.PlotMeasures
 using LinearAlgebra
 using Optim
+using Random
 using Statistics
 using Distributions
 using PrettyTables
