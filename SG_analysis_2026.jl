@@ -60,6 +60,7 @@ include("./Modules/atoms.jl");
 include("./Modules/samplings.jl");
 include("./Modules/JLD2_MyTools.jl");
 include("./Modules/DataReading.jl");
+include("./Modules/FittingDataCQDQM.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
 include("./Modules/TheoreticalSimulation.jl");
 using .TheoreticalSimulation;
@@ -217,9 +218,11 @@ function sci_label(x; n=3)
     return L"$%$(mant_str) \times 10^{%$exp}$"
 end
 
-
-
-
+function fit_poly2(x, y)
+    X = hcat(ones(length(x)), x, x.^2)
+    β = X \ y
+    return β
+end
 
 
 ##################################################################################################
@@ -257,7 +260,7 @@ data_directories = [
                     # "20260225", 
                     "20260226am",
                     # "20260226pm",
-                    "20260227", 
+                    # "20260227", 
                     "20260303", 
                     # "20260306r1", 
                     "20260306r2",
@@ -799,8 +802,11 @@ display(fig)
 
 
 ########################################################################################
+########################################################################################
+########################################################################################
 #+++++++++++++++++++++++++++ Peak Position +++++++++++++++++++++++++++++++++++++++++++++
-
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++ QUANTUM MECHANICS +++++++++++++
 chosen_qm_f1 =  jldopen(data_qmf1_path,"r") do file
     file[JLD2_MyTools.make_keypath_qm(nz, σw_mm, λ0)]
@@ -980,14 +986,15 @@ plot!(fig[1], xlabel="", xformatter=_->"", bottom_margin=-8mm);
 display(fig)
 
 
-
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++ COQUANTUM DYNAMICS +++++++++++++
 cqd_sim_data = JLD2_MyTools.list_keys_jld_cqd(data_cqdup_path)
 n_ki = length(cqd_sim_data.ki);
 @info "CQD simulation for $(n_ki) ki values"
 colores_ki = palette(:darkrainbow, n_ki);
 
-mixdw_cqd = plot_combined_cqd_profiles_dict(
+mixdw_cqd = FittingDataCQDQM.plot_combined_cqd_profiles_dict(
     cqd_sim_data[:ki],
     data_cqdup_path,
     data_cqddw_path;
@@ -1166,8 +1173,6 @@ plot!(fig4,
 );
 display(fig4)
 
-
-
 fig = plot(fig1, fig4, fig2, fig3,
     size=(1600,1300),
     layout=(2,2),
@@ -1183,6 +1188,86 @@ display(fig)
 
 
 
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Select a subset of kᵢ values for interpolation
+using Dierckx
+# ki_start , ki_stop = 1 , 109 ;
+ki_start , ki_stop = 12 , 60 ;
+kis_chosen = cqd_sim_data.ki[ki_start:ki_stop]
+kmin, kmax = extrema(kis_chosen)
+@info @sprintf(
+    "Interpolation in the induction term goes from %.1e to %.1e",
+    kmin / 1e6,
+    kmax / 1e6,
+)
+# Build 2D cubic spline interpolant: z_max(I, kᵢ)
+# s=0 => exact interpolation (no smoothing)
+ki_up_itp   = Dierckx.Spline2D(Icoils, kis_chosen, up_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+ki_dw_itp   = Dierckx.Spline2D(Icoils, kis_chosen, dw_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+ki_Δ_itp    = Dierckx.Spline2D(Icoils, kis_chosen, Δz_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+ki_Δmix_itp = Dierckx.Spline2D(Icoils, kis_chosen, Δz_mix_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
+
+
+# -----------------------------------------------------------------------------
+# One small helper – takes raw Z, optionally log-transforms, returns a plot
+# -----------------------------------------------------------------------------
+function fitting_contour_ki(i_ax, ki_ax, Z, cbar_title; log_scale=true)
+    Zp = log_scale ? log10.(max.(Z, 1e-15)) : Z
+    lo, hi   = floor(minimum(Zp)), ceil(maximum(Zp))
+    decades  = collect(lo:1:hi)
+    labels   = [L"10^{%$k}" for k in decades]
+
+    contourf(i_ax, ki_ax, Zp;
+        levels         = 101,
+        title          = "Fitting contour",
+        xlabel         = L"$I_{c}$ (A)",
+        ylabel         = L"$k_{i}\times 10^{-6}$",
+        color          = :viridis,
+        linewidth      = 0.2,
+        linestyle      = :dash,
+        xaxis          = :log10,
+        yaxis          = :log10,
+        xlims          = (10e-3, 1.05),
+        xticks         = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        clims          = (lo, hi),
+        colorbar_ticks = (decades, labels),
+        colorbar_title = cbar_title,
+    )
+end
+
+# -----------------------------------------------------------------------------
+# Grid
+# -----------------------------------------------------------------------------
+i_surface  = range(10e-3, 1.0;    length=101);
+ki_surface = range(kmin,  kmax;   length=101);
+
+Zup      = [ki_up_itp(x, y)   for y in ki_surface, x in i_surface];
+Zdw      = [ki_dw_itp(x, y)   for y in ki_surface, x in i_surface];
+ΔZ_cqd   = [ki_Δ_itp(x, y)    for y in ki_surface, x in i_surface];
+ΔZ_mix   = [ki_Δmix_itp(x, y) for y in ki_surface, x in i_surface];
+
+# -----------------------------------------------------------------------------
+# Four plots – only data + colorbar title change
+# -----------------------------------------------------------------------------
+panels = [
+    fitting_contour_ki(i_surface, ki_surface, Zup,    L"$ \log(z_{\mathrm{peak}}^{\mathrm{up}}\ \mathrm{(mm)}) $"),
+    fitting_contour_ki(i_surface, ki_surface, abs.(Zdw),    L"$ \log( |z_{\mathrm{peak}}^{\mathrm{dw}}| \ \mathrm{(mm)})$"),
+    fitting_contour_ki(i_surface, ki_surface, ΔZ_cqd, L"$ \log(z_{\mathrm{p-p}}\ \mathrm{(mm)}) $"),
+    fitting_contour_ki(i_surface, ki_surface, ΔZ_mix, L"$ \log(z^{\mathrm{mix}}_{\mathrm{p-p}}\ \mathrm{(mm)}) $"),
+];
+
+plot(panels...;
+    layout       = @layout([a1 a2; a3 a4]),
+    title        = "",
+    size         = (800, 600),
+    left_margin  = 4mm,
+)
+
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++ QUANTUM MECHANICS & COQUANTUM DYNAMICS +++++++++++++
 fig1 = plot(
     xlabel="Currents (A)",
@@ -1324,7 +1409,8 @@ plot!(fig[2], xlabel="", xformatter=_->"",bottom_margin=-9mm,legend=false);
 plot!(fig[3], xlabel="", xformatter=_->"",bottom_margin=-3mm,legend=:outerbottom, legend_columns=7);
 display(fig)
 
-
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++ EXPERIMENTS ++++++++++++++++++++
 EXP_data = OrderedDict{String, NamedTuple}()
 for dir in data_directories
@@ -1354,23 +1440,133 @@ for dir in data_directories
     end
 end
 
-plot(xlabel="Currents (A)",
-ylabel=L"$z_{1}-z_{2}$ (mm)")
-hspan!([-6.5e-3,6.5e-3], color=:gray68, fillalpha=0.8, label="pixel size")
+fig1=plot(
+    xlabel="Currents (A)",
+    ylabel=L"$z^{F=1}_{max}$ (mm)",
+)
+hspan!(fig1,[-6.5e-3,6.5e-3], color=:gray68, fillalpha=0.8, label="pixel size")
 for i = 1:n_data
-plot!(EXP_data[data_directories[i]].Ic, EXP_data[data_directories[i]].F1[1] .- EXP_data[data_directories[i]].F2[1],
+    data = DataFrame(
+            :Ic => EXP_data[data_directories[i]].Ic, 
+            :F1 => EXP_data[data_directories[i]].F1[1] .- EXP_data[data_directories[i]].C00[1]
+            )
+    
+    data_sub = data[data.Ic .< 0.015, :]
+    β = fit_poly2(data_sub[!,:Ic], data_sub[!,:F1])
+    println(β)
+    # smooth curve for plotting
+    xfit = range(0.0, 15e-3, length = 300)
+    yfit = β[1] .+ β[2] .* xfit .+ β[3] .* xfit.^2
+
+    plot!(fig1,data_sub[!,:Ic], data_sub[!,:F1] ,
     label=data_directories[i],
     marker=(:square,3,:white),
     markerstrokewidth=2,
     markerstrokecolor=colores_data[i],
     line=(:dash, 1, colores_data[i]))
+    # fitted curve
+    plot!(fig1,
+        xfit,
+        yfit,
+        label = false,
+        lw = 2,
+        color = colores_data[i],
+    )
 end
-plot!(legend=:outerright,
-    xlims=(-0.1e-3,5e-3),
+plot!(fig1,legend=:outerright,
+    xlims=(-0.1e-3,15e-3),
     ylims=(-10e-3,20e-3),
     # xscale=:log10,
     # yscale=:log10,
 )
+
+fig2=plot(
+    xlabel="Currents (A)",
+    ylabel=L"$z^{F=2}_{max}$ (mm)",
+)
+hspan!(fig2,[-6.5e-3,6.5e-3], color=:gray68, fillalpha=0.8, label="pixel size")
+for i = 1:n_data
+    data = DataFrame(
+            :Ic => EXP_data[data_directories[i]].Ic, 
+            :F2 => EXP_data[data_directories[i]].F2[1] .- EXP_data[data_directories[i]].C00[1]
+            )
+    
+    data_sub = data[data.Ic .< 0.015, :]
+    β = fit_poly2(data_sub[!,:Ic], data_sub[!,:F2])
+    println(β)
+    # smooth curve for plotting
+    xfit = range(0.0, 15e-3, length = 300)
+    yfit = β[1] .+ β[2] .* xfit .+ β[3] .* xfit.^2
+
+    plot!(fig2,data_sub[!,:Ic], data_sub[!,:F2] ,
+    label=data_directories[i],
+    marker=(:square,3,:white),
+    markerstrokewidth=2,
+    markerstrokecolor=colores_data[i],
+    line=(:dash, 1, colores_data[i]))
+    # fitted curve
+    plot!(fig2,
+        xfit,
+        yfit,
+        label = false,
+        lw = 2,
+        color = colores_data[i],
+    )
+end
+plot!(fig2,legend=:outerright,
+    xlims=(-0.1e-3,15e-3),
+    ylims=(-20e-3,12e-3),
+    # xscale=:log10,
+    # yscale=:log10,
+)
+
+fig3 = plot(xlabel="Currents (A)",
+ylabel=L"$z_{F=1}-z_{F=2}$ (mm)")
+hspan!(fig3,[-6.5e-3,6.5e-3], color=:gray68, fillalpha=0.8, label="pixel size")
+for i = 1:n_data
+    data = DataFrame(
+            :Ic => EXP_data[data_directories[i]].Ic, 
+            :Δ  => EXP_data[data_directories[i]].F1[1] .- EXP_data[data_directories[i]].F2[1]
+            )
+    
+    data_sub = data[data.Ic .< 0.015, :]
+    β = fit_poly2(data_sub[!,:Ic], data_sub[!,:Δ])
+    println(β)
+    # smooth curve for plotting
+    xfit = range(0.0, 15e-3, length = 300)
+    yfit = β[1] .+ β[2] .* xfit .+ β[3] .* xfit.^2
+
+    plot!(fig3,data_sub[!,:Ic], data_sub[!,:Δ] ,
+        label=data_directories[i],
+        marker=(:square,3,:white),
+        markerstrokewidth=2,
+        markerstrokecolor=colores_data[i],
+        line=(:dash, 1, colores_data[i]))
+
+    plot!(fig3,
+        xfit,
+        yfit,
+        label = false,
+        lw = 2,
+        color = colores_data[i],
+    )
+end
+plot!(fig3,legend=:outerright,
+    xlims=(-0.1e-3,15e-3),
+    ylims=(-10e-3,20e-3),
+    # xscale=:log10,
+    # yscale=:log10,
+)
+
+fig = plot(fig1, fig2, fig3,
+layout=(3,1),
+size=(600,700),
+link=:x,
+left_margin=2mm,
+bottom_margin=-2mm,)
+plot!(fig[1], xlabel="", xformatter=_->"", bottom_margin=-7mm)
+plot!(fig[2], xlabel="", xformatter=_->"", bottom_margin=-7mm)
+display(fig)
 
 
 EXP_data_processed = OrderedDict{String, DataFrame}()
@@ -1524,7 +1720,8 @@ for 𝓁 = 1:n_data
 
 end
 
-
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++ DATA COMPARISON
 figa = plot(
     xlabel="Currents (A)",
@@ -1632,7 +1829,6 @@ plot!(figc,xscale=:log10, yscale=:log10,
  yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
 )
 
-
 fig = plot(figa,figa1, figb,figc, figc1,
 labelfontsize = 10,
 layout=@layout[ a1 a2 ; a3; a4 a5],
@@ -1683,8 +1879,11 @@ CURRENT_ROW_START = [first_gt_idx(EXP_data_processed[t], :Ic, threshold) for t i
 Ic_sets  = [EXP_data_processed[t][i:end, :Ic]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
 F1_sets  = [EXP_data_processed[t][i:end, :F1]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
 F2_sets  = [EXP_data_processed[t][i:end, :F2]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
+Δ_sets   = [EXP_data_processed[t][i:end, :Δ]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
 σF1_sets = [EXP_data_processed[t][i:end, :ErrF1]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
 σF2_sets = [EXP_data_processed[t][i:end, :ErrF2]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
+σΔ_sets  = [EXP_data_processed[t][i:end, :ErrΔ]  for (t,i) in zip(keys(EXP_data_processed), CURRENT_ROW_START)];
+
 
 # pick a log-spaced grid across the overall I-range (nice for decades-wide currents)
 i_sampled_length = 65 ;
@@ -1694,8 +1893,11 @@ Ic_sampling  = exp10.(range(log10(xlo), log10(xhi), length=i_sampled_length))
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Monte Carlo analysis
-MC_data_F1 = combine_on_grid_mc_weighted(Ic_sets, F1_sets; σxsets=nothing, σysets=σF1_sets, B=5000, xq=grouped_exp_current.Ic);
-MC_data_F2 = combine_on_grid_mc_weighted(Ic_sets, F2_sets; σxsets=nothing, σysets=σF2_sets, B=5000, xq=grouped_exp_current.Ic);
+MC_data_F1 = FittingDataCQDQM.combine_on_grid_mc_weighted(Ic_sets, F1_sets; σxsets=nothing, σysets=σF1_sets, B=5000, xq=grouped_exp_current.Ic);
+MC_data_F2 = FittingDataCQDQM.combine_on_grid_mc_weighted(Ic_sets, F2_sets; σxsets=nothing, σysets=σF2_sets, B=5000, xq=grouped_exp_current.Ic);
+MC_data_Δ  = FittingDataCQDQM.combine_on_grid_mc_weighted(Ic_sets, Δ_sets;  σxsets=nothing, σysets=σΔ_sets,  B=5000, xq=grouped_exp_current.Ic);
+
+
 
 fig = plot(
     xlabel="Current (A)",
@@ -1967,143 +2169,6 @@ plot!(fig[2], xlabel="", xformatter=_->"", bottom_margin=-9mm)
 display(fig)
 
 
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-# Select a subset of kᵢ values for interpolation
-using Dierckx
-# ki_start , ki_stop = 1 , 109 ;
-ki_start , ki_stop = 12 , 60 ;
-println("Interpolation in the induction term goes from ",
-    round(cqd_sim_data.ki[ki_start]/1e6; sigdigits=3),
-    " to ",
-    (round(cqd_sim_data.ki[ki_stop]/1e6, sigdigits=3)),
-    "")
-# Build 2D cubic spline interpolant: z_max(I, kᵢ)
-# s=0 => exact interpolation (no smoothing)
-ki_up_itp = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], up_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
-ki_dw_itp = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], dw_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
-ki_Δ_itp  = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], Δz_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
-ki_Δmix_itp  = Spline2D(Icoils, cqd_sim_data.ki[ki_start:ki_stop], Δz_mix_cqd[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
-
-# -----------------------------------------------------------------------------
-# Create a dense grid for visualization:
-#   - currents from 10 mA to 1 A
-#   - ki from chosen min to max
-# -----------------------------------------------------------------------------
-i_surface = range(10e-3,1.0; length = 101);
-ki_surface = range(cqd_sim_data.ki[ki_start],cqd_sim_data.ki[ki_stop]; length = 101);
-# Evaluate surface on a grid.
-Zup     = [ki_up_itp(x, y) for y in ki_surface, x in i_surface] ;
-Zdw     = [ki_dw_itp(x, y) for y in ki_surface, x in i_surface] ;
-ΔZ_cqd  = [ki_Δ_itp(x, y) for y in ki_surface, x in i_surface] ;
-ΔZ_mix_cqd  = [ki_Δmix_itp(x, y) for y in ki_surface, x in i_surface] ;
-
-# -----------------------------------------------------------------------------
-# Contour plot uses log10(z) as the displayed quantity.
-# We clamp |Z| away from zero to avoid log10(0) and produce stable color limits.
-# -----------------------------------------------------------------------------
-Zp   = max.(Zup, 1e-12);
-logZ = log10.(Zp);
-# Choose "decade" ticks for the colorbar based on min/max of logZ
-lo , hi  = floor(minimum(logZ)) , ceil(maximum(logZ)); 
-decades = collect(lo:1:hi) ; # [-4,-3,-2,-1,0] 
-labels = [L"10^{%$k}" for k in decades];
-fit_contour_up = contourf(i_surface, ki_surface, logZ; 
-    levels=101,
-    title="Fitting contour",
-    xlabel=L"$I_{c}$ (A)", 
-    ylabel=L"$k_{i}\times 10^{-6}$", 
-    color=:viridis, 
-    linewidth=0.2,
-    linestyle=:dash,
-    xaxis=:log10,
-    yaxis=:log10,
-    xlims = (10e-3,1.05),
-    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    clims = (lo, hi),   # optional explicit range
-    colorbar_ticks = (decades, labels),      # show ticks as 10^k
-    colorbar_title = L"$ \log(z_{\mathrm{peak}}^{\mathrm{up}}\ \mathrm{(mm)}) $",   # what the values mean
-);
-display(fit_contour_up)
-
-Zp   = Zdw;
-# Choose "decade" ticks for the colorbar based on min/max of logZ
-lo , hi  = floor(minimum(Zp)) , ceil(maximum(Zp))
-decades = collect(lo:1:hi) ; # [-4,-3,-2,-1,0] 
-labels = [L"10^{%$k}" for k in decades];
-fit_contour_dw = contourf(i_surface, ki_surface, Zp; 
-    levels=101,
-    title="Fitting contour",
-    xlabel=L"$I_{c}$ (A)", 
-    ylabel=L"$k_{i}\times 10^{-6}$", 
-    color= cgrad(:viridis, rev=true), 
-    linewidth=0.2,
-    linestyle=:dash,
-    xaxis=:log10,
-    yaxis=:log10,
-    xlims = (10e-3,1.05),
-    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    clims = (lo, hi),   # optional explicit range
-    colorbar_ticks = (decades, labels),      # show ticks as 10^k
-    colorbar_title = L"$ z_{\mathrm{peak}}^{\mathrm{dw}} \ \mathrm{(mm)}$",   # what the values mean
-);
-display(fit_contour_dw)
-
-Zp   = max.(ΔZ_cqd, 1e-12);
-logZ = log10.(Zp);
-# Choose "decade" ticks for the colorbar based on min/max of logZ
-lo , hi  = floor(minimum(logZ)) , ceil(maximum(logZ)); 
-decades = collect(lo:1:hi) ; # [-4,-3,-2,-1,0] 
-labels = [L"10^{%$k}" for k in decades];
-fit_contour_Δ = contourf(i_surface, ki_surface, logZ; 
-    levels=101,
-    title="Fitting contour",
-    xlabel=L"$I_{c}$ (A)", 
-    ylabel=L"$k_{i}\times 10^{-6}$", 
-    color=:viridis, 
-    linewidth=0.2,
-    linestyle=:dash,
-    xaxis=:log10,
-    yaxis=:log10,
-    xlims = (10e-3,1.05),
-    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    clims = (lo, hi),   # optional explicit range
-    colorbar_ticks = (decades, labels),      # show ticks as 10^k
-    colorbar_title = L"$ \log(z_{\mathrm{p-p}}\ \mathrm{(mm)}) $",   # what the values mean
-);
-display(fit_contour_Δ )
-
-Zp   = max.(ΔZ_mix_cqd, 1e-12);
-logZ = log10.(Zp);
-# Choose "decade" ticks for the colorbar based on min/max of logZ
-lo , hi  = floor(minimum(logZ)) , ceil(maximum(logZ)); 
-decades = collect(lo:1:hi) ; # [-4,-3,-2,-1,0] 
-labels = [L"10^{%$k}" for k in decades];
-fit_contour_Δmix = contourf(i_surface, ki_surface, logZ; 
-    levels=101,
-    title="Fitting contour",
-    xlabel=L"$I_{c}$ (A)", 
-    ylabel=L"$k_{i}\times 10^{-6}$", 
-    color=:viridis, 
-    linewidth=0.2,
-    linestyle=:dash,
-    xaxis=:log10,
-    yaxis=:log10,
-    xlims = (10e-3,1.05),
-    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    clims = (lo, hi),   # optional explicit range
-    colorbar_ticks = (decades, labels),      # show ticks as 10^k
-    colorbar_title = L"$ \log(z^{\mathrm{mix}}_{\mathrm{p-p}}\ \mathrm{(mm)}) $",   # what the values mean
-);
-display(fit_contour_Δmix )
-
-
-plot(fit_contour_up, fit_contour_dw, fit_contour_Δ, fit_contour_Δmix,
-    layout=@layout([a1 a2; a3 a4]);
-    title="",
-    size=(800,600),
-    left_margin=4mm,
-)
 
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
