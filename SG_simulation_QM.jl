@@ -759,40 +759,45 @@ Ns = Nss
 data_screen_path    = joinpath(OUTDIR,"qm_screen_data.jld2")
 
 if !isfile(data_screen_path)
-    @info "Analyzing data arriving to the screen"
+    @info "Analyzing particles arriving at the screen"
 
-    dataQM = jldopen(joinpath(OUTDIR,"qm_particles_data.jld2"), "r") do file
-        Icoils_loaded = file["meta/Icoils"]
-        levels_loaded = file["meta/levels"]
+    dataQM = jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "r") do file
+        Icoils = file["meta/Icoils"]
+        levels = file["meta/levels"]
 
-        nI = length(Icoils_loaded)
-        nlevels = length(levels_loaded)
+        nI      = length(Icoils)
+        nlevels = length(levels)
 
-        particles_trajectories_loaded = OrderedDict{Int8, Vector{Matrix{Float64}}}()
+        data = OrderedDict(
+            Int8(i) => [file["screen/I$(i)/lvl$(j)"] for j in 1:nlevels]
+            for i in 1:nI
+        )
 
-        for i in 1:nI
-            particles_trajectories_loaded[Int8(i)] = [
-                file["screen/I$(i)/lvl$(j)"] for j in 1:nlevels
-            ]
-        end
-
-        return OrderedDict(:Icoils => Icoils_loaded, :levels => levels_loaded, :data => particles_trajectories_loaded)
+        OrderedDict(
+            :Icoils => Icoils,
+            :levels => levels,
+            :data   => data,
+        )
     end
 
-    data_alive_screen = TheoreticalSimulation.QM_select_flagged(dataQM[:data],:screen)   
-    jldopen(data_screen_path , "w") do file
-        file["meta/N"]          = Ns
-        file["meta/T"]          = T_K
-        file["meta/Icoils"]     = dataQM[:Icoils]
-        file["meta/levels"]     = dataQM[:levels] 
-        for i in 1:nI
-            file["screen/I$(i)"] = data_alive_screen[i]  
+    data_alive_screen = TheoreticalSimulation.QM_select_flagged(dataQM[:data], :screen)
+
+    jldopen(data_screen_path, "w") do file
+        file["meta/N"]      = Ns
+        file["meta/T"]      = T_K
+        file["meta/Icoils"] = dataQM[:Icoils]
+        file["meta/levels"] = dataQM[:levels]
+
+        for i in eachindex(dataQM[:Icoils])
+            file["screen/I$(i)"] = data_alive_screen[i]
         end
     end
+
     dataQM = nothing
     data_alive_screen = nothing
     GC.gc()
-    @info "Memory cleaned after QM data acquired"
+
+    @info "Released QM screen-analysis memory"
 else    
     # data analysis
     @info "QM approach : peak position data analysis"
