@@ -1897,40 +1897,163 @@ MC_data_F1 = FittingDataCQDQM.combine_on_grid_mc_weighted(Ic_sets, F1_sets; σxs
 MC_data_F2 = FittingDataCQDQM.combine_on_grid_mc_weighted(Ic_sets, F2_sets; σxsets=nothing, σysets=σF2_sets, B=5000, xq=grouped_exp_current.Ic);
 MC_data_Δ  = FittingDataCQDQM.combine_on_grid_mc_weighted(Ic_sets, Δ_sets;  σxsets=nothing, σysets=σΔ_sets,  B=5000, xq=grouped_exp_current.Ic);
 
-
-
-fig = plot(
-    xlabel="Current (A)",
-    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
-    xlims = (10e-3,1.0),
-    ylims = (1e-3, 2),
+function build_peak_panel(
+    exp_data_processed,
+    data_directories,
+    current_row_start,
+    colors_data,
+    qm_df,
+    mc_data;
+    exp_col::Symbol,
+    err_col::Symbol,
+    qm_col::Symbol,
+    ylabel,
+    threshold,
+    ylims,
+    take_abs::Bool=false,
     legend=:bottomright,
 )
-for (i,dir) in enumerate(data_directories)
-    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
-    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F1]
-    δys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:ErrF1]
-    scatter!(fig,xs,ys,
-        yerror= δys,
-        label=data_directories[i],
-        marker=(:circle, :white,3),
-        markerstrokecolor=colores_data[i],
-        markerstrokewidth=1,
+    f = take_abs ? abs : identity
+
+    fig = plot(
+        xlabel = "Current (A)",
+        ylabel = ylabel,
+        xlims  = (0.6 * threshold, 1.0),
+        ylims  = ylims,
+        xscale = :log10,
+        yscale = :log10,
+        legend = legend,
+        foreground_color_legend = nothing,
+    )
+
+    for (i, dir) in enumerate(data_directories)
+        df   = exp_data_processed[dir]
+        rows = current_row_start[i]:nrow(df)
+
+        xs  = df[rows, :Ic]
+        ys  = f.(df[rows, exp_col])
+        dys = df[rows, err_col]
+
+        scatter!(
+            fig, xs, ys;
+            yerror            = dys,
+            label             = dir,
+            marker            = (:circle, :white, 3),
+            markerstrokecolor = colors_data[i],
+            markerstrokewidth = 1,
         )
+    end
+
+    plot!(
+        fig,
+        qm_df[!, :Ic],
+        f.(qm_df[!, qm_col]);
+        label = "QM",
+        line  = (:black, :dashdot, 2),
+    )
+
+    plot!(
+        fig,
+        mc_data.xq,
+        f.(mc_data.μ);
+        ribbon = mc_data.σ_tot,
+        label  = false,
+        color  = :maroon1,
+    )
+
+    return fig
 end
-plot!(fig, QM_df[!,:Ic], QM_df[!,:F1], label="QM", line=(:black,:dashdot,2));
-plot!(fig, MC_data_F1.xq, MC_data_F1.μ; 
-    ribbon=MC_data_F1.σ_tot,
-    label=false,
-    color=:maroon1,
+
+function plot_weighted_mc_panels(
+    exp_data_processed,
+    data_directories,
+    current_row_start,
+    colors_data,
+    qm_df,
+    mc_data_f1,
+    mc_data_f2,
+    mc_data_Δ;
+    threshold,
 )
-plot!(fig,
-    xscale=:log10,
-    yscale=:log10, 
-    title = "Weighted Monte Carlo combiner",
-    color=:black,
+    specs = (
+        (
+            exp_col  = :F1,
+            err_col  = :ErrF1,
+            qm_col   = :F1,
+            mc_data  = mc_data_f1,
+            ylabel   = L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+            ylims    = (1e-3, 2.0),
+            take_abs = false,
+        ),
+        (
+            exp_col  = :F2,
+            err_col  = :ErrF2,
+            qm_col   = :F2,
+            mc_data  = mc_data_f2,
+            ylabel   = L"$F_{2} : |z_{\mathrm{peak}}|$ (mm)",
+            ylims    = (1e-3, 2.0),
+            take_abs = true,
+        ),
+        (
+            exp_col  = Symbol("Δ"),
+            err_col  = Symbol("ErrΔ"),
+            qm_col   = Symbol("Δ"),
+            mc_data  = mc_data_Δ,
+            ylabel   = L"$\Delta : z_{\mathrm{peak}}$ (mm)",
+            ylims    = (1e-3, 4.0),
+            take_abs = true,
+        ),
+    )
+
+    figs = map(specs) do s
+        build_peak_panel(
+            exp_data_processed,
+            data_directories,
+            current_row_start,
+            colors_data,
+            qm_df,
+            s.mc_data;
+            exp_col   = s.exp_col,
+            err_col   = s.err_col,
+            qm_col    = s.qm_col,
+            ylabel    = s.ylabel,
+            threshold = threshold,
+            ylims     = s.ylims,
+            take_abs  = s.take_abs,
+        )
+    end
+
+    fig1, fig2, fig3 = figs
+
+    fig = plot(
+        fig1, fig2, fig3;
+        suptitle    = "Weighted Monte Carlo",
+        layout      = @layout([a1 a2; a3]),
+        link        = :y,
+        size        = (900, 700),
+        left_margin = 3mm,
+    )
+
+    return fig1, fig2, fig3, fig
+end
+
+fig1, fig2, fig3, fig = plot_weighted_mc_panels(
+    EXP_data_processed,
+    data_directories,
+    CURRENT_ROW_START,
+    colores_data,
+    QM_df,
+    MC_data_F1,
+    MC_data_F2,
+    MC_data_Δ;
+    threshold = threshold,
 )
+
+# display(fig1)
+# display(fig2)
+# display(fig3)
 display(fig)
+
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Spline interpolation
@@ -1939,117 +2062,459 @@ display(fig)
 i_xx0 = unique(round.(sort(grouped_exp_current.Ic); digits=6))
 i_sampled_length = length(i_xx0)
 
-fig = plot(
-    xlabel="Current (A)",
-    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
-    xlims = (10e-3,1.0),
-    ylims = (1e-3, 2),
+function compute_cubic_spline_summary(
+    exp_data_processed,
+    data_directories,
+    current_row_start,
+    i_xx0,
 )
-z1_final = zeros(n_data,i_sampled_length)
-z2_final = zeros(n_data,i_sampled_length)
-for (i,dir) in enumerate(data_directories)
-    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
-    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F1]
-    δys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:ErrF1]
-    splF1 = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
-    z1_final[i,:] = splF1.(i_xx0)
-    scatter!(fig,xs, ys,
-        yerror= δys,
-        label=data_directories[i],
-        marker=(:circle, :white,3),
-        markerstrokecolor=colores_data[i],
-        markerstrokewidth=1,
-        )
-    plot!(fig,i_xx0,splF1.(i_xx0),
-        label=false,
-        line=(colores_data[i],1))
+    n_data = length(data_directories)
+    n_grid = length(i_xx0)
 
-    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
-    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F2]
-    δys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:ErrF2]
-    splF2 = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
-    z2_final[i,:] = splF2.(i_xx0)
+    z1_mat = Matrix{Float64}(undef, n_data, n_grid)
+    z2_mat = Matrix{Float64}(undef, n_data, n_grid)
+    Δz_mat = Matrix{Float64}(undef, n_data, n_grid)
+
+    for (i, dir) in enumerate(data_directories)
+        df   = exp_data_processed[dir]
+        rows = current_row_start[i]:nrow(df)
+        xs   = df[rows, :Ic]
+
+        spl1 = BSplineKit.extrapolate(
+            BSplineKit.interpolate(xs, df[rows, :F1], BSplineKit.BSplineOrder(4), BSplineKit.Natural()),
+            BSplineKit.Linear(),
+        )
+        spl2 = BSplineKit.extrapolate(
+            BSplineKit.interpolate(xs, df[rows, :F2], BSplineKit.BSplineOrder(4), BSplineKit.Natural()),
+            BSplineKit.Linear(),
+        )
+        splΔ = BSplineKit.extrapolate(
+            BSplineKit.interpolate(xs, df[rows, :Δ], BSplineKit.BSplineOrder(4), BSplineKit.Natural()),
+            BSplineKit.Linear(),
+        )
+
+        z1_mat[i, :] = spl1.(i_xx0)
+        z2_mat[i, :] = spl2.(i_xx0)
+        Δz_mat[i, :] = splΔ.(i_xx0)
+    end
+
+    spl_zf1  = vec(mean(z1_mat, dims = 1))
+    spl_δzf1 = vec(std(z1_mat; dims = 1, corrected = true)) ./ sqrt(n_data)
+
+    spl_zf2  = vec(mean(z2_mat, dims = 1))
+    spl_δzf2 = vec(std(z2_mat; dims = 1, corrected = true)) ./ sqrt(n_data)
+
+    spl_Δz   = vec(mean(Δz_mat, dims = 1))
+    spl_δzΔ  = vec(std(Δz_mat; dims = 1, corrected = true)) ./ sqrt(n_data)
+
+    data_spl = OrderedDict(
+        :Ic  => i_xx0,
+        :F1  => spl_zf1,
+        :σF1 => spl_δzf1,
+        :F2  => spl_zf2,
+        :σF2 => spl_δzf2,
+        :Δ   => spl_Δz,
+        :σΔ  => spl_δzΔ,
+    )
+
+    return data_spl
 end
-plot!(fig, QM_df[!,:Ic], QM_df[!,:F1], label="QM", line=(:black,:dashdot,2));
-display(fig)
-plot!(fig,
-title="Interpolation: cubic splines",
-legend=:bottomright,
-xaxis=:log10, 
-yaxis=:log10,
-xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+
+function plot_cubic_spline_summary(
+    exp_data_processed,
+    data_directories,
+    current_row_start,
+    colors_data,
+    qm_df,
+    spl;
+    threshold,
 )
-spl_zf1 = vec(mean(z1_final, dims=1))
-spl_δzf1 = vec(std(z1_final; dims=1, corrected=true))/sqrt(n_data)
-spl_zf2 = vec(mean(z2_final, dims=1))
-spl_δzf2 = vec(std(z2_final; dims=1, corrected=true))/sqrt(n_data)
-data_spl = hcat(i_xx0, spl_zf1, spl_δzf1, spl_zf2, spl_δzf2)
-plot!(fig, data_spl[:,1], data_spl[:,2],
-    ribbon = data_spl[:,3],
-    fillalpha=0.40, 
-    fillcolor=:green3, 
-    label=false,
-    line=(:dash,:green3,2))
+    function build_panel(; data_col, err_col, qm_col, ylabel, ylims, mean_key, sem_key, take_abs=false)
+        f = take_abs ? abs : identity
+
+        fig = plot(
+            xlabel = "Current (A)",
+            ylabel = ylabel,
+            xlims  = (0.6 * threshold, 1.0),
+            ylims  = ylims,
+            legend = :bottomright,
+            foreground_color_legend = nothing,
+            xaxis  = :log10,
+            yaxis  = :log10,
+            xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        )
+
+        for (i, dir) in enumerate(data_directories)
+            df   = exp_data_processed[dir]
+            rows = current_row_start[i]:nrow(df)
+
+            xs  = df[rows, :Ic]
+            ys  = df[rows, data_col]
+            dys = df[rows, err_col]
+
+            spl_i = BSplineKit.extrapolate(
+                BSplineKit.interpolate(
+                    xs, ys,
+                    BSplineKit.BSplineOrder(4),
+                    BSplineKit.Natural(),
+                ),
+                BSplineKit.Linear(),
+            )
+
+            plot!(
+                fig,
+                spl[:Ic],
+                f.(spl_i.(spl[:Ic]));
+                label = false,
+                line  = (colors_data[i], 1),
+            )
+
+            scatter!(
+                fig,
+                xs,
+                f.(ys);
+                yerror            = dys,
+                label             = dir,
+                marker            = (:circle, :white, 3),
+                markerstrokecolor = colors_data[i],
+                markerstrokewidth = 1,
+            )
+        end
+
+        plot!(
+            fig,
+            qm_df[!, :Ic],
+            f.(qm_df[!, qm_col]);
+            label = "QM",
+            line  = (:black, :dashdot, 2),
+        )
+
+        plot!(
+            fig,
+            spl[:Ic],
+            f.(spl[mean_key]);
+            ribbon    = spl[sem_key],
+            fillalpha = 0.40,
+            fillcolor = :green3,
+            label     = false,
+            line      = (:dash, :green3, 2),
+        )
+
+        return fig
+    end
+
+    fig1 = build_panel(
+        data_col = :F1,
+        err_col  = :ErrF1,
+        qm_col   = :F1,
+        ylabel   = L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+        ylims    = (1e-3, 2.0),
+        mean_key = :F1,
+        sem_key  = :σF1,
+    )
+
+    fig2 = build_panel(
+        data_col = :F2,
+        err_col  = :ErrF2,
+        qm_col   = :F2,
+        ylabel   = L"$F_{2} : |z_{\mathrm{peak}}|$ (mm)",
+        ylims    = (1e-3, 2.0),
+        mean_key = :F2,
+        sem_key  = :σF2,
+        take_abs = true,
+    )
+
+    fig3 = build_panel(
+        data_col = :Δ,
+        err_col  = Symbol("ErrΔ"),
+        qm_col   = :Δ,
+        ylabel   = L"$\Delta : z_{\mathrm{peak}}$ (mm)",
+        ylims    = (1e-3, 4.0),
+        mean_key = :Δ,
+        sem_key  = :σΔ,
+    )
+
+    fig = plot(
+        fig1, fig2, fig3;
+        suptitle    = "Interpolation: cubic splines",
+        layout      = @layout([a1 a2; a3]),
+        link        = :y,
+        size        = (900, 700),
+        left_margin = 2mm,
+    )
+
+    return fig1, fig2, fig3, fig
+end
+
+data_spl = compute_cubic_spline_summary(
+    EXP_data_processed,
+    data_directories,
+    CURRENT_ROW_START,
+    i_xx0,
+)
+
+fig1, fig2, fig3, fig = plot_cubic_spline_summary(
+    EXP_data_processed,
+    data_directories,
+    CURRENT_ROW_START,
+    colores_data,
+    QM_df,
+    data_spl;
+    threshold = threshold,
+)
+
+# display(fig1)
+# display(fig2)
+# display(fig3)
 display(fig)
+
 
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Fit Spline interpolation
-fig = plot(
-    xlabel="Current (A)",
-    ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+function compute_smoothing_spline_summary(
+    exp_data_processed,
+    data_directories,
+    current_row_start,
+    i_xx0;
+    λ0::Real = 0.005,
 )
-z1_final_fit = zeros(n_data,i_sampled_length)
-z2_final_fit = zeros(n_data,i_sampled_length)
-for (i,dir) in enumerate(data_directories)
-    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
-    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F1]
-    δys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:ErrF1]
-    splF1 = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.005, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
-    z1_final_fit[i,:] = splF1.(i_xx0)
-    scatter!(fig,xs, ys,
-        label=data_directories[i],
-        marker=(:circle, :white,3),
-        markerstrokecolor=colores_data[i],
-        markerstrokewidth=1,
+    n_data = length(data_directories)
+    n_grid = length(i_xx0)
+
+    z1_mat = Matrix{Float64}(undef, n_data, n_grid)
+    z2_mat = Matrix{Float64}(undef, n_data, n_grid)
+    Δz_mat = Matrix{Float64}(undef, n_data, n_grid)
+
+    for (i, dir) in enumerate(data_directories)
+        df   = exp_data_processed[dir]
+        rows = current_row_start[i]:nrow(df)
+        xs   = df[rows, :Ic]
+
+        ys1  = df[rows, :F1]
+        δy1  = df[rows, :ErrF1]
+        spl1 = BSplineKit.extrapolate(
+            BSplineKit.fit(
+                BSplineKit.BSplineOrder(4),
+                xs,
+                ys1,
+                λ0,
+                BSplineKit.Natural();
+                weights = 1 ./ δy1.^2,
+            ),
+            BSplineKit.Smooth(),
         )
-    plot!(fig,i_xx0,splF1.(i_xx0),
-        label=false,
-        line=(colores_data[i],1))
 
-    xs = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:Ic]
-    ys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:F2]
-    δys = EXP_data_processed[dir][CURRENT_ROW_START[i]:end,:ErrF2]
-    splF2 = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.005, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
-    z2_final_fit[i,:] = splF2.(i_xx0)
+        ys2  = df[rows, :F2]
+        δy2  = df[rows, :ErrF2]
+        spl2 = BSplineKit.extrapolate(
+            BSplineKit.fit(
+                BSplineKit.BSplineOrder(4),
+                xs,
+                ys2,
+                λ0,
+                BSplineKit.Natural();
+                weights = 1 ./ δy2.^2,
+            ),
+            BSplineKit.Smooth(),
+        )
 
+        ysΔ  = df[rows, :Δ]
+        δyΔ  = df[rows, Symbol("ErrΔ")]
+        splΔ = BSplineKit.extrapolate(
+            BSplineKit.fit(
+                BSplineKit.BSplineOrder(4),
+                xs,
+                ysΔ,
+                λ0,
+                BSplineKit.Natural();
+                weights = 1 ./ δyΔ.^2,
+            ),
+            BSplineKit.Smooth(),
+        )
+
+        z1_mat[i, :] = spl1.(i_xx0)
+        z2_mat[i, :] = spl2.(i_xx0)
+        Δz_mat[i, :] = splΔ.(i_xx0)
+    end
+
+    zf1_fit  = vec(mean(z1_mat, dims=1))
+    δzf1_fit = vec(std(z1_mat; dims=1, corrected=true)) ./ sqrt(n_data)
+
+    zf2_fit  = vec(mean(z2_mat, dims=1))
+    δzf2_fit = vec(std(z2_mat; dims=1, corrected=true)) ./ sqrt(n_data)
+
+    Δz_fit   = vec(mean(Δz_mat, dims=1))
+    δzΔ_fit  = vec(std(Δz_mat; dims=1, corrected=true)) ./ sqrt(n_data)
+
+    data_fit = OrderedDict(
+        :Ic  => i_xx0,
+        :F1  => zf1_fit,
+        :σF1 => δzf1_fit,
+        :F2  => zf2_fit,
+        :σF2 => δzf2_fit,
+        :Δ   => Δz_fit,
+        :σΔ  => δzΔ_fit,
+    )
+
+    return data_fit
 end
-plot!(fig, QM_df[!,:Ic], QM_df[!,:F1], label="QM", line=(:black,:dashdot,2));
-display(fig)
-plot!(fig,
-title = "Fit smoothing cubic spline",
-xaxis=:log10, 
-yaxis=:log10,
-xticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-xlims = (10e-3,1.0),
-ylims = (8e-3, 2),
-)
-display(fig)
-zf1_fit = vec(mean(z1_final_fit, dims=1))
-δzf1_fit = vec(std(z1_final_fit; dims=1, corrected=true)/sqrt(n_data))
-zf2_fit = vec(mean(z2_final_fit, dims=1))
-δzf2_fit = vec(std(z2_final_fit; dims=1, corrected=true)/sqrt(n_data))
-data_fit = hcat(i_xx0, zf1_fit, δzf1_fit, zf2_fit, δzf2_fit)
-plot!(fig,i_xx0, zf1_fit,
-    ribbon = δzf1_fit,
-    fillalpha=0.40, 
-    fillcolor=:goldenrod, 
-    label=false,
-    line=(:dash,:goldenrod,2))
-display(fig)
 
+function plot_smoothing_spline_summary(
+    exp_data_processed,
+    data_directories,
+    current_row_start,
+    colors_data,
+    qm_df,
+    fit_data;
+    threshold,
+    λ0::Real = 0.005,
+)
+    function build_panel(; data_col, err_col, qm_col, ylabel, ylims, mean_key, sem_key, take_abs=false, title=nothing)
+        f = take_abs ? abs : identity
+
+        fig = plot(
+            xlabel = "Current (A)",
+            ylabel = ylabel,
+            xaxis  = :log10,
+            yaxis  = :log10,
+            xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            xlims  = (0.6 * threshold, 1.0),
+            ylims  = ylims,
+            foreground_color_legend = nothing,
+            title = isnothing(title) ? "" : title,
+        )
+
+        for (i, dir) in enumerate(data_directories)
+            df   = exp_data_processed[dir]
+            rows = current_row_start[i]:nrow(df)
+
+            xs  = df[rows, :Ic]
+            ys  = df[rows, data_col]
+            dys = df[rows, err_col]
+
+            spl_i = BSplineKit.extrapolate(
+                BSplineKit.fit(
+                    BSplineKit.BSplineOrder(4),
+                    xs,
+                    ys,
+                    λ0,
+                    BSplineKit.Natural();
+                    weights = 1 ./ dys.^2,
+                ),
+                BSplineKit.Smooth(),
+            )
+
+            scatter!(
+                fig,
+                xs,
+                f.(ys);
+                label             = dir,
+                marker            = (:circle, :white, 3),
+                markerstrokecolor = colors_data[i],
+                markerstrokewidth = 1,
+            )
+
+            plot!(
+                fig,
+                fit_data[:Ic],
+                f.(spl_i.(fit_data[:Ic]));
+                label = false,
+                line  = (colors_data[i], 1),
+            )
+        end
+
+        plot!(
+            fig,
+            qm_df[!, :Ic],
+            f.(qm_df[!, qm_col]);
+            label = "QM",
+            line  = (:black, :dashdot, 2),
+        )
+
+        plot!(
+            fig,
+            fit_data[:Ic],
+            f.(fit_data[mean_key]);
+            ribbon    = fit_data[sem_key],
+            fillalpha = 0.40,
+            fillcolor = :goldenrod,
+            label     = false,
+            line      = (:dash, :goldenrod, 2),
+        )
+
+        return fig
+    end
+
+    fig1 = build_panel(
+        data_col = :F1,
+        err_col  = :ErrF1,
+        qm_col   = :F1,
+        ylabel   = L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
+        ylims    = (8e-3, 2.0),
+        mean_key = :F1,
+        sem_key  = :σF1,
+        title    = "Fit smoothing cubic spline",
+    )
+
+    fig2 = build_panel(
+        data_col = :F2,
+        err_col  = :ErrF2,
+        qm_col   = :F2,
+        ylabel   = L"$F_{2} : |z_{\mathrm{peak}}|$ (mm)",
+        ylims    = (8e-3, 2.0),
+        mean_key = :F2,
+        sem_key  = :σF2,
+        take_abs = true,
+    )
+
+    fig3 = build_panel(
+        data_col = :Δ,
+        err_col  = Symbol("ErrΔ"),
+        qm_col   = :Δ,
+        ylabel   = L"$\Delta : z_{\mathrm{peak}}$ (mm)",
+        ylims    = (8e-3, 4.0),
+        mean_key = :Δ,
+        sem_key  = :σΔ,
+        title    = "Fit smoothing cubic spline",
+    )
+
+    fig = plot(
+        fig1, fig2, fig3;
+        layout      = @layout([a1 a2; a3]),
+        link        = :y,
+        size        = (900, 700),
+        left_margin = 2mm,
+    )
+
+    return fig1, fig2, fig3, fig
+end
+
+data_fit = compute_smoothing_spline_summary(
+    EXP_data_processed,
+    data_directories,
+    CURRENT_ROW_START,
+    i_xx0;
+    λ0 = 0.005,
+)
+
+fig1, fig2, fig3, fig = plot_smoothing_spline_summary(
+    EXP_data_processed,
+    data_directories,
+    CURRENT_ROW_START,
+    colores_data,
+    QM_df,
+    data_fit;
+    threshold = threshold,
+    λ0 = 0.005,
+)
+
+# display(fig1)
+# display(fig2)
+# display(fig3)
+display(fig)
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Combined results
@@ -2065,26 +2530,32 @@ combined_result = OrderedDict(
         σzF1     = MC_data_F1.σ_tot,
         zF2      = MC_data_F2.μ,
         σzF2     = MC_data_F2.σ_tot,
-        Δz       = MC_data_F1.μ .- MC_data_F2.μ,
-        σΔz      = sqrt.( (MC_data_F1.σ_tot).^2 .+ (MC_data_F2.σ_tot).^2 )
+        Δz       = MC_data_Δ.μ,
+        σΔz      = MC_data_Δ.σ_tot,
+        Δz_alt   = MC_data_F1.μ .- MC_data_F2.μ,
+        σΔz_alt  = sqrt.( (MC_data_F1.σ_tot).^2 .+ (MC_data_F2.σ_tot).^2 ),
     ),
 
     :SplineInter => (
-        zF1      = data_spl[:,2],
-        σzF1     = data_spl[:,3],
-        zF2      = data_spl[:,4],
-        σzF2     = data_spl[:,5],
-        Δz       = data_spl[:,2] .- data_spl[:,4],
-        σΔz      = sqrt.( (data_spl[:,3]).^2 .+ (data_spl[:,5]).^2 )
+        zF1      = data_spl[:F1],
+        σzF1     = data_spl[:σF1],
+        zF2      = data_spl[:F2],
+        σzF2     = data_spl[:σF2],
+        Δz       = data_spl[:Δ],
+        σΔz      = data_spl[:σΔ],
+        Δz_alt   = data_spl[:F1] .- data_spl[:F2],
+        σΔz_alt  = sqrt.( (data_spl[:σF1]).^2 .+ (data_spl[:σF2]).^2 ),
     ),
 
     :SplineFit => (
-        zF1      = data_fit[:,2],
-        σzF1     = data_fit[:,3],
-        zF2      = data_fit[:,4],
-        σzF2     = data_fit[:,5],
-        Δz       = data_fit[:,2] .- data_fit[:,4],
-        σΔz      = sqrt.( (data_fit[:,3]).^2 .+ (data_fit[:,5]).^2 )
+        zF1      = data_fit[:F1],
+        σzF1     = data_fit[:σF1],
+        zF2      = data_fit[:F2],
+        σzF2     = data_fit[:σF2],
+        Δz       = data_fit[:Δ],
+        σΔz      = data_fit[:σΔ],
+        Δz_alt   = data_fit[:F1] .- data_fit[:F2],
+        σΔz_alt  = sqrt.( (data_fit[:σF1]).^2 .+ (data_fit[:σF2]).^2 ),
     ),
 
 )
@@ -2109,6 +2580,7 @@ plot!(fig1,
     xlims=(0.80*threshold,1.05),
     ylims=(10e-3,2.05),
     xscale=:log10,yscale=:log10,
+    foreground_color_legend=nothing,
     xticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),)
 
@@ -2130,6 +2602,7 @@ plot!(fig2,
     color=:darkgreen )
 plot!(fig2,
     legend=:bottomleft,
+    foreground_color_legend=nothing,
     xlims=(0.80*threshold,1.05),
     xticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     xscale=:log10)
@@ -2152,6 +2625,7 @@ plot!(fig3,
     color=:darkgreen )
 plot!(fig3,
     legend=:topleft,
+    foreground_color_legend=nothing,
     xlims=(0.80*threshold,1.05),
     ylims=(10e-3,4.05),
     xscale=:log10,yscale=:log10,
@@ -2159,8 +2633,36 @@ plot!(fig3,
     yticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
 )
 
-fig = plot(fig1, fig2, fig3,
-    layout=(3,1),
+fig4 = plot(xlabel="Currents (A)", ylabel=L"z_{\mathrm{peak-peak}} \ (\mathrm{mm})")    
+plot!(fig4,
+    combined_result[:Current].Ic, combined_result[:MonteCarlo].Δz_alt ,
+    ribbon= combined_result[:MonteCarlo].σΔz_alt,
+    label= "Monte Carlo",
+    color=:red )
+plot!(fig4,
+    combined_result[:Current].Ic, combined_result[:SplineInter].Δz_alt ,
+    ribbon= combined_result[:SplineInter].σΔz_alt,
+    label="Spl. Interpolation",
+    color=:blue)
+plot!(fig4,
+    combined_result[:Current].Ic, combined_result[:SplineFit].Δz_alt ,
+    ribbon= combined_result[:SplineFit].σΔz_alt,
+    label="Spl. Fit",
+    color=:darkgreen )
+plot!(fig4,
+    legend=:topleft,
+    foreground_color_legend=nothing,
+    xlims=(0.80*threshold,1.05),
+    ylims=(10e-3,4.05),
+    xscale=:log10,yscale=:log10,
+    xticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-2, 1e-1, 1.0], [ L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+)
+
+
+
+fig = plot(fig1, fig2, fig3, fig4,
+    layout=(2,2),
     link=:x,
     size=(800,600),
     left_margin=4mm,)
@@ -2187,7 +2689,10 @@ data_exp = DataFrame(
     F2  = combined_result[combined_method].zF2, 
     σF2 = combined_result[combined_method].σzF2,
     Δz  = combined_result[combined_method].Δz, 
-    σΔz = combined_result[combined_method].σΔz
+    σΔz = combined_result[combined_method].σΔz,
+    Δz_alt  = combined_result[combined_method].Δz_alt, 
+    σΔz_alt = combined_result[combined_method].σΔz_alt
+
 )
 
 fig = plot(xlabel="Currents (A)", ylabel=L"$z^{F=1}_{p} \ (\mathrm{mm})$")
@@ -2209,9 +2714,10 @@ Ic, yexp, σy = data_exp.Ic, data_exp.F1, data_exp.σF1
 # fit_idx = vcat(31:33,36)
 fit_idx = vcat(27:30,33)    #** 25 26am 27 03 r2
 fit_idx = vcat(23:26)       #** 26am 27 03 r2
+fit_idx = vcat(23:26)       #** 26am 03 r2
 y_QM = QM_itp_zF1.(Ic)
 
-fitQM = fit_QM_scale_model(
+fitQM = FittingDataCQDQM.fit_QM_scale_model(
     Ic,
     yexp,
     QM_itp_zF1;
@@ -2223,7 +2729,7 @@ fitQM = fit_QM_scale_model(
 )
 
 α, σα, β, σβ = fitQM.α, fitQM.σα, fitQM.β, fitQM.σβ
-y_QM_model = α .* yqm .+ β;
+y_QM_model = α .* y_QM .+ β;
 relerr1 = 100 .* (yexp .- y_QM) ./ y_QM;
 relerr2 = 100 .* (yexp .- y_QM_model) ./ y_QM_model;
 
@@ -2240,7 +2746,7 @@ else
 end
 
 pretty_table(
-    hcat(Ic, yexp, yqm, relerr1, y_QM_model, relerr2);
+    hcat(Ic, yexp, y_QM, relerr1, y_QM_model, relerr2);
     column_labels = [
         ["Current", "F1 exp", "F1 QM", "Rel. Error", "F1 model QM", "Rel. Error"],
         ["[A]", "[mm]", "[mm]", "[%]", "[mm]", "[%]"]
