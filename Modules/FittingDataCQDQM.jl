@@ -3,6 +3,7 @@ module FittingDataCQDQM
 using Plots; gr()
 using Plots.PlotMeasures
 using LinearAlgebra
+using Interpolations
 using Optim
 using Random
 using Statistics
