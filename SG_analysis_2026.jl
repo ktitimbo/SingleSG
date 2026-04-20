@@ -1725,8 +1725,8 @@ end
 #++++++ DATA COMPARISON
 figa = plot(
     xlabel="Currents (A)",
-    ylabel="Position (mm)"
-)
+    ylabel="Position (mm)",
+);
 for (i,dir) in enumerate(data_directories)
     plot!(figa,
         EXP_data_processed[dir].Ic, EXP_data_processed[dir].F1,
@@ -1744,26 +1744,27 @@ plot!(figa,
     marker=(:diamond,2,:white),
     markerstrokecolor=:black,
     line=(:black,1),
-)
+);
 plot!(figa,
     legend=:bottomright,
     legendfontsize=6,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     xlims=(10e-3, 1.05),
-    ylims=(1e-3, 2.05))
-figa1= deepcopy(figa)
+    ylims=(1e-3, 2.05)
+);
+figa1= deepcopy(figa);
 plot!(figa,
     xscale=:log10,
     yscale=:log10,
     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-)
+);
 
 figb = plot(
     xlabel="Currents (A)",
-    ylabel="Position (mm)"
-)
+    ylabel="Position (mm)",
+);
 for (i,dir) in enumerate(data_directories)
     plot!(figb,
         EXP_data_processed[dir].Ic, EXP_data_processed[dir].F2,
@@ -1781,22 +1782,23 @@ plot!(figb,
     marker=(:diamond,2,:white),
     markerstrokecolor=:black,
     line=(:black,1),
-)
+);
 plot!(figb,
     xlims=(10e-3, 1.05),
-    ylims=(-2.05, -6e-3))
+    ylims=(-2.05, -6e-3),
+);
 plot!(figb,
     legend=:topright,
     legendfontsize=6,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
-)
+);
 
 
 figc = plot(
     xlabel="Currents (A)",
     ylabel="Peak-to-position (mm)"
-)
+);
 for (i,dir) in enumerate(data_directories)
     plot!(figc,
         EXP_data_processed[dir].Ic, EXP_data_processed[dir].Δ ,
@@ -1814,7 +1816,7 @@ plot!(figc,
     marker=(:diamond,2,:white),
     markerstrokecolor=:black,
     line=(:black,1),
-)
+);
 plot!(figc,
     legend=:bottomright,
     legendfontsize=6,
@@ -1822,12 +1824,12 @@ plot!(figc,
     foreground_color_legend = nothing,
     xlims=(10e-3, 1.05),
     ylims=(1e-3, 4.05),
-)
-figc1 = deepcopy(figc)
+);
+figc1 = deepcopy(figc);
 plot!(figc,xscale=:log10, yscale=:log10,
  xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
  yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-)
+);
 
 fig = plot(figa,figa1, figb,figc, figc1,
 labelfontsize = 10,
@@ -2675,9 +2677,14 @@ display(fig)
 
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# FITTING
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Currents used for scan/plotting of fitted curves (log-spaced)
 Iscan = logspace10(0.020, 1.00; n = 101);
 QM_itp_zF1 = Spline1D(QM_df[!,:Ic],QM_df[!,:F1],k=3);
+QM_itp_zF2 = Spline1D(QM_df[!,:Ic],QM_df[!,:F2],k=3);
+QM_itp_Δz  = Spline1D(QM_df[!,:Ic],QM_df[!,:Δ],k=3);
 
 combined_method = :SplineInter ; 
 
@@ -2695,806 +2702,1029 @@ data_exp = DataFrame(
 
 )
 
-fig = plot(xlabel="Currents (A)", ylabel=L"$z^{F=1}_{p} \ (\mathrm{mm})$")
-scatter!(data_exp.Ic, data_exp.F1; yerror=data_exp.σF1, 
-    label="Experimental data ($(length(data_exp.Ic)))",
+fig1 = plot(xlabel="Currents (A)", ylabel=L"$z^{F=1}_{p} \ (\mathrm{mm})$")
+scatter!(fig1, data_exp.Ic, data_exp.F1; yerror=data_exp.σF1, 
+    label=L"$F=1$ Experimental data (%$(length(data_exp.Ic)))",
     marker=(:circle, 3, :white),
     markerstrokecolor=:black)
 for (i, (x, y)) in enumerate(zip(data_exp.Ic, data_exp.F1))
-    annotate!(fig, x, y-0.05, text(L"$\mathbf{%$i}$", :red, 8))
+    annotate!(fig1, x, y-0.05, text(L"$\mathbf{%$i}$", :red, 8))
 end
+display(fig1)
+
+fig2 = plot(xlabel="Currents (A)", ylabel=L"$z^{F=2}_{p} \ (\mathrm{mm})$")
+scatter!(fig2,data_exp.Ic, data_exp.F2; yerror=data_exp.σF2, 
+    label=L"$F=2$ Experimental data (%$(length(data_exp.Ic)))",
+    marker=(:circle, 3, :white),
+    markerstrokecolor=:black)
+for (i, (x, y)) in enumerate(zip(data_exp.Ic, data_exp.F2))
+    annotate!(fig2, x, y+0.05, text(L"$\mathbf{%$i}$", :red, 8))
+end
+display(fig2)
+
+fig3 = plot(xlabel="Currents (A)", ylabel=L"$\Delta z_{p} \ (\mathrm{mm})$")
+scatter!(fig3,data_exp.Ic, data_exp.Δz ; yerror=data_exp.σΔz, 
+    label=L"$\Delta z$ Experimental data (%$(length(data_exp.Ic)))",
+    marker=(:circle, 3, :white),
+    markerstrokecolor=:black)
+for (i, (x, y)) in enumerate(zip(data_exp.Ic, data_exp.Δz))
+    annotate!(fig3, x, y+0.05, text(L"$\mathbf{%$i}$", :red, 8))
+end
+display(fig3)
+
+fig4 = plot(xlabel="Currents (A)", ylabel=L"$\Delta z_{p} \ (\mathrm{mm})$")
+scatter!(fig4,data_exp.Ic, data_exp.Δz_alt ; yerror=data_exp.σΔz_alt, 
+    label=L"$\Delta z$ Experimental data (%$(length(data_exp.Ic)))",
+    marker=(:circle, 3, :white),
+    markerstrokecolor=:black)
+for (i, (x, y)) in enumerate(zip(data_exp.Ic, data_exp.Δz))
+    annotate!(fig4, x, y+0.05, text(L"$\mathbf{%$i}$", :red, 8))
+end
+display(fig4)
+
+fig = plot(fig1, fig2, fig3, fig4,
+    layout=(2,2),
+    link=:x,
+    size=(800,500),
+    left_margin=3mm,
+)
+plot!(fig[1], xlabel="", xformatter=_->"", bottom_margin=-6mm)
+plot!(fig[2], xlabel="", xformatter=_->"", bottom_margin=-6mm)
 display(fig)
 
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-Ic, yexp, σy = data_exp.Ic, data_exp.F1, data_exp.σF1
-# FITTING : QUANTUM MECHANICS vs EXPERIMENTAL DATA
+
 
 # fit_idx = vcat(28:30, 32:33)
 # fit_idx = vcat(31:33,36)
 fit_idx = vcat(27:30,33)    #** 25 26am 27 03 r2
 fit_idx = vcat(23:26)       #** 26am 27 03 r2
-fit_idx = vcat(23:26)       #** 26am 03 r2
-y_QM = QM_itp_zF1.(Ic)
+fit_idx = vcat(23:27)       #** 26am 03 r2
 
-fitQM = FittingDataCQDQM.fit_QM_scale_model(
-    Ic,
-    yexp,
-    QM_itp_zF1;
-    offset = false,
-    fitspace = :log10,
-    σy = σy,
-    idx = fit_idx,
-    project = :model_to_y,
+# ==================================================================================================
+# F1 FITTING
+# ==================================================================================================
+
+current_A      = data_exp.Ic
+sigma_current  = data_exp.σIc
+f1_exp_mm      = data_exp.F1
+sigma_f1_exp   = data_exp.σF1
+
+fitting_results = OrderedDict{Symbol, Any}()
+
+fitting_results[:Current] = (
+    Ic  = current_A,
+    σIc = sigma_current,
 )
 
-α, σα, β, σβ = fitQM.α, fitQM.σα, fitQM.β, fitQM.σβ
-y_QM_model = α .* y_QM .+ β;
-relerr1 = 100 .* (yexp .- y_QM) ./ y_QM;
-relerr2 = 100 .* (yexp .- y_QM_model) ./ y_QM_model;
 
-if σβ !== nothing
+# --------------------------------------------------------------------------------------------------
+# QUANTUM MECHANICS vs EXPERIMENT
+# --------------------------------------------------------------------------------------------------
+
+qm_f1_mm   = QM_itp_zF1.(current_A)
+
+qm_fit = FittingDataCQDQM.fit_QM_scale_model(
+    current_A,
+    f1_exp_mm,
+    QM_itp_zF1;
+    offset   = false,
+    fitspace = :log10,
+    σy       = sigma_f1_exp,
+    idx      = fit_idx,
+    project  = :model_to_y,
+)
+
+qm_alpha       = qm_fit.α
+qm_sigma_alpha = qm_fit.σα
+qm_beta        = qm_fit.β
+qm_sigma_beta  = qm_fit.σβ
+
+qm_f1_fit_mm = qm_alpha .* qm_f1_mm .+ qm_beta
+
+qm_relerr_raw_pct = 100 .* (f1_exp_mm .- qm_f1_mm)     ./ qm_f1_mm
+qm_relerr_fit_pct = 100 .* (f1_exp_mm .- qm_f1_fit_mm) ./ qm_f1_fit_mm
+
+if qm_sigma_beta !== nothing
     @info @sprintf(
-        "Fitting parameters F1: Experiment = (%.3f ± %.3f) * QM + (%.3f ± %.3f)",
-        α, σα, β, σβ
+        "F1 QM fit: Experiment = (%.3f ± %.3f) * QM + (%.3f ± %.3f)",
+        qm_alpha, qm_sigma_alpha, qm_beta, qm_sigma_beta
     )
 else
     @info @sprintf(
-        "Fitting parameters F1: Experiment = (%.3f ± %.3f) * QM",
-        α, σα
+        "F1 QM fit: Experiment = (%.3f ± %.3f) * QM",
+        qm_alpha, qm_sigma_alpha
     )
 end
 
 pretty_table(
-    hcat(Ic, yexp, y_QM, relerr1, y_QM_model, relerr2);
+    hcat(current_A, f1_exp_mm, qm_f1_mm, qm_relerr_raw_pct, qm_f1_fit_mm, qm_relerr_fit_pct);
     column_labels = [
-        ["Current", "F1 exp", "F1 QM", "Rel. Error", "F1 model QM", "Rel. Error"],
-        ["[A]", "[mm]", "[mm]", "[%]", "[mm]", "[%]"]
+        ["Current", "F1 exp", "F1 QM", "Rel. Error", "F1 fitted QM", "Rel. Error"],
+        ["[A]", "[mm]", "[mm]", "[%]", "[mm]", "[%]"],
     ],
-    alignment=:c,
-    row_label_column_alignment=:c,
-    row_group_label_alignment=:c,
-    title="QUANTUM MECHANICS",
-    formatters=[
+    alignment                  = :c,
+    row_label_column_alignment = :c,
+    row_group_label_alignment  = :c,
+    title                      = "QUANTUM MECHANICS",
+    formatters = [
         fmt__printf("%8.3f", [1]),
-        fmt__printf("%8.4f", [2,3,5]),
-        fmt__printf("%8.1f", [4,6])
+        fmt__printf("%8.4f", [2, 3, 5]),
+        fmt__printf("%8.1f", [4, 6]),
     ],
-    style=TextTableStyle(
-        first_line_column_label=crayon"yellow bold",
-        table_border=crayon"blue bold",
-        title=crayon"bold red"
+    style = TextTableStyle(
+        first_line_column_label = crayon"yellow bold",
+        table_border            = crayon"blue bold",
+        title                   = crayon"bold red",
     ),
-    table_format=TextTableFormat(borders=text_table_borders__unicode_rounded),
-    equal_data_column_widths=true,
+    table_format             = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    equal_data_column_widths = true,
 )
 
-scatter(Ic, yexp; yerror=σy, label="Experimental data")
-scatter!(Ic[fitQM.used_mask], yexp[fitQM.used_mask]; label="Used in fit", marker=:diamond)
-plot!(Ic, y_QM; lw=2, label="QM")
-plot!(Ic, y_QM_model; lw=2, label="$(@sprintf("%.3f",α)) × QM + $(@sprintf("%.3f",β))")
-plot!(xlabel="Current (A)", ylabel=L"$z^{F=1}_{\mathrm{peak}}$ (mm)")
+qm_fig = scatter(
+    current_A,
+    f1_exp_mm;
+    yerror = sigma_f1_exp,
+    label  = "Experimental data",
+)
+scatter!(
+    qm_fig,
+    current_A[qm_fit.used_mask],
+    f1_exp_mm[qm_fit.used_mask];
+    label  = "Used in fit",
+    marker = :diamond,
+)
+plot!(qm_fig, current_A, qm_f1_mm;     lw = 2, label = "QM")
+plot!(qm_fig, current_A, qm_f1_fit_mm; lw = 2, label = "$(@sprintf("%.3f", qm_alpha)) × QM + $(@sprintf("%.3f", qm_beta))")
+plot!(qm_fig; xlabel = "Current (A)", ylabel = L"$z^{F=1}_{\mathrm{peak}}$ (mm)")
 
-
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-# FITTING : COQUANTUM DYNAMICS vs EXPERIMENTAL DATA
-CQDmodel = (I, k) -> ki_up_itp(I, k)
-kmin = minimum(cqd_sim_data.ki[ki_start:ki_stop])
-kmax = maximum(cqd_sim_data.ki[ki_start:ki_stop])
-idx_k = findall(data_exp.Ic .< 0.060)
-
-fit = fit_scale_and_k(
-    Ic,
-    yexp,
-    CQDmodel,;
-    σy = σy,
-    bounds      = (kmin, kmax),
-    idx_k       = idx_k,
-    offset      = false,   
-    fit_alpha   = true,
-    idx_alpha   = fit_idx,
-    fitspace    = :linear
+fitting_results[:QM_F1] = (
+    F1     = qm_f1_fit_mm,
+    mag    = (qm_alpha, qm_sigma_alpha),
+    cutoff = (qm_beta, qm_sigma_beta),
 )
 
-kbest = fit.k
-αbest = fit.α
-βbest = fit.β
 
-y_CQD_model = αbest .* CQDmodel.(Ic, Ref(kbest)) .+ βbest
-relerr = 100 .* (yexp .- y_CQD_model) ./ y_CQD_model;
+# --------------------------------------------------------------------------------------------------
+# CQD vs EXPERIMENT
+# --------------------------------------------------------------------------------------------------
 
-@info @sprintf("Fitting parameters F1: α = %.3f , β = %.3f,  ki = %.3f", αbest, βbest, kbest)
+cqd_model = (I, k) -> ki_up_itp(I, k)
+
+ki_bounds = (
+    minimum(cqd_sim_data.ki[ki_start:ki_stop]),
+    maximum(cqd_sim_data.ki[ki_start:ki_stop]),
+)
+
+cqd_k_fit_idx = findall(current_A .< 0.100)
+
+cqd_fit = FittingDataCQDQM.fit_scale_and_k(
+    current_A,
+    f1_exp_mm,
+    cqd_model;
+    σy        = sigma_f1_exp,
+    bounds    = ki_bounds,
+    idx_k     = cqd_k_fit_idx,
+    offset    = false,
+    fit_alpha = true,
+    idx_alpha = fit_idx,
+    fitspace  = :log10,
+)
+
+cqd_k_best       = cqd_fit.k
+cqd_alpha        = cqd_fit.α
+cqd_sigma_alpha  = cqd_fit.σα
+cqd_beta         = cqd_fit.β
+cqd_sigma_beta   = cqd_fit.σβ
+
+cqd_f1_fit_mm      = cqd_alpha .* cqd_model.(current_A, Ref(cqd_k_best)) .+ cqd_beta
+cqd_relerr_fit_pct = 100 .* (f1_exp_mm .- cqd_f1_fit_mm) ./ cqd_f1_fit_mm
+
+@info @sprintf(
+    "F1 CQD fit: α = %.3f, β = %.3f, ki = %.6f",
+    cqd_alpha, cqd_beta, cqd_k_best
+)
+
 pretty_table(
-    hcat(Ic, yexp, y_CQD_model, relerr);
+    hcat(current_A, f1_exp_mm, cqd_f1_fit_mm, cqd_relerr_fit_pct);
     column_labels = [
         ["Current", "F1 exp", "UP CQD", "Rel. Error"],
-        ["[A]", "[mm]", "[mm]", "[%]"]
+        ["[A]", "[mm]", "[mm]", "[%]"],
     ],
-    alignment=:c,
-    row_label_column_alignment=:c,
-    row_group_label_alignment=:c,
-    title="COQUANTUM DYNAMICS",
-    formatters=[
+    alignment                  = :c,
+    row_label_column_alignment = :c,
+    row_group_label_alignment  = :c,
+    title                      = "COQUANTUM DYNAMICS",
+    formatters = [
         fmt__printf("%8.3f", [1]),
-        fmt__printf("%8.4f", [2,3,5]),
-        fmt__printf("%8.1f", [4,6])
+        fmt__printf("%8.4f", [2, 3]),
+        fmt__printf("%8.1f", [4]),
     ],
-    style=TextTableStyle(
-        first_line_column_label=crayon"yellow bold",
-        table_border=crayon"blue bold",
-        title=crayon"bold red"
+    style = TextTableStyle(
+        first_line_column_label = crayon"yellow bold",
+        table_border            = crayon"blue bold",
+        title                   = crayon"bold red",
     ),
-    table_format=TextTableFormat(borders=text_table_borders__unicode_rounded),
-    equal_data_column_widths=true,
+    table_format             = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    equal_data_column_widths = true,
 )
 
-fig = scatter(
-    data_exp.Ic,
-    data_exp.F1;
-    yerror = data_exp.σF1,
-    marker=(:circle,2,:white),
-    markerstrokecolor=:red,
-    label = "Experiment",
-    xlabel = L"$I$ (A)",
-    ylabel = L"$z_{\mathrm{max}}$ (mm)",
-    legend = :topleft
+cqd_fig_linear = scatter(
+    current_A,
+    f1_exp_mm;
+    yerror            = sigma_f1_exp,
+    marker            = (:circle, 2, :white),
+    markerstrokecolor = :red,
+    label             = "Experiment",
+    xlabel            = L"$I$ (A)",
+    ylabel            = L"$z_{\mathrm{max}}$ (mm)",
+    legend            = :topleft,
 )
 plot!(
-    fig,
-    data_exp.Ic,
-    y_CQD_model;
+    cqd_fig_linear,
+    current_A,
+    cqd_f1_fit_mm;
     label = L"Fit: $\alpha f(I,k)$",
-    lw = 2,
-    lc = :blue,
+    lw    = 2,
+    lc    = :blue,
 )
 
-fig_log = scatter(
-    data_exp.Ic,
-    data_exp.F1;
-    yerror = data_exp.σF1,
-    marker=(:circle,2,:white),
-    markerstrokecolor=:red,
-    xscale = :log10,
-    yscale = :log10,
-    label  = "Experiment",
-    xlabel = L"$I$ (A)",
-    ylabel = L"$z_{\mathrm{max}}$ (mm)"
+cqd_fig_log = scatter(
+    current_A,
+    f1_exp_mm;
+    yerror            = sigma_f1_exp,
+    marker            = (:circle, 2, :white),
+    markerstrokecolor = :red,
+    xscale            = :log10,
+    yscale            = :log10,
+    label             = "Experiment",
+    xlabel            = L"$I$ (A)",
+    ylabel            = L"$z_{\mathrm{max}}$ (mm)",
 )
 plot!(
-    fig_log,
-    data_exp.Ic,
-    y_CQD_model;
-    lw = 2,
-    lc = :blue,
-    label = L"Fit: $\alpha=%$(round(αbest, digits=3))$, $k_{i}=%$(round(kbest; digits=2))\times 10^{-6}$ "
+    cqd_fig_log,
+    current_A,
+    cqd_f1_fit_mm;
+    lw    = 2,
+    lc    = :blue,
+    label = L"Fit: $\alpha=%$(round(cqd_alpha, digits=3))$, $k_{i}=%$(round(cqd_k_best; digits=2))\times 10^{-6}$",
 )
 
-plot(fig, fig_log,
-    layout=(2,1),
-    size=(800,800))
+plot(cqd_fig_linear, cqd_fig_log; layout = (2, 1), size = (800, 800))
 
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-fit_ki_mode = :full   # ← change to :low, :high, or :low_high
-n_front  = 8
-n_back   = 8
+fitting_results[:CQD_F1] = (
+    F1     = cqd_f1_fit_mm,
+    ki     = cqd_k_best,
+    mag    = (cqd_alpha, cqd_sigma_alpha),
+    cutoff = (cqd_beta, cqd_sigma_beta),
+)
 
-data = hcat(combined_result[:Current].Ic, combined_result[:Current].σIc , combined_result[:MonteCarlo].zF1 , combined_result[:MonteCarlo].σzF1 )
-low_range  = 1:n_front ;
-high_range = (size(data, 1) - n_back + 1):size(data, 1);
 
-@assert last(low_range) ≤ size(data,1)
+# --------------------------------------------------------------------------------------------------
+# JOINT CQD + QM SCALING ANALYSIS
+# --------------------------------------------------------------------------------------------------
+
+joint_fit_mode = :full
+n_front        = 8
+n_back         = 8
+
+joint_data = hcat(
+    combined_result[:Current].Ic,
+    combined_result[:Current].σIc,
+    combined_result[combined_method].zF1,
+    combined_result[combined_method].σzF1,
+)
+
+n_joint_rows = size(joint_data, 1)
+
+low_range  = 1:n_front
+high_range = (n_joint_rows - n_back + 1):n_joint_rows
+
+@assert last(low_range) ≤ n_joint_rows
 @assert first(high_range) ≥ 1
 
-# Select rows according to the chosen fitting mode
-fit_ki_idx = begin
-    if fit_ki_mode === :full
+joint_fit_idx = begin
+    if joint_fit_mode === :full
         Colon()
-    elseif fit_ki_mode === :low
+    elseif joint_fit_mode === :low
         low_range
-    elseif fit_ki_mode === :high
+    elseif joint_fit_mode === :high
         high_range
-    elseif fit_ki_mode === :low_high
+    elseif joint_fit_mode === :low_high
         vcat(low_range, high_range)
     else
-        error("Unknown fit_ki_mode = $fit_ki_mode")
+        error("Unknown joint_fit_mode = $joint_fit_mode")
     end
 end
 
-function fit_ki_joint_scaling_fitsubset(
-    data,
-    zqm,
-    ki_itp,
-    thresholdI::Float64,
-    ki_range;
-    fit_ki_mode::Symbol = :low_high,     # :full | :low | :high | :low_high
-    n_front::Int = n_front,
-    n_back::Int  = n_back,
-    w::Float64   = 0.5,
-    ref_type::Symbol = :arith,           # :arith or :geom
-
-    # --- uncertainty knobs ---
-    conf::Real = 0.95,
-    use_Zse::Bool = false,
-    profile::Bool = true,
-    profile_grid::Int = 400,)
-
-    # --- Unpack experimental current and z_max ---
-    Iexp = collect(Float64, data[:, 1])
-    yexp = collect(Float64, data[:, 3])
-    σy   = collect(Float64, data[:, 4])   # used only if use_Zse=true
-
-    # base validity (log requires y>0; σy>0 if used)
-    mbase = isfinite.(Iexp) .& isfinite.(yexp) .& (yexp .> 0)
-    if use_Zse
-        mbase .&= isfinite.(σy) .& (σy .> 0)
-    end
-    Iexp, yexp, σy = Iexp[mbase], yexp[mbase], σy[mbase]
-    N = length(Iexp)
-    @assert N ≥ 2 "Not enough valid data points."
-
-    # ------------------------------
-    # 1) Tail region (for scaling)
-    # ------------------------------
-    tail_mask = Iexp .>= thresholdI
-    n_tail = count(tail_mask)
-    n_tail > 0 || error("No experimental points with current ≥ $thresholdI A")
-
-    I_tail = Iexp[tail_mask]
-    y_tail = yexp[tail_mask]
-
-    # -----------------------------------------
-    # 2) Fitting region (subset for ki optimization)
-    # -----------------------------------------
-    low_range  = 1:min(n_front, N)
-    high_range = max(1, N - n_back + 1):N
-
-    fit_idx = if fit_ki_mode === :full
-        collect(1:N)
-    elseif fit_ki_mode === :low
-        collect(low_range)
-    elseif fit_ki_mode === :high
-        collect(high_range)
-    elseif fit_ki_mode === :low_high
-        vcat(collect(low_range), collect(high_range))
-    else
-        error("Invalid fit_ki_mode = $fit_ki_mode. Use :full, :low, :high, or :low_high.")
-    end
-    n_fit_idx = length(fit_idx)
-
-    # weights in log10 space from σy:
-    # Var(log10 y) ≈ (σy/(y ln 10))^2 => w = (y ln 10 / σy)^2
-    log_weights(y, σ) = ((y .* log(10.0)) ./ σ) .^ 2
-
-    # ------------------------------------------------
-    # 3) Tail reference model z_ref(I; ki)
-    # ------------------------------------------------
-    function zref_tail_for(ki)
-        zqm_tail  = zqm.(I_tail)
-        zcqd_tail = ki_itp.(I_tail, ki)
-
-        if ref_type === :arith
-            zref = w .* zqm_tail .+ (1 - w) .* zcqd_tail
-        elseif ref_type === :geom
-            # require positivity for fractional powers
-            zref = zqm_tail .^ w .* zcqd_tail .^ (1 - w)
-        else
-            error("Invalid ref_type = $ref_type. Use :arith or :geom.")
-        end
-        zref
-    end
-
-    # ------------------------------------------------
-    # 4) Scale factor s(ki) from tail projection
-    # ------------------------------------------------
-    function scale_for(ki)
-        zref_tail = zref_tail_for(ki)
-        m = isfinite.(zref_tail) .& isfinite.(y_tail) .& (zref_tail .!= 0)
-        any(m) || return NaN
-        denom = dot(zref_tail[m], zref_tail[m])
-        denom == 0 && return NaN
-        dot(y_tail[m], zref_tail[m]) / denom
-    end
-
-    # ------------------------------------------------
-    # 5) Residual builder in log10 space on fit subset
-    #     r_i = log10(yexp/scale) - log10(y_cqd)
-    # ------------------------------------------------
-    function residuals_for(ki)
-        scale = scale_for(ki)
-        if !isfinite(scale) || scale == 0
-            return nothing
-        end
-
-        y_cqd = ki_itp.(Iexp, ki)
-
-        # mask only selected indices + positivity for logs
-        mfit = falses(N); mfit[fit_idx] .= true
-        m = mfit .&
-            isfinite.(y_cqd) .& (y_cqd .> 0) .&
-            isfinite.(yexp) .& (yexp .> 0) .&
-            (yexp ./ scale .> 0)
-
-        any(m) || return nothing
-
-        y_scaled = yexp[m] ./ scale
-        r = log10.(y_scaled) .- log10.(y_cqd[m])
-
-        ww = if use_Zse
-            log_weights(yexp[m], σy[m])
-        else
-            ones(length(r))
-        end
-
-        return (r=r, w=ww, m=m, scale=scale)
-    end
-
-    # ------------------------------------------------
-    # 6) Loss = weighted RSS in log10 space
-    # ------------------------------------------------
-    function loss(ki)
-        out = residuals_for(ki)
-        out === nothing && return Inf
-        sum(out.w .* (out.r .^ 2))
-    end
-
-    # ------------------------------------------------
-    # 7) Optimize ki (Brent)
-    # ------------------------------------------------
-    kmin, kmax = ki_range
-    opt = optimize(loss, float(kmin), float(kmax), Brent())
-    ki_fit = Optim.minimizer(opt)
-
-    out0 = residuals_for(ki_fit)
-    out0 === nothing && error("Unexpected: residuals invalid at optimum ki.")
-    r0, w0, m0 = out0.r, out0.w, out0.m
-    scale_final = out0.scale
-
-    p = 1
-    n_used0 = length(r0)
-    @assert n_used0 > p "Not enough valid points to estimate uncertainty"
-
-    RSS0 = sum(w0 .* (r0 .^ 2))
-    mse0 = RSS0 / n_used0
-
-    # ------------------------------------------------
-    # 8) Curvature-based SE via finite-difference Jacobian dr/dki
-    # ------------------------------------------------
-    fd_step(k, lo, hi; rel=cbrt(eps(Float64)), absmin=1e-12) = begin
-        hh = max(absmin, rel * max(abs(k), 1.0))
-        room = min(k - lo, hi - k)
-        room > 0 ? min(hh, 0.5 * room) : absmin
-    end
-    h₀ = fd_step(ki_fit, float(kmin), float(kmax))
-
-    outp = residuals_for(ki_fit + h₀)
-    outm = residuals_for(ki_fit - h₀)
-    (outp === nothing || outm === nothing) &&
-        error("Derivative evaluation failed near optimum; try widening bounds or check model positivity.")
-
-    mJ = out0.m .& outp.m .& outm.m
-    @assert count(mJ) > p "Not enough common points to compute derivative."
-
-    function r_on_mask(ki, m)
-        scale = scale_for(ki)
-        y_cqd = ki_itp.(Iexp, ki)
-        y_scaled = yexp[m] ./ scale
-        log10.(y_scaled) .- log10.(y_cqd[m])
-    end
-
-    r_plus  = r_on_mask(ki_fit + h₀, mJ)
-    r_minus = r_on_mask(ki_fit - h₀, mJ)
-    drdk = (r_plus .- r_minus) ./ (2h₀)
-
-    wJ = use_Zse ? log_weights(yexp[mJ], σy[mJ]) : ones(count(mJ))
-    rJ = r_on_mask(ki_fit, mJ)
-
-    RSS = sum(wJ .* (rJ .^ 2))
-    dof = length(rJ) - p
-    σ²  = RSS / dof
-    SJJ = sum(wJ .* (drdk .^ 2))
-    se  = sqrt(σ² / SJJ)
-
-    tcrit = quantile(TDist(dof), 0.5 + conf/2)
-    k_err = tcrit * se
-    ci_t  = (ki_fit - k_err, ki_fit + k_err)
-
-    # ------------------------------------------------
-    # 9) R² in log10 space on mJ
-    # ------------------------------------------------
-    # Rebuild y_hat on mJ
-    scale0 = scale_for(ki_fit)
-    y_cqd0 = ki_itp.(Iexp, ki_fit)
-    y_obs  = log10.(yexp[mJ] ./ scale0)
-    y_hat  = log10.(y_cqd0[mJ])
-
-    ȳw  = sum(wJ .* y_obs) / sum(wJ)
-    TSS = sum(wJ .* (y_obs .- ȳw).^2)
-    R2  = TSS > 0 ? 1 - RSS/TSS : NaN
-
-    # ---------------------------------------------------------
-    # 10) Profile interval with proper scaling
-    #
-    # If use_Zse=true: ΔRSS = χ²(1,conf)
-    # If use_Zse=false: ΔRSS = σ²_hat * χ²(1,conf), with σ²_hat = RSS0/dof0
-    # (this makes the threshold match the loss scale)
-    # ---------------------------------------------------------
-    ci_profile = nothing
-    Δtarget = nothing
-    Δrss = nothing
-    profile_note = nothing
-
-    if profile
-        Δtarget = quantile(Chisq(1), conf)
-
-        if use_Zse
-            Δrss = Δtarget
-            profile_note = nothing
-        else
-            profile_note = :profile_interval_scaled_for_unweighted
-            dof0 = n_used0 - p
-            σ²hat0 = RSS0 / dof0
-            Δrss = σ²hat0 * Δtarget
-        end
-
-        target = RSS0 + Δrss
-
-        function bracket_side(dir::Int)
-            grid = range(ki_fit, dir > 0 ? float(kmax) : float(kmin); length=profile_grid)
-            prevk = first(grid)
-            prevL = loss(prevk)
-            for k in Iterators.drop(grid, 1)
-                L = loss(k)
-                if isfinite(L) && (L > target) && isfinite(prevL) && (prevL <= target)
-                    return (prevk, k)
-                end
-                prevk, prevL = k, L
-            end
-            return nothing
-        end
-
-        function bisect_cross(a, b; maxiter=80, tol=1e-10)
-            lo, hi = a, b
-            for _ in 1:maxiter
-                mid = (lo + hi)/2
-                fmid = loss(mid) - target
-                if !isfinite(fmid)
-                    hi = mid
-                    continue
-                end
-                if fmid > 0
-                    hi = mid
-                else
-                    lo = mid
-                end
-                if abs(hi - lo) <= tol*max(1.0, abs(mid))
-                    return (lo + hi)/2
-                end
-            end
-            return (lo + hi)/2
-        end
-
-        left_br  = bracket_side(-1)
-        right_br = bracket_side(+1)
-
-        k_lo = left_br  === nothing ? float(kmin) : bisect_cross(left_br[1], left_br[2])
-        k_hi = right_br === nothing ? float(kmax) : bisect_cross(right_br[1], right_br[2])
-
-        ci_profile = (k_lo, k_hi)
-    end
-
-    # ------------------------------------------------
-    # 11) Extra diagnostics (linear-space error from log10 residuals)
-    # ------------------------------------------------
-    rmse_log10 = sqrt(mse0)
-    mult_rmse  = 10.0 ^ rmse_log10
-
-    frac_err = abs.(10.0 .^ r0 .- 1.0)
-    med_abs_frac = median(frac_err)
-    p90_abs_frac = quantile(frac_err, 0.90)
-    p99_abs_frac = quantile(frac_err, 0.99)
-    max_abs_frac = maximum(frac_err)
-    n_bad_2pct   = count(>(0.02), frac_err)
-    n_bad_5pct   = count(>(0.05), frac_err)
-
-    scale_inv = 1 / scale_final
-    scale_pct = (scale_inv - 1) * 100
-
-    return (
-        ki_fit       = ki_fit,
-        scale_factor = scale_final,
-        scale_inv    = scale_inv,
-        scale_pct    = scale_pct,
-
-        rss          = RSS0,
-        mse          = mse0,
-        rmse_log10   = rmse_log10,
-
-        se           = se,
-        k_err        = k_err,
-        ci_t         = ci_t,
-
-        ci_profile   = ci_profile,
-        delta_target = Δtarget,
-        delta_rss    = Δrss,
-        profile_note = profile_note,
-
-        R2           = R2,
-
-        mult_rmse    = mult_rmse,
-        med_abs_frac = med_abs_frac,
-        p90_abs_frac = p90_abs_frac,
-        p99_abs_frac = p99_abs_frac,
-        max_abs_frac = max_abs_frac,
-        n_bad_2pct   = n_bad_2pct,
-        n_bad_5pct   = n_bad_5pct,
-
-        n_total      = N,
-        n_tail       = n_tail,
-        n_fit_idx    = n_fit_idx,
-        n_used       = length(rJ),
-
-        converged    = Optim.converged(opt),
-        result       = opt
-    )
-end
-
-M_data_exp = Matrix(data_exp)[:,1:4]
-
-result = fit_ki_joint_scaling_fitsubset(
-    M_data_exp,
+joint_scale_result = FittingDataCQDQM.fit_ki_joint_scaling_fitsubset(
+    joint_data,
     QM_itp_zF1,
     ki_up_itp,
-    0.750,                                  # tail threshold
-    (cqd_sim_data[:ki][ki_start], cqd_sim_data[:ki][ki_stop]); # bracket
-    fit_ki_mode=:full,
-    n_front = n_front,
-    n_back  = n_back,
-    w       = 0.50,
-    ref_type=:geom,
+    0.750,
+    (cqd_sim_data[:ki][ki_start], cqd_sim_data[:ki][ki_stop]);
+    fit_ki_mode = joint_fit_mode,
+    n_front     = n_front,
+    n_back      = n_back,
+    w           = 0.50,
+    ref_type    = :geom,
 )
 
-data_scaled = copy(M_data_exp)
-data_scaled[:, 3] ./= result.scale_factor    # scale z
-data_scaled[:, 4] ./= result.scale_factor    # scale δz
+joint_data_scaled = copy(joint_data)
+joint_data_scaled[:, 3] ./= joint_scale_result.scale_factor
+joint_data_scaled[:, 4] ./= joint_scale_result.scale_factor
 
-data_fitting        = M_data_exp[fit_ki_idx, :]
-data_scaled_fitting = data_scaled[fit_ki_idx, :]
+joint_data_fit_subset        = joint_data[joint_fit_idx, :]
+joint_data_scaled_fit_subset = joint_data_scaled[joint_fit_idx, :]
 
-fit_scaled = fit_ki(
-    data_scaled,            # full dataset for R² (I,z)
-    data_scaled_fitting,    # fitting subset for the loss
-    cqd_sim_data[:ki],
-    (ki_start, ki_stop),
+joint_cqd_fit = FittingDataCQDQM.fit_ki_with_error(
+    cqd_model,
+    joint_data_scaled_fit_subset;
+    bounds   = (cqd_sim_data[:ki][ki_start], cqd_sim_data[:ki][ki_stop]),
+    conf     = 0.95,
+    use_Zse  = false,
 )
 
-fit_scaled = fit_ki_with_error(ki_up_itp, data_scaled_fitting; bounds=(cqd_sim_data[:ki][ki_start], cqd_sim_data[:ki][ki_stop]), conf=0.95, use_Zse=false)
+joint_fig = plot(title = L"Peak position ($F=1$)")
+plot!(
+    joint_fig,
+    joint_data_scaled[:, 1],
+    joint_data_scaled[:, 3];
+    yerror            = joint_data_scaled[:, 4],
+    label             = L"Experimental data (magnif.factor $m = %$(round(joint_scale_result.scale_factor, digits=4))$)",
+    marker            = (:circle, 3, :white),
+    markerstrokecolor = :darkgreen,
+    line              = (:solid, 2, :darkgreen),
+)
+plot!(
+    joint_fig,
+    Iscan,
+    QM_itp_zF1.(Iscan);
+    label = "Quantum mechanical model",
+    line  = (:solid, :red, 1.75),
+)
+plot!(
+    joint_fig,
+    Iscan,
+    ki_up_itp.(Iscan, Ref(joint_cqd_fit.ki));
+    label = L"CoQuantum dynamics: $k_{i}= \left( %$(round(joint_cqd_fit.ki; sigdigits=4)) \pm %$(round(joint_cqd_fit.ki_err, sigdigits=1)) \right) \times 10^{-6}$",
+    line  = (:dot, :blue, 2),
+    markerstrokewidth = 1,
+)
+plot!(
+    joint_fig,
+    Iscan,
+    ki_up_itp.(Iscan, Ref(2.3));
+    label = L"CoQuantum dynamics: $k_{i}= \left( %$(round(2.3; sigdigits=4)) \pm %$(round(joint_cqd_fit.ki_err, sigdigits=1)) \right) \times 10^{-6}$",
+    line  = (:dot, :orangered, 2),
+    markerstrokewidth = 1,
+)
+plot!(
+    joint_fig;
+    xlabel         = "Coil Current (A)",
+    ylabel         = L"$z_{\mathrm{max}}$ (mm)",
+    xaxis          = :log10,
+    yaxis          = :log10,
+    labelfontsize  = 14,
+    tickfontsize   = 12,
+    xticks         = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks         = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    size           = (900, 800),
+    legendfontsize = 12,
+    left_margin    = 3mm,
+)
+display(joint_fig)
 
-fig=plot(    
-    title = L"Peak position ($F=1$)",)
-# Scaled experimental curve with ribbon
-plot!(fig,
-    data_scaled[:,1],data_scaled[:,3],
-    yerror = data_scaled[:,4],
-    label=L"Experimental data (magnif.factor $m = %$(round(result.scale_factor, digits=4))$)",
-    marker=(:circle,3,:white),
-    markerstrokecolor=:darkgreen,
-    line=(:solid,2,:darkgreen),
-    # fillcolor = :darkgreen,
-    # fillalpha = 0.35,
-)
-# QM reference curve
-plot!(fig,Iscan, QM_itp_zF1.(Iscan),
-    label="Quantum mechanical model",
-    line=(:solid,:red,1.75)
-)
-# CQD best-fit curve (from scaled refit)
-plot!(fig,
-    Iscan, ki_up_itp.(Iscan, Ref(fit_scaled.ki)),
-    label=L"CoQuantum dynamics: $k_{i}= \left( %$(round(fit_scaled.ki; sigdigits=4)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
-    line=(:dot,:blue,2),
-    # marker=(:xcross, :blue, 0.2),
-    markerstrokewidth=1
-)
-plot!(fig,
-    Iscan, ki_up_itp.(Iscan, Ref(2.3)),
-    label=L"CoQuantum dynamics: $k_{i}= \left( %$(round(2.3; sigdigits=4)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
-    line=(:dot,:orangered,2),
-    # marker=(:xcross, :blue, 0.2),
-    markerstrokewidth=1
-)
-# Global formatting
-plot!(fig,
-    xlabel = "Coil Current (A)",
-    ylabel = L"$z_{\mathrm{max}}$ (mm)",
-    xaxis=:log10,
-    yaxis=:log10,
-    labelfontsize=14,
-    tickfontsize=12,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    # xlims=(0.010,1.05),
-    size=(900,800),
-    # legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
-    legendfontsize=12,
-    left_margin=3mm,
-)
-display(fig)
+joint_relerr_fit_pct = 100 .* (
+    f1_exp_mm ./ joint_scale_result.scale_factor .- ki_up_itp.(current_A, Ref(joint_cqd_fit.ki))
+) ./ ki_up_itp.(current_A, Ref(joint_cqd_fit.ki))
 
-relerr = 100*(yexp./result.scale_factor .- ki_up_itp.(Ic, Ref(fit_scaled.ki))) ./ ki_up_itp.(Ic, Ref(fit_scaled.ki))
 pretty_table(
-    hcat(Ic, yexp ./ result.scale_factor, ki_up_itp.(Ic, Ref(fit_scaled.ki)), relerr);
+    hcat(
+        current_A,
+        f1_exp_mm ./ joint_scale_result.scale_factor,
+        ki_up_itp.(current_A, Ref(joint_cqd_fit.ki)),
+        joint_relerr_fit_pct,
+    );
     column_labels = [
         ["Current", "F1 exp", "UP CQD", "Rel. Error"],
-        ["[A]", "[mm]", "[mm]", "[%]"]
+        ["[A]", "[mm]", "[mm]", "[%]"],
     ],
-    alignment=:c,
-    row_label_column_alignment=:c,
-    row_group_label_alignment=:c,
-    title="COQUANTUM DYNAMICS",
-    formatters=[
+    alignment                  = :c,
+    row_label_column_alignment = :c,
+    row_group_label_alignment  = :c,
+    title                      = "COQUANTUM DYNAMICS",
+    formatters = [
         fmt__printf("%8.3f", [1]),
-        fmt__printf("%8.4f", [2,3,5]),
-        fmt__printf("%8.1f", [4,6])
+        fmt__printf("%8.4f", [2, 3]),
+        fmt__printf("%8.1f", [4]),
     ],
-    style=TextTableStyle(
-        first_line_column_label=crayon"yellow bold",
-        table_border=crayon"blue bold",
-        title=crayon"bold red"
+    style = TextTableStyle(
+        first_line_column_label = crayon"yellow bold",
+        table_border            = crayon"blue bold",
+        title                   = crayon"bold red",
     ),
-    table_format=TextTableFormat(borders=text_table_borders__unicode_rounded),
-    equal_data_column_widths=true,
+    table_format             = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    equal_data_column_widths = true,
 )
 
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-# GOODNESS OF FITS
-#++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-struct FitStats
-    logMSE::Float64
-    logRMSE::Float64
-    R2_log::Float64
-    chi2_log::Float64
-    chi2_red::Float64
-    p_chi2::Float64
-    AIC::Float64
-    BIC::Float64
-    NMAD::Float64
-end
+fitting_results[:CQD_QM_F1] = (
+    CQD     = ki_up_itp.(current_A, Ref(joint_cqd_fit.ki)),
+    ki     = (joint_cqd_fit.ki, joint_cqd_fit.ki_err),
+    mag    = joint_scale_result.scale_factor,
+)
 
+# --------------------------------------------------------------------------------------------------
+# GOODNESS OF FIT
+# --------------------------------------------------------------------------------------------------
 
-function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
-    @assert length(x) == length(y) == length(ypred)
+gof_current_A    = joint_data[:, 1];
+gof_f1_exp_mm    = joint_data[:, 3];
+gof_sigma_f1_exp = joint_data[:, 4];
 
-    N = length(y)
+gof_cqd = FittingDataCQDQM.goodness_of_fit(
+    gof_current_A,
+    gof_f1_exp_mm,
+    cqd_f1_fit_mm;
+    σ = gof_sigma_f1_exp,
+    k = 2,
+);
 
-    # --- residuals in log-space ---
-    logy    = log.(y)
-    logpred = log.(ypred)
-    r       = logy .- logpred
+gof_qm = FittingDataCQDQM.goodness_of_fit(
+    gof_current_A,
+    gof_f1_exp_mm,
+    qm_f1_fit_mm;
+    σ = gof_sigma_f1_exp,
+    k = 1,
+);
 
-    # --- core metrics in log-space ---
-    logMSE  = mean(r .^ 2)
-    logRMSE = sqrt(logMSE)
-    R2_log  = 1 - sum(r .^ 2) / sum((logy .- mean(logy)) .^ 2)
+metric_names = collect(String.(propertynames(gof_cqd)));
 
-    # --- robust scatter (NMAD) ---
-    NMAD = 1.4826 * median(abs.(r))
+gof_table = hcat(
+    [getproperty(gof_cqd, Symbol(name)) for name in metric_names],
+    [getproperty(gof_qm,  Symbol(name)) for name in metric_names],
+);
 
-    # --- χ², p-value, AIC, BIC ---
-    if isnothing(σ)
-        # No uncertainties: we cannot do a proper χ² test
-        chi2_log = NaN
-        chi2_red = NaN
-        p_chi2   = NaN
-        # Use logMSE as a surrogate for variance in "likelihood"
-        AIC = 2k + N * log(logMSE)
-        BIC = k * log(N) + N * log(logMSE)
-    else
-        @assert length(σ) == N
-        # Propagate σ into log-space: σ_log ≈ σ / y
-        σlog    = σ ./ y
-        chi2_log = sum((r ./ σlog) .^ 2)
-        dof      = max(N - k, 1)  # degrees of freedom
-        chi2_red = chi2_log / dof
+lower_is_better  = Set(["logMSE", "logRMSE", "chi2_log", "chi2_red", "AIC", "BIC", "NMAD"]);
+higher_is_better = Set(["R2_log", "p_chi2"]);
 
-        # p-value: P(χ² >= observed χ² | dof)
-        dist   = Chisq(dof)
-        p_chi2 = ccdf(dist, chi2_log)  # 1 - cdf(dist, chi2_log)
-
-        # AIC/BIC using χ² (Gaussian likelihood)
-        AIC = 2k + chi2_log
-        BIC = k * log(N) + chi2_log
-    end
-
-    return FitStats(logMSE, logRMSE, R2_log, chi2_log, chi2_red, p_chi2, AIC, BIC, NMAD)
-end
-
-
-x_exp = data[:,1]
-y_exp = data[:,3] 
-σ_exp = data[:,4] 
-y_CQD = y_CQD_model
-y_QM  = y_QM_model 
-
-stats_CQD = goodness_of_fit(x_exp, y_exp, y_CQD; σ = σ_exp, k = 2)
-stats_QM  = goodness_of_fit(x_exp, y_exp, y_QM;  σ = σ_exp, k = 1)
-
-metrics = [
-    "logMSE",
-    "logRMSE",
-    "R2_log",
-    "chi2_log",
-    "chi2_red",
-    "p_chi2",
-    "AIC",
-    "BIC",
-    "NMAD",
-]
-
-data = [
-    stats_CQD.logMSE   stats_QM.logMSE
-    stats_CQD.logRMSE  stats_QM.logRMSE
-    stats_CQD.R2_log   stats_QM.R2_log
-    stats_CQD.chi2_log stats_QM.chi2_log
-    stats_CQD.chi2_red stats_QM.chi2_red
-    stats_CQD.p_chi2   stats_QM.p_chi2
-    stats_CQD.AIC      stats_QM.AIC
-    stats_CQD.BIC      stats_QM.BIC
-    stats_CQD.NMAD     stats_QM.NMAD
-]
-
-lower_is_better  = Set(["logMSE", "logRMSE", "chi2_log", "chi2_red", "AIC", "BIC", "NMAD"])
-higher_is_better = Set(["R2_log", "p_chi2"])
-
-hl_best = TextHighlighter(
+best_metric_highlighter = TextHighlighter(
     (tbl, i, j) -> begin
-        # Only evaluate columns 1 (CQD) and 2 (QM)
         if !(j == 1 || j == 2)
             return false
         end
 
-        metric = metrics[i]   # row label from your vector
-        v_CQD = tbl[i, 1]
-        v_QM  = tbl[i, 2]
+        metric_name = metric_names[i]
+        cqd_value   = tbl[i, 1]
+        qm_value    = tbl[i, 2]
 
-        # safety: both numeric
-        if !(isa(v_CQD, Number) && isa(v_QM, Number))
+        if !(isa(cqd_value, Number) && isa(qm_value, Number))
             return false
         end
 
-        if metric in lower_is_better
-            best = min(v_CQD, v_QM)
-            return tbl[i, j] == best
+        if !isfinite(cqd_value) || !isfinite(qm_value)
+            return false
+        end
 
-        elseif metric in higher_is_better
-            best = max(v_CQD, v_QM)
-            return tbl[i, j] == best
+        if metric_name in lower_is_better
+            best_value = min(cqd_value, qm_value)
+            return isapprox(tbl[i, j], best_value; atol = 0, rtol = sqrt(eps(Float64)))
+        elseif metric_name in higher_is_better
+            best_value = max(cqd_value, qm_value)
+            return isapprox(tbl[i, j], best_value; atol = 0, rtol = sqrt(eps(Float64)))
         end
 
         return false
     end,
-    crayon"fg:black bg:#fff7a1"
+    crayon"fg:black bg:#fff7a1 bold",
 );
 
+pretty_table(
+    gof_table;
+    column_labels               = ["CQD", "QM"],
+    row_labels                  = metric_names,
+    row_label_column_alignment  = :l,
+    highlighters                = [best_metric_highlighter],
+    alignment                   = [:c, :c],
+    style = TextTableStyle(
+        first_line_column_label = crayon"yellow bold",
+        table_border            = crayon"blue bold",
+        column_label            = crayon"yellow bold",
+    ),
+    table_format             = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    equal_data_column_widths = true,
+)
+
+
+
+# ==================================================================================================
+# ΔZ FITTING
+# ==================================================================================================
+
+current_A      = data_exp.Ic
+sigma_current  = data_exp.σIc
+Δz_exp_mm      = data_exp.Δz
+sigma_Δz_exp   = data_exp.σΔz
+
+# --------------------------------------------------------------------------------------------------
+# QUANTUM MECHANICS vs EXPERIMENT
+# --------------------------------------------------------------------------------------------------
+
+qm_Δz_mm   = QM_itp_Δz.(current_A)
+
+qm_fit = FittingDataCQDQM.fit_QM_scale_model(
+    current_A,
+    Δz_exp_mm,
+    QM_itp_Δz;
+    offset   = false,
+    fitspace = :log10,
+    σy       = sigma_Δz_exp,
+    idx      = fit_idx,
+    project  = :model_to_y,
+)
+
+qm_alpha       = qm_fit.α
+qm_sigma_alpha = qm_fit.σα
+qm_beta        = qm_fit.β
+qm_sigma_beta  = qm_fit.σβ
+
+qm_Δz_fit_mm = qm_alpha .* qm_Δz_mm .+ qm_beta
+
+qm_relerr_raw_pct = 100 .* (Δz_exp_mm .- qm_Δz_mm)     ./ qm_Δz_mm
+qm_relerr_fit_pct = 100 .* (Δz_exp_mm .- qm_Δz_fit_mm) ./ qm_Δz_fit_mm
+
+if qm_sigma_beta !== nothing
+    @info @sprintf(
+        "Δz QM fit: Experiment = (%.3f ± %.3f) * QM + (%.3f ± %.3f)",
+        qm_alpha, qm_sigma_alpha, qm_beta, qm_sigma_beta
+    )
+else
+    @info @sprintf(
+        "Δz QM fit: Experiment = (%.3f ± %.3f) * QM",
+        qm_alpha, qm_sigma_alpha
+    )
+end
 
 pretty_table(
-    data;
-    column_labels = ["CQD", "QM"],
-    row_labels    = metrics,
-    row_label_column_alignment = :l,
-    highlighters  = [hl_best],
-    alignment     = [:c,:c],
-    style         = TextTableStyle(
-                first_line_column_label = crayon"yellow bold",
-                table_border  = crayon"blue bold",
-                column_label  = crayon"yellow bold",
-                ),
-    table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-    equal_data_column_widths= true,
+    hcat(current_A, Δz_exp_mm, qm_Δz_mm, qm_relerr_raw_pct, qm_Δz_fit_mm, qm_relerr_fit_pct);
+    column_labels = [
+        ["Current", "Δz exp", "Δz QM", "Rel. Error", "Δz fitted QM", "Rel. Error"],
+        ["[A]", "[mm]", "[mm]", "[%]", "[mm]", "[%]"],
+    ],
+    alignment                  = :c,
+    row_label_column_alignment = :c,
+    row_group_label_alignment  = :c,
+    title                      = "QUANTUM MECHANICS",
+    formatters = [
+        fmt__printf("%8.3f", [1]),
+        fmt__printf("%8.4f", [2, 3, 5]),
+        fmt__printf("%8.1f", [4, 6]),
+    ],
+    style = TextTableStyle(
+        first_line_column_label = crayon"yellow bold",
+        table_border            = crayon"blue bold",
+        title                   = crayon"bold red",
+    ),
+    table_format             = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    equal_data_column_widths = true,
 )
+
+qm_fig = scatter(
+    current_A,
+    Δz_exp_mm;
+    yerror = sigma_Δz_exp,
+    label  = "Experimental data",
+)
+scatter!(
+    qm_fig,
+    current_A[qm_fit.used_mask],
+    Δz_exp_mm[qm_fit.used_mask];
+    label  = "Used in fit",
+    marker = :diamond,
+)
+plot!(qm_fig, current_A, qm_Δz_mm;     lw = 2, label = "QM")
+plot!(qm_fig, current_A, qm_Δz_fit_mm; lw = 2, label = "$(@sprintf("%.3f", qm_alpha)) × QM + $(@sprintf("%.3f", qm_beta))")
+plot!(qm_fig; xlabel = "Current (A)", ylabel = L"$\Delta z_{\mathrm{peak}}$ (mm)")
+
+fitting_results[:QM_Δz] = (
+    Δz     = qm_Δz_fit_mm,
+    mag    = (qm_alpha, qm_sigma_alpha),
+    cutoff = (qm_beta, qm_sigma_beta),
+)
+
+
+# --------------------------------------------------------------------------------------------------
+# CQD vs EXPERIMENT
+# --------------------------------------------------------------------------------------------------
+
+cqd_model = (I, k) -> ki_Δ_itp(I, k)
+
+ki_bounds = (
+    minimum(cqd_sim_data.ki[ki_start:ki_stop]),
+    maximum(cqd_sim_data.ki[ki_start:ki_stop]),
+)
+
+cqd_k_fit_idx = findall(current_A .< 0.100)
+
+cqd_fit = FittingDataCQDQM.fit_scale_and_k(
+    current_A,
+    Δz_exp_mm,
+    cqd_model;
+    σy        = sigma_Δz_exp,
+    bounds    = ki_bounds,
+    idx_k     = cqd_k_fit_idx,
+    offset    = false,
+    fit_alpha = true,
+    idx_alpha = fit_idx,
+    fitspace  = :log10,
+)
+
+cqd_k_best       = cqd_fit.k
+cqd_alpha        = cqd_fit.α
+cqd_sigma_alpha  = cqd_fit.σα
+cqd_beta         = cqd_fit.β
+cqd_sigma_beta   = cqd_fit.σβ
+
+cqd_Δz_fit_mm      = cqd_alpha .* cqd_model.(current_A, Ref(cqd_k_best)) .+ cqd_beta ;
+cqd_relerr_fit_pct = 100 .* (Δz_exp_mm .- cqd_Δz_fit_mm) ./ cqd_Δz_fit_mm ;
+
+@info @sprintf(
+    "Δz CQD fit: α = %.3f, β = %.3f, ki = %.6f",
+    cqd_alpha, cqd_beta, cqd_k_best
+);
+
+pretty_table(
+    hcat(current_A, Δz_exp_mm, cqd_Δz_fit_mm, cqd_relerr_fit_pct);
+    column_labels = [
+        ["Current", "Δz exp", "Δz CQD", "Rel. Error"],
+        ["[A]", "[mm]", "[mm]", "[%]"],
+    ],
+    alignment                  = :c,
+    row_label_column_alignment = :c,
+    row_group_label_alignment  = :c,
+    title                      = "COQUANTUM DYNAMICS",
+    formatters = [
+        fmt__printf("%8.3f", [1]),
+        fmt__printf("%8.4f", [2, 3]),
+        fmt__printf("%8.1f", [4]),
+    ],
+    style = TextTableStyle(
+        first_line_column_label = crayon"yellow bold",
+        table_border            = crayon"blue bold",
+        title                   = crayon"bold red",
+    ),
+    table_format             = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    equal_data_column_widths = true,
+)
+
+cqd_fig_linear = scatter(
+    current_A,
+    Δz_exp_mm;
+    yerror            = sigma_Δz_exp,
+    marker            = (:circle, 2, :white),
+    markerstrokecolor = :red,
+    label             = "Experiment",
+    xlabel            = L"$I$ (A)",
+    ylabel            = L"$\Delta z_{\mathrm{max}}$ (mm)",
+    legend            = :topleft,
+);
+plot!(
+    cqd_fig_linear,
+    current_A,
+    cqd_Δz_fit_mm;
+    label = L"Fit: $\alpha f(I,k)$",
+    lw    = 2,
+    lc    = :blue,
+)
+
+cqd_fig_log = scatter(
+    current_A,
+    Δz_exp_mm;
+    yerror            = sigma_Δz_exp,
+    marker            = (:circle, 2, :white),
+    markerstrokecolor = :red,
+    xscale            = :log10,
+    yscale            = :log10,
+    label             = "Experiment",
+    xlabel            = L"$I$ (A)",
+    ylabel            = L"$z_{\mathrm{max}}$ (mm)",
+);
+plot!(
+    cqd_fig_log,
+    current_A,
+    cqd_Δz_fit_mm;
+    lw    = 2,
+    lc    = :blue,
+    label = L"Fit: $\alpha=%$(round(cqd_alpha, digits=3))$, $k_{i}=%$(round(cqd_k_best; digits=2))\times 10^{-6}$",
+)
+
+plot(cqd_fig_linear, cqd_fig_log; layout = (2, 1), size = (800, 800))
+
+fitting_results[:CQD_Δz] = (
+    Δz     = cqd_Δz_fit_mm,
+    ki     = cqd_k_best,
+    mag    = (cqd_alpha, cqd_sigma_alpha),
+    cutoff = (cqd_beta, cqd_sigma_beta),
+)
+
+
+# --------------------------------------------------------------------------------------------------
+# JOINT CQD + QM SCALING ANALYSIS
+# --------------------------------------------------------------------------------------------------
+
+joint_fit_mode = :full
+n_front        = 8
+n_back         = 8
+
+joint_data = hcat(
+    combined_result[:Current].Ic,
+    combined_result[:Current].σIc,
+    combined_result[combined_method].Δz,
+    combined_result[combined_method].σΔz,
+);
+
+n_joint_rows = size(joint_data, 1);
+
+low_range  = 1:n_front;
+high_range = (n_joint_rows - n_back + 1):n_joint_rows;
+
+@assert last(low_range) ≤ n_joint_rows;
+@assert first(high_range) ≥ 1;
+
+joint_fit_idx = begin
+    if joint_fit_mode === :full
+        Colon()
+    elseif joint_fit_mode === :low
+        low_range
+    elseif joint_fit_mode === :high
+        high_range
+    elseif joint_fit_mode === :low_high
+        vcat(low_range, high_range)
+    else
+        error("Unknown joint_fit_mode = $joint_fit_mode")
+    end
+end
+
+joint_scale_result = FittingDataCQDQM.fit_ki_joint_scaling_fitsubset(
+    joint_data,
+    QM_itp_Δz,
+    ki_Δ_itp,
+    0.750,
+    (cqd_sim_data[:ki][ki_start], cqd_sim_data[:ki][ki_stop]);
+    fit_ki_mode = joint_fit_mode,
+    n_front     = n_front,
+    n_back      = n_back,
+    w           = 0.50,
+    ref_type    = :geom,
+)
+
+joint_data_scaled = copy(joint_data);
+joint_data_scaled[:, 3] ./= joint_scale_result.scale_factor;
+joint_data_scaled[:, 4] ./= joint_scale_result.scale_factor;
+
+joint_data_fit_subset        = joint_data[joint_fit_idx, :];
+joint_data_scaled_fit_subset = joint_data_scaled[joint_fit_idx, :];
+
+joint_cqd_fit = FittingDataCQDQM.fit_ki_with_error(
+    cqd_model,
+    joint_data_scaled_fit_subset;
+    bounds   = (cqd_sim_data[:ki][ki_start], cqd_sim_data[:ki][ki_stop]),
+    conf     = 0.95,
+    use_Zse  = false,
+)
+
+joint_fig = plot(title = L"Peak position ($F=1$)");
+plot!(
+    joint_fig,
+    joint_data_scaled[:, 1],
+    joint_data_scaled[:, 3];
+    yerror            = joint_data_scaled[:, 4],
+    label             = L"Experimental data (magnif.factor $m = %$(round(joint_scale_result.scale_factor, digits=4))$)",
+    marker            = (:circle, 3, :white),
+    markerstrokecolor = :darkgreen,
+    line              = (:solid, 2, :darkgreen),
+);
+plot!(
+    joint_fig,
+    Iscan,
+    QM_itp_Δz.(Iscan);
+    label = "Quantum mechanical model",
+    line  = (:solid, :red, 1.75),
+);
+plot!(
+    joint_fig,
+    Iscan,
+    ki_Δ_itp.(Iscan, Ref(joint_cqd_fit.ki));
+    label = L"CoQuantum dynamics: $k_{i}= \left( %$(round(joint_cqd_fit.ki; sigdigits=4)) \pm %$(round(joint_cqd_fit.ki_err, sigdigits=1)) \right) \times 10^{-6}$",
+    line  = (:dot, :blue, 2),
+    markerstrokewidth = 1,
+);
+plot!(
+    joint_fig,
+    Iscan,
+    ki_Δ_itp.(Iscan, Ref(2.3));
+    label = L"CoQuantum dynamics: $k_{i}= \left( %$(round(2.3; sigdigits=4)) \pm %$(round(joint_cqd_fit.ki_err, sigdigits=1)) \right) \times 10^{-6}$",
+    line  = (:dot, :orangered, 2),
+    markerstrokewidth = 1,
+);
+plot!(
+    joint_fig;
+    xlabel         = "Coil Current (A)",
+    ylabel         = L"$\Delta z_{\mathrm{max}}$ (mm)",
+    xaxis          = :log10,
+    yaxis          = :log10,
+    labelfontsize  = 14,
+    tickfontsize   = 12,
+    xticks         = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks         = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    size           = (900, 800),
+    legendfontsize = 12,
+    left_margin    = 3mm,
+);
+display(joint_fig)
+
+joint_relerr_fit_pct = 100 .* (
+    Δz_exp_mm ./ joint_scale_result.scale_factor .- ki_Δ_itp.(current_A, Ref(joint_cqd_fit.ki))
+) ./ ki_Δ_itp.(current_A, Ref(joint_cqd_fit.ki)) ;
+
+pretty_table(
+    hcat(
+        current_A,
+        Δz_exp_mm ./ joint_scale_result.scale_factor,
+        ki_Δ_itp.(current_A, Ref(joint_cqd_fit.ki)),
+        joint_relerr_fit_pct,
+    );
+    column_labels = [
+        ["Current", "Δz exp", "Δz CQD", "Rel. Error"],
+        ["[A]", "[mm]", "[mm]", "[%]"],
+    ],
+    alignment                  = :c,
+    row_label_column_alignment = :c,
+    row_group_label_alignment  = :c,
+    title                      = "COQUANTUM DYNAMICS",
+    formatters = [
+        fmt__printf("%8.3f", [1]),
+        fmt__printf("%8.4f", [2, 3]),
+        fmt__printf("%8.1f", [4]),
+    ],
+    style = TextTableStyle(
+        first_line_column_label = crayon"yellow bold",
+        table_border            = crayon"blue bold",
+        title                   = crayon"bold red",
+    ),
+    table_format             = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    equal_data_column_widths = true,
+)
+
+
+fitting_results[:CQD_QM_Δz] = (
+    CQD     = ki_Δ_itp.(current_A, Ref(joint_cqd_fit.ki)),
+    ki     = (joint_cqd_fit.ki, joint_cqd_fit.ki_err),
+    mag    = joint_scale_result.scale_factor,
+);
+
+# --------------------------------------------------------------------------------------------------
+# GOODNESS OF FIT
+# --------------------------------------------------------------------------------------------------
+
+gof_current_A    = joint_data[:, 1];
+gof_Δz_exp_mm    = joint_data[:, 3];
+gof_sigma_Δz_exp = joint_data[:, 4];
+
+gof_cqd = FittingDataCQDQM.goodness_of_fit(
+    gof_current_A,
+    gof_Δz_exp_mm,
+    cqd_Δz_fit_mm;
+    σ = gof_sigma_Δz_exp,
+    k = 2,
+);
+
+gof_qm = FittingDataCQDQM.goodness_of_fit(
+    gof_current_A,
+    gof_Δz_exp_mm,
+    qm_Δz_fit_mm;
+    σ = gof_sigma_Δz_exp,
+    k = 1,
+);
+
+metric_names = collect(String.(propertynames(gof_cqd)));
+
+gof_table = hcat(
+    [getproperty(gof_cqd, Symbol(name)) for name in metric_names],
+    [getproperty(gof_qm,  Symbol(name)) for name in metric_names],
+);
+
+lower_is_better  = Set(["logMSE", "logRMSE", "chi2_log", "chi2_red", "AIC", "BIC", "NMAD"]);
+higher_is_better = Set(["R2_log", "p_chi2"]);
+
+best_metric_highlighter = TextHighlighter(
+    (tbl, i, j) -> begin
+        if !(j == 1 || j == 2)
+            return false
+        end
+
+        metric_name = metric_names[i]
+        cqd_value   = tbl[i, 1]
+        qm_value    = tbl[i, 2]
+
+        if !(isa(cqd_value, Number) && isa(qm_value, Number))
+            return false
+        end
+
+        if !isfinite(cqd_value) || !isfinite(qm_value)
+            return false
+        end
+
+        if metric_name in lower_is_better
+            best_value = min(cqd_value, qm_value)
+            return isapprox(tbl[i, j], best_value; atol = 0, rtol = sqrt(eps(Float64)))
+        elseif metric_name in higher_is_better
+            best_value = max(cqd_value, qm_value)
+            return isapprox(tbl[i, j], best_value; atol = 0, rtol = sqrt(eps(Float64)))
+        end
+
+        return false
+    end,
+    crayon"fg:black bg:#fff7a1 bold",
+);
+
+pretty_table(
+    gof_table;
+    column_labels               = ["CQD", "QM"],
+    row_labels                  = metric_names,
+    row_label_column_alignment  = :l,
+    highlighters                = [best_metric_highlighter],
+    alignment                   = [:c, :c],
+    style = TextTableStyle(
+        first_line_column_label = crayon"yellow bold",
+        table_border            = crayon"blue bold",
+        column_label            = crayon"yellow bold",
+    ),
+    table_format             = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    equal_data_column_widths = true,
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
