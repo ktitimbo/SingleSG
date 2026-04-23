@@ -246,6 +246,47 @@ function grad_dnormBdz(
     end
 end
 
+function ratio_a_dnormBdz_over_normB(
+    x::Real,
+    z::Real;
+    y::Real = 0.0,
+    Iw::Real = 0.2,
+    z0::Real = 1.3a,
+)
+    Bmag = norm(B_total(x, y, z; z0=z0, Iw=Iw))
+
+    if iszero(Bmag)
+        return NaN
+    else
+        return a * grad_dnormBdz(x, z; y=y, Iw=Iw, z0=z0, scale_factor=1.0) / Bmag
+    end
+end
+
+function ratio_a_dnormBdz_over_normB(
+    xs::AbstractVector,
+    zs::AbstractVector;
+    y::Real = 0.0,
+    Iw::Real = 0.2,
+    z0::Real = 1.3a,
+    axis_order::Symbol = :xz,
+)
+    if axis_order === :xz
+        return [
+            ratio_a_dnormBdz_over_normB(x, z; y=y, Iw=Iw, z0=z0)
+            for x in xs, z in zs
+        ]
+    elseif axis_order === :zx
+        return [
+            ratio_a_dnormBdz_over_normB(x, z; y=y, Iw=Iw, z0=z0)
+            for z in zs, x in xs
+        ]
+    else
+        error("axis_order must be :xz or :zx")
+    end
+end
+
+
+# In the limit ℓ → ∞
 function approx_B_total(x,y,z; z0=1.3*a,Iw=0.2)
     ρ1, ρ2 = hypot(x-a, z-z0), hypot(x+a, z-z0)
     if ρ1 == 0 || ρ2 == 0
@@ -306,7 +347,7 @@ function approx_normB(x,z; Iw=0.2, z0=1.3*a)
     return 2 * a * C  / (ρ1 * ρ2)  
 end
 
-function ratio_dBdz_normB(x,z; z0=1.3*a)
+function approx_ratio_dBdz_normB(x,z; z0=1.3*a)
     Δz = z - z0
     ρ1 = hypot(x-a, Δz)
     ρ2 = hypot(x+a, Δz)
@@ -335,12 +376,12 @@ y_top  = fill(2.0, length(x_fill));
 y_trench = z_magnet_trench.(x_line) / a;
 y_bottom = fill(-2, length(x_fill));
 
-nx, nz = 601, 1201
+nx, nz = 601, 1201 ;
 
 # -----------------------------
 # Current
 # -----------------------------
-Iw_set = 0.100
+Iw_set = 0.100 ;
 
 # -------------- Compute the spatial average ------------------------
 xmin, xmax = -0.5*x_slit, 0.5*x_slit ;
@@ -348,97 +389,326 @@ ymin, ymax = -ℓ, ℓ;
 zmin, zmax = -0.5*z_slit, 0.5*z_slit ;
 
 xmin, xmax = -2.2e-3, 2.2e-3 ;
-zmin, zmax = -750e-6, 750e-6 ;
+zmin, zmax = -720e-6, 720e-6 ;
 
-area_xz = (xmax - xmin) * (zmax - zmin);
-volume_xyz = (xmax - xmin) * (ymax - ymin) * (zmax - zmin);
+function spatial_stats(
+    ;
+    mode::Symbol,
+    dimensionality::Symbol,
+    xmin::Real,
+    xmax::Real,
+    zmin::Real,
+    zmax::Real,
+    y0::Real = 0.0,
+    Iw::Real,
+    ymin::Real = -ℓ,
+    ymax::Real =  ℓ,
+    rtol::Real = 1e-12,
+    atol::Real = 1e-16,
+    verbose::Bool = true,
+)
+    mode ∈ (:gradient, :magnitude) || error("mode must be :gradient or :magnitude")
+    dimensionality ∈ (:dim2d, :dim3d) || error("dimensionality must be :dim2d or :dim3d")
 
-# =========================================================
-# Gradient of |B|
-# =========================================================
+    xmax > xmin || error("xmax must be greater than xmin")
+    zmax > zmin || error("zmax must be greater than zmin")
+    if dimensionality === :dim3d
+        ymax > ymin || error("ymax must be greater than ymin")
+    end
 
-# 2D spatial average over (x, z) at y = 0
-grad2d(v) = grad_dnormBdz(v[1], v[2]; y=0.0, Iw=Iw_set, scale_factor=1.0);
-int_grad2d_mean, err_grad2d_mean = hcubature(grad2d, [xmin, zmin], [xmax, zmax]);
-grad_avg_2d = int_grad2d_mean / area_xz;
+    area_xz = (xmax - xmin) * (zmax - zmin)
 
-grad2d_sq(v) = grad2d(v)^2;
-int_grad2d_sq, err_grad2d_sq = hcubature(grad2d_sq, [xmin, zmin], [xmax, zmax]);
-grad_var_2d = int_grad2d_sq / area_xz - grad_avg_2d^2;
-grad_std_2d = sqrt(max(grad_var_2d, 0.0));
-grad_rel_2d = grad_std_2d / abs(grad_avg_2d);
+    # For the 3D case, the integration volume is a parallelepiped region:
+    # x ∈ [xmin, xmax], y ∈ [ymin, ymax], z ∈ [zmin, zmax].
+    volume_xyz = (xmax - xmin) * (ymax - ymin) * (zmax - zmin)
 
-# 3D spatial average over (x, y, z)
-grad3d(v) = grad_dnormBdz(v[1], v[3]; y=v[2], Iw=Iw_set, scale_factor=1.0);
-int_grad3d_mean, err_grad3d_mean = hcubature(grad3d, [xmin, ymin, zmin], [xmax, ymax, zmax]);
-grad_avg_3d = int_grad3d_mean / volume_xyz;
+    integrand(v) = begin
+        if dimensionality === :dim2d
+            x, z = v
+            if mode === :gradient
+                grad_dnormBdz(x, z; y = y0, Iw = Iw, scale_factor = 1.0)
+            else
+                norm(B_total(x, y0, z; Iw = Iw))
+            end
+        else
+            x, y, z = v
+            if mode === :gradient
+                grad_dnormBdz(x, z; y = y, Iw = Iw, scale_factor = 1.0)
+            else
+                norm(B_total(x, y, z; Iw = Iw))
+            end
+        end
+    end
 
-grad3d_sq(v) = grad3d(v)^2;
-int_grad3d_sq, err_grad3d_sq = hcubature(grad3d_sq, [xmin, ymin, zmin], [xmax, ymax, zmax]);
-grad_var_3d = int_grad3d_sq / volume_xyz - grad_avg_3d^2;
-grad_std_3d = sqrt(max(grad_var_3d, 0.0));
-grad_rel_3d = grad_std_3d / abs(grad_avg_3d);
+    lower = dimensionality === :dim2d ? [xmin, zmin] : [xmin, ymin, zmin]
+    upper = dimensionality === :dim2d ? [xmax, zmax] : [xmax, ymax, zmax]
+    measure = dimensionality === :dim2d ? area_xz : volume_xyz
 
-# =========================================================
-# Magnetic field magnitude |B|
-# =========================================================
+    int_mean, err_mean = hcubature(integrand, lower, upper; rtol = rtol, atol = atol)
+    avg = int_mean / measure
 
-# 2D spatial average over (x, z) at y = 0
-bmag2d(v) = norm(B_total(v[1], 0.0, v[2]; Iw=Iw_set));
-int_bmag2d_mean, err_bmag2d_mean = hcubature(bmag2d, [xmin, zmin], [xmax, zmax]);
-b_avg_2d = int_bmag2d_mean / area_xz;
+    integrand_sq(v) = integrand(v)^2
+    int_sq, err_sq = hcubature(integrand_sq, lower, upper; rtol = rtol, atol = atol)
 
-bmag2d_sq(v) = bmag2d(v)^2;
-int_bmag2d_sq, err_bmag2d_sq = hcubature(bmag2d_sq, [xmin, zmin], [xmax, zmax]);
-b_var_2d = int_bmag2d_sq / area_xz - b_avg_2d^2;
-b_std_2d = sqrt(max(b_var_2d, 0.0));
-b_rel_2d = b_std_2d / abs(b_avg_2d);
+    var = int_sq / measure - avg^2
+    std = sqrt(max(var, 0.0))
+    rel_inhom = iszero(avg) ? NaN : std / abs(avg)
 
-# 3D spatial average over (x, y, z)
-bmag3d(v) = norm(B_total(v[1], v[2], v[3]; Iw=Iw_set));
-int_bmag3d_mean, err_bmag3d_mean = hcubature(bmag3d, [xmin, ymin, zmin], [xmax, ymax, zmax]);
-b_avg_3d = int_bmag3d_mean / volume_xyz;
+    if verbose
+        quantity_label, avg_unit, var_unit, std_unit =
+            mode === :gradient ?
+            ("d|B|/dz", "T/m", "(T/m)^2", "T/m") :
+            ("|B|", "T", "T^2", "T")
 
-bmag3d_sq(v) = bmag3d(v)^2;
-int_bmag3d_sq, err_bmag3d_sq = hcubature(bmag3d_sq, [xmin, ymin, zmin], [xmax, ymax, zmax]);
-b_var_3d = int_bmag3d_sq / volume_xyz - b_avg_3d^2;
-b_std_3d = sqrt(max(b_var_3d, 0.0));
-b_rel_3d = b_std_3d / abs(b_avg_3d);
+        if dimensionality === :dim2d
+            header = @sprintf("---- %s: Spatial 2D at y = %.3e m ----", quantity_label, y0)
+            dim_label = "Spatial 2D"
+        else
+            header = @sprintf("---- %s: Spatial 3D rectang. parallelepiped ----", quantity_label)
+            dim_label = "Spatial 3D"
+        end
 
-# =========================================================
-# Results |B|
-# =========================================================
+        @info header
+        @info @sprintf("%-42s = %.3e %s", "$(dim_label) average of $(quantity_label)", avg, avg_unit)
+        @info @sprintf("%-42s = %.3e %s", "$(dim_label) variance of $(quantity_label)", var, var_unit)
+        @info @sprintf("%-42s = %.3e %s", "$(dim_label) std of $(quantity_label)", std, std_unit)
+        @info @sprintf("%-42s = %.1f %%", "$(dim_label) rel. inhomogeneity of $(quantity_label)", 100 * rel_inhom)
+        # @info @sprintf("%-42s = %.3e", "Estimated cubature error on mean", err_mean)
+        # @info @sprintf("%-42s = %.3e", "Estimated cubature error on 2nd moment", err_sq)
+    end
 
-@info "---- Gradient of |B|: 2D ----"
-@info @sprintf("Spatial 2D average of d|B|/dz = %.3e T/m", grad_avg_2d)
-@info @sprintf("Spatial 2D variance of d|B|/dz = %.3e (T/m)^2", grad_var_2d)
-@info @sprintf("Spatial 2D std of d|B|/dz = %.3e T/m", grad_std_2d)
-@info @sprintf("Spatial 2D relative inhomogeneity of d|B|/dz = %.2f %%", 100 * grad_rel_2d)
+    return (
+        mode = mode,
+        dimensionality = dimensionality,
+        y0 = dimensionality === :dim2d ? y0 : nothing,
+        bounds = dimensionality === :dim2d ?
+            (xmin = xmin, xmax = xmax, zmin = zmin, zmax = zmax) :
+            (xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, zmin = zmin, zmax = zmax),
+        measure = measure,
+        integral_mean = int_mean,
+        err_mean = err_mean,
+        average = avg,
+        integral_second_moment = int_sq,
+        err_second_moment = err_sq,
+        variance = var,
+        std = std,
+        relative_inhomogeneity = rel_inhom,
+    )
+end
 
-@info "---- Gradient of |B|: 3D ----"
-@info @sprintf("Spatial 3D average of d|B|/dz = %.3e T/m", grad_avg_3d)
-@info @sprintf("Spatial 3D variance of d|B|/dz = %.3e (T/m)^2", grad_var_3d)
-@info @sprintf("Spatial 3D std of d|B|/dz = %.3e T/m", grad_std_3d)
-@info @sprintf("Spatial 3D relative inhomogeneity of d|B|/dz = %.2f %%", 100 * grad_rel_3d)
+spatial_stats(
+    mode = :magnitude,
+    dimensionality = :dim2d,
+    xmin = xmin,
+    xmax = xmax,
+    zmin = zmin,
+    zmax = zmax,
+    y0 = 0.0,
+    Iw = Iw_set,
+);
 
-@info "---- Magnetic field magnitude |B|: 2D ----"
-@info @sprintf("Spatial 2D average of |B| = %.6e T", b_avg_2d)
-@info @sprintf("Spatial 2D variance of |B| = %.6e T^2", b_var_2d)
-@info @sprintf("Spatial 2D std of |B| = %.6e T", b_std_2d)
-@info @sprintf("Spatial 2D relative inhomogeneity of |B| = %.2f %%", 100 * b_rel_2d)
+spatial_stats(
+    mode = :magnitude,
+    dimensionality = :dim3d,
+    xmin = xmin,
+    xmax = xmax,
+    zmin = zmin,
+    zmax = zmax,
+    y0 = 0.0,
+    Iw = Iw_set,
+);
 
-@info "---- Magnetic field magnitude |B|: 3D ----"
-@info @sprintf("Spatial 3D average of |B| = %.6e T", b_avg_3d)
-@info @sprintf("Spatial 3D variance of |B| = %.6e T^2", b_var_3d)
-@info @sprintf("Spatial 3D std of |B| = %.6e T", b_std_3d)
-@info @sprintf("Spatial 3D relative inhomogeneity of |B| = %.2f %%", 100 * b_rel_3d)
+spatial_stats(
+    mode = :gradient,
+    dimensionality = :dim2d,
+    xmin = xmin,
+    xmax = xmax,
+    zmin = zmin,
+    zmax = zmax,
+    y0 = 0.0,
+    Iw = Iw_set,
+);
+
+spatial_stats(
+    mode = :gradient,
+    dimensionality = :dim3d,
+    xmin = xmin,
+    xmax = xmax,
+    zmin = zmin,
+    zmax = zmax,
+    y0 = 0.0,
+    Iw = Iw_set,
+);
 
 
-xmin_in, xmax_in = 
+# Volume in a trapezoidal frustum
+xmin_in, xmax_in  = -2.25e-2, 2.25e-2 ;
+zmin_in, zmax_in  = -180e-6, 180e-6 ;
+xmin_out, xmax_out  = -2.6e-2, 2.6e-2 ;
+zmin_out, zmax_out  = -240e-6, 240e-6 ; # Iw=0A
+# zmin_out, zmax_out  = -120e-6, 720e-6 # Iw=1A
 
+function frustum_stats(mode::Symbol;
+    ℓ::Real,
+    xmin_in::Real,
+    xmax_in::Real,
+    zmin_in::Real,
+    zmax_in::Real,
+    xmin_out::Real,
+    xmax_out::Real,
+    zmin_out::Real,
+    zmax_out::Real,
+    Iw::Real,
+    rtol::Real = 1e-12,
+    atol::Real = 1e-16,
+    verbose::Bool = true,
+)
+    if mode !== :gradient && mode !== :magnitude
+        error("mode must be :gradient or :magnitude")
+    end
 
+    t_of_y(y) = (y + ℓ) / (2ℓ)
 
+    x_min(y) = xmin_in  + t_of_y(y) * (xmin_out - xmin_in)
+    x_max(y) = xmax_in  + t_of_y(y) * (xmax_out - xmax_in)
+    z_min(y) = zmin_in  + t_of_y(y) * (zmin_out - zmin_in)
+    z_max(y) = zmax_in  + t_of_y(y) * (zmax_out - zmax_in)
 
+    vol_map(v) = begin
+        _, _, y = v
+        xmin_y = x_min(y)
+        xmax_y = x_max(y)
+        zmin_y = z_min(y)
+        zmax_y = z_max(y)
+        (xmax_y - xmin_y) * (zmax_y - zmin_y)
+    end
+
+    volume, err_volume = hcubature(
+        vol_map,
+        [0.0, 0.0, -ℓ],
+        [1.0, 1.0,  ℓ];
+        rtol = rtol,
+        atol = atol,
+    )
+
+    f_xyz(x, y, z) = if mode === :gradient
+        grad_dnormBdz(x, z; y=y, Iw=Iw, scale_factor=1.0)
+    else
+        norm(B_total(x, y, z; Iw=Iw)) / 1.0
+    end
+
+    f_map(v) = begin
+        u, w, y = v
+
+        xmin_y = x_min(y)
+        xmax_y = x_max(y)
+        zmin_y = z_min(y)
+        zmax_y = z_max(y)
+
+        x = xmin_y + u * (xmax_y - xmin_y)
+        z = zmin_y + w * (zmax_y - zmin_y)
+
+        jac = (xmax_y - xmin_y) * (zmax_y - zmin_y)
+
+        f_xyz(x, y, z) * jac
+    end
+
+    int_mean, err_mean = hcubature(
+        f_map,
+        [0.0, 0.0, -ℓ],
+        [1.0, 1.0,  ℓ];
+        rtol = rtol,
+        atol = atol,
+    )
+
+    avg = int_mean / volume
+
+    fvar_map(v) = begin
+        u, w, y = v
+
+        xmin_y = x_min(y)
+        xmax_y = x_max(y)
+        zmin_y = z_min(y)
+        zmax_y = z_max(y)
+
+        x = xmin_y + u * (xmax_y - xmin_y)
+        z = zmin_y + w * (zmax_y - zmin_y)
+
+        jac = (xmax_y - xmin_y) * (zmax_y - zmin_y)
+
+        (f_xyz(x, y, z) - avg)^2 * jac
+    end
+
+    int_var, err_var = hcubature(
+        fvar_map,
+        [0.0, 0.0, -ℓ],
+        [1.0, 1.0,  ℓ];
+        rtol = rtol,
+        atol = atol,
+    )
+
+    var = int_var / volume
+    std = sqrt(max(var, 0.0))
+    rel_inhom = iszero(avg) ? NaN : std / abs(avg)
+
+    if verbose
+        if mode === :gradient
+            @info "---- Trapezoidal frustum: d|B|/dz ----"
+            @info @sprintf("%-42s = %.3e m^3",     "Frustum volume", volume)
+            @info @sprintf("%-42s = %.3e T/m",     "Volumetric average of d|B|/dz", avg)
+            @info @sprintf("%-42s = %.3e (T/m)^2", "Volumetric variance of d|B|/dz", var)
+            @info @sprintf("%-42s = %.3e T/m",     "Volumetric std of d|B|/dz", std)
+            @info @sprintf("%-42s = %.2f %%",      "Relative vol inhomogeneity of d|B|/dz", 100 * rel_inhom)
+        else
+            @info "---- Trapezoidal frustum: |B| ----"
+            @info @sprintf("%-42s = %.3e m^3", "Frustum volume", volume)
+            @info @sprintf("%-42s = %.3e T",   "Volumetric average of |B|", avg)
+            @info @sprintf("%-42s = %.3e T^2", "Volumetric variance of |B|", var)
+            @info @sprintf("%-42s = %.3e T",   "Volumetric std of |B|", std)
+            @info @sprintf("%-42s = %.2f %%",  "Relative vol inhomogeneity of |B|", 100 * rel_inhom)
+        end
+    end
+
+    return (
+        mode = mode,
+        volume = volume,
+        err_volume = err_volume,
+        integral_mean = int_mean,
+        err_mean = err_mean,
+        average = avg,
+        integral_variance = int_var,
+        err_variance = err_var,
+        variance = var,
+        std = std,
+        relative_inhomogeneity = rel_inhom,
+    )
+end
+
+stats_grad = frustum_stats(:gradient;
+    ℓ = ℓ,
+    xmin_in = xmin_in,
+    xmax_in = xmax_in,
+    zmin_in = zmin_in,
+    zmax_in = zmax_in,
+    xmin_out = xmin_out,
+    xmax_out = xmax_out,
+    zmin_out = zmin_out,
+    zmax_out = zmax_out,
+    Iw = Iw_set,
+);
+
+stats_mag = frustum_stats(:magnitude;
+    ℓ = ℓ,
+    xmin_in = xmin_in,
+    xmax_in = xmax_in,
+    zmin_in = zmin_in,
+    zmax_in = zmax_in,
+    xmin_out = xmin_out,
+    xmax_out = xmax_out,
+    zmin_out = zmin_out,
+    zmax_out = zmax_out,
+    Iw = Iw_set
+);
 
 
 # =========================================================
@@ -1218,84 +1488,74 @@ Bz1 = [B_total(0, y, 0; Iw=Iw_set)[3] for y in y_path]
 Bz2 = [B_total(0, y, 0.150e-3; Iw=Iw_set)[3] for y in y_path]
 Bz3 = [B_total(0, y, 0.300e-3; Iw=Iw_set)[3] for y in y_path]
 Bz4 = [B_total(0, y, 0.750e-3; Iw=Iw_set)[3] for y in y_path]
-plot(1e2*y_path, 1e3*Bz1,
-    xlabel=L"$y$",
+plot(1e2*y_path, abs.(1e3*Bz1),
+    xlabel=L"$y \ \mathrm{cm}$",
     ylabel=L"$B_z(\vec{r}) \ (\mathrm{m T})$",
     line=(:solid,:red,2),
     label=L"B_z(0,y,0)")
-plot!(1e2*y_path, 1e3*Bz2,
+plot!(1e2*y_path, abs.(1e3*Bz2),
     line=(:solid,:blue,2),
     label=L"B_z(0,y,150\mathrm{\mu m })")
-plot!(1e2*y_path, 1e3*Bz3,
+plot!(1e2*y_path, abs.(1e3*Bz3),
     line=(:solid,:green,2),
     label=L"B_z(0,y,300\mathrm{\mu m })")
-plot!(1e2*y_path, 1e3*Bz4,
+plot!(1e2*y_path, abs.(1e3*Bz4),
     line=(:solid,:purple,2),
     label=L"B_z(0,y,750\mathrm{\mu m })")
 vspan!([-3.5,3.5], color=:gray, fillalpha=0.2, label="magnet")
 
 
-m1=maximum(Bz1)
-m2=maximum(Bz2)
-m3=maximum(Bz3)
-m4=maximum(Bz4)
 
-(Bz2 .- Bz1) ./ Bz1
-
-100*(m2-m1)/m1
-
-
-
-
-
-
-
-
-Z = a * [ratio_dBdz_normB(x, z) for z in zs, x in xs] ;
+# -------- Gradient to Magnitud ratio
+xmin, xmax = -2a, 2a;
+zmin, zmax = -1.2a, 1.2a;
+xs = range(xmin, xmax; length=nx);
+zs = range(zmin, zmax; length=nz);
+Z0 = a * [approx_ratio_dBdz_normB(x, z) for z in zs, x in xs] ;
+Z =  ratio_a_dnormBdz_over_normB(xs, zs; y=0,Iw=Iw_set, axis_order=:zx) ;
+finite = vec(Z[.!isnan.(Z) .& .!isinf.(Z)]);
+vmax   = Statistics.quantile(abs.(finite), 0.90)    # tweak 0.99–0.999 as you like
 fig = contour(xs/a, zs/a, Z; 
-    levels=501, 
+    levels=101, 
     fill=true, 
     cbar=true,
+    clims=(0,vmax),
     xlabel=L"x/a", 
     ylabel=L"z/a", 
     aspect_ratio=:equal,
     size = (600, 600),
-    title=L"$a\, {\partial_{z}B(x,z)}/{\vert B(x,z) \vert}$",
+    title=L"$a\, {\partial_{z}\vert \mathbf{B}(x,z)\vert}/{\vert \mathbf{B}(x,z) \vert}$",
+    colorbar_title = L"$\left(\mathrm{T}/\mathrm{m}\right)$",
     titlefontsize = 12,
     top_margin  = -20mm,
 )
-x_line = a * collect(range(-1.75, 1.75, length=10_001))
-# Top magnet edge shape
-x_fill = x_line / a 
-y_edge = z_magnet_edge.(x_line) / a
-y_top  = fill(1.6, length(x_fill))
 plot!(fig, [x_fill; reverse(x_fill)], [y_edge; reverse(y_top)];
-    seriestype = :shape, 
-    label = false,
-    color = :grey36, 
-    line = (:solid, :grey36), 
-    fillalpha = 0.75
-)
-# Bottom trench shape
-y_trench = z_magnet_trench.(x_line) / a
-y_bottom = fill(-1.6, length(x_fill))
+    seriestype = :shape, label = "Magnet",
+    color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
+);
 plot!(fig, [x_fill; reverse(x_fill)], [y_bottom; reverse(y_trench)];
-    seriestype = :shape, 
-    label = false,
-    color = :grey36, 
-    line = (:solid, :grey36), 
-    fillalpha = 0.75
+    seriestype = :shape, label = false,
+    color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
 );
-# Slit rectangle
-x_slit = 4e-3
-z_slit = 300e-6
 plot!(fig,
-    0.5 .* [-x_slit, -x_slit, x_slit,  x_slit, -x_slit] / a,
-    0.5 .* [-z_slit,  z_slit, z_slit, -z_slit, -z_slit] / a;
+    # slit_x / a,
+    # slit_z / a;
+    Shape(slit_x / a, slit_z / a),
     seriestype = :shape, label = "Slit",
-    line = (:solid, :red, 1), color = :red, fillalpha = 0.2
+    line = (:solid, :red, 1), color = :red, fillalpha = 0.15
 );
-plot!(xlim=(-1.25,1.25), ylim=(-1.2,1.0), 
+vline!(fig,[0], line=(:white,0.2), label=false);
+hline!(fig,[0], line=(:white,0.2), label=false);
+plot!(fig,
+    legend=:outerbottom,
+    legend_columns=2,
+    background_color_legend = :white,
+    foreground_color_legend = nothing,
+    xlim=(-1.75,1.75), 
+    ylim=(-1.0,1.0),
+    bottom_margin=-10mm,
+)
+plot!(xlim=(-1.25,1.25), ylim=(-1.0,1.0), 
     # left_margin=2mm,
     # bottom_margin=-50mm, 
     # right_margin=2mm, 
@@ -1311,7 +1571,7 @@ zmin, zmax = -3/50*a, 3/50*a
 nx, nz = 401, 601
 xs = range(xmin, xmax; length=nx)
 zs = range(zmin, zmax; length=nz)
-Z = a * [ratio_dBdz_normB(x, z) for z in zs, x in xs] ;
+Z = a * [approx_ratio_dBdz_normB(x, z) for z in zs, x in xs] ;
 fig = contour(xs/a, zs/a, Z; 
     levels=91, 
     fill=true, 
@@ -1326,18 +1586,19 @@ fig = contour(xs/a, zs/a, Z;
     bottom_margin = 5mm,
     left_margin = 5mm,
 )
-# Slit rectangle
-x_slit = 4e-3
-z_slit = 300e-6
 plot!(fig,
-    0.5 .* [-x_slit, -x_slit, x_slit,  x_slit, -x_slit] / a,
-    0.5 .* [-z_slit,  z_slit, z_slit, -z_slit, -z_slit] / a;
-    seriestype = :shape, label = false,
-    line = (:solid, :red, 1), color = :red, fillalpha = 0.01
+    Shape(slit_x / a, slit_z / a),
+    seriestype = :shape, label = "Slit",
+    line = (:solid, :red, 1), color = :red, fillalpha = 0.15
 );
 display(fig)
 
 
+
+
+
+using CSV
+using DataFrames
 df = CSV.read("./SG_BvsI.csv", DataFrame; header=["dI","Bz"])
 BvsI = linear_interpolation(df.dI, df.Bz; extrapolation_bc=Line())
 
@@ -1347,7 +1608,7 @@ iw = range(2e-3,1,100)
 plot(iw,BvsI.(iw))
 plot!()
 
-plot(iw,ratio_dBdz_normB(0,0)*BvsI.(iw), label=L"$\mathcal{G}=\frac{\epsilon}{a}B$",
+plot(iw,approx_ratio_dBdz_normB(0,0)*BvsI.(iw), label=L"$\mathcal{G}=\frac{\epsilon}{a}B$",
     xlabel="Current (A)",
     ylabel=L"Magnetic field Gradient $\mathcal{G}$ (T/m)",
     )
