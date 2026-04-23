@@ -8,6 +8,7 @@ Plots.default(
 using Plots.PlotMeasures
 # Data I/O and numerical tools
 using LinearAlgebra
+using HCubature
 using Interpolations
 using Statistics
 # Aesthetics and output formatting
@@ -25,6 +26,8 @@ using Alert
 const μ0 = 4π*1e-7
 const ℓ = 3.5e-2
 const a = 2.5e-3
+const x_slit = 4e-3
+const z_slit = 300e-6
 
 
 """
@@ -131,8 +134,17 @@ function B_total(x,y,z; z0=1.3*a,Iw=0.2)
     return (Bx,0.0,Bz)
 end
 
-function field_component_grid(xs, zs; y=0.0, Iw=0.2, z0=1.3*a, comp=:x, scale_factor=1.0)
-    [begin
+function Bfield_component_grid(
+    xs,
+    zs;
+    y::Real = 0.0,
+    Iw::Real = 0.2,
+    z0::Real = 1.3a,
+    comp::Symbol = :x,
+    scale_factor::Real = 1.0,
+    axis_order::Symbol = :xz, # rows.columns
+)
+    value_at(x, z) = begin
         Bx, By, Bz = B_total(x, y, z; z0=z0, Iw=Iw)
 
         value = if comp === :x
@@ -146,7 +158,17 @@ function field_component_grid(xs, zs; y=0.0, Iw=0.2, z0=1.3*a, comp=:x, scale_fa
         end
 
         value / scale_factor
-    end for x in xs, z in zs]
+    end
+
+    if axis_order === :xz
+        # size = (length(xs), length(zs))
+        return [value_at(x, z) for x in xs, z in zs]
+    elseif axis_order === :zx
+        # size = (length(zs), length(xs))
+        return [value_at(x, z) for z in zs, x in xs]
+    else
+        error("axis_order must be :xz or :zx")
+    end
 end
 
 function grad_B(x, y, z; z0=1.3*a, Iw=0.2)
@@ -184,6 +206,44 @@ function grad_B(x, y, z; z0=1.3*a, Iw=0.2)
         0 0 0;
         dBzdx dBzdy dBzdz
     ]
+end
+
+function grad_dnormBdz(
+    x::Real,
+    z::Real;
+    y::Real = 0.0,
+    Iw::Real = 0.2,
+    z0::Real = 1.3a,
+    scale_factor::Real = 1.0,
+)
+    Bx, By, Bz = B_total(x, y, z; z0=z0, Iw=Iw)
+    J = grad_B(x, y, z; z0=z0, Iw=Iw)
+
+    Bmag = sqrt(Bx^2 + By^2 + Bz^2)
+
+    if iszero(Bmag)
+        return NaN
+    else
+        return (Bx * J[1,3] + By * J[2,3] + Bz * J[3,3]) / Bmag / scale_factor
+    end
+end
+
+function grad_dnormBdz(
+    xs::AbstractVector,
+    zs::AbstractVector;
+    y::Real = 0.0,
+    Iw::Real = 0.2,
+    z0::Real = 1.3a,
+    scale_factor::Real = 1.0,
+    axis_order::Symbol = :xz,
+)
+    if axis_order === :xz
+        return [grad_dnormBdz(x, z; y=y, Iw=Iw, z0=z0, scale_factor=scale_factor) for x in xs, z in zs]
+    elseif axis_order === :zx
+        return [grad_dnormBdz(x, z; y=y, Iw=Iw, z0=z0, scale_factor=scale_factor) for z in zs, x in xs]
+    else
+        error("axis_order must be :xz or :zx")
+    end
 end
 
 function approx_B_total(x,y,z; z0=1.3*a,Iw=0.2)
@@ -227,7 +287,7 @@ function approx_grad_B(x, y, z; z0=1.3*a, Iw=0.2)
     ]
 end
 
-function approx_dBdz(x,z; Iw=0.2, z0=1.3*a)
+function approx_dnormBdz(x,z; Iw=0.2, z0=1.3*a)
     ρ1 = hypot(x-a, z-z0)
     ρ2 = hypot(x+a, z-z0)
 
@@ -254,72 +314,201 @@ function ratio_dBdz_normB(x,z; z0=1.3*a)
     return -2 * Δz * (a^2+x^2+Δz^2)*ρ1*ρ2 / ((x^2-a^2)^2 + 2*(x^2+a^2)*Δz^2 + Δz^4)^(3/2)
 end
 
-zslit = a*[-0.06,  0.06,  0.06, -0.06]
-xslit = a*[-0.8,  -0.8,   0.8,   0.8]
+# -----------------------------
+# Common geometry
+# -----------------------------
+slit_x = 0.5 .* [-x_slit, -x_slit,  x_slit,  x_slit, -x_slit]
+slit_z = 0.5 .* [-z_slit,  z_slit,  z_slit, -z_slit, -z_slit]
 
-Iw_set = 0.030
+# Pole piece circle 
+zc, xc, r = 1.3, 0.0, 1.0 ;   # center (z=1.3, x=0), radius 1
+θ = range(0, 2π; length=721);
+z_circle =  zc .+ r*cos.(θ);
+x_circle =  xc .+ r*sin.(θ);
 
-# Grid
-scale_factor = 1e-3
-scale_10power = round(Int, log10(scale_factor))
+x_line = a * collect(range(-2, 2, length=10_001))
+# Top magnet edge shape
+x_fill = x_line / a; 
+y_edge = z_magnet_edge.(x_line) / a;
+y_top  = fill(2.0, length(x_fill));
+# Bottom trench shape
+y_trench = z_magnet_trench.(x_line) / a;
+y_bottom = fill(-2, length(x_fill));
+
+nx, nz = 601, 1201
+
+# -----------------------------
+# Current
+# -----------------------------
+Iw_set = 0.100
+
+# -------------- Compute the spatial average ------------------------
+xmin, xmax = -0.5*x_slit, 0.5*x_slit ;
+ymin, ymax = -ℓ, ℓ;
+zmin, zmax = -0.5*z_slit, 0.5*z_slit ;
+
+xmin, xmax = -2.2e-3, 2.2e-3 ;
+zmin, zmax = -750e-6, 750e-6 ;
+
+area_xz = (xmax - xmin) * (zmax - zmin);
+volume_xyz = (xmax - xmin) * (ymax - ymin) * (zmax - zmin);
+
+# =========================================================
+# Gradient of |B|
+# =========================================================
+
+# 2D spatial average over (x, z) at y = 0
+grad2d(v) = grad_dnormBdz(v[1], v[2]; y=0.0, Iw=Iw_set, scale_factor=1.0);
+int_grad2d_mean, err_grad2d_mean = hcubature(grad2d, [xmin, zmin], [xmax, zmax]);
+grad_avg_2d = int_grad2d_mean / area_xz;
+
+grad2d_sq(v) = grad2d(v)^2;
+int_grad2d_sq, err_grad2d_sq = hcubature(grad2d_sq, [xmin, zmin], [xmax, zmax]);
+grad_var_2d = int_grad2d_sq / area_xz - grad_avg_2d^2;
+grad_std_2d = sqrt(max(grad_var_2d, 0.0));
+grad_rel_2d = grad_std_2d / abs(grad_avg_2d);
+
+# 3D spatial average over (x, y, z)
+grad3d(v) = grad_dnormBdz(v[1], v[3]; y=v[2], Iw=Iw_set, scale_factor=1.0);
+int_grad3d_mean, err_grad3d_mean = hcubature(grad3d, [xmin, ymin, zmin], [xmax, ymax, zmax]);
+grad_avg_3d = int_grad3d_mean / volume_xyz;
+
+grad3d_sq(v) = grad3d(v)^2;
+int_grad3d_sq, err_grad3d_sq = hcubature(grad3d_sq, [xmin, ymin, zmin], [xmax, ymax, zmax]);
+grad_var_3d = int_grad3d_sq / volume_xyz - grad_avg_3d^2;
+grad_std_3d = sqrt(max(grad_var_3d, 0.0));
+grad_rel_3d = grad_std_3d / abs(grad_avg_3d);
+
+# =========================================================
+# Magnetic field magnitude |B|
+# =========================================================
+
+# 2D spatial average over (x, z) at y = 0
+bmag2d(v) = norm(B_total(v[1], 0.0, v[2]; Iw=Iw_set));
+int_bmag2d_mean, err_bmag2d_mean = hcubature(bmag2d, [xmin, zmin], [xmax, zmax]);
+b_avg_2d = int_bmag2d_mean / area_xz;
+
+bmag2d_sq(v) = bmag2d(v)^2;
+int_bmag2d_sq, err_bmag2d_sq = hcubature(bmag2d_sq, [xmin, zmin], [xmax, zmax]);
+b_var_2d = int_bmag2d_sq / area_xz - b_avg_2d^2;
+b_std_2d = sqrt(max(b_var_2d, 0.0));
+b_rel_2d = b_std_2d / abs(b_avg_2d);
+
+# 3D spatial average over (x, y, z)
+bmag3d(v) = norm(B_total(v[1], v[2], v[3]; Iw=Iw_set));
+int_bmag3d_mean, err_bmag3d_mean = hcubature(bmag3d, [xmin, ymin, zmin], [xmax, ymax, zmax]);
+b_avg_3d = int_bmag3d_mean / volume_xyz;
+
+bmag3d_sq(v) = bmag3d(v)^2;
+int_bmag3d_sq, err_bmag3d_sq = hcubature(bmag3d_sq, [xmin, ymin, zmin], [xmax, ymax, zmax]);
+b_var_3d = int_bmag3d_sq / volume_xyz - b_avg_3d^2;
+b_std_3d = sqrt(max(b_var_3d, 0.0));
+b_rel_3d = b_std_3d / abs(b_avg_3d);
+
+# =========================================================
+# Results |B|
+# =========================================================
+
+@info "---- Gradient of |B|: 2D ----"
+@info @sprintf("Spatial 2D average of d|B|/dz = %.3e T/m", grad_avg_2d)
+@info @sprintf("Spatial 2D variance of d|B|/dz = %.3e (T/m)^2", grad_var_2d)
+@info @sprintf("Spatial 2D std of d|B|/dz = %.3e T/m", grad_std_2d)
+@info @sprintf("Spatial 2D relative inhomogeneity of d|B|/dz = %.2f %%", 100 * grad_rel_2d)
+
+@info "---- Gradient of |B|: 3D ----"
+@info @sprintf("Spatial 3D average of d|B|/dz = %.3e T/m", grad_avg_3d)
+@info @sprintf("Spatial 3D variance of d|B|/dz = %.3e (T/m)^2", grad_var_3d)
+@info @sprintf("Spatial 3D std of d|B|/dz = %.3e T/m", grad_std_3d)
+@info @sprintf("Spatial 3D relative inhomogeneity of d|B|/dz = %.2f %%", 100 * grad_rel_3d)
+
+@info "---- Magnetic field magnitude |B|: 2D ----"
+@info @sprintf("Spatial 2D average of |B| = %.6e T", b_avg_2d)
+@info @sprintf("Spatial 2D variance of |B| = %.6e T^2", b_var_2d)
+@info @sprintf("Spatial 2D std of |B| = %.6e T", b_std_2d)
+@info @sprintf("Spatial 2D relative inhomogeneity of |B| = %.2f %%", 100 * b_rel_2d)
+
+@info "---- Magnetic field magnitude |B|: 3D ----"
+@info @sprintf("Spatial 3D average of |B| = %.6e T", b_avg_3d)
+@info @sprintf("Spatial 3D variance of |B| = %.6e T^2", b_var_3d)
+@info @sprintf("Spatial 3D std of |B| = %.6e T", b_std_3d)
+@info @sprintf("Spatial 3D relative inhomogeneity of |B| = %.2f %%", 100 * b_rel_3d)
+
+
+xmin_in, xmax_in = 
+
+
+
+
+
+
+# =========================================================
+# Plot 1: Gradient zoomed view near slit / pole piece
+# ===============================================;
+scale_factor = 1e-3;
+scale_10power = round(Int, log10(scale_factor));
 xmin, xmax = -1*a, 1*a ;
 zmin, zmax = -0.2*a, 0.2*a ;
-nx, nz = 801, 1201
-xs = range(xmin, xmax; length=nx)
-zs = range(zmin, zmax; length=nz)
+
+xs = range(xmin, xmax; length=nx);
+zs = range(zmin, zmax; length=nz);
 # Evaluate on the grid
-Z = 1/ scale_factor * [approx_dBdz(x, z; Iw=Iw_set) for x in xs, z in zs]  # size (nx, nz)
+Z = [approx_dnormBdz(x, z; Iw=Iw_set) / scale_factor for x in xs, z in zs];  # size (nx, nz)
 # Filled contour
 plt = contour(zs/a, xs/a, Z; 
             levels=40, fill=true, cbar=true,
             xlabel=L"z/a", ylabel=L"x/a", #aspect_ratio=:equal,
-            title=L"$\partial_{z} B(x,z)$ at $I_{w}=%$(Iw_set)\mathrm{A}$",
+            title=L"$\partial_{z} \vert \mathbf{B}(x,z)\vert$ at $I_{w}=%$(Int(1000*Iw_set))\mathrm{mA}$",
             xflip=true,
             colorbar_title = L"$\times \, 10^{%$(scale_10power)} \ \left(\mathrm{T}/\mathrm{m}\right)$",
-            )
-plot!(Shape(zslit/a, xslit/a);
+            );
+plot!(plt,
+    Shape(slit_z/a, slit_x/a);
     fill = true,
     fillalpha=0.1,
     linecolor = :black,
     linewidth = 2,
     linestyle = :dashdot,
     label = "slit region",
-)
-# Zero-contour overlay
-contour!(zs/a, xs/a, Z; levels=[0.0], linecolor=:black, linewidth=2, linestyle=:dot,)
-# Circle params (in the same units as your data)
-zc, xc, r = 1.3, 0.0, 1.0 ;           # center (z=1.3, x=0), radius 1
-θ = range(0, 2π; length=721);
-z_circle =  zc .+ r*cos.(θ);
-x_circle =  xc .+ r*sin.(θ);
-plot!(z_circle, x_circle; 
+);
+# Spatial average-contour overlay
+contour!(plt,
+    zs/a, xs/a, Z; 
+    label=L"$\langle \partial_{z} \vert \mathbf{B}(x,z)\vert \rangle$",
+    levels=[Grad_avg/scale_factor], 
+    line=(:dot,:limegreen, 2),
+);
+plot!(plt,
+    z_circle, x_circle; 
     fill=true, 
     fillalpha= 0.5, 
     color=:black, 
     lw=2, 
-    ls=:dash, label="pole piece", 
-)
-plot!(
+    ls=:solid, 
+    label="pole piece", 
+);
+plot!(plt,
     legend=:topleft,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     right_margin=3mm,
-    xlim=(zmin/a,0.4),
-    ylim=(-1.0,1.0)
-)
+    xlim=(zmin/a,0.35),
+    ylim=(-1.0,1.0),
+    # aspect_ratio=:equal,
+);
 display(plt)
 
-# Grid
-scale_factor = 1e-3
-scale_10power = round(Int, log10(scale_factor))
+# =========================================================
+# Plot 2: Gradient wider view with magnet geometry
+# =========================================================
+scale_factor = 1e-3;
+scale_10power = round(Int, log10(scale_factor));
 xmin, xmax = -2a, 2a;
 zmin, zmax = -1.2*a, 1.2*a;
-nx, nz = 801, 1601;
 xs = range(xmin, xmax; length=nx);
 zs = range(zmin, zmax; length=nz);
-Z =1/scale_factor .* [approx_dBdz(x, z; Iw=Iw_set) for z in zs, x in xs]  # size (nx, nz)
-finite = vec(Z[.!isnan.(Z) .& .!isinf.(Z)])
-vmax   = Statistics.quantile(abs.(finite), 0.90)      # tweak 0.99–0.999 as you like
+Z = [approx_dnormBdz(x, z; Iw=Iw_set) / scale_factor  for z in zs, x in xs];  # size (nx, nz)
+finite = vec(Z[.!isnan.(Z) .& .!isinf.(Z)]);
+vmax   = Statistics.quantile(abs.(finite), 0.90);    # tweak 0.99–0.999 as you like
 
 fig = contour(xs/a, zs/a, Z; 
             levels=111, 
@@ -327,39 +516,34 @@ fig = contour(xs/a, zs/a, Z;
             cbar=true,
             clims=(0,vmax),
             xlabel=L"x/a", ylabel=L"z/a", aspect_ratio=:equal,
-            title=L"$\partial_{z} B(x,z)$ at $I_{w}=%$(Iw_set)\mathrm{A}$",
+            title=L"$\partial_{z} \vert \mathbf{B}(x,z)\vert$ at $I_{w}=%$(Int(1000*Iw_set))\mathrm{mA}$",
             colorbar_title = L"$\times \, 10^{%$(scale_10power)} \ \left(\mathrm{T}/\mathrm{m}\right)$",
             # color=:default,
             # xflip=true
-)
-x_line = a * collect(range(-2, 2, length=10_001))
-# Top magnet edge shape
-x_fill = x_line / a; 
-y_edge = z_magnet_edge.(x_line) / a;
-y_top  = fill(2.0, length(x_fill));
+);
+contour!(fig, xs/a, zs/a, Z; 
+    label=L"$\langle \partial_{z} B(x,z) \rangle$",
+    levels=[Grad_avg/scale_factor], 
+    line=(:dot,:limegreen, 2),
+);
 plot!(fig, [x_fill; reverse(x_fill)], [y_edge; reverse(y_top)];
     seriestype = :shape, label = "Magnet",
     color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
 );
-# Bottom trench shape
-y_trench = z_magnet_trench.(x_line) / a;
-y_bottom = fill(-2, length(x_fill));
 plot!(fig, [x_fill; reverse(x_fill)], [y_bottom; reverse(y_trench)];
     seriestype = :shape, label = false,
     color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
 );
-# Slit rectangle
-x_slit = 4e-3
-z_slit = 300e-6
 plot!(fig,
-    0.5 .* [-x_slit, -x_slit, x_slit,  x_slit, -x_slit] / a,
-    0.5 .* [-z_slit,  z_slit, z_slit, -z_slit, -z_slit] / a;
+    # slit_x / a,
+    # slit_z / a;
+    Shape(slit_x / a, slit_z / a),
     seriestype = :shape, label = "Slit",
     line = (:solid, :red, 1), color = :red, fillalpha = 0.15
 );
-vline!(fig,[0], line=(:white,0.2), label=false)
-hline!(fig,[0], line=(:white,0.2), label=false)
-plot!(
+vline!(fig,[0], line=(:white,0.2), label=false);
+hline!(fig,[0], line=(:white,0.2), label=false);
+plot!(fig,
     legend=:outerbottom,
     legend_columns=2,
     background_color_legend = :white,
@@ -367,27 +551,29 @@ plot!(
     xlim=(-1.75,1.75), 
     ylim=(-1.0,1.0),
     bottom_margin=-10mm,
-)
+);
 display(fig)
 
 
 
-# Grid
-scale_factor = 1e-6
-scale_10power = round(Int, log10(scale_factor))
+# =========================================================
+# Plot 3: Magnetic field x-component zoomed view near slit / pole piecey
+# =========================================================
+scale_factor = 1e-6;
+scale_10power = round(Int, log10(scale_factor));
 xmin, xmax = -1*a, 1*a ;
 zmin, zmax = -0.2*a, 0.2*a ;
-nx, nz = 801, 1201
-xs = range(xmin, xmax; length=nx)
-zs = range(zmin, zmax; length=nz)
+xs = range(xmin, xmax; length=nx);
+zs = range(zmin, zmax; length=nz);
 # Evaluate on the grid
-Bx_grid   = field_component_grid(xs, zs;  y=0.0, Iw=Iw_set, comp=:x,     scale_factor=scale_factor)
-Bz_grid   = field_component_grid(xs, zs;  y=0.0, Iw=Iw_set, comp=:z,     scale_factor=scale_factor)
-Bnorm_grid = field_component_grid(xs, zs; y=0.0, Iw=Iw_set, comp=:norm, scale_factor=scale_factor)
+Bx_grid   = Bfield_component_grid(xs, zs;  y=0.0, Iw=Iw_set, comp=:x,     scale_factor=scale_factor, axis_order=:xz);
+Bz_grid   = Bfield_component_grid(xs, zs;  y=0.0, Iw=Iw_set, comp=:z,     scale_factor=scale_factor, axis_order=:xz);
+Bnorm_grid = Bfield_component_grid(xs, zs; y=0.0, Iw=Iw_set, comp=:norm, scale_factor=scale_factor,  axis_order=:xz);
 # Filled contour
 plt_Bx = contour(
     zs/a, xs/a, Bx_grid;
     levels = 40,
+    # color=:balance,
     fill = true,
     cbar = true,
     xlabel = L"z/a",
@@ -395,41 +581,40 @@ plt_Bx = contour(
     title = L"$B_x(x,z)$ at $I_w=%$(Iw_set)\,\mathrm{A}$",
     xflip = true,
     colorbar_title = L"\times 10^{%$(scale_10power)} \ \mathrm{T}",
-)
+);
 plot!(plt_Bx,
-    Shape(zslit/a, xslit/a);
+    Shape(slit_z/a, slit_x/a);
     fill = true,
     fillalpha=0.1,
-    linecolor = :black,
+    linecolor = :red,
     linewidth = 2,
     linestyle = :dashdot,
     label = "slit region",
-)
-# Circle params (in the same units as your data)
-zc, xc, r = 1.3, 0.0, 1.0 ;           # center (z=1.3, x=0), radius 1
-θ = range(0, 2π; length=721);
-z_circle =  zc .+ r*cos.(θ);
-x_circle =  xc .+ r*sin.(θ);
+);
 plot!(plt_Bx,
     z_circle, x_circle; 
     fill=true, 
     fillalpha= 0.5, 
     color=:black, 
     lw=2, 
-    ls=:dash, label="pole piece", 
-)
+    ls=:solid, 
+    label="pole piece", 
+);
+# Zero-contour overlay
+contour!(plt_Bx,zs/a, xs/a, Bx_grid; levels=[0.0], linecolor=:black, linewidth=2, linestyle=:dot,);
 plot!(plt_Bx,
     legend=:topleft,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     right_margin=3mm,
-    xlim=(zmin/a,0.4),
+    xlim=(zmin/a,0.35),
     ylim=(-1.0,1.0)
-)
+);
 display(plt_Bx)
 
 plt_Bz = contour(
     zs/a, xs/a, Bz_grid;
+    # color=:balance,
     levels = 40,
     fill = true,
     cbar = true,
@@ -438,94 +623,626 @@ plt_Bz = contour(
     title = L"$B_z(x,z)$ at $I_w=%$(Iw_set)\,\mathrm{A}$",
     xflip = true,
     colorbar_title = L"\times 10^{%$(scale_10power)} \ \mathrm{T}",
-)
+);
 plot!(plt_Bz,
-    Shape(zslit/a, xslit/a);
+    Shape(slit_z/a, slit_x/a);
     fill = true,
     fillalpha=0.1,
-    linecolor = :black,
+    linecolor = :red,
     linewidth = 2,
     linestyle = :dashdot,
     label = "slit region",
-)
-# Circle params (in the same units as your data)
-zc, xc, r = 1.3, 0.0, 1.0 ;           # center (z=1.3, x=0), radius 1
-θ = range(0, 2π; length=721);
-z_circle =  zc .+ r*cos.(θ);
-x_circle =  xc .+ r*sin.(θ);
+);
+# Zero-contour overlay
+contour!(plt_Bz,zs/a, xs/a, Bz_grid; levels=[0.0], linecolor=:black, linewidth=2, linestyle=:dot,);
 plot!(plt_Bz,
     z_circle, x_circle; 
     fill=true, 
     fillalpha= 0.5, 
     color=:black, 
     lw=2, 
-    ls=:dash, label="pole piece", 
-)
+    ls=:solid, 
+    label="pole piece", 
+);
 plot!(plt_Bz,
     legend=:topleft,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     right_margin=3mm,
-    xlim=(zmin/a,0.4),
+    xlim=(zmin/a,0.35),
     ylim=(-1.0,1.0)
-)
+);
 display(plt_Bz)
 
+plt_Bnorm = contour(
+    zs/a, xs/a, Bnorm_grid;
+    levels = 40,
+    fill = true,
+    cbar = true,
+    xlabel = L"z/a",
+    ylabel = L"x/a",
+    title = L"$\vert \mathbf{B}(x,z) \vert$ at $I_w=%$(Iw_set)\,\mathrm{A}$",
+    xflip = true,
+    colorbar_title = L"\times 10^{%$(scale_10power)} \ \mathrm{T}",
+);
+contour!(plt_Bnorm ,
+    zs/a, xs/a, Bnorm_grid; 
+    label=L"$\langle \vert \mathbf{B}(x,z) \vert \rangle$",
+    levels=[B_avg/scale_factor], 
+    line=(:dot,:limegreen, 2),
+);
+plot!(plt_Bnorm,
+    Shape(slit_z/a, slit_x/a);
+    fill = true,
+    fillalpha=0.1,
+    linecolor = :red,
+    linewidth = 2,
+    linestyle = :dashdot,
+    label = "slit region",
+);
+plot!(plt_Bnorm,
+    z_circle, x_circle; 
+    fill=true, 
+    fillalpha= 0.5, 
+    color=:black, 
+    lw=2, 
+    ls=:solid, 
+    label="pole piece", 
+);
+plot!(plt_Bnorm,
+    legend=:topleft,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    right_margin=3mm,
+    xlim=(zmin/a,0.35),
+    ylim=(-1.0,1.0)
+);
+display(plt_Bnorm)
 
 
+plt = plot(plt_Bx, plt_Bz, plt_Bnorm,
+layout=@layout([a1 ; a2 ; a3]),
+size=(600,800),
+left_margin=2mm,
+);
+display(plt)
 
+# =========================================================
+# Plot 4: Magnetic fiel wider view with magnet geometry
+# =========================================================
+scale_factor = 1e-3;
+scale_10power = round(Int, log10(scale_factor));
+xmin, xmax = -2a, 2a;
+zmin, zmax = -1.2*a, 1.2*a;
+xs = range(xmin, xmax; length=nx);
+zs = range(zmin, zmax; length=nz);
+Bx_grid   = Bfield_component_grid(xs, zs;  y=0.0, Iw=Iw_set, comp=:x,     scale_factor=scale_factor, axis_order=:zx);
+Bz_grid   = Bfield_component_grid(xs, zs;  y=0.0, Iw=Iw_set, comp=:z,     scale_factor=scale_factor, axis_order=:zx);
+Bnorm_grid = Bfield_component_grid(xs, zs; y=0.0, Iw=Iw_set, comp=:norm, scale_factor=scale_factor,  axis_order=:zx);
+vmax_x    = Statistics.quantile(abs.(vec(Bx_grid[.!isnan.(Bx_grid) .& .!isinf.(Bx_grid)])), 0.90);      # tweak 0.99–0.999 as you like
+vmax_z    = Statistics.quantile(abs.(vec(Bz_grid[.!isnan.(Bz_grid) .& .!isinf.(Bz_grid)])), 0.90);      # tweak 0.99–0.999 as you like
+vmax_norm = Statistics.quantile(abs.(vec(Bnorm_grid[.!isnan.(Bnorm_grid) .& .!isinf.(Bnorm_grid)])), 0.90);      # tweak 0.99–0.999 as you like
+
+
+fig_Bx = contour(xs/a, zs/a, Bx_grid; 
+            levels=111, 
+            fill=true, 
+            cbar=true,
+            clims=(-vmax_x,vmax_x),
+            xlabel=L"x/a", ylabel=L"z/a", aspect_ratio=:equal,
+            title=L"$B_{x}(x,z)$ at $I_{w}=%$(Int(1000*Iw_set))\mathrm{mA}$",
+            colorbar_title = L"$\times \, 10^{%$(scale_10power)} \ \left(\mathrm{T}\right)$",
+            color=:balance,
+            # xflip=true
+);
+plot!(fig_Bx, [x_fill; reverse(x_fill)], [y_edge; reverse(y_top)];
+    seriestype = :shape, label = "Magnet",
+    color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
+);
+plot!(fig_Bx, [x_fill; reverse(x_fill)], [y_bottom; reverse(y_trench)];
+    seriestype = :shape, label = false,
+    color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
+);
+plot!(fig_Bx,
+    Shape(slit_x / a, slit_z / a),
+    seriestype = :shape, label = "Slit",
+    line = (:solid, :red, 1), color = :red, fillalpha = 0.15
+);
+vline!(fig_Bx,[0], line=(:white,0.2), label=false);
+hline!(fig_Bx,[0], line=(:white,0.2), label=false);
+plot!(fig_Bx,
+    legend=:outerbottom,
+    legend_columns=2,
+    background_color_legend = :white,
+    foreground_color_legend = nothing,
+    xlim=(-1.75,1.75), 
+    ylim=(-1.0,1.0),
+    bottom_margin=-10mm,
+);
+display(fig_Bx)
+
+
+fig_Bz = contour(xs/a, zs/a, Bz_grid; 
+            levels=111, 
+            fill=true, 
+            cbar=true,
+            clims=(-vmax_z,vmax_z),
+            xlabel=L"x/a", ylabel=L"z/a", aspect_ratio=:equal,
+            title=L"$B_{z}(x,z)$ at $I_{w}=%$(Int(1000*Iw_set))\mathrm{mA}$",
+            colorbar_title = L"$\times \, 10^{%$(scale_10power)} \ \left(\mathrm{T}\right)$",
+            color=:balance,
+            # xflip=true
+);
+plot!(fig_Bz, [x_fill; reverse(x_fill)], [y_edge; reverse(y_top)];
+    seriestype = :shape, label = "Magnet",
+    color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
+);
+plot!(fig_Bz, [x_fill; reverse(x_fill)], [y_bottom; reverse(y_trench)];
+    seriestype = :shape, label = false,
+    color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
+);
+plot!(fig_Bz,
+    Shape(slit_x / a, slit_z / a),
+    seriestype = :shape, label = "Slit",
+    line = (:solid, :red, 1), color = :red, fillalpha = 0.15
+);
+vline!(fig_Bz,[0], line=(:white,0.2), label=false);
+hline!(fig_Bz,[0], line=(:white,0.2), label=false);
+plot!(fig_Bz,
+    legend=:outerbottom,
+    legend_columns=2,
+    background_color_legend = :white,
+    foreground_color_legend = nothing,
+    xlim=(-1.75,1.75), 
+    ylim=(-1.0,1.0),
+    bottom_margin=-10mm,
+);
+display(fig_Bz)
+
+fig_Bnorm = contour(xs/a, zs/a, Bnorm_grid; 
+            levels=111, 
+            fill=true, 
+            cbar=true,
+            clims=(0.0,vmax_norm),
+            xlabel=L"x/a", ylabel=L"z/a", aspect_ratio=:equal,
+            title=L"$\vert \mathbf{B}(x,z) \vert$ at $I_{w}=%$(Int(1000*Iw_set))\mathrm{mA}$",
+            colorbar_title = L"$\times \, 10^{%$(scale_10power)} \ \left(\mathrm{T}\right)$",
+            # color=:default,
+            # xflip=true
+);
+contour!(fig_Bnorm, 
+    xs/a, zs/a, Bnorm_grid; 
+    label=L"$\langle \vert \mathbf{B}(x,z) \vert \rangle$",
+    levels=[B_avg/scale_factor], 
+    line=(:dot,:limegreen, 2),
+);
+plot!(fig_Bnorm, [x_fill; reverse(x_fill)], [y_edge; reverse(y_top)];
+    seriestype = :shape, label = "Magnet",
+    color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
+);
+plot!(fig_Bnorm, [x_fill; reverse(x_fill)], [y_bottom; reverse(y_trench)];
+    seriestype = :shape, label = false,
+    color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
+);
+plot!(fig_Bnorm,
+    Shape(slit_x / a, slit_z / a),
+    seriestype = :shape, label = "Slit",
+    line = (:solid, :red, 1), color = :red, fillalpha = 0.15
+);
+vline!(fig_Bnorm,[0], line=(:white,0.2), label=false);
+hline!(fig_Bnorm,[0], line=(:white,0.2), label=false);
+plot!(fig_Bnorm,
+    legend=:outerbottom,
+    legend_columns=2,
+    background_color_legend = :white,
+    foreground_color_legend = nothing,
+    xlim=(-1.75,1.75), 
+    ylim=(-1.0,1.0),
+    bottom_margin=-10mm,
+);
+display(fig_Bnorm)
+
+
+plot!(fig_Bx; legend=false, bottom_margin=2mm);
+plot!(fig_Bz; legend=false, bottom_margin=2mm);
+plot!(fig_Bnorm; legend=false, bottom_margin=2mm);
+figA = plot(fig_Bx, fig_Bz, fig_Bnorm,
+layout=@layout([a1 ; a2 ; a3]),
+size=(500,800),
+left_margin=2mm,
+link=:x,
+);
+display(figA)
+
+
+# =========================================================
+# Plot: z-derivative of the magnetic field components
+# =========================================================
+scale_factor = 1e-3;
+scale_10power = round(Int, log10(scale_factor));
+
+xmin, xmax = -2a, 2a;
+zmin, zmax = -1.2a, 1.2a;
+
+xs = range(xmin, xmax; length=nx);
+zs = range(zmin, zmax; length=nz);
+
+# Build grids with orientation compatible with contour(xs, zs, Z)
+dBxdz_grid = [
+    grad_B(x, 0.0, z; Iw=Iw_set)[1,3] / scale_factor
+    for z in zs, x in xs
+];
+dBzdz_grid = [
+    grad_B(x, 0.0, z; Iw=Iw_set)[3,3] / scale_factor
+    for z in zs, x in xs
+];
+norm_dBdz_grid = [
+    hypot(
+        grad_B(x, 0.0, z; Iw=Iw_set)[1,3],
+        grad_B(x, 0.0, z; Iw=Iw_set)[3,3],
+    ) / scale_factor
+    for z in zs, x in xs
+];
+dBmagdz_grid = grad_dnormBdz(xs, zs; y = 0.0, Iw=Iw_set, scale_factor=scale_factor, axis_order = :zx)
+
+# Robust color limits
+finite_x    = vec(dBxdz_grid[isfinite.(dBxdz_grid)]);
+finite_z    = vec(dBzdz_grid[isfinite.(dBzdz_grid)]);
+finite_norm = vec(norm_dBdz_grid[isfinite.(norm_dBdz_grid)]);
+finite_maggrad = vec(dBmagdz_grid[isfinite.(dBmagdz_grid)]);
+
+vmax_x    = Statistics.quantile(abs.(finite_x), 0.90);
+vmax_z    = Statistics.quantile(abs.(finite_z), 0.90);
+vmax_norm = Statistics.quantile(abs.(finite_norm), 0.90);
+vmax_maggrad = Statistics.quantile(abs.(finite_maggrad), 0.90);
+
+# ---------------- Panel 1: dBxdz ----------------
+fig_dBxdz = contour(
+    xs/a, zs/a, dBxdz_grid;
+    color=:balance,
+    levels = 111,
+    fill = true,
+    cbar = true,
+    clims = (-vmax_x, vmax_x),
+    xlabel = L"x/a",
+    ylabel = L"z/a",
+    aspect_ratio = :equal,
+    title = L"$\partial_z B_x(x,z)$ at $I_w=%$(Iw_set)\,\mathrm{A}$",
+    colorbar_title = L"$\times 10^{%$(scale_10power)}\ \mathrm{T/m}$",
+);
+plot!(
+    fig_dBxdz,
+    [x_fill; reverse(x_fill)],
+    [y_edge; reverse(y_top)];
+    seriestype = :shape,
+    label = "Magnet",
+    color = :grey36,
+    line = (:solid, :grey36),
+    fillalpha = 0.75,
+);
+plot!(
+    fig_dBxdz,
+    [x_fill; reverse(x_fill)],
+    [y_bottom; reverse(y_trench)];
+    seriestype = :shape,
+    label = false,
+    color = :grey36,
+    line = (:solid, :grey36),
+    fillalpha = 0.75,
+);
+plot!(
+    fig_dBxdz,
+    Shape(slit_x/a, slit_z/a);
+    fill = true,
+    fillalpha = 0.15,
+    linecolor = :red,
+    linewidth = 1,
+    linestyle = :solid,
+    label = "Slit",
+);
+contour!(
+    fig_dBxdz,
+    xs/a, zs/a, dBxdz_grid;
+    levels = [0.0],
+    linecolor = :black,
+    linewidth = 2,
+    linestyle = :dot,
+    label = false,
+);
+vline!(fig_dBxdz, [0]; line = (:white, 0.2), label = false);
+hline!(fig_dBxdz, [0]; line = (:white, 0.2), label = false);
+plot!(
+    fig_dBxdz;
+    legend = :outerbottom,
+    legend_columns = 2,
+    background_color_legend = :white,
+    foreground_color_legend = nothing,
+    xlim = (-1.75, 1.75),
+    ylim = (-1.0, 1.0),
+    bottom_margin = -8mm,
+)
+
+# ---------------- Panel 2: dBzdz ----------------
+fig_dBzdz = contour(
+    xs/a, zs/a, dBzdz_grid;
+    color=:balance,
+    levels = 111,
+    fill = true,
+    cbar = true,
+    clims = (-vmax_z, vmax_z),
+    xlabel = L"x/a",
+    ylabel = L"z/a",
+    aspect_ratio = :equal,
+    title = L"$\partial_z B_z(x,z)$ at $I_w=%$(Iw_set)\,\mathrm{A}$",
+    colorbar_title = L"$\times 10^{%$(scale_10power)}\ \mathrm{T/m}$",
+);
+plot!(
+    fig_dBzdz,
+    [x_fill; reverse(x_fill)],
+    [y_edge; reverse(y_top)];
+    seriestype = :shape,
+    label = "Magnet",
+    color = :grey36,
+    line = (:solid, :grey36),
+    fillalpha = 0.75,
+);
+plot!(
+    fig_dBzdz,
+    [x_fill; reverse(x_fill)],
+    [y_bottom; reverse(y_trench)];
+    seriestype = :shape,
+    label = false,
+    color = :grey36,
+    line = (:solid, :grey36),
+    fillalpha = 0.75,
+);
+plot!(
+    fig_dBzdz,
+    Shape(slit_x/a, slit_z/a);
+    fill = true,
+    fillalpha = 0.15,
+    linecolor = :red,
+    linewidth = 1,
+    linestyle = :solid,
+    label = "Slit",
+);
+contour!(
+    fig_dBzdz,
+    xs/a, zs/a, dBzdz_grid;
+    levels = [0.0],
+    linecolor = :black,
+    linewidth = 2,
+    linestyle = :dot,
+    label = false,
+);
+vline!(fig_dBzdz, [0]; line = (:white, 0.2), label = false);
+hline!(fig_dBzdz, [0]; line = (:white, 0.2), label = false);
+plot!(
+    fig_dBzdz;
+    legend = :outerbottom,
+    legend_columns = 2,
+    background_color_legend = :white,
+    foreground_color_legend = nothing,
+    xlim = (-1.75, 1.75),
+    ylim = (-1.0, 1.0),
+)
+
+# ---------------- Panel 3: ||dB/dz|| ----------------
+fig_norm_dBdz = contour(
+    xs/a, zs/a, norm_dBdz_grid;
+    levels = 111,
+    fill = true,
+    cbar = true,
+    clims = (0, vmax_norm),
+    xlabel = L"x/a",
+    ylabel = L"z/a",
+    aspect_ratio = :equal,
+    title = L"$\|\partial_z \mathbf{B}(x,z)\|$ at $I_w=%$(Iw_set)\,\mathrm{A}$",
+    colorbar_title = L"$\times 10^{%$(scale_10power)}\ \mathrm{T/m}$",
+);
+contour!(fig_norm_dBdz, xs/a, zs/a, norm_dBdz_grid; 
+    label=L"$\langle \vert \mathbf{B}(x,z) \vert \rangle$",
+    levels=[Grad_avg/scale_factor], 
+    line=(:dot,:limegreen, 2),
+);
+plot!(
+    fig_norm_dBdz,
+    [x_fill; reverse(x_fill)],
+    [y_edge; reverse(y_top)];
+    seriestype = :shape,
+    label = "Magnet",
+    color = :grey36,
+    line = (:solid, :grey36),
+    fillalpha = 0.75,
+);
+plot!(
+    fig_norm_dBdz,
+    [x_fill; reverse(x_fill)],
+    [y_bottom; reverse(y_trench)];
+    seriestype = :shape,
+    label = false,
+    color = :grey36,
+    line = (:solid, :grey36),
+    fillalpha = 0.75,
+);
+plot!(
+    fig_norm_dBdz,
+    Shape(slit_x/a, slit_z/a);
+    fill = true,
+    fillalpha = 0.15,
+    linecolor = :red,
+    linewidth = 1,
+    linestyle = :solid,
+    label = "Slit",
+);
+vline!(fig_norm_dBdz, [0]; line = (:white, 0.2), label = false);
+hline!(fig_norm_dBdz, [0]; line = (:white, 0.2), label = false);
+plot!(
+    fig_norm_dBdz;
+    legend = :outerbottom,
+    legend_columns = 2,
+    background_color_legend = :white,
+    foreground_color_legend = nothing,
+    xlim = (-1.75, 1.75),
+    ylim = (-1.0, 1.0),
+)
+
+# ---------------- Panel 4: d||B||/dz ----------------
+fig_dBmagdz = contour(
+    xs/a, zs/a, dBmagdz_grid;
+    levels = 111,
+    fill = true,
+    cbar = true,
+    clims = (0.0, vmax_maggrad),
+    xlabel = L"x/a",
+    ylabel = L"z/a",
+    aspect_ratio = :equal,
+    title = L"$\partial_z |\mathbf{B}(x,z)|$ at $I_w=%$(Iw_set)\,\mathrm{A}$",
+    colorbar_title = L"$\times 10^{%$(scale_10power)}\ \mathrm{T/m}$",
+);
+contour!(fig_dBmagdz, xs/a, zs/a, dBmagdz_grid; 
+    label=L"$\langle \partial_{z} \vert \mathbf{B}(x,z) \vert \rangle$",
+    levels=[Grad_avg/scale_factor], 
+    line=(:dot,:limegreen, 2),
+);
+plot!(
+    fig_dBmagdz,
+    [x_fill; reverse(x_fill)],
+    [y_edge; reverse(y_top)];
+    seriestype = :shape,
+    label = "Magnet",
+    color = :grey36,
+    line = (:solid, :grey36),
+    fillalpha = 0.75,
+);
+plot!(
+    fig_dBmagdz,
+    [x_fill; reverse(x_fill)],
+    [y_bottom; reverse(y_trench)];
+    seriestype = :shape,
+    label = false,
+    color = :grey36,
+    line = (:solid, :grey36),
+    fillalpha = 0.75,
+);
+plot!(
+    fig_dBmagdz,
+    Shape(slit_x/a, slit_z/a);
+    fill = true,
+    fillalpha = 0.15,
+    linecolor = :red,
+    linewidth = 1,
+    linestyle = :solid,
+    label = "Slit",
+);
+vline!(fig_dBmagdz, [0]; line = (:white, 0.2), label = false);
+hline!(fig_dBmagdz, [0]; line = (:white, 0.2), label = false);
+plot!(
+    fig_dBmagdz;
+    legend = :outerbottom,
+    legend_columns = 2,
+    background_color_legend = :white,
+    foreground_color_legend = nothing,
+    xlim = (-1.75, 1.75),
+    ylim = (-1.0, 1.0),
+)
+
+# ---------------- Combined figure ----------------
+fig_gradz = plot(
+    fig_dBxdz,
+    fig_dBzdz,
+    fig_norm_dBdz,
+    fig_dBmagdz;
+    layout = (2, 2),
+    size = (900,600),
+    link = :xy,
+    left_margin = 5mm,
+)
+display(fig_gradz)
+
+
+# Plot: Gradient zoomed view near slit / pole piece
+scale_10power = round(Int, log10(scale_factor));
+xmin, xmax = -1*a, 1*a ;
+zmin, zmax = -0.2*a, 0.2*a ;
+xs = range(xmin, xmax; length=nx);
+zs = range(zmin, zmax; length=nz);
+# Evaluate on the grid
+Z = grad_dnormBdz(xs, zs; y = 0.0, Iw=Iw_set, scale_factor=scale_factor, axis_order = :xz)
+# Filled contour
 plt = contour(zs/a, xs/a, Z; 
             levels=40, fill=true, cbar=true,
             xlabel=L"z/a", ylabel=L"x/a", #aspect_ratio=:equal,
-            title=L"$\partial_{z} B(x,z)$ at $I_{w}=%$(Iw_set)\mathrm{A}$",
+            title=L"$\partial_{z} \vert \mathbf{B}(x,z) \vert $ at $I_{w}=%$(Int(1000*Iw_set))\mathrm{mA}$",
             xflip=true,
             colorbar_title = L"$\times \, 10^{%$(scale_10power)} \ \left(\mathrm{T}/\mathrm{m}\right)$",
-            )
-plot!(Shape(zslit/a, xslit/a);
+            );
+contour!(plt, zs/a, xs/a, Z; 
+    label=L"$\langle \partial_{z} \vert \mathbf{B}(x,z) \vert \rangle$",
+    levels=[Grad_avg/scale_factor], 
+    line=(:dot,:limegreen, 2),
+);
+plot!(plt,
+    Shape(slit_z/a, slit_x/a);
     fill = true,
     fillalpha=0.1,
     linecolor = :black,
     linewidth = 2,
     linestyle = :dashdot,
     label = "slit region",
-)
+);
 # Zero-contour overlay
-contour!(zs/a, xs/a, Z; levels=[0.0], linecolor=:black, linewidth=2, linestyle=:dot,)
-# Circle params (in the same units as your data)
-zc, xc, r = 1.3, 0.0, 1.0 ;           # center (z=1.3, x=0), radius 1
-θ = range(0, 2π; length=721);
-z_circle =  zc .+ r*cos.(θ);
-x_circle =  xc .+ r*sin.(θ);
-plot!(z_circle, x_circle; 
+plot!(plt,
+    z_circle, x_circle; 
     fill=true, 
     fillalpha= 0.5, 
     color=:black, 
     lw=2, 
-    ls=:dash, label="pole piece", 
-)
-plot!(
+    ls=:solid, label="pole piece", 
+);
+plot!(plt,
     legend=:topleft,
     background_color_legend = nothing,
     foreground_color_legend = nothing,
     right_margin=3mm,
-    xlim=(zmin/a,0.4),
-    ylim=(-1.0,1.0)
-)
+    xlim=(zmin/a,0.35),
+    ylim=(-1.0,1.0),
+    # aspect_ratio=:equal,
+);
 display(plt)
 
 
 
-ys = range(-4e-2, 4e-2; length=100)
-Bz = abs.([B_total(0, y, 0; Iw=Iw_set)[3] for y in ys])
+y_path = range(-7e-2, 7e-2; length=100)
+Bz1 = [B_total(0, y, 0; Iw=Iw_set)[3] for y in y_path]
+Bz2 = [B_total(0, y, 0.150e-3; Iw=Iw_set)[3] for y in y_path]
+Bz3 = [B_total(0, y, 0.300e-3; Iw=Iw_set)[3] for y in y_path]
+Bz4 = [B_total(0, y, 0.750e-3; Iw=Iw_set)[3] for y in y_path]
+plot(1e2*y_path, 1e3*Bz1,
+    xlabel=L"$y$",
+    ylabel=L"$B_z(\vec{r}) \ (\mathrm{m T})$",
+    line=(:solid,:red,2),
+    label=L"B_z(0,y,0)")
+plot!(1e2*y_path, 1e3*Bz2,
+    line=(:solid,:blue,2),
+    label=L"B_z(0,y,150\mathrm{\mu m })")
+plot!(1e2*y_path, 1e3*Bz3,
+    line=(:solid,:green,2),
+    label=L"B_z(0,y,300\mathrm{\mu m })")
+plot!(1e2*y_path, 1e3*Bz4,
+    line=(:solid,:purple,2),
+    label=L"B_z(0,y,750\mathrm{\mu m })")
+vspan!([-3.5,3.5], color=:gray, fillalpha=0.2, label="magnet")
 
-plot(ys, Bz,
-    xlabel="y",
-    ylabel=L"B_z(0,y,0)",
-    lw=2,
-    label=L"B_z")
-vspan!([-3.5e-2,3.5e-2], color=:gray, fillalpha=0.2)
 
+m1=maximum(Bz1)
+m2=maximum(Bz2)
+m3=maximum(Bz3)
+m4=maximum(Bz4)
 
+(Bz2 .- Bz1) ./ Bz1
+
+100*(m2-m1)/m1
 
 
 
@@ -652,12 +1369,12 @@ plot!([0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01],
 
 
 
-plot(iw, [approx_dBdz(0, 0; Iw=ix) for ix in iw] )
-plot!(iw, [approx_dBdz(4/5*a, 0; Iw=ix) for ix in iw] )
+plot(iw, [approx_dnormBdz(0, 0; Iw=ix) for ix in iw] )
+plot!(iw, [approx_dnormBdz(4/5*a, 0; Iw=ix) for ix in iw] )
 
 
 
-plot(xs/a,[approx_dBdz(x, 0) for x in xs] ./ [approx_dBdz(x, (sqrt(2)-1.3)*a) for x in xs],
+plot(xs/a,[approx_dnormBdz(x, 0) for x in xs] ./ [approx_dnormBdz(x, (sqrt(2)-1.3)*a) for x in xs],
     ylims=(0,1.2))
 
 
