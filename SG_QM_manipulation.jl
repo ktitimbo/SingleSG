@@ -2,7 +2,7 @@
 # Manipulation of data
 # Kelvin Titimbo
 # California Institute of Technology
-# January 2026
+# April 2026
 
 using Plots; gr()
 Plots.default(
@@ -206,6 +206,11 @@ exp_x = 1e3*TheoreticalSimulation.pixel_coordinates(2160, 4, cam_pixelsize)
 exp_z = 1e3*TheoreticalSimulation.pixel_coordinates(2560, 1, cam_pixelsize)
 
 exp_result_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary", data_dir, data_dir * "_report_summary.jld2")
+
+exp_result = jldopen(exp_result_path, "r") do file
+    data = file[JLD2_MyTools.make_keypath_exp(data_dir,nz_bins,λ0_spline)][:F1_profile]
+end
+
 exp_result = jldopen(exp_result_path, "r") do file
         Ic = file["meta/Currents"]
         data = file[JLD2_MyTools.make_keypath_exp(data_dir,nz_bins,λ0_spline)];
