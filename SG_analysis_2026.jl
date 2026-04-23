@@ -2458,7 +2458,7 @@ function plot_smoothing_spline_summary(
         ylims    = (8e-3, 2.0),
         mean_key = :F1,
         sem_key  = :σF1,
-        title    = "Fit smoothing cubic spline",
+        # title    = "Fit smoothing cubic spline",
     )
 
     fig2 = build_panel(
@@ -2480,11 +2480,12 @@ function plot_smoothing_spline_summary(
         ylims    = (8e-3, 4.0),
         mean_key = :Δ,
         sem_key  = :σΔ,
-        title    = "Fit smoothing cubic spline",
+        # title    = "Fit smoothing cubic spline",
     )
 
     fig = plot(
         fig1, fig2, fig3;
+        suptitle    = "Fit smoothing cubic spline",
         layout      = @layout([a1 a2; a3]),
         link        = :y,
         size        = (900, 700),
