@@ -9,6 +9,7 @@ using Plots.PlotMeasures
 # Data I/O and numerical tools
 using LinearAlgebra
 using Interpolations
+using Statistics
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using Printf, LaTeXStrings, PrettyTables
@@ -130,6 +131,24 @@ function B_total(x,y,z; z0=1.3*a,Iw=0.2)
     return (Bx,0.0,Bz)
 end
 
+function field_component_grid(xs, zs; y=0.0, Iw=0.2, z0=1.3*a, comp=:x, scale_factor=1.0)
+    [begin
+        Bx, By, Bz = B_total(x, y, z; z0=z0, Iw=Iw)
+
+        value = if comp === :x
+            Bx
+        elseif comp === :z
+            Bz
+        elseif comp === :norm
+            sqrt(Bx^2 + By^2 + Bz^2)
+        else
+            error("comp must be :x, :z, or :norm")
+        end
+
+        value / scale_factor
+    end for x in xs, z in zs]
+end
+
 function grad_B(x, y, z; z0=1.3*a, Iw=0.2)
     ρ1 = hypot(x-a, z-z0)
     ρ2 = hypot(x+a, z-z0)
@@ -166,10 +185,6 @@ function grad_B(x, y, z; z0=1.3*a, Iw=0.2)
         dBzdx dBzdy dBzdz
     ]
 end
-
-B_total(2e-6,1e-6,0)
-grad_B(2e-6,1e-6,0)
-
 
 function approx_B_total(x,y,z; z0=1.3*a,Iw=0.2)
     ρ1, ρ2 = hypot(x-a, z-z0), hypot(x+a, z-z0)
@@ -239,70 +254,96 @@ function ratio_dBdz_normB(x,z; z0=1.3*a)
     return -2 * Δz * (a^2+x^2+Δz^2)*ρ1*ρ2 / ((x^2-a^2)^2 + 2*(x^2+a^2)*Δz^2 + Δz^4)^(3/2)
 end
 
+zslit = a*[-0.06,  0.06,  0.06, -0.06]
+xslit = a*[-0.8,  -0.8,   0.8,   0.8]
+
+Iw_set = 0.030
+
 # Grid
-xmin, xmax = -0.75*a, 0.75*a
-zmin, zmax = -0.5*a, 0.5*a
-nx, nz = 401, 601
+scale_factor = 1e-3
+scale_10power = round(Int, log10(scale_factor))
+xmin, xmax = -1*a, 1*a ;
+zmin, zmax = -0.2*a, 0.2*a ;
+nx, nz = 801, 1201
 xs = range(xmin, xmax; length=nx)
 zs = range(zmin, zmax; length=nz)
 # Evaluate on the grid
-Z = [approx_dBdz(x, z; Iw=0.002) for x in xs, z in zs]  # size (nx, nz)
+Z = 1/ scale_factor * [approx_dBdz(x, z; Iw=Iw_set) for x in xs, z in zs]  # size (nx, nz)
 # Filled contour
 plt = contour(zs/a, xs/a, Z; 
             levels=40, fill=true, cbar=true,
-            xlabel="z/a", ylabel="x/a", #aspect_ratio=:equal,
-            title="∂zB(x,z) contours",
-            xflip=true
+            xlabel=L"z/a", ylabel=L"x/a", #aspect_ratio=:equal,
+            title=L"$\partial_{z} B(x,z)$ at $I_{w}=%$(Iw_set)\mathrm{A}$",
+            xflip=true,
+            colorbar_title = L"$\times \, 10^{%$(scale_10power)} \ \left(\mathrm{T}/\mathrm{m}\right)$",
             )
+plot!(Shape(zslit/a, xslit/a);
+    fill = true,
+    fillalpha=0.1,
+    linecolor = :black,
+    linewidth = 2,
+    linestyle = :dashdot,
+    label = "slit region",
+)
 # Zero-contour overlay
-contour!(zs/a, xs/a, Z; levels=[0.0], linecolor=:black, linewidth=2)
+contour!(zs/a, xs/a, Z; levels=[0.0], linecolor=:black, linewidth=2, linestyle=:dot,)
 # Circle params (in the same units as your data)
-zc, xc, r = 1.3, 0.0, 1.0          # center (z=1.3, x=0), radius 1
-θ = range(0, 2π; length=361)
-z_circle =  zc .+ r*cos.(θ)
-x_circle =  xc .+ r*sin.(θ)
+zc, xc, r = 1.3, 0.0, 1.0 ;           # center (z=1.3, x=0), radius 1
+θ = range(0, 2π; length=721);
+z_circle =  zc .+ r*cos.(θ);
+x_circle =  xc .+ r*sin.(θ);
 plot!(z_circle, x_circle; 
     fill=true, 
     fillalpha= 0.5, 
     color=:black, 
     lw=2, 
     ls=:dash, label="pole piece", 
-    xlim=(-0.5,0.5),
-    ylim=(-0.75,0.75))
+)
+plot!(
+    legend=:topleft,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    right_margin=3mm,
+    xlim=(zmin/a,0.4),
+    ylim=(-1.0,1.0)
+)
 display(plt)
 
 # Grid
+scale_factor = 1e-3
+scale_10power = round(Int, log10(scale_factor))
 xmin, xmax = -2a, 2a;
-zmin, zmax = -1.2*a, 1.0*a;
-nx, nz = 401, 801;
+zmin, zmax = -1.2*a, 1.2*a;
+nx, nz = 801, 1601;
 xs = range(xmin, xmax; length=nx);
 zs = range(zmin, zmax; length=nz);
-Z = [approx_dBdz(x, z; Iw=0.1) for z in zs, x in xs]  # size (nx, nz)
+Z =1/scale_factor .* [approx_dBdz(x, z; Iw=Iw_set) for z in zs, x in xs]  # size (nx, nz)
 finite = vec(Z[.!isnan.(Z) .& .!isinf.(Z)])
-vmax   = quantile(abs.(finite), 0.97)      # tweak 0.99–0.999 as you like
+vmax   = Statistics.quantile(abs.(finite), 0.90)      # tweak 0.99–0.999 as you like
 
 fig = contour(xs/a, zs/a, Z; 
-            levels=101, 
+            levels=111, 
             fill=true, 
             cbar=true,
             clims=(0,vmax),
             xlabel=L"x/a", ylabel=L"z/a", aspect_ratio=:equal,
-            title=L"$\partial_{z}B(x,z)$ – contours",
+            title=L"$\partial_{z} B(x,z)$ at $I_{w}=%$(Iw_set)\mathrm{A}$",
+            colorbar_title = L"$\times \, 10^{%$(scale_10power)} \ \left(\mathrm{T}/\mathrm{m}\right)$",
             # color=:default,
             # xflip=true
-);
+)
 x_line = a * collect(range(-2, 2, length=10_001))
 # Top magnet edge shape
-x_fill = x_line / a 
-y_edge = z_magnet_edge.(x_line) / a
-y_top  = fill(2.0, length(x_fill))
+x_fill = x_line / a; 
+y_edge = z_magnet_edge.(x_line) / a;
+y_top  = fill(2.0, length(x_fill));
 plot!(fig, [x_fill; reverse(x_fill)], [y_edge; reverse(y_top)];
     seriestype = :shape, label = "Magnet",
     color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
 );
 # Bottom trench shape
-y_trench = z_magnet_trench.(x_line) / a
-y_bottom = fill(-2, length(x_fill))
+y_trench = z_magnet_trench.(x_line) / a;
+y_bottom = fill(-2, length(x_fill));
 plot!(fig, [x_fill; reverse(x_fill)], [y_bottom; reverse(y_trench)];
     seriestype = :shape, label = false,
     color = :grey36, line = (:solid, :grey36), fillalpha = 0.75
@@ -314,12 +355,181 @@ plot!(fig,
     0.5 .* [-x_slit, -x_slit, x_slit,  x_slit, -x_slit] / a,
     0.5 .* [-z_slit,  z_slit, z_slit, -z_slit, -z_slit] / a;
     seriestype = :shape, label = "Slit",
-    line = (:solid, :red, 1), color = :red, fillalpha = 0.2
+    line = (:solid, :red, 1), color = :red, fillalpha = 0.15
 );
-plot!(xlim=(-1.75,1.75), ylim=(-1.0,1.0));
 vline!(fig,[0], line=(:white,0.2), label=false)
 hline!(fig,[0], line=(:white,0.2), label=false)
+plot!(
+    legend=:outerbottom,
+    legend_columns=2,
+    background_color_legend = :white,
+    foreground_color_legend = nothing,
+    xlim=(-1.75,1.75), 
+    ylim=(-1.0,1.0),
+    bottom_margin=-10mm,
+)
 display(fig)
+
+
+
+# Grid
+scale_factor = 1e-6
+scale_10power = round(Int, log10(scale_factor))
+xmin, xmax = -1*a, 1*a ;
+zmin, zmax = -0.2*a, 0.2*a ;
+nx, nz = 801, 1201
+xs = range(xmin, xmax; length=nx)
+zs = range(zmin, zmax; length=nz)
+# Evaluate on the grid
+Bx_grid   = field_component_grid(xs, zs;  y=0.0, Iw=Iw_set, comp=:x,     scale_factor=scale_factor)
+Bz_grid   = field_component_grid(xs, zs;  y=0.0, Iw=Iw_set, comp=:z,     scale_factor=scale_factor)
+Bnorm_grid = field_component_grid(xs, zs; y=0.0, Iw=Iw_set, comp=:norm, scale_factor=scale_factor)
+# Filled contour
+plt_Bx = contour(
+    zs/a, xs/a, Bx_grid;
+    levels = 40,
+    fill = true,
+    cbar = true,
+    xlabel = L"z/a",
+    ylabel = L"x/a",
+    title = L"$B_x(x,z)$ at $I_w=%$(Iw_set)\,\mathrm{A}$",
+    xflip = true,
+    colorbar_title = L"\times 10^{%$(scale_10power)} \ \mathrm{T}",
+)
+plot!(plt_Bx,
+    Shape(zslit/a, xslit/a);
+    fill = true,
+    fillalpha=0.1,
+    linecolor = :black,
+    linewidth = 2,
+    linestyle = :dashdot,
+    label = "slit region",
+)
+# Circle params (in the same units as your data)
+zc, xc, r = 1.3, 0.0, 1.0 ;           # center (z=1.3, x=0), radius 1
+θ = range(0, 2π; length=721);
+z_circle =  zc .+ r*cos.(θ);
+x_circle =  xc .+ r*sin.(θ);
+plot!(plt_Bx,
+    z_circle, x_circle; 
+    fill=true, 
+    fillalpha= 0.5, 
+    color=:black, 
+    lw=2, 
+    ls=:dash, label="pole piece", 
+)
+plot!(plt_Bx,
+    legend=:topleft,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    right_margin=3mm,
+    xlim=(zmin/a,0.4),
+    ylim=(-1.0,1.0)
+)
+display(plt_Bx)
+
+plt_Bz = contour(
+    zs/a, xs/a, Bz_grid;
+    levels = 40,
+    fill = true,
+    cbar = true,
+    xlabel = L"z/a",
+    ylabel = L"x/a",
+    title = L"$B_z(x,z)$ at $I_w=%$(Iw_set)\,\mathrm{A}$",
+    xflip = true,
+    colorbar_title = L"\times 10^{%$(scale_10power)} \ \mathrm{T}",
+)
+plot!(plt_Bz,
+    Shape(zslit/a, xslit/a);
+    fill = true,
+    fillalpha=0.1,
+    linecolor = :black,
+    linewidth = 2,
+    linestyle = :dashdot,
+    label = "slit region",
+)
+# Circle params (in the same units as your data)
+zc, xc, r = 1.3, 0.0, 1.0 ;           # center (z=1.3, x=0), radius 1
+θ = range(0, 2π; length=721);
+z_circle =  zc .+ r*cos.(θ);
+x_circle =  xc .+ r*sin.(θ);
+plot!(plt_Bz,
+    z_circle, x_circle; 
+    fill=true, 
+    fillalpha= 0.5, 
+    color=:black, 
+    lw=2, 
+    ls=:dash, label="pole piece", 
+)
+plot!(plt_Bz,
+    legend=:topleft,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    right_margin=3mm,
+    xlim=(zmin/a,0.4),
+    ylim=(-1.0,1.0)
+)
+display(plt_Bz)
+
+
+
+
+plt = contour(zs/a, xs/a, Z; 
+            levels=40, fill=true, cbar=true,
+            xlabel=L"z/a", ylabel=L"x/a", #aspect_ratio=:equal,
+            title=L"$\partial_{z} B(x,z)$ at $I_{w}=%$(Iw_set)\mathrm{A}$",
+            xflip=true,
+            colorbar_title = L"$\times \, 10^{%$(scale_10power)} \ \left(\mathrm{T}/\mathrm{m}\right)$",
+            )
+plot!(Shape(zslit/a, xslit/a);
+    fill = true,
+    fillalpha=0.1,
+    linecolor = :black,
+    linewidth = 2,
+    linestyle = :dashdot,
+    label = "slit region",
+)
+# Zero-contour overlay
+contour!(zs/a, xs/a, Z; levels=[0.0], linecolor=:black, linewidth=2, linestyle=:dot,)
+# Circle params (in the same units as your data)
+zc, xc, r = 1.3, 0.0, 1.0 ;           # center (z=1.3, x=0), radius 1
+θ = range(0, 2π; length=721);
+z_circle =  zc .+ r*cos.(θ);
+x_circle =  xc .+ r*sin.(θ);
+plot!(z_circle, x_circle; 
+    fill=true, 
+    fillalpha= 0.5, 
+    color=:black, 
+    lw=2, 
+    ls=:dash, label="pole piece", 
+)
+plot!(
+    legend=:topleft,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    right_margin=3mm,
+    xlim=(zmin/a,0.4),
+    ylim=(-1.0,1.0)
+)
+display(plt)
+
+
+
+ys = range(-4e-2, 4e-2; length=100)
+Bz = abs.([B_total(0, y, 0; Iw=Iw_set)[3] for y in ys])
+
+plot(ys, Bz,
+    xlabel="y",
+    ylabel=L"B_z(0,y,0)",
+    lw=2,
+    label=L"B_z")
+vspan!([-3.5e-2,3.5e-2], color=:gray, fillalpha=0.2)
+
+
+
+
+
+
 
 
 
@@ -370,9 +580,9 @@ plot!(fig,
 );
 plot!(xlim=(-1.25,1.25), ylim=(-1.2,1.0), 
     # left_margin=2mm,
-    # bottom_margin=-20mm, 
+    # bottom_margin=-50mm, 
     # right_margin=2mm, 
-    top_margin=-50mm,
+    # top_margin=-50mm,
     )
 hline!([1.3-sqrt(3)], color=:yellow, label=L"$z_{0}-\sqrt{3}$")
 hline!([1.3-sqrt(2)], color=:orange, label=L"$z_{0}-\sqrt{2}$")
