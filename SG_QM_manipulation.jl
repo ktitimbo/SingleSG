@@ -206,12 +206,6 @@ exp_x = 1e3*TheoreticalSimulation.pixel_coordinates(2160, 4, cam_pixelsize)
 exp_z = 1e3*TheoreticalSimulation.pixel_coordinates(2560, 1, cam_pixelsize)
 
 exp_result_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary", data_dir, data_dir * "_report_summary.jld2")
-
-exp_result = jldopen(exp_result_path, "r") do file
-    data = file[JLD2_MyTools.make_keypath_exp(data_dir,nz_bins,λ0_spline)][:F1_profile]
-
-end
-
 exp_result = jldopen(exp_result_path, "r") do file
         Ic = file["meta/Currents"]
         data = file[JLD2_MyTools.make_keypath_exp(data_dir,nz_bins,λ0_spline)];
@@ -258,7 +252,9 @@ img_exp_prof = plot(exp_z, exp_profile,
 # ===================================================
 # ++++++++++++++++++++ QM DATA ++++++++++++++++++++++
 # ===================================================
-qm_path = joinpath(@__DIR__,"simulation_data","QM_T200_8M","qm_screen_data.jld2");
+qm_path = joinpath(@__DIR__,"simulation_data","QM_T200_8M","qm_screen_data.jld2")
+qm_path = F:\SternGerlachExperiments\EXPERIMENTS
+
 qm_data = jldopen(qm_path, "r") do file
     # keys(file["screen"])
     file["screen"]["I$(Ic_idx)"]
