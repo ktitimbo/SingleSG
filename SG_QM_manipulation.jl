@@ -27,6 +27,7 @@ using DSP
 using LambertW, PolyLog
 using StatsBase
 using Random, Statistics, NaNStatistics, Distributions, StaticArrays
+using BSplineKit, Optim, Dierckx
 using Alert
 # Data manipulation
 using OrderedCollections
@@ -51,6 +52,7 @@ include("./Modules/DataReading.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
 include("./Modules/JLD2_MyTools.jl");
 
+BASE_PATH = raw"F:\SternGerlachExperiments"
 
 """
 Compute per-particle fluorescence weights for a laser sheet,
@@ -146,13 +148,13 @@ Icoils = [0.00,
             0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
             0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
 ];
-nI = length(Icoils)
+nI = length(Icoils);
 
 nx_bins, nz_bins = 32, 1 ;
 σw_mm = 0.200;
 λ0_raw            = 0.01;
 λ0_spline         = 0.001;
-ki_idx = 27;
+ki_idx = 42;
 Ic_idx = 47;
 norm_type = :none ;
 @info "Electric current associated to the simulation $(Int(1000*Icoils[Ic_idx]))mA"
@@ -193,19 +195,305 @@ colores = palette(:darkrainbow, n_data);
 data_dir = data_directories[1]
 
 @info "EXPERIMENTAL DATA : $(data_dir)"
-exp_path = joinpath(@__DIR__,"EXPERIMENTS",data_dir)
+exp_path = joinpath(BASE_PATH,"EXPERIMENTS",data_dir);
 exp_data = load(joinpath(exp_path,"data_processed.jld2"),"data");
+exp_x = 1e3*TheoreticalSimulation.pixel_coordinates(2160, 4, cam_pixelsize)
+exp_z = 1e3*TheoreticalSimulation.pixel_coordinates(2560, 1, cam_pixelsize)
 exp_data[:Currents]
 Ic_idx_exp = 19 ;
 @info "Electric current chosen from the experimental data $(round(1000*exp_data[:Currents][Ic_idx_exp]; sigdigits=4))mA"
 
-exp_image = mean(exp_data[:F1ProcessedImages], dims=(3)) |> x -> dropdims(x, dims=(3))
-exp_image = exp_image[:,:,Ic_idx_exp]
-exp_size = size(exp_image);
-exp_x = 1e3*TheoreticalSimulation.pixel_coordinates(2160, 4, cam_pixelsize)
-exp_z = 1e3*TheoreticalSimulation.pixel_coordinates(2560, 1, cam_pixelsize)
 
-exp_result_path = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary", data_dir, data_dir * "_report_summary.jld2")
+function rowwise_spline_maxima(
+    stack::AbstractArray{<:Real,3},
+    z_binned_mm::AbstractVector{<:Real};
+    n_bins::Integer,
+    λ0::Real,
+    half_max::Bool = false,
+    min_points::Integer = 6,
+)
+    n_rows, n_z, n_frames = size(stack)
+
+    @assert n_z % n_bins == 0 "Signal length not divisible by n_bins"
+
+    n_z_binned = div(n_z, n_bins)
+
+    @assert length(z_binned_mm) == n_z_binned """
+    length(z_binned_mm) must be equal to size(stack, 2) / n_bins.
+    Got length(z_binned_mm) = $(length(z_binned_mm)), expected $n_z_binned.
+    """
+
+    z_binned = Float64.(z_binned_mm)
+
+    max_position_data = Matrix{Float64}(undef, n_rows, n_frames)
+
+    for i in 1:n_frames
+        @info "Frame $i"
+        for l in 1:n_rows
+
+            # ------------------------------------------------------------
+            # Per-row z-profile for frame i
+            # stack[l, :, i] has length n_z
+            # ------------------------------------------------------------
+            processed_profile = Vector{Float64}(undef, n_z_binned)
+
+            for k in 1:n_z_binned
+                acc = 0.0
+                offset = (k - 1) * n_bins
+
+                @inbounds for b in 1:n_bins
+                    acc += stack[l, offset + b, i]
+                end
+
+                @inbounds processed_profile[k] = acc / n_bins
+            end
+
+            # ------------------------------------------------------------
+            # Optional half-maximum window
+            # ------------------------------------------------------------
+            z_fit = z_binned
+            y_fit = processed_profile
+
+            if half_max
+                y_max = maximum(y_fit)
+                keep = findall(yi -> yi > y_max / 2, y_fit)
+
+                if length(keep) < min_points
+                    max_position_data[l, i] = NaN
+                    continue
+                end
+
+                z_fit = z_binned[keep]
+                y_fit = processed_profile[keep]
+            end
+
+            if length(z_fit) < min_points
+                max_position_data[l, i] = NaN
+                continue
+            end
+
+            # ------------------------------------------------------------
+            # Spline fit
+            # ------------------------------------------------------------
+            S_fit = BSplineKit.fit(
+                BSplineOrder(4),
+                z_fit,
+                y_fit,
+                λ0;
+                weights = MyExperimentalAnalysis.compute_weights(z_fit, λ0),
+            )
+
+            # ------------------------------------------------------------
+            # Maxima search from several initial guesses
+            # ------------------------------------------------------------
+            negative_spline(x) = -S_fit(x[1])
+
+            initial_guesses = sort([
+                quantile(z_fit, 0.40),
+                z_fit[argmax(y_fit)],
+                quantile(z_fit, 0.65),
+                quantile(z_fit, 0.75),
+                quantile(z_fit, 0.90),
+            ])
+
+            candidates = Float64[]
+
+            for g in initial_guesses
+                res = Optim.optimize(
+                    negative_spline,
+                    [minimum(z_fit)],
+                    [maximum(z_fit)],
+                    [g],
+                    Fminbox(LBFGS()),
+                )
+
+                push!(candidates, Optim.minimizer(res)[1])
+            end
+
+            sort!(candidates)
+
+            # ------------------------------------------------------------
+            # Deduplicate candidates
+            # ------------------------------------------------------------
+            dedup = Float64[]
+
+            for v in candidates
+                if all(abs(v - x) > 1e-9 for x in dedup)
+                    push!(dedup, v)
+                end
+            end
+
+            if isempty(dedup)
+                max_position_data[l, i] = NaN
+                continue
+            end
+
+            # ------------------------------------------------------------
+            # Select tallest spline maximum
+            # ------------------------------------------------------------
+            vals = S_fit.(dedup)
+            best_ix = argmax(vals)
+            max_z = dedup[best_ix]
+
+            max_position_data[l, i] = max_z
+        end
+    end
+
+    return max_position_data
+end
+
+function rowgroup_spline_maxima(
+    stack::AbstractArray{<:Real,3},
+    z_binned_mm::AbstractVector{<:Real},
+    row_1::Integer,
+    row_2::Integer;
+    n_bins::Integer,
+    λ0::Real,
+    half_max::Bool = false,
+    min_points::Integer = 6,
+)
+    n_rows, n_z, n_frames = size(stack)
+
+    @assert 1 <= row_1 <= n_rows "row_1 must be between 1 and $n_rows"
+    @assert 1 <= row_2 <= n_rows "row_2 must be between 1 and $n_rows"
+    @assert row_1 <= row_2 "row_1 must be <= row_2"
+    @assert n_z % n_bins == 0 "Signal length not divisible by n_bins"
+
+    n_z_binned = div(n_z, n_bins)
+
+    @assert length(z_binned_mm) == n_z_binned """
+    length(z_binned_mm) must be equal to size(stack, 2) / n_bins.
+    Got length(z_binned_mm) = $(length(z_binned_mm)), expected $n_z_binned.
+    """
+
+    z_binned = Float64.(z_binned_mm)
+    max_position_data = Vector{Float64}(undef, n_frames)
+
+    n_selected_rows = row_2 - row_1 + 1
+
+    for i in 1:n_frames
+
+        # ------------------------------------------------------------
+        # Mean z-profile over rows row_1:row_2 for frame i
+        # Then bin along z.
+        # ------------------------------------------------------------
+        processed_profile = Vector{Float64}(undef, n_z_binned)
+
+        for k in 1:n_z_binned
+            acc = 0.0
+            offset = (k - 1) * n_bins
+
+            @inbounds for l in row_1:row_2
+                for b in 1:n_bins
+                    acc += stack[l, offset + b, i]
+                end
+            end
+
+            @inbounds processed_profile[k] = acc / (n_bins * n_selected_rows)
+        end
+
+        # ------------------------------------------------------------
+        # Optional half-maximum window
+        # ------------------------------------------------------------
+        z_fit = z_binned
+        y_fit = processed_profile
+
+        if half_max
+            y_max = maximum(y_fit)
+            keep = findall(yi -> yi > y_max / 2, y_fit)
+
+            if length(keep) < min_points
+                max_position_data[i] = NaN
+                continue
+            end
+
+            z_fit = z_binned[keep]
+            y_fit = processed_profile[keep]
+        end
+
+        if length(z_fit) < min_points
+            max_position_data[i] = NaN
+            continue
+        end
+
+        # ------------------------------------------------------------
+        # Spline fit
+        # ------------------------------------------------------------
+        S_fit = BSplineKit.fit(
+            BSplineOrder(4),
+            z_fit,
+            y_fit,
+            λ0;
+            weights = MyExperimentalAnalysis.compute_weights(z_fit, λ0),
+        )
+
+        # ------------------------------------------------------------
+        # One-dimensional maximum search
+        # ------------------------------------------------------------
+        zmin, zmax = extrema(z_fit)
+
+        negative_spline(z) = -S_fit(z)
+
+        res = optimize(
+            negative_spline,
+            zmin,
+            zmax,
+            Brent(),
+        )
+
+        max_position_data[i] = Optim.minimizer(res)
+    end
+
+    return max_position_data
+end
+
+stack_exp_data = @view exp_data[:F1ProcessedImages][:, :, :, Ic_idx_exp];
+# max_position_data = rowwise_spline_maxima(
+#     stack_exp_data,
+#     exp_z;
+#     n_bins = nz_bins,
+#     λ0 = λ0_raw,
+#     half_max = true,
+# )
+
+
+
+heatmap(
+    range(1,length(exp_x)),
+    range(1,length(exp_z)),
+    dropdims(mean(stack_exp_data, dims=3),dims=3)',
+    colormap = :viridis,
+    title = "Experiment",
+    xlabel = "x (px)",
+    ylabel = "z (px)",
+    # xlims = (1,540),
+    # ylims = (1,2560),
+    # aspect_ratio = :equal,
+    colorbar = true
+)
+
+
+for (i,j) in [(1,540),(120,180),(1,270),(271,540),(240,300),(1,400),(100,400)]
+    max_position_data = rowgroup_spline_maxima(
+        stack_exp_data,
+        exp_z,
+        i,
+        j;
+        n_bins = nz_bins,
+        λ0 = λ0_raw,
+        half_max = false,
+    )
+
+    @info "Peak position in rows ($i,$j)   \t:  $(round(mean(max_position_data); digits=3))"
+
+end
+
+
+exp_image = mean(exp_data[:F1ProcessedImages], dims=(3)) |> x -> dropdims(x, dims=(3))
+exp_image = exp_image[:,:,Ic_idx_exp];
+exp_size = size(exp_image);
+
+exp_result_path = joinpath(BASE_PATH, "EXPDATA_ANALYSIS","summary", data_dir, data_dir * "_report_summary.jld2")
 exp_result = jldopen(exp_result_path, "r") do file
         Ic = file["meta/Currents"]
         data = file[JLD2_MyTools.make_keypath_exp(data_dir,nz_bins,λ0_spline)];
@@ -222,6 +510,7 @@ end
 
 exp_profile = vec(mean(exp_image, dims=1))
 exp_z = exp_result.z
+
 
 img_exp = heatmap(
     exp_x,
@@ -252,16 +541,12 @@ img_exp_prof = plot(exp_z, exp_profile,
 # ===================================================
 # ++++++++++++++++++++ QM DATA ++++++++++++++++++++++
 # ===================================================
-qm_path = joinpath(@__DIR__,"simulation_data","QM_T200_8M","qm_screen_data.jld2")
-qm_path = F:\SternGerlachExperiments\EXPERIMENTS
-
+qm_path = joinpath(BASE_PATH,"SIMULATIONS","QM_T200_8M","qm_screen_data.jld2")
 qm_data = jldopen(qm_path, "r") do file
     # keys(file["screen"])
     file["screen"]["I$(Ic_idx)"]
 end
 qm_data = vcat([qm_data[lv]  for lv=6:8]...);
-
-qm_data
 
 xf_qm = 1e3* view(qm_data,:,7);
 zf_qm = 1e3* view(qm_data,:,8);
@@ -311,8 +596,8 @@ img_qm_prof = plot(centers_z, qm_profile,
     foreground_color_legend = nothing,
 );
 
-data_qmf1_path = joinpath(@__DIR__,
-    "simulation_data",
+data_qmf1_path = joinpath(BASE_PATH,
+    "SIMULATIONS",
     "QM_T200_8M",
     "qm_screen_profiles_f1_table.jld2");
 data_qm =  jldopen(data_qmf1_path,"r") do file
@@ -325,7 +610,7 @@ zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)];
 # +++++++++++++++++++++ CQD DATA ++++++++++++++++++++
 # ===================================================
 # data_CQD_up  = load(joinpath(@__DIR__,"simulation_data","cqd_simulation_6M","cqd_6000000_ki0$(ki_idx)_up_screen.jld2"),"screen")[:data];
-data_CQD_up  = load(joinpath(@__DIR__,"simulation_data","CQD_T200_8M","cqd20260304T185235747_8000000_ki001_up_screen.jld2"),"screen")[:data];
+data_CQD_up  = load(joinpath(BASE_PATH,"SIMULATIONS","CQD_T200_8M","up","cqd20260304T185235747_8000000_ki042_up_screen.jld2"),"screen")[:data];
 data_cqd = data_CQD_up[Ic_idx];
 
 xf_cqd = 1e3* view(data_cqd,:,9);
@@ -333,46 +618,32 @@ zf_cqd = 1e3* view(data_cqd,:,10);
 
 vxf_cqd = view(data_cqd,:,4);
 vyf_cqd = view(data_cqd,:,5);
-vzf_cqd =view(data_cqd,:,11);
+vzf_cqd = view(data_cqd,:,11);
 
-table_cqd_path = joinpath(@__DIR__,
-    "simulation_data",
+table_cqd_path = joinpath(BASE_PATH,
+    "SIMULATIONS",
     "CQD_T200_8M",
     "cqd_8M_up_profiles.jld2");
 cqd_meta = jldopen(table_cqd_path, "r") do file
-    meta = file["meta"]
-    
-    keys(file["meta"])
+    meta_group = file["meta"]
 
-    # mapping: original key (String) → new Symbol
-    rename = OrderedDict(
-        "induction_coeff"   => :ki,
-        "nz_bins"           => :nz,
-        "gaussian_width_mm" => :gw,
-        "λ0_raw_list"       => :λ0,
-        "λ0_spline"         => :λs,
-    )
+    meta_keys = sort(collect(keys(meta_group)))
+    w = maximum(length.(meta_keys))
 
-    # alignment width (use original names for printing)
-    w = maximum(length.(keys(rename)))
+    println("Metadata in: meta")
+    for k in meta_keys
+        val = meta_group[k]
+        println(rpad(k, w), " = ", val)
+    end
 
-    # out = OrderedDict{Symbol,Any}()
-
-    # for (k_old, k_new) in rename
-    #     val = round.(meta[k_old], digits=3)
-
-    #     # println(rpad(k_old, w), " = ", val)
-
-    #     out[k_new] = val
-    # end
-    # out;
-end
-ki = cqd_meta[:ki][ki_idx];
+    return file["meta/ki"]
+end;
+ki = 1e6*cqd_meta[ki_idx]
 @info "Induction term kᵢ=$(ki)×10⁻⁶ "
 
 data_CQD_up_zmax = jldopen(table_cqd_path, "r") do file
-    file[keypath(:up,ki,nz_bins,σw_mm,λ0_raw)]
-end
+    file[JLD2_MyTools.make_keypath_cqd(:up,ki,nz_bins,σw_mm,λ0_raw)]
+end;
 Ic_CQD   = [data_CQD_up_zmax[idx][:Icoil] for idx=1:nI];
 zmax_CQD = [data_CQD_up_zmax[idx][:z_max_smooth_spline_mm] for idx=1:nI];
 
@@ -415,7 +686,7 @@ img_cqd_prof = plot(centers_z, cqd_profile,
 # ======================================================================================================
 # ======================================================================================================
 
-plot(img_exp, img_exp_prof, img_qm, img_qm_prof,# img_cqd, img_cqd_prof, 
+plot(img_exp, img_exp_prof, img_qm, img_qm_prof, img_cqd, img_cqd_prof, 
     layout=(3,2),
     suptitle = "Original",
     left_margin=10mm,
@@ -431,7 +702,7 @@ plot(img_exp, img_exp_prof, img_qm, img_qm_prof,# img_cqd, img_cqd_prof,
 # 1) Choose laser detuning (Hz). You can set δlaser = 0 or optimize it later.
 δlaser = -5e6 ;
 # 2) s0: saturation parameter (dimensionless)
-s0 = 2.75 ;
+s0 = 0.75 ;
 # 3) Compute Doppler weights
 w_cqd = doppler_weights(vzf_cqd, vyf_cqd; branch=:up, Γν=5.956e6, δlaser=δlaser, s0=s0, normalize = true);
 w_qm = doppler_weights(vzf_qm, vyf_qm; branch=:up, Γν=5.956e6, δlaser=δlaser, s0=s0, normalize = true);
@@ -582,16 +853,16 @@ fig = plot(xlabel=L"$z$ (mm)");
 Laser_detuning = collect(range(-15,15,11));
 cols_i = palette(:darkrainbow,length(Laser_detuning));
 Γ_K39 = 5.956e6 ;
-s0 = 2.75 ;
-# plot!(fig,centers_z,cqd_profile, label="CQD profile",
-#     line=(:dash,2,:black));
+s0 = 0.75 ;
+plot!(fig,centers_z,cqd_profile/ maximum(cqd_profile), label="CQD profile",
+    line=(:dash,2,:black));
 for (i,δlaser) in enumerate(Laser_detuning)
     w = doppler_weights(vzf_cqd, vyf_cqd; branch=:up, Γν=Γ_K39, δlaser=1e6*δlaser, s0=s0, normalize=false)
     img = weighted_image(xf_cqd, zf_cqd, w , edges_x, edges_z; norm_mode = norm_type)
     counts_doppler = img.weights
     z_profile_doppler = vec(mean(counts_doppler, dims = 1))
     plot!(fig,
-        centers_z,z_profile_doppler, 
+        centers_z,z_profile_doppler/ maximum(z_profile_doppler), 
         label=L"$\delta_{L}=%$(round(δlaser, sigdigits=3))$MHz",
         line = (:solid,1.2, cols_i[i]))
 end
