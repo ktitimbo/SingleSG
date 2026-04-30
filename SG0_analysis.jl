@@ -78,13 +78,15 @@ MyExperimentalAnalysis.effective_cam_pixelsize_z    = exp_pixelsize_z;
 MyExperimentalAnalysis.x_pixels                     = x_pixels;
 MyExperimentalAnalysis.z_pixels                     = z_pixels;
 
+BASE_PATH = raw"F:\SternGerlachExperiments"
+
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 T_START   = Dates.now()
 RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 
-nz = 2
-λ0 = 0.005
+nz = 1
+λ0 = 0.001
 
 # position
 z_mm        = 1e3 .* pixel_positions(z_pixels, nz, exp_pixelsize_z) ; 
@@ -93,24 +95,27 @@ z_mm_error  = 1/sqrt(12) * 1e3 * exp_pixelsize_z * nz ; # half of the pixel size
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directories = [
-        "20260415A", 
-        "20260415B", 
-        "20260416A", 
-        "20260416B"
+        # "20260415A", 
+        # "20260415B", 
+        # "20260416A", 
+        # "20260416B",
+        "20260427A",
+        "20260427B",
+        "20260427C",
         ];
 nd = length(data_directories);
 
 for data_directory in data_directories
-    outfile_raw         = joinpath("EXPERIMENTS",data_directory, "data.jld2")
-    outfile_processed   = joinpath("EXPERIMENTS",data_directory, "data_processed.jld2")
-    data_summary_path   = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS","summary",data_directory)
+    outfile_raw         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
+    outfile_processed   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
+    data_summary_path   = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS","summary",data_directory)
     isdir(data_summary_path) || mkpath(data_summary_path);
 
 
     if !isfile(outfile_processed) # check if the processed images exists
         if !isfile(outfile_raw) # check if the raw data exists
             @info "Not found → building $outfile_raw"
-            data_in = joinpath(@__DIR__,"EXPERIMENTS", data_directory)
+            data_in = joinpath(BASE_PATH,"EXPERIMENTS", data_directory)
             data_raw = MyExperimentalAnalysis.SG0_stack_data(data_in)
             jldsave(outfile_raw, data=data_raw)
             data_raw = nothing
@@ -131,9 +136,10 @@ end
 
 tables = Vector{DataFrame}(undef, nd)
 for (idx,data_directory) in enumerate(data_directories)
-    data_processed = load(joinpath("EXPERIMENTS",data_directory, "data_processed.jld2"))["data"]
+    # data_directory = data_directories[2]
+    data_processed = load(joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2"))["data"]
 
-    OUTDIR    = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
+    OUTDIR    = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
     isdir(OUTDIR) || mkpath(OUTDIR);
     @info "Created output directory" OUTDIR
     MyExperimentalAnalysis.OUTDIR   = OUTDIR;
@@ -143,16 +149,16 @@ for (idx,data_directory) in enumerate(data_directories)
     Bz0 = data_processed[:SG0Bz]
     Bz1 = data_processed[:SG1Bz]
 
-    f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=true,λ0=λ0);
-    f2_max = MyExperimentalAnalysis.SG0_framewise_maxima("F2", data_processed, nz ; half_max=true,λ0=λ0);
+    f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=false,λ0=λ0);
+    f2_max = MyExperimentalAnalysis.SG0_framewise_maxima("F2", data_processed, nz ; half_max=false,λ0=λ0);
 
-    MyExperimentalAnalysis.SG0_mean_maxima("F1", data_processed, nz ; half_max=true,λ0=λ0);
-    MyExperimentalAnalysis.SG0_mean_maxima("F2", data_processed, nz ; half_max=true,λ0=λ0);
+    MyExperimentalAnalysis.SG0_mean_maxima("F1", data_processed, nz ; half_max=false,λ0=λ0);
+    MyExperimentalAnalysis.SG0_mean_maxima("F2", data_processed, nz ; half_max=false,λ0=λ0);
 
     f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ z_mm_error^2 );
     f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
 
-    Δz_mm = f1_z_mm .- f2_z_mm
+    Δz_mm = -(f1_z_mm .- f2_z_mm)
     Δz_sem_mm = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2   )
 
     data = data = DataFrame(
@@ -280,6 +286,18 @@ for (idx,data_directory) in enumerate(data_directories)
         bottom_margin=3mm)
     display(fig)
     
+    colors_sg0 = palette(:darkrainbow, length(SG0_current))
+    plt = plot(xlabel="z - pixel",
+        legend=:topleft,
+        legend_title="SG0",
+        )
+    for i in eachindex(SG0_current)
+    img = dropdims(mean(data_processed[:F1ProcessedImages][:,:,:,i], dims=(1,3)), dims=(1,3))
+    plt = plot!(img,
+        line=(:solid,1,colors_sg0[i]),
+        label=L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$")
+    end
+    display(plt)
     GC.gc()
 
 end
@@ -365,21 +383,21 @@ plot!(
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directory = "20260415A"
 
-OUTDIR    = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
+OUTDIR    = joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 MyExperimentalAnalysis.OUTDIR   = OUTDIR;
 
-outfile_raw         = joinpath("EXPERIMENTS",data_directory, "data.jld2")
-outfile_processed   = joinpath("EXPERIMENTS",data_directory, "data_processed.jld2")
-data_summary_path   = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS","summary",data_directory)
+outfile_raw         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
+outfile_processed   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
+data_summary_path   = joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS","summary",data_directory)
 isdir(data_summary_path) || mkpath(data_summary_path);
 
 
 if !isfile(outfile_processed) # check if the processed images exists
     if !isfile(outfile_raw) # check if the raw data exists
         @info "Not found → building $outfile_raw"
-        data_in = joinpath(@__DIR__,"EXPERIMENTS", data_directory)
+        data_in = joinpath(BASE_PATH,"EXPERIMENTS", data_directory)
         data_raw = MyExperimentalAnalysis.SG0_stack_data(data_in)
         jldsave(outfile_raw, data=data_raw)
         data_raw = nothing
@@ -585,21 +603,21 @@ saveplot(p2,"zvssg0")
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directory = "20260312A"
 
-OUTDIR    = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
+OUTDIR    = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 MyExperimentalAnalysis.OUTDIR   = OUTDIR;
 
-outfile_raw         = joinpath("EXPERIMENTS",data_directory, "data.jld2")
-outfile_processed   = joinpath("EXPERIMENTS",data_directory, "data_processed.jld2")
-data_summary_path   = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS","summary",data_directory)
+outfile_raw         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
+outfile_processed   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
+data_summary_path   = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS","summary",data_directory)
 isdir(data_summary_path) || mkpath(data_summary_path);
 
 
 if !isfile(outfile_processed) # check if the processed images exists
     if !isfile(outfile_raw) # check if the raw data exists
         @info "Not found → building $outfile_raw"
-        data_in = joinpath(@__DIR__,"EXPERIMENTS", data_directory)
+        data_in = joinpath(BASE_PATH,"EXPERIMENTS", data_directory)
         data_raw = MyExperimentalAnalysis.SG0_stack_data(data_in)
         jldsave(outfile_raw, data=data_raw)
         data_raw = nothing
@@ -807,21 +825,21 @@ saveplot(p2,"zvssg0")
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directory = "20260312B"
 
-OUTDIR    = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
+OUTDIR    = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 MyExperimentalAnalysis.OUTDIR   = OUTDIR;
 
-outfile_raw         = joinpath("EXPERIMENTS",data_directory, "data.jld2")
-outfile_processed   = joinpath("EXPERIMENTS",data_directory, "data_processed.jld2")
-data_summary_path   = joinpath(@__DIR__, "SG0_EXPDATA_ANALYSIS","summary",data_directory)
+outfile_raw         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
+outfile_processed   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
+data_summary_path   = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS","summary",data_directory)
 isdir(data_summary_path) || mkpath(data_summary_path);
 
 
 if !isfile(outfile_processed) # check if the processed images exists
     if !isfile(outfile_raw) # check if the raw data exists
         @info "Not found → building $outfile_raw"
-        data_in = joinpath(@__DIR__,"EXPERIMENTS", data_directory)
+        data_in = joinpath(BASE_PATH,"EXPERIMENTS", data_directory)
         data_raw = MyExperimentalAnalysis.SG0_stack_data(data_in)
         jldsave(outfile_raw, data=data_raw)
         data_raw = nothing
