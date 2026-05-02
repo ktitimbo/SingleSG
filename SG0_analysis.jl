@@ -85,8 +85,8 @@ BASE_PATH = raw"F:\SternGerlachExperiments"
 T_START   = Dates.now()
 RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 
-nz = 1
-λ0 = 0.001
+nz = 2
+λ0 = 0.005
 
 # position
 z_mm        = 1e3 .* pixel_positions(z_pixels, nz, exp_pixelsize_z) ; 
@@ -99,13 +99,20 @@ data_directories = [
         # "20260415B", 
         # "20260416A", 
         # "20260416B",
-        "20260427A",
-        "20260427B",
-        "20260427C",
+        # "20260427A",
+        # "20260427B",
+        # "20260427C",
+        "20260429A",
+        "20260429B",
+        "20260429C",
+        "20260429D",
+        "20260429E",
+        "20260429F",
         ];
 nd = length(data_directories);
 
 for data_directory in data_directories
+    @info data_directory
     outfile_raw         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
     outfile_processed   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
     data_summary_path   = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS","summary",data_directory)
@@ -134,9 +141,10 @@ for data_directory in data_directories
 
 end
 
-tables = Vector{DataFrame}(undef, nd)
+tables = Vector{DataFrame}(undef, nd);
 for (idx,data_directory) in enumerate(data_directories)
-    # data_directory = data_directories[2]
+    # data_directory = data_directories[5]
+    @info data_directory
     data_processed = load(joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2"))["data"]
 
     OUTDIR    = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
@@ -144,10 +152,10 @@ for (idx,data_directory) in enumerate(data_directories)
     @info "Created output directory" OUTDIR
     MyExperimentalAnalysis.OUTDIR   = OUTDIR;
 
-    SG0_current = data_processed[:SG0Currents]
-    SG1_current = data_processed[:SG1Currents]
-    Bz0 = data_processed[:SG0Bz]
-    Bz1 = data_processed[:SG1Bz]
+    SG0_current = data_processed[:SG0Currents];
+    SG1_current = data_processed[:SG1Currents];
+    Bz0 = data_processed[:SG0Bz];
+    Bz1 = data_processed[:SG1Bz];
 
     f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=false,λ0=λ0);
     f2_max = MyExperimentalAnalysis.SG0_framewise_maxima("F2", data_processed, nz ; half_max=false,λ0=λ0);
@@ -158,8 +166,8 @@ for (idx,data_directory) in enumerate(data_directories)
     f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ z_mm_error^2 );
     f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
 
-    Δz_mm = -(f1_z_mm .- f2_z_mm)
-    Δz_sem_mm = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2   )
+    Δz_mm = -(f1_z_mm .- f2_z_mm);
+    Δz_sem_mm = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2   );
 
     data = data = DataFrame(
         I0        = SG0_current,
@@ -199,45 +207,44 @@ for (idx,data_directory) in enumerate(data_directories)
         label=L"$F=1$",
         seriestype=:scatter,
         marker=(:circle,2,:white),
-        markerstrokecolor=:red)
+        markerstrokecolor=:red);
     plot!(fig1, data.I0, data.zf2,
         yerror = data.errzf2,
         label=L"$F=2$",
         seriestype=:scatter,
         marker=(:circle,2,:white),
-        markerstrokecolor=:blue)
+        markerstrokecolor=:blue);
     plot!(fig1, data.I0, mean([data.zf1,data.zf2]),
         label="Centre",
         marker=(:diamond,:white),
         markerstrokecolor=:gray47,
         line=(:dash,1,:gray47)
-    )
+    );
     plot!(fig1,
         xlabel="SG0 Currents (A)",
         foreground_color_legend = nothing,
         background_color_legend = nothing,
-        yformatter = y -> @sprintf("%.3f", y))
-    display(fig1)
-
+        yformatter = y -> @sprintf("%.3f", y));
+    # display(fig1)
 
     fig2 = plot(data_pos.I0, data_pos.zf1, 
         yerror = data_pos.errzf1,
         label=L"$F=1$",
         seriestype=:scatter,
         marker=(:circle,2,:white),
-        markerstrokecolor=:red)
+        markerstrokecolor=:red);
     plot!(fig2, data_pos.I0, data_pos.zf2,
         yerror = data_pos.errzf2,
         label=L"$F=2$",
         seriestype=:scatter,
         marker=(:circle,2,:white),
-        markerstrokecolor=:blue)
+        markerstrokecolor=:blue);
     plot!(fig2, data_pos.I0, mean([data_pos.zf1,data_pos.zf2]),
         label="Centre",
         marker=(:diamond,:white),
         markerstrokecolor=:gray47,
         line=(:dash,1,:gray47)  
-    )
+    );
     plot!(fig2,
         foreground_color_legend = nothing,
         background_color_legend = nothing,
@@ -245,66 +252,133 @@ for (idx,data_directory) in enumerate(data_directories)
         yformatter = y -> @sprintf("%.3f", y),
         # xlims=(1e-3,10e-3)
         xscale=:log10
-    )
-    display(fig2)
-
+    );
+    # display(fig2)
 
     fig3 = plot(data.I0, data.split/6.5e-3, 
         yerror = data.errsplit/6.5e-3,
         label=L"$\Delta z$",
         seriestype=:scatter,
         marker=(:circle,2,:white),
-        markerstrokecolor=:darkgreen)
+        markerstrokecolor=:darkgreen);
     plot!(fig3,
         foreground_color_legend = nothing,
         background_color_legend = nothing,
         xlabel="SG0 Current (A)",
         ylabel="Split (px)",
-        yminorticks=false,)
-    display(fig3)
+        yminorticks=false,);
+    # display(fig3)
 
     fig4 = plot(data_pos.I0, data_pos.split/6.5e-3, 
         yerror = data_pos.errsplit/6.5e-3,
         label=L"$\Delta z$",
         seriestype=:scatter,
         marker=(:circle,2,:white),
-        markerstrokecolor=:darkgreen)
+        markerstrokecolor=:darkgreen);
     plot!(fig4,
         xscale=:log10,
         foreground_color_legend = nothing,
         background_color_legend = nothing,
         xlabel="SG0 Current (A)",
         ylabel="Split (px)",
-        yminorticks=false,)
-    display(fig4)
+        yminorticks=false,);
+    # display(fig4)
 
     fig = plot(fig1,fig2,fig3,fig4,
         suptitle = "$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA",
         layout=(2,2),
         size=(1000,600),
+        link=:x,
         left_margin=5mm,
         bottom_margin=3mm)
+    plot!(fig[1], xlabel="", xformatter=_->"", bottom_margin=-5mm)
+    plot!(fig[2], xlabel="", xformatter=_->"", bottom_margin=-5mm)
     display(fig)
     
-    colors_sg0 = palette(:darkrainbow, length(SG0_current))
-    plt = plot(xlabel="z - pixel",
+    colors_sg0 = palette(:darkrainbow, length(SG0_current));
+
+    for i in eachindex(SG0_current)
+    f1imgs = data_processed[:F1ProcessedImages];
+    f1image_i   = dropdims(mean(f1imgs[:,:,:,i], dims=3), dims=3);
+    mask = isfinite.(f1image_i) .& (f1image_i .>= -10) .& (f1image_i .<= 1000);
+    f1image_i = f1image_i .* mask  ;
+    f1vmax   = Statistics.quantile(vec(f1image_i), 0.999);
+    f1profile_i = dropdims(mean(f1image_i, dims=(1)), dims=(1));
+
+    f2imgs = data_processed[:F2ProcessedImages];
+    f2image_i   = dropdims(mean(f2imgs[:,:,:,i], dims=3), dims=3);
+    mask = isfinite.(f2image_i) .& (f2image_i .>= -5) .& (f2image_i .<= 500);
+    f2image_i = f2image_i .* mask  ;
+    f2vmax   = Statistics.quantile(vec(f2image_i), 0.999);
+    f2profile_i = dropdims(mean(f2image_i, dims=(1)), dims=(1));
+
+    plt1 = heatmap(f1image_i,
+        xlabel=L"$z\ \ (\mathrm{px})$",
+        ylabel=L"$x\ \ (\mathrm{px})$",
+        cbar = true,
+        clims=(0,f1vmax)
+    )
+    plt2 = plot(f1profile_i,
+        line=(:solid,1,colors_sg0[i]),
+        label=L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$",
+        xlabel=L"$z\ \ (\mathrm{px})$",
         legend=:topleft,
         legend_title="SG0",
+        background_color_legend = :white,
+       foreground_color_legend = nothing,
+    );
+    plt3 = heatmap(f2image_i,
+        xlabel=L"$z\ \ (\mathrm{px})$",
+        ylabel=L"$x\ \ (\mathrm{px})$",
+        cbar = true,
+        clims=(0,f2vmax)
+    );
+    plt4 = plot(f2profile_i,
+        line=(:solid,1,colors_sg0[i]),
+        label=L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$",
+        xlabel=L"$z\ \ (\mathrm{px})$",
+        legend=:topleft,
+        legend_title="SG0",
+        background_color_legend = :white,
+        foreground_color_legend = nothing,
+    );
+
+    plt = plot(plt1, plt2, plt3, plt4,
+    suptitle = "$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA",
+    layout=(2,2),
+    size=(800,450),
+    left_margin=3mm,
+    bottom_margin=2mm,
+    )
+    display(plt)
+    end
+
+    plt = plot(xlabel="z - pixel",
+        legend=:topleft,
+        title="$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA",
         )
     for i in eachindex(SG0_current)
-    img = dropdims(mean(data_processed[:F1ProcessedImages][:,:,:,i], dims=(1,3)), dims=(1,3))
-    plt = plot!(img,
-        line=(:solid,1,colors_sg0[i]),
-        label=L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$")
+        img = dropdims(mean(data_processed[:F1ProcessedImages][:,:,:,i], dims=(1,3)), dims=(1,3))
+        plot!(plt,
+            img,
+            line=(:solid,1,colors_sg0[i]),
+            label=L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$"
+            )
     end
+    plot!(
+        legend_font = 8,
+        foreground_color_legend = nothing,
+        legend_columns=2)
     display(plt)
-    GC.gc()
 
+
+    GC.gc()
 end
 
 
 mark_symbol = [:circle, :rect]
 colores = (:darkgreen, :indigo )
+current_polarity = ("+","–")
 
 plot(xlabel="SG0 Current (A)",
     ylabel=L"$\Delta z$ (px)")
@@ -313,13 +387,14 @@ for (i,dir) in enumerate(data_directories[1:2])
     data_pos = data[data.I0 .> 0, :]
     plot!(data_pos.I0, data_pos.split/6.5e-3,
             yerror = data_pos.errsplit/6.5e-3,
-            label=dir,
-            seriestype=:scatter,
+            label="($(current_polarity[i])) "*dir,
+            line=(:solid, 1, colores[i],0.5),
             marker=(mark_symbol[i],2,:white),
             markerstrokecolor=colores[i]
     )
 end
 plot!(
+    title = "SG1 = 0mA",
     xscale=:log10,
     foreground_color_legend = nothing,
     background_color_legend = nothing,
@@ -327,14 +402,15 @@ plot!(
 
 
 plot(xlabel="SG0 Current (A)",
-    ylabel=L"$\Delta z$ (px)")
+    ylabel=L"$\Delta z$ (px)",
+    title = "SG1 = 40mA",)
 for (i,dir) in enumerate(data_directories[3:4])
     data = tables[i+2]
     data_pos = data[data.I0 .> 0, :]
     plot!(data_pos.I0, data_pos.split/6.5e-3,
             yerror = data_pos.errsplit/6.5e-3,
-            label=dir,
-            seriestype=:scatter,
+            label="($(current_polarity[i])) "*dir,
+            line=(:solid, 1, colores[i],0.5),
             marker=(mark_symbol[i],2,:white),
             markerstrokecolor=colores[i]
     )
@@ -344,6 +420,28 @@ plot!(
     foreground_color_legend = nothing,
     background_color_legend = nothing,
     yminorticks=false,)
+
+plot(xlabel="SG0 Current (A)",
+    ylabel=L"$\Delta z$ (px)",
+    title = L"SG1 $\sim 500\mathrm{mA}$",)
+for (i,dir) in enumerate(data_directories[5:6])
+    data = tables[i+4]
+    data_pos = data[data.I0 .> 0, :]
+    plot!(data_pos.I0, data_pos.split/6.5e-3,
+            yerror = data_pos.errsplit/6.5e-3,
+            label="($(current_polarity[i])) "*dir,
+            line=(:solid, 1, colores[i],0.5),
+            marker=(mark_symbol[i],2,:white),
+            markerstrokecolor=colores[i]
+    )
+end
+plot!(
+    xscale=:log10,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+    yminorticks=false,)
+
+
 
 
 mark_symbol = (:circle, :rect, :diamond, :utriangle )
