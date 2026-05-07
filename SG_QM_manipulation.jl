@@ -24,7 +24,7 @@ using LinearAlgebra, DataStructures
 # using BSplineKit
 using Dierckx, Optim
 using DSP
-using LambertW, PolyLog
+using LambertW, PolyLog, Polynomials
 using StatsBase
 using Random, Statistics, NaNStatistics, Distributions, StaticArrays
 using BSplineKit, Optim, Dierckx
@@ -51,8 +51,77 @@ include("./Modules/TheoreticalSimulation.jl");
 include("./Modules/DataReading.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
 include("./Modules/JLD2_MyTools.jl");
+include("./Modules/ProfileFitTools.jl");
 
 BASE_PATH = raw"F:\SternGerlachExperiments"
+
+# PHYSICAL CONSTANTS from NIST
+const ATOM        = "39K"  ;
+# RSU : Relative Standard Uncertainty
+const kb    = 1.380649e-23 ;       # Boltzmann constant (J/K)
+const ħ     = 6.62607015e-34/2π ;  # Reduced Planck constant (J s)
+const μ₀    = 1.25663706127e-6;    # Vacuum permeability (Tm/A)
+const μB    = 9.2740100657e-24 ;   # Bohr magneton (J/T)
+const γₑ    = -1.76085962784e11 ;  # Electron gyromagnetic ratio  (1/sT). Relative Standard Uncertainty = 3.0e-10
+const μₑ    = 9.2847646917e-24 ;   # Electron magnetic moment (J/T). RSU = 3.0e-10
+const Sspin = 1/2 ;                # Electron spin
+const gₑ    = -2.00231930436092 ;  # Electron g-factor
+K39_params = TheoreticalSimulation.AtomParams(ATOM);
+
+# STERN--GERLACH EXPERIMENT
+# Camera and pixel geometry : intrinsic properties
+cam_pixelsize = 6.5e-6 ;  # Physical pixel size of camera [m]
+nx_pixels , nz_pixels= (2160, 2560); # (Nx,Nz) pixels
+println("""
+***************************************************
+CAMERA FEATURES
+    Number of pixels        : $(nx_pixels) × $(nz_pixels)
+    Pixel size              : $(1e6*cam_pixelsize) μm
+***************************************************
+""")
+
+# Furnace
+T_K = 273.15 + 200 ; # Furnace temperature (K)
+# Furnace aperture
+const x_furnace = 2.0e-3 ;
+const z_furnace = 100e-6 ;
+# Slit
+const x_slit  = 4.0e-3 ;
+const z_slit  = 300e-6 ;
+# Propagation distances
+const y_FurnaceToSlit = 224.0e-3 ;
+const y_SlitToSG      = 44.0e-3 ;
+const y_SG            = 7.0e-2 ;
+const y_SGToScreen    = 32.0e-2 ;
+# Connecting pipes
+const R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
+effusion_params = TheoreticalSimulation.BeamEffusionParams(x_furnace,z_furnace,x_slit,z_slit,y_FurnaceToSlit,T_K,K39_params);
+println("""
+***************************************************
+SETUP FEATURES
+    Temperature (K          : $(T_K)
+    Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
+    Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
+    Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
+    Slit → SG magnet        : $(1e3*y_SlitToSG)mm
+    SG magnet               : $(1e3*y_SG)mm
+    SG magnet → Screen      : $(1e3*y_SGToScreen)mm
+    Tube radius             : $(1e3*R_tube)mm
+***************************************************
+""")
+# Setting the variables for the module
+TheoreticalSimulation.default_camera_pixel_size = cam_pixelsize;
+TheoreticalSimulation.default_x_pixels          = nx_pixels;
+TheoreticalSimulation.default_z_pixels          = nz_pixels;
+TheoreticalSimulation.default_x_furnace         = x_furnace;
+TheoreticalSimulation.default_z_furnace         = z_furnace;
+TheoreticalSimulation.default_x_slit            = x_slit;
+TheoreticalSimulation.default_z_slit            = z_slit;
+TheoreticalSimulation.default_y_FurnaceToSlit   = y_FurnaceToSlit;
+TheoreticalSimulation.default_y_SlitToSG        = y_SlitToSG;
+TheoreticalSimulation.default_y_SG              = y_SG;
+TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
+TheoreticalSimulation.default_R_tube            = R_tube;
 
 """
 Compute per-particle fluorescence weights for a laser sheet,
@@ -129,80 +198,14 @@ edges_u, edges_v: bin edges (ranges)
 """
 function weighted_image(coords_u, coords_v, w, edges_u, edges_v; norm_mode::Symbol= :probability)
     if norm_mode === :none
-        h = fit(Histogram, (coords_u, coords_v), weights(w), (edges_u, edges_v))                    # raw counts (no normalization)
+        h = StatsBase.fit(Histogram, (coords_u, coords_v), weights(w), (edges_u, edges_v))                    # raw counts (no normalization)
     elseif norm_mode in (:probability, :pdf, :density)
-        h = normalize(fit(Histogram, (coords_u, coords_v), weights(w), (edges_u, edges_v)); mode=norm_mode)
+        h = normalize(StatsBase.fit(Histogram, (coords_u, coords_v), weights(w), (edges_u, edges_v)); mode=norm_mode)
     else
         throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $norm_mode"))
     end
     return h
 end
-
-cam_pixelsize = 6.5e-6 ;  # Physical pixel size of camera [m]
-
-# Coil currents
-Icoils = [0.00,
-            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
-            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
-            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
-            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
-            0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
-];
-nI = length(Icoils);
-
-nx_bins, nz_bins = 32, 1 ;
-σw_mm = 0.200;
-λ0_raw            = 0.01;
-λ0_spline         = 0.001;
-ki_idx = 42;
-Ic_idx = 47;
-norm_type = :none ;
-@info "Electric current associated to the simulation $(Int(1000*Icoils[Ic_idx]))mA"
-
-# Fixed analysis limits
-xlim = (-8.0, 8.0);
-zlim = (-12.5, 12.5);
-xmin, xmax = xlim ;
-zmin, zmax = zlim ;
-
-# Bin size in mm (default_camera_pixel_size is assumed global in meters)
-x_bin_size = 1e3 * nx_bins * cam_pixelsize ;
-z_bin_size = 1e3 * nz_bins * cam_pixelsize ;
-
-# --------------------------------------------------------
-# X edges: force symmetric centers around 0
-# --------------------------------------------------------
-x_half_range = max(abs(xmin), abs(xmax)) ;
-kx = max(1, ceil(Int, x_half_range / x_bin_size)) ;
-centers_x = collect((-kx:kx) .* x_bin_size) ;
-edges_x = collect((-(kx + 0.5)) * x_bin_size : x_bin_size : ((kx + 0.5) * x_bin_size)) ;
-
-# --------------------------------------------------------
-# Z edges: force symmetric centers around 0
-# --------------------------------------------------------
-z_half_range = max(abs(zmin), abs(zmax));
-kz = max(1, ceil(Int, z_half_range / z_bin_size));
-centers_z = collect((-kz:kz) .* z_bin_size);
-edges_z = collect((-(kz + 0.5)) * z_bin_size : z_bin_size : ((kz + 0.5) * z_bin_size));
-
-# ===================================================
-# ++++++++++++++++++++ EXPERIMENT +++++++++++++++++++
-# ===================================================
-data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
-n_data = length(data_directories);
-colores = palette(:darkrainbow, n_data);
-
-data_dir = data_directories[1]
-
-@info "EXPERIMENTAL DATA : $(data_dir)"
-exp_path = joinpath(BASE_PATH,"EXPERIMENTS",data_dir);
-exp_data = load(joinpath(exp_path,"data_processed.jld2"),"data");
-exp_x = 1e3*TheoreticalSimulation.pixel_coordinates(2160, 4, cam_pixelsize)
-exp_z = 1e3*TheoreticalSimulation.pixel_coordinates(2560, 1, cam_pixelsize)
-exp_data[:Currents]
-Ic_idx_exp = 19 ;
-@info "Electric current chosen from the experimental data $(round(1000*exp_data[:Currents][Ic_idx_exp]; sigdigits=4))mA"
-
 
 function rowwise_spline_maxima(
     stack::AbstractArray{<:Real,3},
@@ -447,7 +450,85 @@ function rowgroup_spline_maxima(
     return max_position_data
 end
 
-stack_exp_data = @view exp_data[:F1ProcessedImages][:, :, :, Ic_idx_exp];
+# Coil currents
+Icoils = [0.00,
+            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
+            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
+            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
+            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
+            0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
+];
+nI = length(Icoils);
+
+nx_bins, nz_bins = 32, 1 ;
+σw_mm       = 0.200;
+λ0_raw      = 0.01;
+λ0_spline   = 0.001;
+ki_idx = 42;
+Ic_idx = length(Icoils);
+norm_type = :none ;
+@info "Electric current associated to the simulation $(Int(1000*Icoils[Ic_idx]))mA"
+
+# Fixed analysis limits
+xlim = (-8.0, 8.0);
+zlim = (-12.5, 12.5);
+xmin, xmax = xlim ;
+zmin, zmax = zlim ;
+
+# Bin size in mm (default_camera_pixel_size is assumed global in meters)
+x_bin_size = 1e3 * nx_bins * cam_pixelsize ;
+z_bin_size = 1e3 * nz_bins * cam_pixelsize ;
+
+# --------------------------------------------------------
+# X edges: force symmetric centers around 0
+# --------------------------------------------------------
+x_half_range = max(abs(xmin), abs(xmax)) ;
+kx = max(1, ceil(Int, x_half_range / x_bin_size)) ;
+centers_x = collect((-kx:kx) .* x_bin_size) ;
+edges_x = collect((-(kx + 0.5)) * x_bin_size : x_bin_size : ((kx + 0.5) * x_bin_size)) ;
+
+# --------------------------------------------------------
+# Z edges: force symmetric centers around 0
+# --------------------------------------------------------
+z_half_range = max(abs(zmin), abs(zmax));
+kz = max(1, ceil(Int, z_half_range / z_bin_size));
+centers_z = collect((-kz:kz) .* z_bin_size);
+edges_z = collect((-(kz + 0.5)) * z_bin_size : z_bin_size : ((kz + 0.5) * z_bin_size));
+
+# ===================================================
+# ++++++++++++++++++++ EXPERIMENT +++++++++++++++++++
+# ===================================================
+data_directories = ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
+n_data = length(data_directories);
+colores = palette(:darkrainbow, n_data);
+
+# ============================================================
+# Section 1 — Load & validate experimental data
+# ============================================================
+
+data_dir = data_directories[8]
+@info "EXPERIMENTAL DATA : $(data_dir)"
+
+exp_path = joinpath(BASE_PATH,"EXPERIMENTS",data_dir);
+exp_data = load(joinpath(exp_path,"data_processed.jld2"),"data");
+
+# Pixel-to-mm coordinate grids
+exp_x = 1e3*TheoreticalSimulation.pixel_coordinates(nx_pixels, 4, cam_pixelsize)
+exp_z = 1e3*TheoreticalSimulation.pixel_coordinates(nz_pixels, 1, cam_pixelsize)
+
+# Select the highest-current index
+Ic_idx = lastindex(exp_data[:Currents])
+I_selected_mA = round(1000*exp_data[:Currents][Ic_idx]; digits=2)
+@info "Selected current: $(I_selected_mA) mA  (index $Ic_idx)"
+
+
+# ============================================================
+# Section 2 — Quick heatmap sanity-check (pixel coordinates)
+# ============================================================
+stack_exp = @view exp_data[:F1ProcessedImages][:, :, :, Ic_idx]
+mean_stack = dropdims(mean(stack_exp; dims=3); dims=3)
+
+stack_exp_data = @view exp_data[:F1ProcessedImages][:, :, :, Ic_idx];
 # max_position_data = rowwise_spline_maxima(
 #     stack_exp_data,
 #     exp_z;
@@ -456,47 +537,47 @@ stack_exp_data = @view exp_data[:F1ProcessedImages][:, :, :, Ic_idx_exp];
 #     half_max = true,
 # )
 
-
-
 heatmap(
-    range(1,length(exp_x)),
-    range(1,length(exp_z)),
-    dropdims(mean(stack_exp_data, dims=3),dims=3)',
-    colormap = :viridis,
-    title = "Experiment",
-    xlabel = "x (px)",
-    ylabel = "z (px)",
-    # xlims = (1,540),
-    # ylims = (1,2560),
-    # aspect_ratio = :equal,
-    colorbar = true
+    eachindex(exp_x), eachindex(exp_z),
+    mean_stack';
+    colormap  = :viridis,
+    title     = "Experiment — $data_dir",
+    xlabel    = L"x \ (\mathrm{px})",
+    ylabel    = L"z \ (\mathrm{px})",
+    colorbar  = true,
 )
 
 
-for (i,j) in [(1,540),(120,180),(1,270),(271,540),(240,300),(1,400),(100,400)]
-    max_position_data = rowgroup_spline_maxima(
-        stack_exp_data,
-        exp_z,
-        i,
-        j;
-        n_bins = nz_bins,
-        λ0 = λ0_raw,
+# ============================================================
+# Section 3 — Region-of-interest peak positions
+# ============================================================
+ROI_RANGES = [
+    (1, 540), (120, 180), (1, 270),
+    (271, 540), (240, 300), (1, 400), (100, 400),
+]
+
+for (row_lo, row_hi) in ROI_RANGES
+    peak_positions = rowgroup_spline_maxima(
+        stack_exp, exp_z, row_lo, row_hi;
+        n_bins   = nz_bins,
+        λ0       = λ0_raw,
         half_max = false,
     )
-
-    @info "Peak position in rows ($i,$j)   \t:  $(round(mean(max_position_data); digits=3))"
-
+    μ_peak = round(mean(peak_positions); digits=3)
+    @info "Peak position  rows ($row_lo, $row_hi) → $μ_peak mm"
 end
 
-
-exp_image = mean(exp_data[:F1ProcessedImages], dims=(3)) |> x -> dropdims(x, dims=(3))
-exp_image = exp_image[:,:,Ic_idx_exp];
-exp_size = size(exp_image);
-
-exp_result_path = joinpath(BASE_PATH, "EXPDATA_ANALYSIS","summary", data_dir, data_dir * "_report_summary.jld2")
+# ============================================================
+# Section 4 — Load processed results & centre on midpoint C₀₀
+# ============================================================
+exp_result_path = joinpath(BASE_PATH, 
+                    "EXPDATA_ANALYSIS",
+                    "summary", 
+                    data_dir, 
+                    data_dir * "_report_summary.jld2");
 exp_result = jldopen(exp_result_path, "r") do file
         Ic = file["meta/Currents"]
-        data = file[JLD2_MyTools.make_keypath_exp(data_dir,nz_bins,λ0_spline)];
+        data = file[JLD2_MyTools.make_keypath_exp(data_dir,nz_bins,λ0_raw)];
         C00 = 0.5*(data[:mean_F1_peak_pos_raw ][1] + data[:mean_F2_peak_pos_raw ][1])
 
         F1_profile = data[:F1_profile_spline]
@@ -505,12 +586,33 @@ exp_result = jldopen(exp_result_path, "r") do file
         F2_profile = data[:F2_profile_spline]
         F2_profile[:,1] .-= C00
 
-        return (Ic = Ic, z=collect(data[:z_mm]) .- C00, F1=data[:F1_profile], F2=data[:F2_profile], F1_profile = F1_profile, F2_profile = F2_profile ) 
-end
+        return (Ic = Ic, 
+                z=collect(data[:z_mm]) .- C00, 
+                centroid = C00,
+                # raw
+                F1=data[:F1_profile], 
+                F2=data[:F2_profile],
+                # spline 
+                F1_profile = F1_profile, 
+                F2_profile = F2_profile,
+                # peaks
+                F1_peaks = data[:fw_F1_peak_pos],
+                F2_peaks = data[:fw_F2_peak_pos],
 
-exp_profile = vec(mean(exp_image, dims=1))
-exp_z = exp_result.z
+                ) 
+end;
+I0 = exp_result.Ic[Ic_idx];
 
+# Collapse the image to a 1-D axial profile (average over x)
+exp_image = mean(exp_data[:F1ProcessedImages], dims=(3)) |> 
+                x -> dropdims(x, dims=(3))[:,:,Ic_idx];
+exp_size = size(exp_image);
+exp_profile = vec(mean(exp_image, dims=1));
+exp_z_mm = exp_result.z;
+
+# ============================================================
+# Section 5 — Visualise image + 1-D profile side-by-side
+# ============================================================
 
 img_exp = heatmap(
     exp_x,
@@ -524,9 +626,9 @@ img_exp = heatmap(
     ylims = extrema(exp_z),
     aspect_ratio = :equal,
     colorbar = true
-)
-
-img_exp_prof = plot(exp_z, exp_profile,
+);
+hline!([exp_result.centroid], line=(:dash,1,:gray64), label=false)
+img_exp_prof = plot(exp_z_mm, exp_profile,
     label="Experimental profile",
     seriestype=:scatter,
     marker=(:circle,2,:white),
@@ -536,7 +638,196 @@ img_exp_prof = plot(exp_z, exp_profile,
     legend=:topleft,
     background_color_legend = :transparent,
     foreground_color_legend = nothing,
+);
+img = plot(img_exp, img_exp_prof,
+    suptitle="Experiment $(data_dir) : $(round(1000*I0; sigdigits=6))mA",
+    layout=(1,2),
+    size=(600,400)
+);
+plot!(img[1],title="",);
+display(img)
+
+# ============================================================
+# Section 6 — Set up theory grid and orthonormal basis
+# ============================================================
+P_DEGREE    = 3 ;
+ncols_bg    = P_DEGREE + 1 ;
+NORM_MODE   = :none ;
+
+# Build a symmetric z-grid wide enough to cover the data
+nrange_z = 20001;
+range_z  = floor(min(maximum(exp_z_mm), abs(minimum(exp_z_mm))); digits=1);
+z_theory = range(-range_z, range_z; length=nrange_z) |> collect;
+
+# Sanity checks on the grid
+let atol_mean = 10 * eps(float(range_z)),
+    atol_std  = eps(float(range_z))
+
+    @assert isapprox(mean(z_theory), 0.0; atol=atol_mean) "Grid mean $(mean(z_theory)) deviates from 0 beyond tolerance $atol_mean"
+    @assert isapprox(std(z_theory), ProfileFitTools.std_sample(range_z, nrange_z); atol=atol_std) "Grid std $(std(z_theory)) inconsistent with symmetric range"
+end
+
+# Shared by all fits — computed once
+μ_grid, σ_grid, _t, Q_basis, R_basis =
+    ProfileFitTools.orthonormal_basis_on(z_theory; n=P_DEGREE)
+
+# ============================================================
+# Section 7 — Build experimental and theoretical PDFs
+# ============================================================
+
+# --- Experimental PDF: B-spline fit evaluated on the theory grid ---
+let weights = TheoreticalSimulation.compute_weights(exp_z_mm, λ0_raw),
+    spl     = BSplineKit.fit(BSplineOrder(4), exp_z_mm, exp_profile, λ0_raw; weights)
+
+    global pdf_exp = spl.(z_theory)
+end
+
+# --- Theoretical PDF: sum over all |F=1⟩ magnetic sub-levels ---
+let 𝒢     = TheoreticalSimulation.GvsI(I0),
+    μ_eff = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
+             for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)],
+    z_m   = 1e-3 .* z_theory   # mm → m, computed once outside the sum
+
+    global pdf_theory = mapreduce(+, μ_eff) do μF
+        TheoreticalSimulation.getProbDist_v3(
+            μF, 𝒢, z_m, K39_params, effusion_params; pdf=:finite,
+        )
+    end
+end
+
+# --- Normalise (mode controlled by NORM_MODE) ---
+pdf_exp_norm    = ProfileFitTools.normalize_vec(pdf_exp;    by=NORM_MODE)
+pdf_theory_norm = ProfileFitTools.normalize_vec(pdf_theory; by=NORM_MODE)
+
+dict = OrderedDict{String, Any}()
+# ============================================================
+# Section 8 — Joint PDF fit
+# ============================================================
+
+fit_data, fit_params, δparams, modelfun, model_on_z, meta, extras =
+    ProfileFitTools.fit_pdf_joint(
+        [z_theory], [pdf_exp_norm], [pdf_theory_norm];
+        n      = P_DEGREE,
+        Q_list = [Q_basis],
+        R_list = [R_basis],
+        μ_list = [μ_grid],
+        σ_list = [σ_grid],
+        w_mode = :fixed,
+        A_mode = :global,
+        d_mode = :global,
+        w0     = 1e-12,
+        A0     = 1.0,
+    )
+
+# ============================================================
+# Section 9 — Extract fit results
+# ============================================================
+
+# Background polynomial coefficients evaluated on z_theory
+fit_poly        = ProfileFitTools.bg_function(z_theory, fit_params.c[1])
+c_poly_coeffs   = [fit_poly[dg] for dg in 0:P_DEGREE]
+
+w_fit = fit_params.w
+A_fit = fit_params.A
+
+# Coefficient of determination R²
+ss_res = sum((pdf_exp_norm .- model_on_z[1]).^2)
+ss_tot = sum((pdf_exp_norm .- mean(pdf_exp_norm)).^2)
+R2_coeff_det  = 1.0 - ss_res / ss_tot
+
+fitting_params = [R2_coeff_det  A_fit  w_fit  c_poly_coeffs...]
+
+hdr_top = Any[
+    "Residuals",
+    MultiColumn(2, "Theoretical PDF"),
+    MultiColumn(ncols_bg, "Background P$(ProfileFitTools.sub(P_DEGREE))(z)")
+];
+hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * ProfileFitTools.sub(k) for k in 0:P_DEGREE]);
+
+pretty_table(
+    fitting_params;
+    title                       = "FITTING ANALYSIS — RAW PROFILE : $data_dir",
+    stubhead_label              = "I₀ [mA]",
+    column_labels               = [hdr_top, hdr_bot],
+    column_label_alignment      = :c,
+    row_labels                  = [round(1000 * I0; sigdigits=4)],
+    row_label_column_alignment  = :c,
+    alignment                   = :c,
+    equal_data_column_widths    = true,
+    formatters                  = [
+        fmt__printf("%2.4f",  [1]),
+        fmt__printf("%4.6f",  2:3),
+        fmt__printf("%4.6e",  4:(3 + P_DEGREE + 1)),
+    ],
+    table_format                = TextTableFormat(borders = text_table_borders__unicode_rounded),
+    style                       = TextTableStyle(
+        first_line_merged_column_label = crayon"light_red bold",
+        first_line_column_label        = crayon"yellow bold",
+        column_label                   = crayon"yellow",
+        table_border                   = crayon"blue bold",
+        title                          = crayon"red bold",
+    ),
 )
+
+# ============================================================
+# Section 11 — Store results
+# ============================================================
+
+dict[data_dir] = (
+    current       = I0,
+    fit_globals   = (A=A_fit, w=w_fit),
+    bg_poly       = c_poly_coeffs,
+    profiles      = hcat(z_theory, pdf_exp_norm, model_on_z[1]),
+)
+
+plot(dict[data_dir].profiles[:,1],dict[data_dir].profiles[:,2])
+plot!(dict[data_dir].profiles[:,1],dict[data_dir].profiles[:,3])
+
+# ============================================================
+# Section 12 — Baseline subtraction
+# ============================================================
+
+# Reconstruct the background polynomial from the fitted coefficients
+p_baseline = Polynomial(c_poly_coeffs)
+baseline   = p_baseline.(exp_z_mm)
+
+# Subtract baseline and normalise by the fitted amplitude
+pdf_exp_no_baseline  = ProfileFitTools.normalize_vec(exp_profile;    by=NORM_MODE) .- baseline
+pdf_exp_clean        = pdf_exp_no_baseline ./ A_fit
+
+# ============================================================
+# Section 13 — Visualise baseline subtraction
+# ============================================================
+
+fig_baseline = plot(
+    exp_z_mm, exp_profile;
+    seriestype        = :scatter,
+    marker            = (:circle, 2, :white),
+    markerstrokecolor = :black,
+    label             = "Experimental profile ($data_dir)",
+    xlabel            = L"$z$ (mm)",
+    ylabel            = "Intensity (au)",
+);
+plot!(fig_baseline, exp_z_mm, baseline;
+    label = L"Baseline $P_{%$(P_DEGREE)}(z)$",
+    line  = (:dash, 2, :red),
+);
+plot!(fig_baseline, exp_z_mm, pdf_exp_no_baseline;
+    seriestype        = :scatter,
+    marker            = (:circle, 2, :white),
+    markerstrokecolor = :gray25,
+    label             = "Profile − Baseline",
+);
+plot!(fig_baseline; title = "Experiment & background — $data_dir")
+display(fig_baseline)
+
+
+exp_result.F1_peaks[1][Ic_idx][1]
+TheoreticalSimulation.max_of_bspline_positions(exp_z_mm,exp_profile;λ0=λ0_raw)[1][1]
+TheoreticalSimulation.max_of_bspline_positions(exp_z_mm,pdf_exp_no_baseline;λ0=λ0_raw)[1][1]
+
+
+
 
 # ===================================================
 # ++++++++++++++++++++ QM DATA ++++++++++++++++++++++
@@ -558,9 +849,8 @@ extrema(vyf_qm)
 vzf_qm = view(qm_data,:,9);
 extrema(vzf_qm)
 
-
 if norm_type === :none
-    h_qm = fit(Histogram, (xf_qm, zf_qm), (edges_x, edges_z))                    # raw counts (no normalization)
+    h_qm = StatsBase.fit(Histogram, (xf_qm, zf_qm), (edges_x, edges_z))                    # raw counts (no normalization)
 elseif norm_type in (:probability, :pdf, :density)
     h_qm = normalize(fit(Histogram, (xf_qm, zf_qm), (edges_x, edges_z)); mode=norm_type)
 else
@@ -586,7 +876,6 @@ img_qm = heatmap(
     aspect_ratio = :equal,
     colorbar = true
 );
-
 img_qm_prof = plot(centers_z, qm_profile,
     label="Quantum mechanics",
     xlabel=L"$z$ (mm)",
@@ -595,17 +884,45 @@ img_qm_prof = plot(centers_z, qm_profile,
     background_color_legend = :transparent,
     foreground_color_legend = nothing,
 );
+img = plot(img_qm, img_qm_prof,
+    suptitle="Quantum mechanics",
+    layout=(1,2),
+)
+plot!(img[1],title="",)
+display(img)
+
+ProfileFitTools.normalize_vec(exp_profile;    by=NORM_MODE)
+
+plot(exp_z_mm, ProfileFitTools.normalize_vec(pdf_exp_clean;    by=:max);
+    seriestype        = :scatter,
+    marker            = (:circle, 2, :white),
+    markerstrokecolor = :gray25,
+    label             = "Profile − Baseline",
+)
+plot!(centers_z, ProfileFitTools.normalize_vec(qm_profile; by=:max),
+    label="Quantum mechanics",
+    xlabel=L"$z$ (mm)",
+    line=(:solid,2,:blue),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+)
+
 
 data_qmf1_path = joinpath(BASE_PATH,
     "SIMULATIONS",
     "QM_T200_8M",
     "qm_screen_profiles_f1_table.jld2");
 data_qm =  jldopen(data_qmf1_path,"r") do file
-    file[JLD2_MyTools.make_keypath_qm(nz_bins, σw_mm, λ0_spline)]
+    file[JLD2_MyTools.make_keypath_qm(nz_bins, σw_mm, λ0_raw)]
 end
 @info "QM data loaded"
 Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)];
 zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)];
+
+
+
+
 # ===================================================
 # +++++++++++++++++++++ CQD DATA ++++++++++++++++++++
 # ===================================================
@@ -648,9 +965,9 @@ Ic_CQD   = [data_CQD_up_zmax[idx][:Icoil] for idx=1:nI];
 zmax_CQD = [data_CQD_up_zmax[idx][:z_max_smooth_spline_mm] for idx=1:nI];
 
 if norm_type === :none
-    h_cqd = fit(Histogram, (xf_cqd, zf_cqd), (edges_x, edges_z));     # raw counts (no normalization)
+    h_cqd = StatsBase.fit(Histogram, (xf_cqd, zf_cqd), (edges_x, edges_z));     # raw counts (no normalization)
 elseif norm_type in (:probability, :pdf, :density)
-    h_cqd = normalize(fit(Histogram, (xf_cqd, zf_cqd), (edges_x, edges_z)); mode=norm_type);
+    h_cqd = normalize(StatsBase.fit(Histogram, (xf_cqd, zf_cqd), (edges_x, edges_z)); mode=norm_type);
 else
     throw(ArgumentError("mode must be one of :pdf, :density, :probability, :none, got $norm_type"))
 end
@@ -700,7 +1017,7 @@ plot(img_exp, img_exp_prof, img_qm, img_qm_prof, img_cqd, img_cqd_prof,
 # ======================================================================================================
 
 # 1) Choose laser detuning (Hz). You can set δlaser = 0 or optimize it later.
-δlaser = -5e6 ;
+δlaser = -6.5e6 ;
 # 2) s0: saturation parameter (dimensionless)
 s0 = 0.75 ;
 # 3) Compute Doppler weights
@@ -722,6 +1039,32 @@ z_max_cqd_spline_mm_doppler, Sfit_cqd_doppler = TheoreticalSimulation.max_of_bsp
 z_profile_qm_doppler = vec(mean(counts_qm_doppler, dims = 1));
 z_max_qm_mm_doppler = centers_z[argmax(z_profile_qm_doppler)];
 z_max_qm_spline_mm_doppler, Sfit_qm_doppler = TheoreticalSimulation.max_of_bspline_positions(centers_z,z_profile_qm_doppler;λ0=λ0_raw );
+
+
+plot(exp_z_mm, ProfileFitTools.normalize_vec(pdf_exp_clean;    by=:max);
+    seriestype        = :scatter,
+    marker            = (:circle, 2, :white),
+    markerstrokecolor = :gray25,
+    label             = "Profile − Baseline",
+)
+plot!(centers_z, ProfileFitTools.normalize_vec(qm_profile; by=:max),
+    label="Quantum mechanics",
+    xlabel=L"$z$ (mm)",
+    line=(:solid,2,:red),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+)
+plot!(centers_z, ProfileFitTools.normalize_vec(z_profile_qm_doppler; by=:max),
+    label="QM + Doppler= $(δlaser/1e6)MHz",
+    xlabel=L"$z$ (mm)",
+    line=(:solid,2,:blue),
+    legend=:topleft,
+    background_color_legend = :transparent,
+    foreground_color_legend = nothing,
+)
+
+
 
 img_qm_doppler = heatmap(
     centers_x,
@@ -774,7 +1117,6 @@ suptitle=L"Doppler: $\delta_{L}=%$(round(δlaser/1e6,sigdigits=4))$MHz, $s_{0}=%
 layout=(3,2),
 left_margin=10mm,
 size=(1000,1400))
-
 
 
 fig1 = plot(exp_z[1:10:end], exp_profile[1:10:end]/maximum(exp_profile),
