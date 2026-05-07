@@ -102,17 +102,23 @@ data_directories = [
         # "20260427A",
         # "20260427B",
         # "20260427C",
-        "20260429A",
-        "20260429B",
-        "20260429C",
-        "20260429D",
-        "20260429E",
-        "20260429F",
+        # "20260429A",
+        # "20260429B",
+        # "20260429C",
+        # "20260429D",
+        # "20260429E",
+        # "20260429F",
+        "20260504/Round1_SG1=0mA_SG0=+MG=3A",
+        "20260504/Round2_SG1=0mA_SG0=-MG=3A",
+        "20260504/Round3_SG1=40mA_SG0=+MG=3A",
+        "20260504/Round4_SG1=40mA_SG0=-MG=3A",
+        "20260504/Round5_SG1=500mA_SG0=+MG=3A",
+        "20260504/Round6_SG1=500mA_SG0=-MG=3A",
         ];
 nd = length(data_directories);
 
 for data_directory in data_directories
-    @info data_directory
+    printstyled("\t" * data_directory * "\n"; color=:cyan, bold=true)
     outfile_raw         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
     outfile_processed   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
     data_summary_path   = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS","summary",data_directory)
@@ -139,12 +145,14 @@ for data_directory in data_directories
         @info "Found $outfile_processed → skipping build"
     end
 
+    println("\n$(data_directory) PROCESSING COMPLETED\n\n")
 end
 
 tables = Vector{DataFrame}(undef, nd);
 for (idx,data_directory) in enumerate(data_directories)
-    # data_directory = data_directories[5]
-    @info data_directory
+    # idx = 2
+    # data_directory = data_directories[idx]
+    printstyled("\t" * data_directory * "\n"; color=:cyan, bold=true)
     data_processed = load(joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2"))["data"]
 
     OUTDIR    = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
@@ -160,14 +168,14 @@ for (idx,data_directory) in enumerate(data_directories)
     f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=false,λ0=λ0);
     f2_max = MyExperimentalAnalysis.SG0_framewise_maxima("F2", data_processed, nz ; half_max=false,λ0=λ0);
 
-    MyExperimentalAnalysis.SG0_mean_maxima("F1", data_processed, nz ; half_max=false,λ0=λ0);
-    MyExperimentalAnalysis.SG0_mean_maxima("F2", data_processed, nz ; half_max=false,λ0=λ0);
+    # MyExperimentalAnalysis.SG0_mean_maxima("F1", data_processed, nz ; half_max=false,λ0=λ0);
+    # MyExperimentalAnalysis.SG0_mean_maxima("F2", data_processed, nz ; half_max=false,λ0=λ0);
 
     f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ z_mm_error^2 );
     f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
 
     Δz_mm = -(f1_z_mm .- f2_z_mm);
-    Δz_sem_mm = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2   );
+    Δz_sem_mm = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2 );
 
     data = data = DataFrame(
         I0        = SG0_current,
@@ -298,79 +306,141 @@ for (idx,data_directory) in enumerate(data_directories)
     colors_sg0 = palette(:darkrainbow, length(SG0_current));
 
     for i in eachindex(SG0_current)
-    f1imgs = data_processed[:F1ProcessedImages];
-    f1image_i   = dropdims(mean(f1imgs[:,:,:,i], dims=3), dims=3);
-    mask = isfinite.(f1image_i) .& (f1image_i .>= -10) .& (f1image_i .<= 1000);
-    f1image_i = f1image_i .* mask  ;
-    f1vmax   = Statistics.quantile(vec(f1image_i), 0.999);
-    f1profile_i = dropdims(mean(f1image_i, dims=(1)), dims=(1));
+        f1imgs = data_processed[:F1ProcessedImages];
+        f1image_i   = dropdims(mean(f1imgs[:,:,:,i], dims=3), dims=3);
+        mask = isfinite.(f1image_i) .& (f1image_i .>= -10) .& (f1image_i .<= 1000);
+        f1image_i = f1image_i .* mask  ;
+        f1vmax   = Statistics.quantile(vec(f1image_i), 0.999);
+        f1profile_i = dropdims(mean(f1image_i, dims=(1)), dims=(1));
 
-    f2imgs = data_processed[:F2ProcessedImages];
-    f2image_i   = dropdims(mean(f2imgs[:,:,:,i], dims=3), dims=3);
-    mask = isfinite.(f2image_i) .& (f2image_i .>= -5) .& (f2image_i .<= 500);
-    f2image_i = f2image_i .* mask  ;
-    f2vmax   = Statistics.quantile(vec(f2image_i), 0.999);
-    f2profile_i = dropdims(mean(f2image_i, dims=(1)), dims=(1));
+        f2imgs = data_processed[:F2ProcessedImages];
+        f2image_i   = dropdims(mean(f2imgs[:,:,:,i], dims=3), dims=3);
+        mask = isfinite.(f2image_i) .& (f2image_i .>= -5) .& (f2image_i .<= 500);
+        f2image_i = f2image_i .* mask  ;
+        f2vmax   = Statistics.quantile(vec(f2image_i), 0.999);
+        f2profile_i = dropdims(mean(f2image_i, dims=(1)), dims=(1));
 
-    plt1 = heatmap(f1image_i,
-        xlabel=L"$z\ \ (\mathrm{px})$",
-        ylabel=L"$x\ \ (\mathrm{px})$",
-        cbar = true,
-        clims=(0,f1vmax)
-    )
-    plt2 = plot(f1profile_i,
-        line=(:solid,1,colors_sg0[i]),
-        label=L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$",
-        xlabel=L"$z\ \ (\mathrm{px})$",
-        legend=:topleft,
-        legend_title="SG0",
-        background_color_legend = :white,
-       foreground_color_legend = nothing,
-    );
-    plt3 = heatmap(f2image_i,
-        xlabel=L"$z\ \ (\mathrm{px})$",
-        ylabel=L"$x\ \ (\mathrm{px})$",
-        cbar = true,
-        clims=(0,f2vmax)
-    );
-    plt4 = plot(f2profile_i,
-        line=(:solid,1,colors_sg0[i]),
-        label=L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$",
-        xlabel=L"$z\ \ (\mathrm{px})$",
-        legend=:topleft,
-        legend_title="SG0",
-        background_color_legend = :white,
+        plt1 = heatmap(f1image_i,
+            xlabel=L"$z\ \ (\mathrm{px})$",
+            ylabel=L"$x\ \ (\mathrm{px})$",
+            cbar = true,
+            clims=(0,f1vmax)
+        )
+        plt2 = plot(f1profile_i,
+            line=(:solid,1,colors_sg0[i]),
+            label=L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$",
+            xlabel=L"$z\ \ (\mathrm{px})$",
+            legend=:topleft,
+            legend_title="SG0",
+            background_color_legend = :white,
         foreground_color_legend = nothing,
-    );
+        );
+        plt3 = heatmap(f2image_i,
+            xlabel=L"$z\ \ (\mathrm{px})$",
+            ylabel=L"$x\ \ (\mathrm{px})$",
+            cbar = true,
+            clims=(0,f2vmax)
+        );
+        plt4 = plot(f2profile_i,
+            line=(:solid,1,colors_sg0[i]),
+            label=L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$",
+            xlabel=L"$z\ \ (\mathrm{px})$",
+            legend=:topleft,
+            legend_title="SG0",
+            background_color_legend = :white,
+            foreground_color_legend = nothing,
+        );
 
-    plt = plot(plt1, plt2, plt3, plt4,
-    suptitle = "$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA",
-    layout=(2,2),
-    size=(800,450),
-    left_margin=3mm,
-    bottom_margin=2mm,
-    )
-    display(plt)
+        plt = plot(plt1, plt2, plt3, plt4,
+        suptitle = "$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA",
+        layout=(2,2),
+        size=(800,450),
+        left_margin=3mm,
+        bottom_margin=2mm,
+        )
+        display(plt)
     end
 
-    plt = plot(xlabel="z - pixel",
-        legend=:topleft,
-        title="$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA",
-        )
+    plt1 = plot(
+        xlabel = L"$z \ \ (\mathrm{px})$",
+        legend = :topleft,
+        # title = "$(data_directory) | SG1: $(round(1000 * data.I1[end], digits=2))mA",
+    )
     for i in eachindex(SG0_current)
-        img = dropdims(mean(data_processed[:F1ProcessedImages][:,:,:,i], dims=(1,3)), dims=(1,3))
-        plot!(plt,
-            img,
-            line=(:solid,1,colors_sg0[i]),
-            label=L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$"
-            )
+        img = dropdims(
+            mean(data_processed[:F1ProcessedImages][:, :, :, i], dims=(1, 3)),
+            dims=(1, 3)
+        )
+
+        # Keep only finite values within the accepted range
+        mask = isfinite.(img) .& (img .>= -10) .& (img .<= 1000)
+
+        # Count rejected points
+        n_bad   = count(.!mask)
+        @info "Cleaning F1 profile" SG0_mA=round(1000 * SG0_current[i], digits=3) n_bad
+
+        # Replace rejected points by zero
+        img_clean = ifelse.(mask, img, 0.0)
+
+        plot!(
+            plt1,
+            img_clean,
+            line = (:solid, 1, colors_sg0[i]),
+            label = L"$%$(round(1000 * SG0_current[i]; digits=3))\mathrm{mA}$",
+        )
     end
     plot!(
+        plt1;
         legend_font = 8,
         foreground_color_legend = nothing,
-        legend_columns=2)
-    display(plt)
+        legend_columns = 2,
+    )
+    display(plt1)
 
+    plt2 = plot(
+        xlabel = L"$z \ \ (\mathrm{px})$",
+        legend = :topleft,
+        # title = "$(data_directory) | SG1: $(round(1000 * data.I1[end], digits=2))mA",
+    )
+    for i in eachindex(SG0_current)
+        img = dropdims(
+            mean(data_processed[:F2ProcessedImages][:, :, :, i], dims=(1, 3)),
+            dims=(1, 3)
+        )
+
+        # Keep only finite values within the accepted range
+        mask = isfinite.(img) .& (img .>= -10) .& (img .<= 1000)
+
+        # Count rejected points
+        n_bad   = count(.!mask)
+        @info "Cleaning F2 profile" SG0_mA=round(1000 * SG0_current[i], digits=3) n_bad
+
+        # Replace rejected points by zero
+        img_clean = ifelse.(mask, img, 0.0)
+
+        plot!(
+            plt2,
+            img_clean,
+            line = (:solid, 1, colors_sg0[i]),
+            label = L"$%$(round(1000 * SG0_current[i]; digits=3))\mathrm{mA}$",
+        )
+    end
+    plot!(
+        plt2;
+        legend_font = 8,
+        foreground_color_legend = nothing,
+        legend_columns = 2,
+    )
+    display(plt2)
+
+    fig = plot(plt1, plt2,
+        suptitle = "$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA",
+        layout=(2,1),
+        size=(900,850),
+        left_margin=3mm,
+        bottom_margin=2mm,
+        )
+    display(fig)
 
     GC.gc()
 end
