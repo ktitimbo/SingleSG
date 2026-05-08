@@ -54,7 +54,7 @@ include("./Modules/TheoreticalSimulation.jl");
 TheoreticalSimulation.SAVE_FIG = SAVE_FIG;
 TheoreticalSimulation.FIG_EXT  = FIG_EXT;
 TheoreticalSimulation.OUTDIR   = OUTDIR;
-
+BASE_PATH = raw"F:\SternGerlachExperiments"
 @info "Run stamp initialized" RUN_STAMP = RUN_STAMP
 println("\n\t\tRunning process on:\t $(RUN_STAMP) \n")
 
@@ -137,7 +137,7 @@ dict = OrderedDict{String, Tuple{
 wanted_binning  = 2 ; 
 wanted_smooth   = 0.01 ;
 
-P_DEGREE    = 5 ;
+P_DEGREE    = 3 ;
 ncols_bg    = P_DEGREE + 1 ;
 
 norm_mode = :none ;
@@ -151,7 +151,15 @@ dir_list = [
     # "20251002" , "20251003", "20251006",
     # "20251109",
     # "20260211" , "20260213",
-    "20260220", "20260225", "20260226am","20260226pm","20260227","20260303","20260306r1","20260306r2"
+    # 
+    # "20260220", 
+    # "20260225", 
+    # "20260226am",
+    # "20260226pm",
+    # "20260227",
+    "20260303",
+    # "20260306r1",
+    # "20260306r2"
 ]
 
 hdr_top = Any[
@@ -161,13 +169,33 @@ hdr_top = Any[
 ];
 hdr_bot = vcat(["(exp-model)²", "A", "w [mm]"], ["c" * ProfileFitTools.sub(k) for k in 0:P_DEGREE]);
 
+# for wanted_data_dir in dir_list
+    wanted_data_dir = dir_list[1]
+    exp_result_path = joinpath(BASE_PATH, "EXPDATA_ANALYSIS","summary", wanted_data_dir, wanted_data_dir * "_report_summary.jld2")
+    exp_result = jldopen(exp_result_path, "r") do file
+            Ic = file["meta/Currents"]
+            data = file[JLD2_MyTools.make_keypath_exp(wanted_data_dir,wanted_binning,wanted_smooth)];
+            C00 = 0.5*(data[:mean_F1_peak_pos_raw ][1] + data[:mean_F2_peak_pos_raw ][1])
 
-for wanted_data_dir in dir_list
-    # wanted_data_dir = dir_list[1]
+            F1_profile = data[:F1_profile_spline]
+            F1_profile[:,1] .-= C00
+
+            F2_profile = data[:F2_profile_spline]
+            F2_profile[:,1] .-= C00
+
+            return (Ic = Ic, 
+                    z=collect(data[:z_mm]) .- C00, 
+                    # raw
+                    F1=data[:F1_profile], 
+                    F2=data[:F2_profile],
+                    # spline 
+                    F1_profile = F1_profile, 
+                    F2_profile = F2_profile ) 
+    end
 
     # Data loading
     read_exp_info = DataReading.find_report_data(
-            joinpath(@__DIR__, "EXPDATA_ANALYSIS",wanted_data_dir);
+            joinpath(BASE_PATH, "EXPDATA_ANALYSIS",wanted_data_dir);
             wanted_data_dir=wanted_data_dir,
             wanted_binning=wanted_binning,
             wanted_smooth=wanted_smooth
@@ -189,27 +217,29 @@ for wanted_data_dir in dir_list
         @info msg
     end
 
-    exp_data = load(joinpath(read_exp_info.directory,"profiles_mean.jld2"))["profiles"];
-    # jldopen(joinpath(@__DIR__, "EXPDATA_ANALYSIS", wanted_data_dir, wanted_data_dir*"_report_summary.jld2"),"r") do file
-    #     file[JLD2_MyTools.make_keypath_exp(wanted_data_dir, wanted_binning, wanted_smooth)]
-    # end
-    Ic_sampled = abs.(exp_data[:Icoils]);
-    nI = length(Ic_sampled)
+    magnification_factor = read_exp_info.magnification ;
 
-    println(nI)
+    Ic_sampled = abs.(exp_result.Ic)
+    nI = length(Ic_sampled)
 
     chosen_currents_idx = [nI]
 
     println("Target currents in A: (", 
-            join(map(x -> @sprintf("%.3f", x), Ic_sampled[chosen_currents_idx]), ", "),
-            ")"
+                join(map(x -> @sprintf("%.3f", x), Ic_sampled[chosen_currents_idx]), ", "),
+                ")"
     )
 
-    magnification_factor = read_exp_info.magnification ;
-
-    z_exp    = (exp_data[:z_mm] .- exp_data[:Centroid_mm][1]) ./ magnification_factor ;
-    range_z  = floor(minimum([maximum(z_exp),abs(minimum(z_exp))]),digits=1);
+    z_exp = exp_result.z;
+    range_z  = floor(minimum([maximum(z_exp),abs(minimum(z_exp))]),digits=1)
     z_theory = collect(range(-range_z,range_z,length=nrange_z));
+
+    # exp_data = load(joinpath(read_exp_info.directory,"profiles_mean.jld2"))["profiles"]
+    # Ic_sampled = abs.(exp_data[:Icoils])
+    # nI = length(Ic_sampled)
+    # chosen_currents_idx = [nI]
+    # z_exp    = (exp_data[:z_mm] .- exp_data[:Centroid_mm][1]) ./ magnification_factor ;
+    # range_z  = floor(minimum([maximum(z_exp),abs(minimum(z_exp))]),digits=1);
+    # z_theory = collect(range(-range_z,range_z,length=nrange_z));
 
     @assert isapprox(mean(z_theory), 0.0; atol= 10 * eps(float(range_z)) ) "μz=$(μz) not ~ 0 within atol=$(10 * eps(float(range_z)) )"
     @assert isapprox(std(z_theory), ProfileFitTools.std_sample(range_z, nrange_z); atol= eps(float(range_z))) "σz=$(σz) is not defined for a symmetric range"
@@ -254,8 +284,8 @@ for wanted_data_dir in dir_list
     #########################################################################################################
     fit_data, fit_params, δparams, modelfun, model_on_z, meta, extras = ProfileFitTools.fit_pdf_joint(z_list, exp_list, pdf_th_list;
                 n=P_DEGREE, Q_list, R_list, μ_list, σ_list,
-                w_mode=:global, A_mode=:global, d_mode =:global,
-                w0=0.25, A0=1.0);
+                w_mode=:fixed, A_mode=:global, d_mode =:global,
+                w0=1e-12, A0=1.0);
 
     c_poly_coeffs = [Vector{Float64}(undef, ncols_bg) for _ in 1:rl]
     for i=1:rl
