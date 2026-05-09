@@ -448,13 +448,13 @@ plot!(fig1b,
     yminorticks=5,)
 
 fig1c=plot(
-    xlabel="SG0 Current (mA)",
+    xlabel="SG0 Current (A)",
     ylabel=L"$\Delta z$ (px)");
 for (i,dir) in enumerate(data_directories[1:2])
     data = tables[i]
     data_pos = data
     plot!(fig1c,
-            1000*data_pos.I0, data_pos.split/6.5e-3,
+            data_pos.I0, data_pos.split/6.5e-3,
             label=false,
             line=(:dashdot, 1, colores[i],0.5),
     )
@@ -470,7 +470,7 @@ for (i,dir) in enumerate(data_directories[1:2])
 end
 plot!(fig1c,
     title = L"SG1 $\sim 0\mathrm{mA}$",
-    xlims=(-1,10),
+    # xlims=(-1,10),
     legend=:bottomright,
     foreground_color_legend = nothing,
     background_color_legend = nothing,
@@ -478,11 +478,11 @@ plot!(fig1c,
 
 
 fig1 = plot(fig1a,fig1b,fig1c,
-    layout=(1,3),
-    size=(900,400),
+    layout=@layout([a1 a2; a3]),
+    size=(850,550),
     link=:y,
     left_margin=3mm,
-    bottom_margin=3mm,);
+    bottom_margin=3mm,)
 plot!(fig1[2], ylabel="", yformatter=_->"", left_margin=-4mm);
 display(fig1)
 
