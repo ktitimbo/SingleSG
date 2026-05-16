@@ -313,7 +313,66 @@ for (i,ki) in enumerate(kis)
     GC.gc()
 end
 
+######################################################################
+T_END = Dates.now()
+T_RUN = Dates.canonicalize(T_END-T_START)
+report = """
+***************************************************
+EXPERIMENT
+    Single Stern–Gerlach Experiment
+    atom                    : $(atom)
+    Output directory        : $(OUTDIR)
+    RUN_STAMP               : $(RUN_STAMP)
+
+CAMERA FEATURES
+    Number of pixels        : $(nx_pixels) × $(nz_pixels)
+    Pixel size              : $(1e6*cam_pixelsize) μm
+
+SETUP FEATURES
+    Temperature             : $(T_K)
+    Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
+    Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
+    Post-SG aperture radius : $(1e3*R_aper)mm
+    Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
+    Slit → SG magnet        : $(1e3*y_SlitToSG)mm
+    SG magnet               : $(1e3*y_SG)mm
+    SG magnet → Screen      : $(1e3*y_SGToScreen)mm
+    SG magnet → Aperture    : $(1e3*y_SGToAperture)mm
+    Tube radius             : $(1e3*R_tube)mm
+
+SIMULATION INFORMATION
+    Number of atoms         : $(Nss)
+    Induction term          : ($(kis))
+    Currents (A)            : $(round.(Icoils,sigdigits=3))
+    No. of currents         : $(nI)
+
+CODE
+    Code name               : $(PROGRAM_FILE)
+    Start date              : $(T_START)
+    End data                : $(T_END)
+    Run time                : $(T_RUN)
+    Hostname                : $(HOSTNAME)
+
+***************************************************
+"""
+# Print to terminal
+println(report)
+
+# Save to file
+open(joinpath(OUTDIR,"simulation_cqd_report.txt"), "w") do io
+    write(io, report)
+end
+
 @info "\e[1;32mDATA COLLECTED : $RUN_STAMP\e[0m"
+
+
+
+######################################################################
+######################################################################
+######################################################################
+
+
+
 
 nx_bins             = 32; # fixed nx bins
 nz_bins             = [1, 2];
