@@ -313,7 +313,7 @@ for (i,ki) in enumerate(kis)
     GC.gc()
 end
 
-@info "\e[1;31mDATA COLLECTED : $RUN_STAMP\e[0m"
+@info "\e[1;32mDATA COLLECTED : $RUN_STAMP\e[0m"
 
 nx_bins             = 32; # fixed nx bins
 nz_bins             = [1, 2];
@@ -659,5 +659,5 @@ open(joinpath(OUTDIR,"simulation_cqd_report.txt"), "w") do io
     write(io, report)
 end
 
-println("\e[1;31mDATA ANALYZED : script $RUN_STAMP has finished!\e[0m")
+@info "\e[1;32mDATA ANALYZED : script $RUN_STAMP has finished!\e[0m"
 alert("script $RUN_STAMP has finished!")
