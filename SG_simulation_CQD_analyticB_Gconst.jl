@@ -177,10 +177,10 @@ TheoreticalSimulation.default_center_of_SG_magnet   = center_of_SG_magnet
 
 # Coil currents
 Icoils = [0.00,
-            # 0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
-            # 0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
-            # 0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
-            # 0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
+            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
+            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
+            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
+            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
             0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
 ];
 nI = length(Icoils);
@@ -188,7 +188,7 @@ nI = length(Icoils);
 calibration = TheoreticalSimulation.build_calibration(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 200 ; 
+const Nss = 50_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
@@ -210,8 +210,18 @@ end
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
 
-data_UP_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_UP)
-data_DOWN_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_DOWN)
+data_UP_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_UP);
+data_DOWN_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_DOWN);
+
+kI = 1.60e-6;
+
+@time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(Icoils, data_UP, data_UP_SG, kI, K39_params, calibration; y_length=5001,verbose=true);
+@time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(Icoils, kI, data_UP, data_UP_SG, CQD_up_particles_flag, K39_params, calibration);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
+
+@time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(Icoils, data_DOWN, data_DOWN_SG, kI, K39_params, calibration; y_length=5001,verbose=true);
+@time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(Icoils, kI, data_DOWN, data_DOWN_SG, CQD_dw_particles_flag, K39_params, calibration);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_dw_particles_trajectories, :down)
 
 kis                 = unique(round.([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:1.5];sigdigits=4))
 @info "Number of ki sampled = $(length(kis))" 
