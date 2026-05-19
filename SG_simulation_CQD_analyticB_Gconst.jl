@@ -220,6 +220,22 @@ kI = 1.60e-6;
 TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
 
 
+Ieff = calibration.I_eff_B(0.75)
+S = calibration.grad_scale(0.75)
+
+center_of_SG_magnet
+
+ifff=TheoreticalSimulation.calibrate_Ieff_for_Bz(Icoils)
+
+TheoreticalSimulation.B_total(0,0,0,Iw=ifff(0.75))
+
+TheoreticalSimulation.B_total(0,center_of_SG_magnet,0; Iw = 0.75)
+
+S .* TheoreticalSimulation.grad_normB(0,center_of_SG_magnet,0; Iw=calibration.I_eff_B(0.075))
+
+TheoreticalSimulation.BvsI(0.75)
+TheoreticalSimulation.GvsI(0.75)
+
 CQD_up_particles_trajectories[1] .- CQD_up_particles_trajectories[25]
 
 
