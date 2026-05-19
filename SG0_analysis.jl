@@ -18,7 +18,7 @@ using LinearAlgebra
 using ImageFiltering, FFTW
 using DataStructures
 using Statistics, StatsBase
-using BSplineKit, Optim, Dierckx
+using Interpolations, BSplineKit, Optim, Dierckx
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using Printf, LaTeXStrings, PrettyTables
@@ -92,6 +92,118 @@ nz = 2 ;
 z_mm        = 1e3 .* pixel_positions(z_pixels, nz, exp_pixelsize_z) ; 
 z_mm_error  = 1/sqrt(12) * 1e3 * exp_pixelsize_z * nz ;
 
+
+d_qm_f1 = jldopen(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_profiles_f1_table.jld2"),"r") do f
+    select_key = JLD2_MyTools.make_keypath_qm(nz,0.200,λ0)
+    data = f[select_key]
+    nI = length(keys(data))
+    return (;
+        Ic = [data[x][:Icoil] for x=1:nI], 
+        F1 = [data[x][:z_max_smooth_mm] for x=1:nI], 
+        F1s = [data[x][:z_max_smooth_spline_mm] for x=1:nI] 
+        )
+end
+
+d_qm_f2 = jldopen(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_profiles_f2_table.jld2"),"r") do f
+    select_key = JLD2_MyTools.make_keypath_qm(nz,0.200,λ0)
+    data = f[select_key]
+    nI = length(keys(data))
+    return (;
+        Ic = [data[x][:Icoil] for x=1:nI], 
+        F2 = [data[x][:z_max_smooth_mm] for x=1:nI], 
+        F2s = [data[x][:z_max_smooth_spline_mm] for x=1:nI] )
+end
+
+
+
+d_cqd_up = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","up","cqd_7M_up_profiles.jld2"),"r") do f
+    select_key = JLD2_MyTools.make_keypath_cqd(:up, 1.6,nz,0.200,λ0)
+    data = f[select_key]
+    nI = length(keys(data))
+    return (;
+        Ic = [data[x][:Icoil] for x=1:nI], 
+        up = [data[x][:z_max_smooth_mm] for x=1:nI], 
+        ups = [data[x][:z_max_smooth_spline_mm] for x=1:nI] )
+end
+
+d_cqd_dw = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","dw","cqd_7M_dw_profiles.jld2"),"r") do f
+    select_key = JLD2_MyTools.make_keypath_cqd(:dw, 1.6,nz,0.200,λ0)
+    data = f[select_key]
+    nI = length(keys(data))
+    return (;
+        Ic = [data[x][:Icoil] for x=1:nI], 
+        dw = [data[x][:z_max_smooth_mm] for x=1:nI], 
+        dws = [data[x][:z_max_smooth_spline_mm] for x=1:nI] )
+end
+
+QM_Δz = d_qm_f1.F1s .- d_qm_f2.F2s
+CQD_Δz = d_cqd_up.ups .- d_cqd_dw.dws
+Ithreshold = 0.025
+mask = d_qm_f1.Ic .>= Ithreshold
+
+function find_optimal_I(Ic, QM, CQD; 
+                        Ithreshold = 0.020)
+
+    # ── discrete case (your existing approach) ────────────────────────────
+    mask     = Ic .> Ithreshold
+    Ic_m     = Ic[mask]; QM_m = QM[mask]; CQD_m = CQD[mask]
+
+    log_diff = log10.(QM_m) .- log10.(CQD_m)
+    imax     = argmax(log_diff)
+    I_opt_discrete = Ic_m[imax]
+    δ_discrete     = QM_m[imax] - CQD_m[imax]
+
+    @info "Discrete optimum" Ic_A=I_opt_discrete  δ=round(δ_discrete; sigdigits=3)
+
+    # ── continuous case (interpolation + optimization) ────────────────────
+    # Work in log10(I) space so the interpolation is uniform
+    logI    = log10.(Ic_m)
+    itp_QM  = linear_interpolation(logI, log10.(QM_m))
+    itp_CQD = linear_interpolation(logI, log10.(CQD_m))
+
+    # Objective: negative log-diff (Optim minimizes)
+    objective(logI_val) = -(itp_QM(logI_val[1]) - itp_CQD(logI_val[1]))
+
+    result         = optimize(objective, [logI[1]], [logI[end]], [log10(I_opt_discrete)], Fminbox(BFGS()))
+    I_opt_cont     = 10^Optim.minimizer(result)[1]
+    δ_cont         = 10^itp_QM(log10(I_opt_cont)) - 10^itp_CQD(log10(I_opt_cont))
+
+    @info "Continuous optimum" Ic_A=round(I_opt_cont; digits=3)  δ=round(δ_cont; sigdigits=3)
+
+    return (;
+        I_opt_discrete, δ_discrete,
+        I_opt_cont,     δ_cont,
+    )
+end
+
+res = find_optimal_I(d_qm_f1.Ic, QM_Δz, CQD_Δz; Ithreshold=Ithreshold);
+
+plot(d_qm_f1.Ic[mask], QM_Δz[mask], label=L"QM: $F=2(m_{F}=2,1,0,-1) - F=1$",
+    line=(:solid,2,:red))
+plot!(d_qm_f1.Ic[mask], CQD_Δz[mask], label=L"CQD: $up - down$",
+    line=(:solid,2,:blue))
+vline!([res.I_opt_discrete], line=(:dash,1.2,:black), label=L"$I_{c}=%$(round(1000*res.I_opt_cont; sigdigits=3))\mathrm{mA}$ | $δ=%$(round(1000*res.δ_cont;sigdigits=3))\mathrm{\mu m}$")
+plot!(
+    xlabel="Current (A)",
+    ylabel=L"$Δz \ (\mathrm{mm})$",
+    xscale=:log10,
+    yscale=:log10,
+    ylims=(0.09,4),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+            [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
+            [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    legend=:topleft,
+    foreground_color_legend=nothing,
+    background_color_legend=nothing)
+
+
+
+
+
+
+
+
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directories = [
@@ -112,22 +224,26 @@ data_directories = [
         # "20260429D",
         # "20260429E",
         # "20260429F",
-        "20260504/Round1_SG1=0mA_SG0=+MG=3A",
-        "20260504/Round2_SG1=0mA_SG0=-MG=3A",
-        "20260504/Round3_SG1=40mA_SG0=+MG=3A",
-        "20260504/Round4_SG1=40mA_SG0=-MG=3A",
-        "20260504/Round5_SG1=500mA_SG0=+MG=3A",
-        "20260504/Round6_SG1=500mA_SG0=-MG=3A",
-        "20260507/Round1_SG1=278mA_SG0=+_MG=2300mA",
-        "20260507/Round2_SG1=278mA_SG0=-_MG=2300mA",
-        "20260507/Round3_SG1=279mA_SG0=+_MG=2020mA",
-        "20260507/Round4_SG1=279mA_SG0=-_MG=2020mA",
-        "20260507/Round5_SG1=279mA_SG0=+_MG=1530mA",
-        "20260507/Round6_SG1=279mA_SG0=-_MG=1530mA",
-        "20260507/Round7_SG1=278mA_SG0=+_MG=1070mA",
-        "20260507/Round8_SG1=278mA_SG0=-_MG=1070mA",
-        "20260507/Round9_SG1=279mA_SG0=+_MG=540mA",
-        "20260507/Round10_SG1=279mA_SG0=-_MG=540mA",
+        # "20260504/Round1_SG1=0mA_SG0=+MG=3A",
+        # "20260504/Round2_SG1=0mA_SG0=-MG=3A",
+        # "20260504/Round3_SG1=40mA_SG0=+MG=3A",
+        # "20260504/Round4_SG1=40mA_SG0=-MG=3A",
+        # "20260504/Round5_SG1=500mA_SG0=+MG=3A",
+        # "20260504/Round6_SG1=500mA_SG0=-MG=3A",
+        # "20260507/Round1_SG1=278mA_SG0=+_MG=2300mA",
+        # "20260507/Round2_SG1=278mA_SG0=-_MG=2300mA",
+        # "20260507/Round3_SG1=279mA_SG0=+_MG=2020mA",
+        # "20260507/Round4_SG1=279mA_SG0=-_MG=2020mA",
+        # "20260507/Round5_SG1=279mA_SG0=+_MG=1530mA",
+        # "20260507/Round6_SG1=279mA_SG0=-_MG=1530mA",
+        # "20260507/Round7_SG1=278mA_SG0=+_MG=1070mA",
+        # "20260507/Round8_SG1=278mA_SG0=-_MG=1070mA",
+        # "20260507/Round9_SG1=279mA_SG0=+_MG=540mA",
+        # "20260507/Round10_SG1=279mA_SG0=-_MG=540mA",
+        "20260513/Round1_SG1=40mA_SG0=+_MG=40G",
+        "20260513/Round2_SG1=40mA_SG0=-_MG=40G",
+        "20260515/Round2_SG1=223mA_SG0=+_MG=40G",
+        "20260515/Round3_SG1=223mA_SG0=-_MG=40G"
         ];
 nd = length(data_directories);
 
@@ -162,7 +278,6 @@ for data_directory in data_directories
     println("\n$(data_directory) PROCESSING COMPLETED\n\n")
 end
 
-
 tables = Vector{DataFrame}(undef, nd);
 jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(RUN_STAMP).jld2"), "w") do f
     f["meta/nz"]               = nz
@@ -184,8 +299,10 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
         SG0_current = data_processed[:SG0Currents];
         SG1_current = data_processed[:SG1Currents];
         MG_current  = data_processed[:MGCurrents];
-        Bz0 = data_processed[:SG0Bz];
-        Bz1 = data_processed[:SG1Bz];
+        
+        Bz0 = 1e3 .* data_processed[:SG0Bz];
+        Bz1 = 1e3 .* data_processed[:SG1Bz];
+        MG_fields   = 1e3 * data_processed[:MGFields];
 
         # ── Framewise maxima & statistics ────────────────────────────────────────
         f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=false,λ0=λ0);
@@ -205,6 +322,7 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
             Ig        = MG_current,
             I0        = SG0_current,
             I1        = SG1_current,
+            Bg        = MG_fields,
             B0        = Bz0,
             B1        = Bz1,
             zf1       = f1_z_mm,
@@ -220,11 +338,11 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
 
         pretty_table(data;
                 title         = data_directory,
-                formatters    = [ fmt__printf("%8.3f", [1]), fmt__printf("%8.5f", 2:5), fmt__printf("%8.3f", [6,8,10]), fmt__printf("%8.4f", [7,9,11])],
+                formatters    = [ fmt__printf("%8.3f", [1]), fmt__printf("%8.5f", 2:3), fmt__printf("%8.3f", 4:6),  fmt__printf("%8.3f", [7,9,11]), fmt__printf("%8.4f", [8,10,12])],
                 alignment     = :c,
                 column_labels  = [
-                    ["Ig current", "I0 Current", "I1 Current", "B0 field", "B1 field", "F1", "F1 err", "F2", "F2 err", "Δz", "Δz err"], 
-                    ["[A]", "[A]", "[A]" ,"[T]", "[T]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
+                    ["IG current", "I0 Current", "I1 Current", "BG field", "B0 field", "B1 field", "F1", "F1 err", "F2", "F2 err", "Δz", "Δz err"], 
+                    ["[A]", "[A]", "[A]", "[mT]" ,"[mT]", "[mT]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
                 ],
                 table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
                 style = TextTableStyle(
@@ -530,12 +648,12 @@ end
 
 plot_sg1_fig(
     1:2,
-    0.0;
+    40.0;
 )
 
 plot_sg1_fig(
     3:4,
-    40.0;
+    223.0;
 )
 
 plot_sg1_fig(
@@ -609,9 +727,10 @@ function plot_sg0_sweep(
     # ── a1 : full range ───────────────────────────────────────────────────────
     a1 = plot(xlabel = "SG0 (A)", ylabel = "Separation (px)")
     for (i, idx) in enumerate(table_indices)
-        plot_series!(a1, tables[idx], i; x_slice = 2:nrow(df), connect_slice = 2:nrow(df))
+        df = tables[idx]
+        plot_series!(a1, df, i; x_slice = 2:nrow(df), connect_slice = 2:nrow(df))
     end
-    plot!(a1; xscale=:log10, legend_kw...)
+    plot!(a1; xscale=:identity, legend_kw...)
 
     # ── a2 : zoomed, I0 < 50 mA ───────────────────────────────────────────────
     a2 = plot(xlabel = "SG0 (A)", ylabel = "Separation (px)")
@@ -654,6 +773,8 @@ function plot_sg0_sweep(
     return fig
 end
 
+plot_sg0_sweep([1,2])
+plot_sg0_sweep([3,4])
 
 plot_sg0_sweep([7,9,11,13,15])
 
