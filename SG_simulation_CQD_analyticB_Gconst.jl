@@ -188,7 +188,7 @@ nI = length(Icoils);
 calibration = TheoreticalSimulation.build_calibration(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 500 ; 
+const Nss = 15_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
@@ -215,34 +215,51 @@ data_DOWN_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_DOWN);
 
 kI = 1.60e-6;
 
-@time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(Icoils, data_UP, data_UP_SG, kI, K39_params, calibration; y_length=5001,verbose=true);
-@time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(Icoils, kI, data_UP, data_UP_SG, CQD_up_particles_flag, K39_params, calibration);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
-TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
 
 
-Ieff = calibration.I_eff_B(0.75)
-S = calibration.grad_scale(0.75)
 
-center_of_SG_magnet
 
-ifff=TheoreticalSimulation.calibrate_Ieff_for_Bz(Icoils)
 
-TheoreticalSimulation.B_total(0,0,0,Iw=ifff(0.75))
 
-TheoreticalSimulation.B_total(0,center_of_SG_magnet,0; Iw = 0.75)
+isdir(joinpath(OUTDIR,"up")) || mkpath(joinpath(OUTDIR,"up"));
+for (i,kI) in enumerate([1.6e-6])
 
-S .* TheoreticalSimulation.grad_normB(0,center_of_SG_magnet,0; Iw=calibration.I_eff_B(0.075))
+    @time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(Icoils, data_UP, data_UP_SG, kI, K39_params, calibration; y_length=5001,verbose=true);
+    @time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(Icoils, kI, data_UP, data_UP_SG, CQD_up_particles_flag, K39_params, calibration);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+    TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
+    @time CQD_up_particles_screen       = TheoreticalSimulation.CQD_select_flagged(CQD_up_particles_trajectories,:screen )
 
-TheoreticalSimulation.BvsI(0.75)
-TheoreticalSimulation.GvsI(0.75)
+    filepath = joinpath(OUTDIR, "up", "cqd$(RUN_STAMP)_ki$(@sprintf("%03d", i))_up_screen.jld2")
 
-CQD_up_particles_trajectories[1] .- CQD_up_particles_trajectories[25]
+    jldopen( filepath , "w") do f
+
+        # Global metadata
+        f["meta/k"]       = kI
+        f["meta/Iw"]      = collect(Icoils)
+
+        for (idx, Iw) in enumerate(Icoils)
+            # Save only passed particles
+            screen_camera = CQD_up_particles_screen[idx]
+            f["data/final/I$(idx)"] = screen_camera
+
+            @info "$(idx)/$(length(Icoils))" Iw_mA = round(Int, 1000 * Iw) passed_pct = round(100*size(screen_camera,1)/size(data_UP,1); digits=3) z_mm  = round.(extrema(1e3 .* screen_camera[:, 10]); digits=3) x_mm  = round.(extrema(1e3 .* screen_camera[:, 9]); digits=3)
+        end
+    end
+
+    # @info "\e[1;33mSaved\e[0m" filepath=filepath
+end
+
 
 
 
 @time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(Icoils, data_DOWN, data_DOWN_SG, kI, K39_params, calibration; y_length=5001,verbose=true);
 @time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(Icoils, kI, data_DOWN, data_DOWN_SG, CQD_dw_particles_flag, K39_params, calibration);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
 TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_dw_particles_trajectories, :down)
+@time CQD_dw_particles_screen       = TheoreticalSimulation.CQD_select_flagged(CQD_dw_particles_trajectories,:screen )
+
+
+
+
 
 kis                 = unique(round.([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:1.5];sigdigits=4))
 @info "Number of ki sampled = $(length(kis))" 
