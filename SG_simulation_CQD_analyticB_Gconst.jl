@@ -188,7 +188,7 @@ nI = length(Icoils);
 calibration = TheoreticalSimulation.build_calibration(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 50_000 ; 
+const Nss = 500 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
@@ -218,6 +218,11 @@ kI = 1.60e-6;
 @time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(Icoils, data_UP, data_UP_SG, kI, K39_params, calibration; y_length=5001,verbose=true);
 @time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(Icoils, kI, data_UP, data_UP_SG, CQD_up_particles_flag, K39_params, calibration);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
 TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
+
+
+CQD_up_particles_trajectories[1] .- CQD_up_particles_trajectories[25]
+
+
 
 @time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(Icoils, data_DOWN, data_DOWN_SG, kI, K39_params, calibration; y_length=5001,verbose=true);
 @time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(Icoils, kI, data_DOWN, data_DOWN_SG, CQD_dw_particles_flag, K39_params, calibration);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
