@@ -34,6 +34,7 @@ LinearAlgebra.BLAS.set_num_threads(2)
 # Custom modules
 include("./Modules/DataReading.jl")
 include("./Modules/JLD2_MyTools.jl");
+include("./Modules/TheoreticalSimulation.jl")
 include("./Modules/MyExperimentalAnalysis.jl");
 using .MyExperimentalAnalysis;
 # Set the working directory to the current location
@@ -80,13 +81,20 @@ MyExperimentalAnalysis.z_pixels                     = z_pixels;
 
 BASE_PATH = raw"F:\SternGerlachExperiments"
 
+data_2025 = load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_xkl","data_averaged_2.jld2"), "data")
+
+data_2025[:δz_smooth]
+
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 T_START   = Dates.now()
 RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 
+
+K39_params = TheoreticalSimulation.AtomParams("39K"); # [R μn γn Ispin Ahfs M ] 
 nz = 2 ;
 λ0 = 0.005 ;
+σw = 0.200;
 
 # position
 z_mm        = 1e3 .* pixel_positions(z_pixels, nz, exp_pixelsize_z) ; 
@@ -114,7 +122,13 @@ d_qm_f2 = jldopen(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_profi
         F2s = [data[x][:z_max_smooth_spline_mm] for x=1:nI] )
 end
 
+profiles_1    = TheoreticalSimulation.QM_analyze_profiles_to_dict(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_data.jld2"), K39_params;
+                    manifold=1,    n_bins= (32 , nz), width_mm=σw, add_plot=false, plot_xrange=:all, λ_raw=λ0, λ_smooth = 0.001, mode=:probability);
+profiles_5    = TheoreticalSimulation.QM_analyze_profiles_to_dict(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_data.jld2"), K39_params;
+                    manifold=5,    n_bins= (32 , nz), width_mm=σw, add_plot=false, plot_xrange=:all, λ_raw=λ0, λ_smooth = 0.001, mode=:probability);
 
+d_qm_lvl1 = [profiles_1[x][:z_max_smooth_spline_mm] for x=1:47]
+d_qm_lvl5 = [profiles_5[x][:z_max_smooth_spline_mm] for x=1:47]
 
 d_cqd_up = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","up","cqd_7M_up_profiles.jld2"),"r") do f
     select_key = JLD2_MyTools.make_keypath_cqd(:up, 1.6,nz,0.200,λ0)
@@ -136,10 +150,59 @@ d_cqd_dw = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","dw","cqd_7M_d
         dws = [data[x][:z_max_smooth_spline_mm] for x=1:nI] )
 end
 
+Icoils = d_cqd_up.Ic
 QM_Δz = d_qm_f1.F1s .- d_qm_f2.F2s
+nocollapse_Δz = d_qm_lvl5 .- d_qm_lvl1
 CQD_Δz = d_cqd_up.ups .- d_cqd_dw.dws
 Ithreshold = 0.025
 mask = d_qm_f1.Ic .>= Ithreshold
+
+TheoreticalSimulation.BvsI(0.025)
+
+
+plot(TheoreticalSimulation.BvsI.(Icoils[mask]), QM_Δz[mask]./(1e3*cam_pixelsize), label="QM",
+line=(:solid,2,:red))
+plot!(TheoreticalSimulation.BvsI.(Icoils[mask]), CQD_Δz[mask]./(1e3*cam_pixelsize), label="CQD",
+line=(:solid,2,:blue))
+plot!(TheoreticalSimulation.BvsI.(Icoils[mask]), nocollapse[mask]./(1e3*cam_pixelsize), label="CQD - No collapse",
+line=(:solid,2,:green))
+plot!(
+    ylabel=L"$\Delta z$ (px)",
+    xlabel="Magnetic field (T)",
+    xlims=(0.001,1),
+    ylims=(0.1,1000),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0], 
+            [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0], 
+            [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    xscale=:log10,
+    yscale=:log10,
+    legend=:topleft,
+    foreground_color_legend=nothing,
+    background_color_legend=nothing)
+
+plot(Icoils[mask], QM_Δz[mask]./(1e3*cam_pixelsize), label="QM",
+line=(:solid,2,:red))
+plot!(Icoils[mask], CQD_Δz[mask]./(1e3*cam_pixelsize), label="CQD",
+line=(:solid,2,:blue))
+plot!(Icoils[mask], nocollapse_Δz[mask]./(1e3*cam_pixelsize), label="CQD - No collapse",
+line=(:solid,2,:green))
+plot!(
+    ylabel=L"$\Delta z$ (px)",
+    xlabel="Current (A)",
+    xlims=(Ithreshold,1),
+    ylims=(10,1000),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0], 
+            [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0], 
+            [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    # xscale=:log10,
+    # yscale=:log10,
+    legend=:topleft,
+    foreground_color_legend=nothing,
+    background_color_legend=nothing)
+
+hcat(Icoils,abs.((CQD_Δz .- nocollapse_Δz)/6.5e-3))
 
 function find_optimal_I(Ic, QM, CQD; 
                         Ithreshold = 0.020)
