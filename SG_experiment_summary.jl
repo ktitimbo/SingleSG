@@ -35,8 +35,9 @@ include("./Modules/DataReading.jl");
 include("./Modules/JLD2_MyTools.jl");
 # Set the working directory to the current location
 cd(@__DIR__) 
+const BASE_PATH = raw"F:\SternGerlachExperiments"
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSS");
-const OUTDIR    = joinpath(@__DIR__, "EXPDATA_ANALYSIS", "smoothing_binning")
+const OUTDIR    = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", "smoothing_binning",RUN_STAMP)
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 # General setup
@@ -61,7 +62,7 @@ data_JSF = OrderedDict(
 );
 
 nz_fix, σ_fix, λ0_fix = (2,0.200,0.01)
-chosen_qm = jldopen(joinpath(@__DIR__,"simulation_data","QM_T205_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
+chosen_qm = jldopen(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
     file[JLD2_MyTools.make_keypath_qm(nz_fix,σ_fix,λ0_fix)]
 end
 Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
@@ -77,7 +78,7 @@ dI_all = Vector{Vector{Float64}}(undef, n_runs);
 cols = palette(:darkrainbow, n_runs);
 
 for (i, dir) in enumerate(data_directories)
-    d   = load(joinpath(@__DIR__, "EXPERIMENTS", dir, "data_processed.jld2"), "data");
+    d   = load(joinpath(BASE_PATH, "EXPERIMENTS", dir, "data_processed.jld2"), "data");
     I_all[i]  = Vector{Float64}(d[:Currents]);
     dI_all[i] = Vector{Float64}(d[:CurrentsError]);
 end
@@ -126,7 +127,7 @@ for data_directory in data_directories
 
     magnification_factor = mag_factor(data_directory) ;
 
-    parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS", data_directory);
+    parent_folder = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", data_directory);
     m = DataReading.collect_fw_map(parent_folder; 
                                     select=sel, 
                                     filename="fw_data.csv", 
@@ -169,7 +170,7 @@ for data_directory in data_directories
         markerstrokewidth = 1,
         markerstrokecolor=cols_k[i]
         )
-        chosen_qm_i  = jldopen(joinpath(@__DIR__,"simulation_data","QM_T205_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
+        chosen_qm_i  = jldopen(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_profiles_f1_table.jld2"),"r") do file
                             file[JLD2_MyTools.make_keypath_qm(m[key][1],σ_fix,m[key][2])]
         end       
         Ic_qm_i      = [chosen_qm_i[i][:Icoil] for i in eachindex(chosen_qm_i)][2:end]
@@ -220,9 +221,9 @@ println("Experiment analysis finished!\n\n")
 #########################################################################################
 # Choose a particular configuration for comparison purposes 
 #########################################################################################
-parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS");
+parent_folder = joinpath(BASE_PATH, "EXPDATA_ANALYSIS");
 m_sets = map(d -> begin
-    parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS", d)
+    parent_folder = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", d)
     DataReading.collect_fw_map(
         parent_folder;
         select = sel,
@@ -364,7 +365,7 @@ println("\nComparison of differente experiments finished!\n\n")
 Ics = Vector{Vector{Float64}}(undef, length(data_directories));
 tol_grouping = 0.05
 for (i, dir) in enumerate(data_directories)
-    data = load(joinpath(@__DIR__, "EXPERIMENTS", dir, "data_processed.jld2"), "data")
+    data = load(joinpath(BASE_PATH, "EXPERIMENTS", dir, "data_processed.jld2"), "data")
     Ics[i] = data[:Currents]
 end
 clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping);
@@ -852,7 +853,7 @@ plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Sp
 plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:log10)
 plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:identity)
 
-ss = load(joinpath(@__DIR__,"20250820","data_processed.jld2"))
+ss = load(joinpath(BASE_PATH,"20250820","data_processed.jld2"))
 
 ss["data"]
 ss["data"][:Currents]
