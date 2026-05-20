@@ -35,6 +35,7 @@ LinearAlgebra.BLAS.set_num_threads(2)
 @info "Julia threads" count = Threads.nthreads()
 # Set the working directory to the current location
 cd(@__DIR__) ;
+const BASE_PATH = raw"F:\SternGerlachExperiments"
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const OUTDIR    = joinpath(@__DIR__, "data_studies", "FITki"*RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
@@ -523,14 +524,14 @@ function plot_cqd_vs_qm(ZCQD, ZQM, Icurrent, ki_list;
     return fig
 end
 
-function keypath(branch::Symbol, ki::Float64, nz::Int, gw::Float64, λ0_raw::Float64)
-    fmt(x) = @sprintf("%.12g", x)  # safer than %.6g to reduce collisions
-    return "/" * String(branch) *
-           "/ki=" * fmt(ki) *"e-6" *
-           "/nz=" * string(nz) *
-           "/gw=" * fmt(gw) *
-           "/lam=" * fmt(λ0_raw)
-end
+# function keypath(branch::Symbol, ki::Float64, nz::Int, gw::Float64, λ0_raw::Float64)
+#     fmt(x) = @sprintf("%.12g", x)  # safer than %.6g to reduce collisions
+#     return "/" * String(branch) *
+#            "/ki=" * fmt(ki) *"e-6" *
+#            "/nz=" * string(nz) *
+#            "/gw=" * fmt(gw) *
+#            "/lam=" * fmt(λ0_raw)
+# end
 
 # =============================================================================
 # Simulated coil currents (in Amperes)
@@ -557,7 +558,7 @@ nI = length(Icoils); # Number of simulated current points
 # Each entry contains the corresponding screen-profile analysis results
 # for all currents in `Icoils`.
 # =============================================================================
-table_qm_path = joinpath(@__DIR__,"simulation_data",
+table_qm_path = joinpath(BASE_PATH,"SIMULATIONS",
     "QM_T205_8M",
     "qm_screen_profiles_f1_table.jld2");
 qm_meta = JLD2_MyTools.list_keys_jld_qm(table_qm_path);
@@ -578,9 +579,9 @@ qm_meta = JLD2_MyTools.list_keys_jld_qm(table_qm_path);
 #   - λ0  : raw spline smoothing parameter
 #   - λs  : spline smoothing parameter used internally
 # =============================================================================
-table_cqd_path = joinpath(@__DIR__, "simulation_data",
-    "cqd_simulation_7M",
-    "cqd_7000000_up_profiles_bykey.jld2");
+table_cqd_path = joinpath(BASE_PATH,"SIMULATIONS",
+    "CQD_T205_7M","up",
+    "cqd_7M_up_profiles.jld2");
 cqd_meta = jldopen(table_cqd_path, "r") do file
     meta = file["meta"]
 
@@ -623,7 +624,7 @@ end
 #   - dz/dI is the spline derivative evaluated at xq
 #   - δz_interp is the interpolated z-uncertainty at xq
 # =============================================================================
-exp_avg = load(joinpath(@__DIR__,"EXPDATA_ANALYSIS","smoothing_binning","data_averaged_2.jld2"))["data"]
+exp_avg = load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_xkl","data_averaged_2.jld2"))["data"]
 
 mask = [any(abs(a - b) ≤ 1e-15 for a in exp_avg[:Ic_grouped][:,1]) for b in exp_avg[:i_smooth]]
 Ichosen  = exp_avg[:i_smooth][mask]
@@ -2337,6 +2338,8 @@ data = data_exp_scattered[i_start:end, :]
 data_scaled = copy(data)
 data_scaled[:, 3] ./= scaled_mag
 data_scaled[:, 4] ./= scaled_mag
+
+data_scaled
 
 fig=plot(    
     # title = L"Peak position ($F=1$)",
