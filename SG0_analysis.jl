@@ -81,9 +81,8 @@ MyExperimentalAnalysis.z_pixels                     = z_pixels;
 
 BASE_PATH = raw"F:\SternGerlachExperiments"
 
-data_2025 = load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_xkl","data_averaged_2.jld2"), "data")
 
-data_2025[:δz_smooth]
+data_2025 = CSV.read(joinpath(@__DIR__,"data_studies","FITki20260519T160646328","data_exp.csv"), DataFrame)
 
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -95,6 +94,7 @@ K39_params = TheoreticalSimulation.AtomParams("39K"); # [R μn γn Ispin Ahfs M 
 nz = 2 ;
 λ0 = 0.005 ;
 σw = 0.200;
+ki = 2.3;
 
 # position
 z_mm        = 1e3 .* pixel_positions(z_pixels, nz, exp_pixelsize_z) ; 
@@ -131,7 +131,7 @@ d_qm_lvl1 = [profiles_1[x][:z_max_smooth_spline_mm] for x=1:47]
 d_qm_lvl5 = [profiles_5[x][:z_max_smooth_spline_mm] for x=1:47]
 
 d_cqd_up = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","up","cqd_7M_up_profiles.jld2"),"r") do f
-    select_key = JLD2_MyTools.make_keypath_cqd(:up, 1.6,nz,0.200,λ0)
+    select_key = JLD2_MyTools.make_keypath_cqd(:up,ki,nz,0.200,λ0)
     data = f[select_key]
     nI = length(keys(data))
     return (;
@@ -141,7 +141,7 @@ d_cqd_up = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","up","cqd_7M_u
 end
 
 d_cqd_dw = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","dw","cqd_7M_dw_profiles.jld2"),"r") do f
-    select_key = JLD2_MyTools.make_keypath_cqd(:dw, 1.6,nz,0.200,λ0)
+    select_key = JLD2_MyTools.make_keypath_cqd(:dw,ki,nz,0.200,λ0)
     data = f[select_key]
     nI = length(keys(data))
     return (;
@@ -151,20 +151,131 @@ d_cqd_dw = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","dw","cqd_7M_d
 end
 
 Icoils = d_cqd_up.Ic
+
 QM_Δz = d_qm_f1.F1s .- d_qm_f2.F2s
+
 nocollapse_Δz = d_qm_lvl5 .- d_qm_lvl1
 CQD_Δz = d_cqd_up.ups .- d_cqd_dw.dws
+
+"""
+    interpolate_and_evaluate(x_list, y_list, x_exp)
+ 
+Interpolates the data given by `x_list` and `y_list` using a cubic spline,
+then evaluates the interpolated function at each point in `x_exp`.
+ 
+# Arguments
+- `x_list::AbstractVector{<:Real}`: Known x data points (must be strictly increasing).
+- `y_list::AbstractVector{<:Real}`: Known y data points corresponding to `x_list`.
+- `x_exp::AbstractVector{<:Real}`: Query points at which to evaluate the interpolant.
+ 
+# Returns
+- `Vector{Float64}`: Interpolated y values at each point in `x_exp`.
+ 
+# Notes
+- Uses cubic spline interpolation (k=3) via Dierckx.jl.
+- s=0 forces the spline to pass exactly through every data point.
+- `x_list` must be sorted in strictly increasing order.
+"""
+function interpolate_and_evaluate(
+    x_list::AbstractVector{<:Real},
+    y_list::AbstractVector{<:Real},
+    x_exp::AbstractVector{<:Real}
+)
+    length(x_list) == length(y_list) ||
+        throw(ArgumentError("x_list and y_list must have the same length."))
+    issorted(x_list; lt = <) ||
+        throw(ArgumentError("x_list must be strictly increasing."))
+ 
+    # Build a cubic spline (k=3); s=0 forces the spline through every data point
+    spl = Spline1D(Float64.(x_list), Float64.(y_list); k=3, s=0)
+ 
+    # Broadcast call syntax works without needing to import evaluate explicitly
+    return spl.(Float64.(x_exp))
+end
+
+"""
+    find_spline_maximum(CNR; n_grid=10_000, log_x=false)
+ 
+Given a two-column matrix `CNR` where column 1 is x (e.g. Ic) and column 2 is y,
+fits a cubic spline and finds the x and y values at the global maximum.
+ 
+Strategy:
+  1. Evaluate the spline on a fine grid (n_grid points) to locate the global peak.
+  2. Refine the best grid point with BFGS to get a precise answer.
+ 
+# Keyword arguments
+- `n_grid::Int=10_000`: number of points in the coarse search grid.
+- `log_x::Bool=false`: if true, the coarse grid is spaced logarithmically (useful when
+  x spans several decades, as with current sweeps on a log scale).
+ 
+# Returns
+- `(x_max, y_max)`: x location of the maximum and the corresponding spline value.
+"""
+function find_spline_maximum(
+    CNR::AbstractMatrix{<:Real};
+    n_grid::Int = 10_000,
+    log_x::Bool = false
+)
+    x = Float64.(CNR[:, 1])
+    y = Float64.(CNR[:, 2])
+ 
+    # Sort by x in case data is unordered
+    idx = sortperm(x)
+    x, y = x[idx], y[idx]
+ 
+    spl = Spline1D(x, y; k=3, s=0)
+ 
+    # 1. Coarse grid search — log-spaced if requested (matches log-scale plots)
+    x_grid = log_x ? exp.(range(log(x[1]), log(x[end]); length=n_grid)) :
+                     range(x[1], x[end]; length=n_grid)
+    y_grid = spl.(x_grid)
+    x0 = x_grid[argmax(y_grid)]   # best coarse estimate
+ 
+    # 2. Refine with BFGS starting from the coarse peak
+    result = optimize(t -> -spl(t[1]), [x0], BFGS(),
+                      Optim.Options(; x_abstol=1e-12))
+ 
+    x_max = clamp(Optim.minimizer(result)[1], x[1], x[end])
+    y_max = spl(x_max)
+ 
+    return x_max, y_max
+end
+ 
+QM_Δz_on_exp         = interpolate_and_evaluate(Icoils, QM_Δz, data_2025.Ic)
+nocollapse_Δz_on_exp = interpolate_and_evaluate(Icoils, nocollapse_Δz, data_2025.Ic)
+CQD_Δz_on_exp        = interpolate_and_evaluate(Icoils, CQD_Δz, data_2025.Ic)
+
+CNR = hcat(data_2025.Ic, abs.((nocollapse_Δz_on_exp .- CQD_Δz_on_exp)) ./ data_2025.szmax )
+cnr_x_max, cnr_y_max = find_spline_maximum(CNR; log_x=true)
+
+fig_CNR = plot(CNR[:,1], CNR[:,2],
+    label=L"$\mathrm{No \ collapse}-\mathrm{CQD}(%$(ki)\times10^{-6}$)",
+    line=(:solid,2,:red),
+    marker=(:circle,2,:white),
+    markerstrokecolor=:red,
+    xlabel="Current (A)",
+    ylabel="CNR",
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0], 
+            [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    # yticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0], 
+    #         [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    xscale=:log10,
+    # yscale=:log10,
+    legend=:topright,
+    foreground_color_legend=nothing,
+    background_color_legend=nothing,
+)
+vline!(fig_CNR, [cnr_x_max], label=L"$I_{c}=%$(round(1000*cnr_x_max; digits=2))\mathrm{mA}$ ", line=(:dash,1,:black) )
+
+
 Ithreshold = 0.025
 mask = d_qm_f1.Ic .>= Ithreshold
-
-TheoreticalSimulation.BvsI(0.025)
-
 
 plot(TheoreticalSimulation.BvsI.(Icoils[mask]), QM_Δz[mask]./(1e3*cam_pixelsize), label="QM",
 line=(:solid,2,:red))
 plot!(TheoreticalSimulation.BvsI.(Icoils[mask]), CQD_Δz[mask]./(1e3*cam_pixelsize), label="CQD",
 line=(:solid,2,:blue))
-plot!(TheoreticalSimulation.BvsI.(Icoils[mask]), nocollapse[mask]./(1e3*cam_pixelsize), label="CQD - No collapse",
+plot!(TheoreticalSimulation.BvsI.(Icoils[mask]), nocollapse_Δz[mask]./(1e3*cam_pixelsize), label="CQD - No collapse",
 line=(:solid,2,:green))
 plot!(
     ylabel=L"$\Delta z$ (px)",
@@ -179,30 +290,35 @@ plot!(
     yscale=:log10,
     legend=:topleft,
     foreground_color_legend=nothing,
-    background_color_legend=nothing)
+    background_color_legend=nothing,
+)
 
-plot(Icoils[mask], QM_Δz[mask]./(1e3*cam_pixelsize), label="QM",
+fig_z = plot(Icoils[mask], QM_Δz[mask]./(1e3*cam_pixelsize), label="QM",
 line=(:solid,2,:red))
-plot!(Icoils[mask], CQD_Δz[mask]./(1e3*cam_pixelsize), label="CQD",
+plot!(fig_z, Icoils[mask], CQD_Δz[mask]./(1e3*cam_pixelsize), label="CQD",
 line=(:solid,2,:blue))
-plot!(Icoils[mask], nocollapse_Δz[mask]./(1e3*cam_pixelsize), label="CQD - No collapse",
+plot!(fig_z, Icoils[mask], nocollapse_Δz[mask]./(1e3*cam_pixelsize), label="CQD - No collapse",
 line=(:solid,2,:green))
-plot!(
+plot!(fig_z,
     ylabel=L"$\Delta z$ (px)",
     xlabel="Current (A)",
     xlims=(Ithreshold,1),
     ylims=(10,1000),
     xticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0], 
             [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0], 
-            [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
-    # xscale=:log10,
-    # yscale=:log10,
+    yticks = ([10.0, 100.0], 
+            [ L"10^{1}", L"10^{2}"]),
+    xscale=:log10,
+    yscale=:log10,
     legend=:topleft,
     foreground_color_legend=nothing,
     background_color_legend=nothing)
+vline!(fig_z, [cnr_x_max], label=L"$I_{c}=%$(round(1000*cnr_x_max; digits=2))\mathrm{mA}$ ", line=(:dash,1,:black) )
 
-hcat(Icoils,abs.((CQD_Δz .- nocollapse_Δz)/6.5e-3))
+plot(fig_z, fig_CNR,
+    layout=(2,1))
+
+
 
 function find_optimal_I(Ic, QM, CQD; 
                         Ithreshold = 0.020)
