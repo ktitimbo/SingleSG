@@ -21,9 +21,8 @@ using Dates
 const T_START = Dates.now() ; # Timestamp start for execution timing
 # Numerical tools
 using LinearAlgebra, DataStructures
-using Interpolations, Roots, Loess, Optim, Polynomials
-using BSplineKit
-using Polynomials
+using Interpolations, Roots, Loess, Optim
+using BSplineKit, Polynomials
 using DSP
 using LambertW, PolyLog
 using StatsBase
@@ -87,6 +86,7 @@ const μe_over_M = μₑ / K39_params.M
 # Math constants
 const TWOπ = 2π;
 const INV_E = exp(-1);
+const SUP  = Dict(zip("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻"))
 quantum_numbers = fmf_levels(K39_params);
 
 # STERN--GERLACH EXPERIMENT
@@ -142,7 +142,7 @@ effusion_params = BeamEffusionParams(x_furnace,z_furnace,x_slit,z_slit,y_Furnace
 println("""
 ***************************************************
 SETUP FEATURES
-    Temperature             : $(T_K)
+    Temperature             : $(T_K)K
     Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
     Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
     Post-SG aperture radius : $(1e3*R_aper)mm
@@ -188,7 +188,7 @@ nI = length(Icoils);
 calibration = TheoreticalSimulation.build_calibration(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 15_000 ; 
+const Nss = 1_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
@@ -213,74 +213,55 @@ data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set;
 data_UP_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_UP);
 data_DOWN_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_DOWN);
 
-kI = 1.60e-6;
-
-
-
-
-
-
-
-isdir(joinpath(OUTDIR,"up")) || mkpath(joinpath(OUTDIR,"up"));
-for (i,kI) in enumerate([1.6e-6])
-
-    @time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(Icoils, data_UP, data_UP_SG, kI, K39_params, calibration; y_length=5001,verbose=true);
-    @time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(Icoils, kI, data_UP, data_UP_SG, CQD_up_particles_flag, K39_params, calibration);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
-    TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_up_particles_trajectories, :up)
-    @time CQD_up_particles_screen       = TheoreticalSimulation.CQD_select_flagged(CQD_up_particles_trajectories,:screen )
-
-    filepath = joinpath(OUTDIR, "up", "cqd$(RUN_STAMP)_ki$(@sprintf("%03d", i))_up_screen.jld2")
-
-    jldopen( filepath , "w") do f
-
-        # Global metadata
-        f["meta/k"]       = kI
-        f["meta/Iw"]      = collect(Icoils)
-
-        for (idx, Iw) in enumerate(Icoils)
-            # Save only passed particles
-            screen_camera = CQD_up_particles_screen[idx]
-            f["data/final/I$(idx)"] = screen_camera
-
-            @info "$(idx)/$(length(Icoils))" Iw_mA = round(Int, 1000 * Iw) passed_pct = round(100*size(screen_camera,1)/size(data_UP,1); digits=3) z_mm  = round.(extrema(1e3 .* screen_camera[:, 10]); digits=3) x_mm  = round.(extrema(1e3 .* screen_camera[:, 9]); digits=3)
-        end
-    end
-
-    # @info "\e[1;33mSaved\e[0m" filepath=filepath
-end
-
-
-
-
-@time CQD_dw_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(Icoils, data_DOWN, data_DOWN_SG, kI, K39_params, calibration; y_length=5001,verbose=true);
-@time CQD_dw_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(Icoils, kI, data_DOWN, data_DOWN_SG, CQD_dw_particles_flag, K39_params, calibration);   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
-TheoreticalSimulation.CQD_travelling_particles_summary(Icoils,CQD_dw_particles_trajectories, :down)
-@time CQD_dw_particles_screen       = TheoreticalSimulation.CQD_select_flagged(CQD_dw_particles_trajectories,:screen )
-
-
-
-
-
-kis                 = unique(round.([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:1.5];sigdigits=4))
+kis                 = unique(round.(vcat([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:2.0],1);sigdigits=4))
 @info "Number of ki sampled = $(length(kis))" 
-induction_coeff     = round.(1e6 .* kis; sigdigits=3)
+induction_coeff_for_label     = round.(1e6 .* kis; sigdigits=3)
+ki_labels = [(e = floor(Int, log10(abs(k)) + 1e-9);
+              string(round(k / exp10(e), sigdigits=3), "×10", join(SUP[c] for c in string(e))))
+             for k in kis]
 
-isdir(joinpath(OUTDIR,"up")) || mkpath(joinpath(OUTDIR,"up"));
-isdir(joinpath(OUTDIR,"dw")) || mkpath(joinpath(OUTDIR,"dw"));
-for (i,ki) in enumerate(kis)
-    @info "\e[1;31mRUNNING FOR kᵢ = $(round(1e6*ki,sigdigits=3))×10⁻⁶\e[0m"
+isdir(joinpath(OUTDIR, "up")) || mkpath(joinpath(OUTDIR, "up"))
+isdir(joinpath(OUTDIR, "dw")) || mkpath(joinpath(OUTDIR, "dw"))
+for (i, kI) in enumerate(kis)
+    @info "\e[1;31mRUNNING FOR kᵢ = $(ki_labels[i])\e[0m"
 
-    @info "\e[1;32mAnalyzing data for electron magnetic moment UP\e[0m"
-    run_save_and_filter2(data_UP, Icoils, calibration,
-        joinpath(OUTDIR, "up", "cqd$(RUN_STAMP)_ki$(@sprintf("%03d", i))_up_screen.jld2");
-        k=ki, μ_over_m=μe_over_M)
 
-    @info "\e[1;32mAnalyzing data for electron magnetic moment DOWN\e[0m"
-    run_save_and_filter2(data_DOWN, Icoils, calibration,
-        joinpath(OUTDIR, "dw", "cqd$(RUN_STAMP)_ki$(@sprintf("%03d", i))_dw_screen.jld2");
-        k=-ki, μ_over_m=μe_over_M)
+    for (label, label_str, data, data_SG) in ((:up, "UP", data_UP,   data_UP_SG),
+                                   (:dw, "DOWN", data_DOWN, data_DOWN_SG))
 
-    GC.gc()
+        @info "\e[1;32mAnalyzing data for electron magnetic moment $(uppercase(String(label_str)))\e[0m"
+
+        particles_flag = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(
+            Icoils, data, data_SG, kI, K39_params, calibration; y_length=5001, verbose=true)
+
+        @time particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(
+            Icoils, kI, data, data_SG, particles_flag, K39_params, calibration)   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+
+        TheoreticalSimulation.CQD_travelling_particles_summary(Icoils, particles_trajectories, label_str)
+
+        particles_screen = TheoreticalSimulation.CQD_select_flagged(particles_trajectories, :screen)
+
+        filepath = joinpath(OUTDIR, String(label),
+            "cqd$(RUN_STAMP)_ki$(@sprintf("%03d", i))_$(label)_screen.jld2")
+
+        jldopen(filepath, "w") do f
+            # Global metadata
+            f["meta/T"]  = T_K
+            f["meta/N"]  = Nss
+            f["meta/k"]  = kI
+            f["meta/Iw"] = collect(Icoils)
+
+            for (idx, Iw) in enumerate(Icoils)
+                # Save only passed particles arriving to the detector
+                screen_camera = particles_screen[idx]
+                f["data/final/I$(idx)"] = screen_camera
+
+                @info "$(idx)/$(length(Icoils))" Iw_mA = round(Int, 1000 * Iw) passed_pct = round(100 * size(screen_camera, 1) / size(data, 1); digits=3) z_mm = round.(extrema(1e3 .* screen_camera[:, 10]); digits=3) x_mm = round.(extrema(1e3 .* screen_camera[:, 9]); digits=3)
+            end
+        end
+
+        @info "\e[1;33mSaved\e[0m" filepath=filepath
+    end
 end
 
 ######################################################################
@@ -299,7 +280,7 @@ CAMERA FEATURES
     Pixel size              : $(1e6*cam_pixelsize) μm
 
 SETUP FEATURES
-    Temperature             : $(T_K)
+    Temperature             : $(T_K)K
     Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
     Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
     Post-SG aperture radius : $(1e3*R_aper)mm
@@ -319,7 +300,7 @@ SIMULATION INFORMATION
 CODE
     Code name               : $(PROGRAM_FILE)
     Start date              : $(T_START)
-    End data                : $(T_END)
+    End date                : $(T_END)
     Run time                : $(T_RUN)
     Hostname                : $(HOSTNAME)
 
@@ -342,8 +323,8 @@ end
 
 nx_bins             = 32; # fixed nx bins
 nz_bins             = [1, 2];
-gaussian_width_mm   = [0.001, 0.010, 0.025, 0.050, 0.065, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ]; # try different gaussian widths
-λ0_raw_list         = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
+gaussian_width_mm   = [0.001, 0.050, 0.100]#, 0.150, 0.200, 0.250, 0.300, 0.400, 0.500 ]; # try different gaussian widths
+λ0_raw_list         = [0.001, 0.005, 0.01]#, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
 λ0_spline           = 0.001;
 
 # ---------- precompute param grid ----------
@@ -362,7 +343,7 @@ const INDIR_up = joinpath(OUTDIR,"up")
 files = sort(filter(f -> isfile(joinpath(INDIR_up, f)) && endswith(f, ".jld2"),
                readdir(INDIR_up)))
 nfiles = length(files)
-@assert nfiles == length(induction_coeff) "Mismatch: files vs induction_coeff"
+@assert nfiles == length(induction_coeff_for_label) "Mismatch: files vs induction_coeff"
 
 # Total combinations
 Ntot = nfiles * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
@@ -378,31 +359,35 @@ outjld = joinpath(OUTDIR, "cqd_$(Nss)_up_profiles.jld2")
 # Main serial loop
 # ============================================================
 
-@time jldopen(outjld, "w") do f
+# Open in append/read-write mode so a previous partial run is preserved.
+# "a+" creates the file if it doesn't exist and opens it read-write otherwise.
+@time jldopen(outjld, "a+") do f
 
     # ------------------------------------------------------------
-    # Global metadata
+    # Global metadata — write once, only if not already present
     # ------------------------------------------------------------
-    f["meta/N"]        = Nss
-    f["meta/T"]        = T_K
-    f["meta/branch"]   = "up"
-    f["meta/s_spline"] = λ0_spline
-    f["meta/nx"]       = nx_bins
-    f["meta/nz"]       = nz_bins
-    f["meta/σw"]       = gaussian_width_mm
-    f["meta/λ0"]       = λ0_raw_list
-    f["meta/ki"]       = kis
-    f["meta/files"]    = files
+    if !haskey(f, "meta/N")
+        f["meta/N"]        = Nss
+        f["meta/T"]        = T_K
+        f["meta/branch"]   = "up"
+        f["meta/s_spline"] = λ0_spline
+        f["meta/nx"]       = nx_bins
+        f["meta/nz"]       = nz_bins
+        f["meta/σw"]       = gaussian_width_mm
+        f["meta/λ0"]       = λ0_raw_list
+        f["meta/ki"]       = kis
+        f["meta/files"]    = files
+    end
 
     # ------------------------------------------------------------
     # Loop over simulation files
     # ------------------------------------------------------------
     for (j, fname) in pairs(files)
 
-        ki      = induction_coeff[j]
+        ki      = induction_coeff_for_label[j]
         simpath = joinpath(INDIR_up, fname)
 
-        @info "\e[96mProcessing file $(j)/$(length(files))\e[0m" fname=fname ki=ki
+        @info "\e[96mProcessing file $(j)/$(nfiles)\e[0m" fname=fname ki=ki
 
         # --------------------------------------------------------
         # Loop over all analysis parameter combinations
@@ -411,16 +396,18 @@ outjld = joinpath(OUTDIR, "cqd_$(Nss)_up_profiles.jld2")
 
             nz, gw, λ0_raw = params[pidx]
 
-            # Build output key before doing expensive work.
-            # This makes the loop resume-friendly if the file is opened with "r+" later.
-            label_path = JLD2_MyTools.make_keypath_cqd(
-                :up, ki, nz, gw, λ0_raw
-            )
+            # Build the output key BEFORE doing expensive work.
+            label_path = JLD2_MyTools.make_keypath_cqd(:up, ki, nz, gw, λ0_raw)
+
+            # Resume: if this combination was already saved, skip it.
+            if haskey(f, label_path)
+                @info "Skipping (already computed)" key=label_path
+                continue
+            end
 
             @info "Analyzing" nz=nz σw=gw λ0=λ0_raw
 
-            # Main expensive call.
-            # This reads from simpath and returns the profile dictionary.
+            # Main expensive call. Reads from simpath, returns the profile dict.
             profiles_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
                 simpath;
                 n_bins      = (nx_bins, nz),
@@ -433,20 +420,12 @@ outjld = joinpath(OUTDIR, "cqd_$(Nss)_up_profiles.jld2")
                 mode        = :probability
             )
 
-            # Save immediately after each parameter set.
-            # This avoids accumulating many large dictionaries in RAM.
+            # Save immediately so progress survives a crash.
             f[label_path] = profiles_up
 
-            # Release large result from memory before the next iteration.
+            # Release the large result before the next iteration.
             profiles_up = nothing
-
-            # Optional: collect only occasionally to avoid slowing every iteration.
-            if pidx % 5 == 0
-                GC.gc()
-            end
         end
-
-        GC.gc()
 
         @info "Done file $(j)/$(length(files))" free_GiB = round(Sys.free_memory() / 1024^3, digits=3)
     end
@@ -463,7 +442,7 @@ const INDIR_dw = joinpath(OUTDIR,"dw")
 files = sort(filter(f -> isfile(joinpath(INDIR_dw, f)) && endswith(f, ".jld2"),
                readdir(INDIR_dw)))
 nfiles = length(files)
-@assert nfiles == length(induction_coeff) "Mismatch: files vs induction_coeff"
+@assert nfiles == length(induction_coeff_for_label) "Mismatch: files vs induction_coeff"
 
 # Total combinations
 Ntot = nfiles * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
@@ -479,31 +458,35 @@ outjld = joinpath(OUTDIR, "cqd_$(Nss)_dw_profiles.jld2")
 # Main serial loop
 # ============================================================
 
-@time jldopen(outjld, "w") do f
+# Open in append/read-write mode so a previous partial run is preserved.
+# "a+" creates the file if it doesn't exist and opens it read-write otherwise.
+@time jldopen(outjld, "a+") do f
 
     # ------------------------------------------------------------
-    # Global metadata
+    # Global metadata — write once, only if not already present
     # ------------------------------------------------------------
-    f["meta/N"]        = Nss
-    f["meta/T"]        = T_K
-    f["meta/branch"]   = "dw"
-    f["meta/s_spline"] = λ0_spline
-    f["meta/nx"]       = nx_bins
-    f["meta/nz"]       = nz_bins
-    f["meta/σw"]       = gaussian_width_mm
-    f["meta/λ0"]       = λ0_raw_list
-    f["meta/ki"]       = kis
-    f["meta/files"]    = files
+    if !haskey(f, "meta/N")
+        f["meta/N"]        = Nss
+        f["meta/T"]        = T_K
+        f["meta/branch"]   = "dw"
+        f["meta/s_spline"] = λ0_spline
+        f["meta/nx"]       = nx_bins
+        f["meta/nz"]       = nz_bins
+        f["meta/σw"]       = gaussian_width_mm
+        f["meta/λ0"]       = λ0_raw_list
+        f["meta/ki"]       = kis
+        f["meta/files"]    = files
+    end
 
     # ------------------------------------------------------------
     # Loop over simulation files
     # ------------------------------------------------------------
     for (j, fname) in pairs(files)
 
-        ki      = induction_coeff[j]
+        ki      = induction_coeff_for_label[j]
         simpath = joinpath(INDIR_dw, fname)
 
-        @info "\e[96mProcessing file $(j)/$(length(files))\e[0m" fname=fname ki=ki
+        @info "\e[96mProcessing file $(j)/$(nfiles)\e[0m" fname=fname ki=ki
 
         # --------------------------------------------------------
         # Loop over all analysis parameter combinations
@@ -512,16 +495,18 @@ outjld = joinpath(OUTDIR, "cqd_$(Nss)_dw_profiles.jld2")
 
             nz, gw, λ0_raw = params[pidx]
 
-            # Build output key before doing expensive work.
-            # This makes the loop resume-friendly if the file is opened with "r+" later.
-            label_path = JLD2_MyTools.make_keypath_cqd(
-                :dw, ki, nz, gw, λ0_raw
-            )
+            # Build the output key BEFORE doing expensive work.
+            label_path = JLD2_MyTools.make_keypath_cqd(:dw, ki, nz, gw, λ0_raw)
+
+            # Resume: if this combination was already saved, skip it.
+            if haskey(f, label_path)
+                @info "Skipping (already computed)" key=label_path
+                continue
+            end
 
             @info "Analyzing" nz=nz σw=gw λ0=λ0_raw
 
-            # Main expensive call.
-            # This reads from simpath and returns the profile dictionary.
+            # Main expensive call. Reads from simpath, returns the profile dict.
             profiles_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
                 simpath;
                 n_bins      = (nx_bins, nz),
@@ -534,101 +519,17 @@ outjld = joinpath(OUTDIR, "cqd_$(Nss)_dw_profiles.jld2")
                 mode        = :probability
             )
 
-            # Save immediately after each parameter set.
-            # This avoids accumulating many large dictionaries in RAM.
+            # Save immediately so progress survives a crash.
             f[label_path] = profiles_dw
 
-            # Release large result from memory before the next iteration.
+            # Release the large result before the next iteration.
             profiles_dw = nothing
-
-            # Optional: collect only occasionally to avoid slowing every iteration.
-            if pidx % 5 == 0
-                GC.gc()
-            end
         end
-
-        GC.gc()
 
         @info "Done file $(j)/$(length(files))" free_GiB = round(Sys.free_memory() / 1024^3, digits=3)
     end
 end
 @info "\e[91mCompleted DOWN table\e[0m"
-
-# ii = rand(1:Nss)
-# CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(Icoils, data_UP, kI, K39_params; y_length=5001,verbose=true);
-# CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(Icoils, kI, data_UP, CQD_up_particles_flag, K39_params);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
-# jj = 19;
-# Ij = Icoils[jj];
-
-# TheoreticalSimulation.B_total(0.0001,0,0.0002; Iw=Ij) 
-# TheoreticalSimulation.approx_B_total(0.0001,0,0.0002; Iw=Ij)
-
-# TheoreticalSimulation.grad_normB(0.0001,0,0.0002; Iw=Ij)
-# TheoreticalSimulation.approx_grad_normB(0.0001,0,0.0002; Iw=Ij)
-# TheoreticalSimulation.approx_dnormBdz(0.0001,0.0002; Iw=Ij)
-
-
-# scatter(Icoils, TheoreticalSimulation.BvsI.(Icoils), 
-#     label="Magnetic field (target)",
-#     marker=(:circle,2,:white));
-# plot!(Icoils, [TheoreticalSimulation.B_total(0,0,0; Iw=calibration.I_eff_B(x))[3] for x in Icoils],
-#     label="Magnetic field corrected" );
-# plot!(xlabel="Current (A)", ylabel=L"Magnetic field $B_{z}$ (T)")
-
-# scatter(Icoils, TheoreticalSimulation.GvsI.(Icoils), 
-#     label="Gradient (target)",
-#     marker=(:circle,2,:white));
-# plot!(Icoils, [calibration.grad_scale(x) for x in Icoils].*[TheoreticalSimulation.grad_normB(0,0,0; Iw=calibration.I_eff_B(x))[1] for x in Icoils],
-#     label=L"$\partial_{x}|B|$ corrected" );
-# plot!(Icoils, [calibration.grad_scale(x) for x in Icoils].*[TheoreticalSimulation.grad_normB(0,0,0; Iw=calibration.I_eff_B(x))[2] for x in Icoils],
-#     label=L"$\partial_{y}|B|$ corrected" );
-# plot!(Icoils, [calibration.grad_scale(x) for x in Icoils].*[TheoreticalSimulation.grad_normB(0,0,0; Iw=calibration.I_eff_B(x))[3] for x in Icoils],
-#     label=L"$\partial_{z}|B|$ corrected" );
-# plot!(xlabel="Current (A)", ylabel=L"Magnetic field Gradient $\partial_{z}|B|$ (T/m)")
-
-
-# r0 = data_UP[ii, 1:3]
-# v0 = data_UP[ii, 4:6]
-# θ0 = data_UP[ii, 7]          # initial polar angle from generate_CQDinitial_conditions
-
-# result = TheoreticalSimulation.full_trajectory(Ij, r0, v0, calibration;
-#     μ_over_m = μe_over_M,
-#     k        = kI,
-#     θ0       = θ0,
-#     grad_mask = (0.0,0.0,1.0)
-#     );
-
-# println("""
-# ***************************************************
-# FINITE TWO-WIRE MODEL
-#     r at furnace   = $(round.(1e3 .* r0; digits=3))          mm
-#     v at furnace   = $(round.(v0; digits=3))      m/s
-
-#     r at slit      = $(round.(1e3 .* result.sol_magnet.u[1][1:3]; digits=3))        mm
-#     v at slit      = $(round.(result.sol_magnet.u[1][4:6]; digits=3))      m/s
-
-#     r at SG-in     = $(round.(1e3 .* result.sol_magnet.u[2][1:3]; digits=3))        mm
-#     v at SG-in     = $(round.(result.sol_magnet.u[2][4:6]; digits=3))      m/s
-
-#     r at SG-centre = $(round.(1e3 .* result.sol_magnet.u[3][1:3]; digits=3))        mm
-#     v at SG_centre = $(round.(result.sol_magnet.u[3][4:6]; digits=3))      m/s
-
-#     r at SG-out    = $(round.(1e3 .* result.sol_magnet.u[4][1:3]; digits=3))         mm
-#     v at SG_out    = $(round.(result.sol_magnet.u[4][4:6]; digits=3))       m/s
-
-#     r at aperture  = $(round.(1e3 .* result.sol_magnet.u[5][1:3]; digits=3))        mm
-#     v at aperture  = $(round.(result.sol_magnet.u[5][4:6]; digits=3))       m/s
-
-#     r at screen    = $(round.(1e3 .* result.r_screen; digits=3))        mm
-#     v at screen    = $(round.(result.v_screen; digits=3))       m/s
-# ***************************************************
-# MANUAL FIELD : SIMPLIFIED VERSION
-#     r at furnace   = $(round.(1e3*CQD_up_particles_trajectories[19][ii,1:3]; digits=3)) mm
-#     v at furnace   = $(round.(CQD_up_particles_trajectories[19][ii,4:6]; digits=3)) m/s
-#     (x,z) at screen = $(round.(1e3*CQD_up_particles_trajectories[19][ii,9:10]; digits=3)) mm
-#     vz at screen    = $(round.(CQD_up_particles_trajectories[19][ii,11]; digits=3)) m/s
-
-# """)
 
 ######################################################################
 T_END = Dates.now()
@@ -646,7 +547,7 @@ CAMERA FEATURES
     Pixel size              : $(1e6*cam_pixelsize) μm
 
 SETUP FEATURES
-    Temperature             : $(T_K)
+    Temperature             : $(T_K)K
     Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
     Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
     Post-SG aperture radius : $(1e3*R_aper)mm
@@ -670,7 +571,7 @@ SIMULATION INFORMATION
 CODE
     Code name               : $(PROGRAM_FILE)
     Start date              : $(T_START)
-    End data                : $(T_END)
+    End date                : $(T_END)
     Run time                : $(T_RUN)
     Hostname                : $(HOSTNAME)
 
