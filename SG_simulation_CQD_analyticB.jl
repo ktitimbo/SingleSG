@@ -344,7 +344,7 @@ SIMULATION INFORMATION
 CODE
     Code name               : $(PROGRAM_FILE)
     Start date              : $(T_START)
-    End data                : $(T_END)
+    End date                : $(T_END)
     Run time                : $(T_RUN)
     Hostname                : $(HOSTNAME)
 
@@ -695,7 +695,7 @@ SIMULATION INFORMATION
 CODE
     Code name               : $(PROGRAM_FILE)
     Start date              : $(T_START)
-    End data                : $(T_END)
+    End date                : $(T_END)
     Run time                : $(T_RUN)
     Hostname                : $(HOSTNAME)
 
