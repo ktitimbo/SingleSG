@@ -40,6 +40,7 @@ LinearAlgebra.BLAS.set_num_threads(1)
 # Set the working directory to the current location
 cd(@__DIR__) ;
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
+const BASE_PATH = raw"F:\SternGerlachExperiments";
 const OUTDIR    = joinpath(@__DIR__, "simulation_data", RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "\e[1;31mCreated output directory\e[0m" OUTDIR
@@ -187,32 +188,7 @@ nI = length(Icoils);
 @info "No of currents : $(nI)"
 calibration = TheoreticalSimulation.build_calibration(Icoils);
 
-# Sample size: number of atoms arriving to the screen
-const Nss = 6_000_000 ; 
-@info "Number of MonteCarlo particles : $(Nss)\n"
-
-# Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
-crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
-jldsave( joinpath(OUTDIR,"cross_slit_particles_$(Nss).jld2"), data = crossing_slit)
-
-if SAVE_FIG
-    plot_μeff(K39_params,"mm_effective")
-    plot_SG_geometry("SG_geometry")
-    plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf")
-    # plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
-    # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
-end
-
-##################################################################################################
-#   COQUANTUM DYNAMICS
-##################################################################################################
-
-# Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
-data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
-
-data_UP_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_UP);
-data_DOWN_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_DOWN);
-
+# Induction terms 
 kis                 = unique(round.(vcat([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:5.0],0.001);sigdigits=4))
 @info "Number of ki sampled = $(length(kis))" 
 induction_coeff_for_label     = round.(1e6 .* kis; sigdigits=3)
@@ -220,48 +196,84 @@ ki_labels = [(e = floor(Int, log10(abs(k)) + 1e-9);
               string(round(k / exp10(e), sigdigits=3), "×10", join(SUP[c] for c in string(e))))
              for k in kis]
 
-isdir(joinpath(OUTDIR, "up")) || mkpath(joinpath(OUTDIR, "up"))
-isdir(joinpath(OUTDIR, "dw")) || mkpath(joinpath(OUTDIR, "dw"))
-for (i, kI) in enumerate(kis)
-    @info "\e[1;31mRUNNING FOR kᵢ = $(ki_labels[i])\e[0m"
 
+# Sample size: number of atoms arriving to the screen
+const Nss = 6_000_000 ; 
+@info "Number of MonteCarlo particles : $(Nss)\n"
 
-    for (label, label_str, data, data_SG) in ((:up, "UP", data_UP,   data_UP_SG),
-                                   (:dw, "DOWN", data_DOWN, data_DOWN_SG))
+const DATA_READY = true
 
-        @info "\e[1;32mAnalyzing data for electron magnetic moment $(uppercase(String(label_str)))\e[0m"
+if DATA_READY
+    const OUTDIR_PATH = joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_6M_deltaG")
+    # const OUTDIR_PATH = joinpath(dirname(OUTDIR),"20260521T142848073")
+else
+    const OUTDIR_PATH = OUTDIR
+    # Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
+    crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
+    jldsave( joinpath(OUTDIR_PATH,"cross_slit_particles_$(Nss).jld2"), data = crossing_slit)
 
-        particles_flag = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(
-            Icoils, data, data_SG, kI, K39_params, calibration; y_length=5001, verbose=true)
-
-        @time particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(
-            Icoils, kI, data, data_SG, particles_flag, K39_params, calibration)   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
-
-        TheoreticalSimulation.CQD_travelling_particles_summary(Icoils, particles_trajectories, label_str)
-
-        particles_screen = TheoreticalSimulation.CQD_select_flagged(particles_trajectories, :screen)
-
-        filepath = joinpath(OUTDIR, String(label),
-            "cqd$(RUN_STAMP)_ki$(@sprintf("%03d", i))_$(label)_screen.jld2")
-
-        jldopen(filepath, "w") do f
-            # Global metadata
-            f["meta/T"]  = T_K
-            f["meta/N"]  = Nss
-            f["meta/k"]  = kI
-            f["meta/Iw"] = collect(Icoils)
-
-            for (idx, Iw) in enumerate(Icoils)
-                # Save only passed particles arriving to the detector
-                screen_camera = particles_screen[idx]
-                f["data/final/I$(idx)"] = screen_camera
-
-                @info "$(idx)/$(length(Icoils))" Iw_mA = round(Int, 1000 * Iw) passed_pct = round(100 * size(screen_camera, 1) / size(data, 1); digits=3) z_mm = round.(extrema(1e3 .* screen_camera[:, 10]); digits=3) x_mm = round.(extrema(1e3 .* screen_camera[:, 9]); digits=3)
-            end
-        end
-
-        @info "\e[1;33mSaved\e[0m" filepath=filepath
+    if SAVE_FIG
+        plot_μeff(K39_params,"mm_effective")
+        plot_SG_geometry("SG_geometry")
+        plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf")
+        # plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
+        # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
     end
+
+    ##################################################################################################
+    #   COQUANTUM DYNAMICS
+    ##################################################################################################
+
+    # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
+    data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:partition);
+
+    data_UP_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_UP);
+    data_DOWN_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_DOWN);
+
+    isdir(joinpath(OUTDIR_PATH, "up")) || mkpath(joinpath(OUTDIR_PATH, "up"))
+    isdir(joinpath(OUTDIR_PATH, "dw")) || mkpath(joinpath(OUTDIR_PATH, "dw"))
+    for (i, kI) in enumerate(kis)
+        @info "\e[1;31mRUNNING FOR kᵢ = $(ki_labels[i])\e[0m"
+
+
+        for (label, label_str, data, data_SG) in ((:up, "UP", data_UP,   data_UP_SG),
+                                    (:dw, "DOWN", data_DOWN, data_DOWN_SG))
+
+            @info "\e[1;32mAnalyzing data for electron magnetic moment $(uppercase(String(label_str)))\e[0m"
+
+            particles_flag = TheoreticalSimulation.CQD_flag_travelling_particles_twowires(
+                Icoils, data, data_SG, kI, K39_params, calibration; y_length=5001, verbose=true)
+
+            @time particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles_twowires(
+                Icoils, kI, data, data_SG, particles_flag, K39_params, calibration)   # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
+
+            TheoreticalSimulation.CQD_travelling_particles_summary(Icoils, particles_trajectories, label_str)
+
+            particles_screen = TheoreticalSimulation.CQD_select_flagged(particles_trajectories, :screen)
+
+            filepath = joinpath(OUTDIR_PATH, String(label),
+                "cqd$(RUN_STAMP)_ki$(@sprintf("%03d", i))_$(label)_screen.jld2")
+
+            jldopen(filepath, "w") do f
+                # Global metadata
+                f["meta/T"]  = T_K
+                f["meta/N"]  = Nss
+                f["meta/k"]  = kI
+                f["meta/Iw"] = collect(Icoils)
+
+                for (idx, Iw) in enumerate(Icoils)
+                    # Save only passed particles arriving to the detector
+                    screen_camera = particles_screen[idx]
+                    f["data/final/I$(idx)"] = screen_camera
+
+                    @info "$(idx)/$(length(Icoils))" Iw_mA = round(Int, 1000 * Iw) passed_pct = round(100 * size(screen_camera, 1) / size(data, 1); digits=3) z_mm = round.(extrema(1e3 .* screen_camera[:, 10]); digits=3) x_mm = round.(extrema(1e3 .* screen_camera[:, 9]); digits=3)
+                end
+            end
+
+            @info "\e[1;33mSaved\e[0m" filepath=filepath
+        end
+    end
+
 end
 
 ######################################################################
@@ -272,7 +284,7 @@ report = """
 EXPERIMENT
     Single Stern–Gerlach Experiment
     atom                    : $(atom)
-    Output directory        : $(OUTDIR)
+    Output directory        : $(OUTDIR_PATH)
     RUN_STAMP               : $(RUN_STAMP)
 
 CAMERA FEATURES
@@ -310,7 +322,7 @@ CODE
 println(report)
 
 # Save to file
-open(joinpath(OUTDIR,"simulation_cqd_report.txt"), "w") do io
+open(joinpath(OUTDIR_PATH,"simulation_cqd_report.txt"), "w") do io
     write(io, report)
 end
 
@@ -324,7 +336,7 @@ end
 
 nx_bins             = 32; # fixed nx bins
 nz_bins             = [1, 2];
-gaussian_width_mm   = [0.001, 0.050, 0.100, 0.150, 0.200, 0.250, 0.300, 0.400, 0.500 ]; # try different gaussian widths
+gaussian_width_mm   = [0.001, 0.025, 0.050, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.275, 0.300, 0.350, 0.400, 0.500 ]; # try different gaussian widths
 λ0_raw_list         = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
 λ0_spline           = 0.001;
 
@@ -332,36 +344,59 @@ gaussian_width_mm   = [0.001, 0.050, 0.100, 0.150, 0.200, 0.250, 0.300, 0.400, 0
 params = [(nz, gw, λ0_raw)
           for nz in nz_bins
           for gw in gaussian_width_mm
-          for λ0_raw in λ0_raw_list]
+          for λ0_raw in λ0_raw_list];
 
 
-# =========================================================
-# ============== UP and DOWN in one loop ==================
-# =========================================================
-for branch in (:up, :dw)
+"""
+    process_branch!(branch, OUTDIR, Nss, induction_coeff_for_label, nz_bins,
+                    gaussian_width_mm, λ0_raw_list, params, nx_bins, kis,
+                    T_K, λ0_spline)
 
-    # --- Branch-specific setup (the only things that differ) ---
-    indir  = joinpath(OUTDIR, String(branch))                       # "up" or "dw"
+Process all simulation files for a given branch (`:up` or `:dw`), computing
+CQD profiles over all parameter combinations (nz, σw, λ0) and saving results
+incrementally to a JLD2 file.
+
+Skips parameter combinations that were already computed in a previous run,
+making it safe to call repeatedly — progress is always preserved.
+
+# Arguments
+- `branch`                    : `:up` or `:dw`
+- `OUTDIR`                    : root output directory; files are read from and written to `OUTDIR/branch/`
+- `Nss`                       : number of samples (used in output filename and metadata)
+- `induction_coeff_for_label` : vector of induction coefficients, one per simulation file
+- `nz_bins`                   : vector of z-bin counts to sweep over
+- `gaussian_width_mm`         : vector of Gaussian widths (mm) to sweep over
+- `λ0_raw_list`               : vector of raw λ0 values to sweep over
+- `params`                    : pre-expanded parameter grid (nz, gw, λ0) — e.g. from `Iterators.product`
+- `nx_bins`                   : number of x bins (fixed across all runs)
+- `kis`                       : vector of induction coefficient labels aligned with `files`
+- `T_K`                       : temperature in Kelvin (metadata only)
+- `λ0_spline`                 : smoothed spline of λ0 (metadata + passed to analyzer)
+"""
+function process_branch!(branch, OUTDIR, Nss, kis, induction_coeff_for_label, 
+                         nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+                         params, T_K
+)
+
+    indir  = joinpath(OUTDIR, String(branch))
     outjld = joinpath(OUTDIR, String(branch), "cqd_$(Nss)_$(branch)_profiles.jld2")
 
-    # --- Files ---
-    files  = sort(filter(f -> isfile(joinpath(indir, f)) && endswith(f, ".jld2"),
+    # Discover .jld2 simulation files present at this moment
+    files  = sort(filter(f -> isfile(joinpath(indir, f)) && endswith(f, "$(branch)_screen.jld2"),
                          readdir(indir)))
     nfiles = length(files)
-    @assert nfiles == length(induction_coeff_for_label) "Mismatch: files vs induction_coeff ($(branch))"
 
-    # Total combinations
+    # Nothing to do yet — caller decides whether to retry later
+    nfiles == 0 && (@info "No files yet for $(branch), skipping."; return)
+
     Ntot = nfiles * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-    @info "\e[93m[$(uppercase(String(branch)))] Total profiles to compute : Nkᵢ × Nnz × Nσ × Nλ0 × Nλs = $(Ntot)\e[0m"
+    @info "\e[93m[$(uppercase(String(branch)))] Files found: $(nfiles), total profiles: $(Ntot)\e[0m"
 
-    # ============================================================
-    # Main serial loop
-    # ============================================================
-    # Open in append/read-write mode so a previous partial run is preserved.
-    # "a+" creates the file if it doesn't exist and opens it read-write otherwise.
+    # Open output JLD2 in append mode so partial results from previous runs are preserved
     @time jldopen(outjld, "a+") do f
 
-        # --- Global metadata — write once, only if not already present ---
+        # Write metadata once on first open; on subsequent opens only refresh
+        # meta/files since new simulation files may have appeared since last run
         if !haskey(f, "meta/N")
             f["meta/N"]        = Nss
             f["meta/T"]        = T_K
@@ -373,33 +408,31 @@ for branch in (:up, :dw)
             f["meta/λ0"]       = λ0_raw_list
             f["meta/ki"]       = kis
             f["meta/files"]    = files
+        else
+            # JLD2 doesn't support in-place mutation, so delete and rewrite
+            delete!(f, "meta/files")
+            f["meta/files"] = files
         end
 
-        # --- Loop over simulation files ---
         for (j, fname) in pairs(files)
 
             ki      = induction_coeff_for_label[j]
             simpath = joinpath(indir, fname)
 
-            @info "\e[96m[$(uppercase(String(branch)))] Processing file $(j)/$(nfiles)\e[0m" fname=fname ki=kis[j]
+            @info "\e[96m[$(uppercase(String(branch)))] Processing file $(j)/$(nfiles)\e[0m" file_name=fname ki=kis[j]
 
-            # --- Loop over all analysis parameter combinations ---
+            # Sweep over all (nz, σw, λ0) combinations for this simulation file
             @time for pidx in eachindex(params)
 
                 nz, gw, λ0_raw = params[pidx]
-
-                # Build the output key BEFORE doing expensive work.
                 label_path = JLD2_MyTools.make_keypath_cqd(branch, ki, nz, gw, λ0_raw)
 
-                # Resume: if this combination was already saved, skip it.
-                if haskey(f, label_path)
-                    @info "Skipping (already computed)" key=label_path
-                    continue
-                end
+                # Resume support: skip combinations already saved
+                haskey(f, label_path) && (@info "Skipping (already computed)" key=label_path; continue)
 
                 @info "\e[1;33mAnalyzing: nz=$(nz)  σw=$(@sprintf("%.3f",gw))  λ0=$(λ0_raw)\e[0m"
 
-                # Main expensive call. Reads from simpath, returns the profile dict.
+                # Main expensive call — reads simulation file, returns profile dict
                 profiles = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
                     simpath;
                     n_bins      = (nx_bins, nz),
@@ -412,19 +445,53 @@ for branch in (:up, :dw)
                     mode        = :probability
                 )
 
-                # Save immediately so progress survives a crash.
+                # Save immediately — if the run crashes, completed work is not lost
                 f[label_path] = profiles
 
-                # Release the large result before the next iteration.
+                # Explicitly release large result before next iteration
                 profiles = nothing
             end
 
             @info "Done file $(j)/$(nfiles)" free_GiB = round(Sys.free_memory() / 1024^3, digits=3)
         end
     end
+
     @info "\e[91mCompleted $(uppercase(String(branch))) table\e[0m"
 end
 
+# Returns true if all expected simulation files are present for `branch`
+files_ready(branch) = length(filter(
+    f -> isfile(joinpath(OUTDIR_PATH, String(branch), f)) && endswith(f, "$(branch)_screen.jld2"),
+    readdir(joinpath(OUTDIR_PATH, String(branch)))
+)) == length(induction_coeff_for_label)
+
+# --- Dispatch: single pass if all files are ready, polling loop otherwise ---
+if all(files_ready(b) for b in (:up, :dw))
+    @info "All files present, running single pass."
+    for branch in (:up, :dw)
+        process_branch!(branch, OUTDIR_PATH, Nss, kis, induction_coeff_for_label, 
+                            nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+                            params, T_K)
+    end
+else
+    # Some files are still being generated — keep looping until both branches are complete
+    @info "Files still being generated, switching to polling mode."
+    while true
+        for branch in (:up, :dw)
+            process_branch!(branch, OUTDIR_PATH, Nss, kis, induction_coeff_for_label, 
+                            nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+                            params, T_K)
+        end
+
+        all(files_ready(b) for b in (:up, :dw)) && break
+
+        @info "Not all files present yet, sleeping 30s..."
+        sleep(30)
+    end
+end
+
+JLD2_MyTools.list_keys_jld_cqd(joinpath(OUTDIR_PATH, "up", "cqd_$(Nss)_up_profiles.jld2"));
+JLD2_MyTools.list_keys_jld_cqd(joinpath(OUTDIR_PATH, "dw", "cqd_$(Nss)_dw_profiles.jld2"));
 
 ######################################################################
 T_END = Dates.now()
@@ -434,7 +501,8 @@ report = """
 EXPERIMENT
     Single Stern–Gerlach Experiment
     atom                    : $(atom)
-    Output directory        : $(OUTDIR)
+    Base directory          : $(BASE_PATH)
+    Output directory        : $(OUTDIR_PATH)
     RUN_STAMP               : $(RUN_STAMP)
 
 CAMERA FEATURES
@@ -476,7 +544,7 @@ CODE
 println(report)
 
 # Save to file
-open(joinpath(OUTDIR,"simulation_cqd_report.txt"), "w") do io
+open(joinpath(OUTDIR_PATH,"simulation_cqd_report.txt"), "w") do io
     write(io, report)
 end
 
