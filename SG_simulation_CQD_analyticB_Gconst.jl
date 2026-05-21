@@ -188,7 +188,7 @@ nI = length(Icoils);
 calibration = TheoreticalSimulation.build_calibration(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 1_000 ; 
+const Nss = 6_000_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # Monte Carlo generation of particles traersing the filtering slit [x0 y0 z0 v0x v0y v0z]
@@ -213,7 +213,7 @@ data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set;
 data_UP_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_UP);
 data_DOWN_SG = TheoreticalSimulation.propagate_to_SG_entrance(data_DOWN);
 
-kis                 = unique(round.(vcat([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:2.0],1);sigdigits=4))
+kis                 = unique(round.(vcat([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:5.0],0.001);sigdigits=4))
 @info "Number of ki sampled = $(length(kis))" 
 induction_coeff_for_label     = round.(1e6 .* kis; sigdigits=3)
 ki_labels = [(e = floor(Int, log10(abs(k)) + 1e-9);
@@ -324,8 +324,8 @@ end
 
 nx_bins             = 32; # fixed nx bins
 nz_bins             = [1, 2];
-gaussian_width_mm   = [0.001, 0.050, 0.100]#, 0.150, 0.200, 0.250, 0.300, 0.400, 0.500 ]; # try different gaussian widths
-λ0_raw_list         = [0.001, 0.005, 0.01]#, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
+gaussian_width_mm   = [0.001, 0.050, 0.100, 0.150, 0.200, 0.250, 0.300, 0.400, 0.500 ]; # try different gaussian widths
+λ0_raw_list         = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
 λ0_spline           = 0.001;
 
 # ---------- precompute param grid ----------
@@ -334,7 +334,7 @@ params = [(nz, gw, λ0_raw)
           for gw in gaussian_width_mm
           for λ0_raw in λ0_raw_list]
 
-          
+
 # =========================================================
 # ============== UP and DOWN in one loop ==================
 # =========================================================
@@ -425,204 +425,6 @@ for branch in (:up, :dw)
     @info "\e[91mCompleted $(uppercase(String(branch))) table\e[0m"
 end
 
-
-
-
-# =========================================================
-# ======================== UP =============================
-# =========================================================
-const INDIR_up = joinpath(OUTDIR,"up")
-# --- Files ---
-files = sort(filter(f -> isfile(joinpath(INDIR_up, f)) && endswith(f, ".jld2"),
-               readdir(INDIR_up)))
-nfiles = length(files)
-@assert nfiles == length(induction_coeff_for_label) "Mismatch: files vs induction_coeff"
-
-# Total combinations
-Ntot = nfiles * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-@info "\e[93mTotal profiles to compute : Nkᵢ × Nnz × Nσ × Nλ0 × Nλs = $(Ntot)\e[0m"
-
-# ============================================================
-# Output file + metadata
-# ============================================================
-
-outjld = joinpath(OUTDIR, "cqd_$(Nss)_up_profiles.jld2")
-
-# ============================================================
-# Main serial loop
-# ============================================================
-
-# Open in append/read-write mode so a previous partial run is preserved.
-# "a+" creates the file if it doesn't exist and opens it read-write otherwise.
-@time jldopen(outjld, "a+") do f
-
-    # ------------------------------------------------------------
-    # Global metadata — write once, only if not already present
-    # ------------------------------------------------------------
-    if !haskey(f, "meta/N")
-        f["meta/N"]        = Nss
-        f["meta/T"]        = T_K
-        f["meta/branch"]   = "up"
-        f["meta/s_spline"] = λ0_spline
-        f["meta/nx"]       = nx_bins
-        f["meta/nz"]       = nz_bins
-        f["meta/σw"]       = gaussian_width_mm
-        f["meta/λ0"]       = λ0_raw_list
-        f["meta/ki"]       = kis
-        f["meta/files"]    = files
-    end
-
-    # ------------------------------------------------------------
-    # Loop over simulation files
-    # ------------------------------------------------------------
-    for (j, fname) in pairs(files)
-
-        ki      = induction_coeff_for_label[j]
-        simpath = joinpath(INDIR_up, fname)
-
-        @info "\e[96mProcessing file $(j)/$(nfiles)\e[0m" fname=fname ki=kis[j]
-
-        # --------------------------------------------------------
-        # Loop over all analysis parameter combinations
-        # --------------------------------------------------------
-        @time for pidx in eachindex(params)
-
-            nz, gw, λ0_raw = params[pidx]
-
-            # Build the output key BEFORE doing expensive work.
-            label_path = JLD2_MyTools.make_keypath_cqd(:up, ki, nz, gw, λ0_raw)
-
-            # Resume: if this combination was already saved, skip it.
-            if haskey(f, label_path)
-                @info "Skipping (already computed)" key=label_path
-                continue
-            end
-
-            @info "\e[1;33mAnalyzing: nz=$(nz)  σw=$(@sprintf("%.3f",gw))  λ0=$(λ0_raw)\e[0m"
-
-            # Main expensive call. Reads from simpath, returns the profile dict.
-            profiles_up = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
-                simpath;
-                n_bins      = (nx_bins, nz),
-                width_mm    = gw,
-                add_plot    = false,
-                plot_xrange = :all,
-                branch      = :up,
-                λ_raw       = λ0_raw,
-                λ_smooth    = λ0_spline,
-                mode        = :probability
-            )
-
-            # Save immediately so progress survives a crash.
-            f[label_path] = profiles_up
-
-            # Release the large result before the next iteration.
-            profiles_up = nothing
-        end
-
-        @info "Done file $(j)/$(length(files))" free_GiB = round(Sys.free_memory() / 1024^3, digits=3)
-    end
-end
-@info "\e[91mCompleted UP table\e[0m"
-
-
-
-# =========================================================
-# ======================== DOWN ===========================
-# =========================================================
-const INDIR_dw = joinpath(OUTDIR,"dw")
-# --- Files ---
-files = sort(filter(f -> isfile(joinpath(INDIR_dw, f)) && endswith(f, ".jld2"),
-               readdir(INDIR_dw)))
-nfiles = length(files)
-@assert nfiles == length(induction_coeff_for_label) "Mismatch: files vs induction_coeff"
-
-# Total combinations
-Ntot = nfiles * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-@info "\e[93mTotal profiles to compute : Nkᵢ × Nnz × Nσ × Nλ0 × Nλs = $(Ntot)\e[0m"
-
-# ============================================================
-# Output file + metadata
-# ============================================================
-
-outjld = joinpath(OUTDIR, "cqd_$(Nss)_dw_profiles.jld2")
-
-# ============================================================
-# Main serial loop
-# ============================================================
-
-# Open in append/read-write mode so a previous partial run is preserved.
-# "a+" creates the file if it doesn't exist and opens it read-write otherwise.
-@time jldopen(outjld, "a+") do f
-
-    # ------------------------------------------------------------
-    # Global metadata — write once, only if not already present
-    # ------------------------------------------------------------
-    if !haskey(f, "meta/N")
-        f["meta/N"]        = Nss
-        f["meta/T"]        = T_K
-        f["meta/branch"]   = "dw"
-        f["meta/s_spline"] = λ0_spline
-        f["meta/nx"]       = nx_bins
-        f["meta/nz"]       = nz_bins
-        f["meta/σw"]       = gaussian_width_mm
-        f["meta/λ0"]       = λ0_raw_list
-        f["meta/ki"]       = kis
-        f["meta/files"]    = files
-    end
-
-    # ------------------------------------------------------------
-    # Loop over simulation files
-    # ------------------------------------------------------------
-    for (j, fname) in pairs(files)
-
-        ki      = induction_coeff_for_label[j]
-        simpath = joinpath(INDIR_dw, fname)
-
-        @info "\e[96mProcessing file $(j)/$(nfiles)\e[0m" fname=fname ki=kis[j]
-
-        # --------------------------------------------------------
-        # Loop over all analysis parameter combinations
-        # --------------------------------------------------------
-        @time for pidx in eachindex(params)
-
-            nz, gw, λ0_raw = params[pidx]
-
-            # Build the output key BEFORE doing expensive work.
-            label_path = JLD2_MyTools.make_keypath_cqd(:dw, ki, nz, gw, λ0_raw)
-
-            # Resume: if this combination was already saved, skip it.
-            if haskey(f, label_path)
-                @info "Skipping (already computed)" key=label_path
-                continue
-            end
-
-            @info "\e[1;33mAnalyzing: nz=$(nz)  σw=$(@sprintf("%.3f",gw))  λ0=$(λ0_raw)\e[0m"
-
-            # Main expensive call. Reads from simpath, returns the profile dict.
-            profiles_dw = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
-                simpath;
-                n_bins      = (nx_bins, nz),
-                width_mm    = gw,
-                add_plot    = false,
-                plot_xrange = :all,
-                branch      = :dw,
-                λ_raw       = λ0_raw,
-                λ_smooth    = λ0_spline,
-                mode        = :probability
-            )
-
-            # Save immediately so progress survives a crash.
-            f[label_path] = profiles_dw
-
-            # Release the large result before the next iteration.
-            profiles_dw = nothing
-        end
-
-        @info "Done file $(j)/$(length(files))" free_GiB = round(Sys.free_memory() / 1024^3, digits=3)
-    end
-end
-@info "\e[91mCompleted DOWN table\e[0m"
 
 ######################################################################
 T_END = Dates.now()
