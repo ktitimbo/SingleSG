@@ -1,7 +1,7 @@
 # Simulation of atom trajectories in the Stern–Gerlach experiment
 # Kelvin Titimbo
 # California Institute of Technology
-# August 2025
+# April 2026
 
 #  Plotting Setup
 # ENV["GKS_WSTYPE"] = "100"
@@ -127,10 +127,10 @@ const z_slit  = 300e-6 ;
 const R_aper            = 5.8e-3/2 ;
 const y_SGToAperture    = 1e-3 ;   
 # Propagation distances
-const y_FurnaceToSlit = 0.5445 ;
+const y_FurnaceToSlit = 541.75e-3 ;
 const y_SlitToSG      = 44.0e-3 ;
 const y_SG            = 7.0e-2 ;
-const y_SGToScreen    = 0.400 ;
+const y_SGToScreen    = 395.25e-3 ;
 # Connecting pipes
 const R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
 effusion_params = BeamEffusionParams(x_furnace,z_furnace,x_slit,z_slit,y_FurnaceToSlit,T_K,K39_params);
@@ -165,11 +165,6 @@ TheoreticalSimulation.default_R_tube            = R_tube;
 TheoreticalSimulation.default_c_aperture        = R_aper;
 TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
 
-##################################################################################################
-avg_data = load(joinpath(@__DIR__, "EXPDATA_ANALYSIS", "smoothing_binning","data_averaged_2.jld2"), "data" );
-I_exp  = avg_data[:i_smooth];
-z_exp  = avg_data[:z_smooth];
-δz_exp = avg_data[:δz_smooth];
 ##################################################################################################
 
 ## Coil currents
@@ -1005,7 +1000,7 @@ else
     )
 
     nx_bins = 32 ;
-    nz_bins = [1,2,4,8];  # try different nz_bins
+    nz_bins = [1,2,4];  # try different nz_bins
     gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
