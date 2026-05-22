@@ -16,6 +16,7 @@ SAVE_FIG = true
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using LaTeXStrings, Printf, PrettyTables
+using ProgressMeter
 # Time-stamping/logging
 using Dates
 const T_START = Dates.now() ; # Timestamp start for execution timing
@@ -751,18 +752,21 @@ if !isfile(data_screen_path)
             nI       = length(_Icoils)
             nlevels  = length(_levels)
 
-            _traj = OrderedDict{Int8, Vector{Matrix{Float64}}}(
-                Int8(i) => Matrix{Float64}[file["screen/I$(i)/lvl$(j)"] for j in 1:nlevels]
-                for i in 1:nI
-            )
+            _traj = OrderedDict{Int8, Vector{Matrix{Float64}}}()
+            @showprogress desc="Loading trajectories from disk..." for i in 1:nI
+                _traj[Int8(i)] = Matrix{Float64}[file["screen/I$(i)/lvl$(j)"] for j in 1:nlevels]
+            end
 
             _traj, _Icoils, _levels, _Ns, _T
         end
 
+    @info "Computing particles summary..."
     TheoreticalSimulation.travelling_particles_summary(Icoils_loaded, quantum_numbers_loaded, particles_trajectories_temp)
 
+    @info "Selecting particles at screen..."
     data_alive_screen_temp = TheoreticalSimulation.QM_select_flagged(particles_trajectories_temp, :screen)
 
+    @info "Saving screen data to disk..."
     jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
         file["meta/N"]          = N_loaded
         file["meta/T"]          = T_loaded
@@ -777,7 +781,7 @@ if !isfile(data_screen_path)
     data_alive_screen_temp = nothing
     GC.gc()
 
-    @info "Released QM screen-analysis memory"
+    @info "Released QM screen-analysis memory" free_memory_GiB=round(Sys.free_memory() / 1024^3, sigdigits=6)
 else    
     # data analysis
     @info "QM approach : peak position data analysis"
