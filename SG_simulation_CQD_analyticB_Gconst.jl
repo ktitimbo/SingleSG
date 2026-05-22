@@ -41,7 +41,7 @@ LinearAlgebra.BLAS.set_num_threads(1)
 cd(@__DIR__) ;
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const BASE_PATH = raw"F:\SternGerlachExperiments";
-const OUTDIR    = joinpath(@__DIR__, "simulation_data", RUN_STAMP);
+const OUTDIR    = joinpath(@__DIR__, "simulation_data", "CQD_" * RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "\e[1;31mCreated output directory\e[0m" OUTDIR
 const TEMP_DIR = joinpath(@__DIR__,"artifacts", "JuliaTemp")
@@ -201,7 +201,7 @@ ki_labels = [(e = floor(Int, log10(abs(k)) + 1e-9);
 const Nss = 6_000_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
-const DATA_READY = true
+const DATA_READY = false
 
 if DATA_READY
     const OUTDIR_PATH = joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_6M_deltaG")
