@@ -41,7 +41,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 # Set the working directory to the current location
 cd(@__DIR__) ;
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
-const OUTDIR    = joinpath(@__DIR__, "simulation_data", "QM"*RUN_STAMP);
+const OUTDIR    = joinpath(@__DIR__, "simulation_data", "QM2026_"*RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 const TEMP_DIR = joinpath(@__DIR__,"artifacts", "JuliaTemp")
@@ -164,7 +164,8 @@ TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
 TheoreticalSimulation.default_R_tube            = R_tube;
 TheoreticalSimulation.default_c_aperture        = R_aper;
 TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
-
+##################################################################################################
+JLD2_MyTools.save_script_copy(OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP)
 ##################################################################################################
 
 ## Coil currents
