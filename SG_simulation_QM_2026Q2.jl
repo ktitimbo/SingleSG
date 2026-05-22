@@ -180,7 +180,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 8000 ; 
+const Nss = 800 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2 ; 
@@ -228,7 +228,7 @@ jldopen(joinpath(OUTDIR,"qm_particles_data.jld2"), "w") do file
     end
 end
 
-data_alive_screen = TheoreticalSimulation.QM_select_flagged(particles_trajectories,:screen);
+data_alive_screen = TheoreticalSimulation.QM_select_flagged(particles_trajectories,:screen)
 ############### data saved in block format for easier access ###############
 data_screen_path = joinpath(OUTDIR,"qm_screen_data.jld2")
 jldopen(data_screen_path, "w") do file
@@ -742,40 +742,39 @@ data_screen_path    = joinpath(OUTDIR,"qm_screen_data.jld2")
 if !isfile(data_screen_path)
     @info "Analyzing particles arriving at the screen"
 
-    dataQM = jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "r") do file
-        Icoils = file["meta/Icoils"]
-        levels = file["meta/levels"]
+    particles_trajectories_temp, Icoils_loaded, quantum_numbers_loaded, N_loaded, T_loaded =
+        jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "r") do file
+            _Icoils  = file["meta/Icoils"]
+            _levels  = file["meta/levels"]
+            _Ns      = file["meta/N"]
+            _T       = file["meta/T"] 
+            nI       = length(_Icoils)
+            nlevels  = length(_levels)
 
-        nI      = length(Icoils)
-        nlevels = length(levels)
+            _traj = OrderedDict{Int8, Vector{Matrix{Float64}}}(
+                Int8(i) => Matrix{Float64}[file["screen/I$(i)/lvl$(j)"] for j in 1:nlevels]
+                for i in 1:nI
+            )
 
-        data = OrderedDict(
-            Int8(i) => [file["screen/I$(i)/lvl$(j)"] for j in 1:nlevels]
-            for i in 1:nI
-        )
+            _traj, _Icoils, _levels, _Ns, _T
+        end
 
-        OrderedDict(
-            :Icoils => Icoils,
-            :levels => levels,
-            :data   => data,
-        )
-    end
+    TheoreticalSimulation.travelling_particles_summary(Icoils_loaded, quantum_numbers_loaded, particles_trajectories_temp)
 
-    data_alive_screen = TheoreticalSimulation.QM_select_flagged(dataQM[:data], :screen)
+    data_alive_screen_temp = TheoreticalSimulation.QM_select_flagged(particles_trajectories_temp, :screen)
 
-    jldopen(data_screen_path, "w") do file
-        file["meta/N"]      = Ns
-        file["meta/T"]      = T_K
-        file["meta/Icoils"] = dataQM[:Icoils]
-        file["meta/levels"] = dataQM[:levels]
-
-        for i in eachindex(dataQM[:Icoils])
-            file["screen/I$(i)"] = data_alive_screen[i]
+    jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
+        file["meta/N"]          = N_loaded
+        file["meta/T"]          = T_loaded
+        file["meta/Icoils"]     = Icoils_loaded
+        file["meta/levels"]     = quantum_numbers_loaded
+        for (i, data) in data_alive_screen_temp
+            file["screen/I$(i)"] = data
         end
     end
 
-    dataQM = nothing
-    data_alive_screen = nothing
+    particles_trajectories_temp = nothing
+    data_alive_screen_temp = nothing
     GC.gc()
 
     @info "Released QM screen-analysis memory"
