@@ -175,6 +175,9 @@ TheoreticalSimulation.default_𝒶                     = 𝒶;
 TheoreticalSimulation.default_ℓ                     = ℓ;
 TheoreticalSimulation.default_center_of_SG_magnet   = center_of_SG_magnet
 ##################################################################################################
+JLD2_MyTools.save_script_copy(OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP)
+##################################################################################################
+
 
 # Coil currents
 Icoils = [0.00,
