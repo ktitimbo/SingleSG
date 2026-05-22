@@ -424,14 +424,6 @@ plot!(fig,xaxis=:log10,
     left_margin =2mm,
 );
 savefig(fig,joinpath(OUTDIR,"QM_results_comparison_a.$(FIG_EXT)"))
-plot!(fig,I_exp[12:end],z_exp[12:end],
-    ribbon=δz_exp[12:end],
-    label="Experiment (combined)",
-    line=(:black,:dot,2),
-    fillalpha=0.23, 
-    fillcolor=:black, 
-);
-savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
 
 # ATOMS PROPAGATION
 r = 1:1:nI;
@@ -653,13 +645,6 @@ for (jdx,nz) in enumerate(nz_bins_list)
         line=(ls_list[jdx],cls[idx],1.5),)
     end
 end
-plot!(fig,I_exp[2:end], 1.28/1.20* z_exp[2:end],
-    ribbon=δz_exp[5:end],
-    label="Experiment (combined)",
-    line=(:black,:dash,2),
-    fillalpha=0.23, 
-    fillcolor=:black, 
-    );
 plot!(fig,
     xaxis=:log10,
     yaxis=:log10,
