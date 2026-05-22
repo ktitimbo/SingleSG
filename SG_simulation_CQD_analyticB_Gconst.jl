@@ -189,7 +189,8 @@ nI = length(Icoils);
 calibration = TheoreticalSimulation.build_calibration(Icoils);
 
 # Induction terms 
-kis                 = unique(round.(vcat([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:5.0],0.001);sigdigits=4))
+kis     = unique(round.(vcat([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:5.0],0.001);sigdigits=4))
+kis     = kis[1:8]            
 @info "Number of ki sampled = $(length(kis))" 
 induction_coeff_for_label     = round.(1e6 .* kis; sigdigits=3)
 ki_labels = [(e = floor(Int, log10(abs(k)) + 1e-9);
@@ -201,7 +202,7 @@ ki_labels = [(e = floor(Int, log10(abs(k)) + 1e-9);
 const Nss = 6_000_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
-const DATA_READY = false
+const DATA_READY = true
 
 if DATA_READY
     const OUTDIR_PATH = joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_6M_deltaG")
@@ -274,59 +275,61 @@ else
         end
     end
 
+    ######################################################################
+    T_END = Dates.now()
+    T_RUN = Dates.canonicalize(T_END-T_START)
+    report = """
+    ***************************************************
+    EXPERIMENT
+        Single Stern–Gerlach Experiment
+        atom                    : $(atom)
+        Output directory        : $(OUTDIR_PATH)
+        RUN_STAMP               : $(RUN_STAMP)
+
+    CAMERA FEATURES
+        Number of pixels        : $(nx_pixels) × $(nz_pixels)
+        Pixel size              : $(1e6*cam_pixelsize) μm
+
+    SETUP FEATURES
+        Temperature             : $(T_K)K
+        Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
+        Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
+        Post-SG aperture radius : $(1e3*R_aper)mm
+        Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
+        Slit → SG magnet        : $(1e3*y_SlitToSG)mm
+        SG magnet               : $(1e3*y_SG)mm
+        SG magnet → Screen      : $(1e3*y_SGToScreen)mm
+        SG magnet → Aperture    : $(1e3*y_SGToAperture)mm
+        Tube radius             : $(1e3*R_tube)mm
+
+    SIMULATION INFORMATION
+        Number of atoms         : $(Nss)
+        Induction term          : ($(kis))
+        Currents (A)            : $(round.(Icoils,sigdigits=3))
+        No. of currents         : $(nI)
+
+    CODE
+        Code name               : $(PROGRAM_FILE)
+        Start date              : $(T_START)
+        End date                : $(T_END)
+        Run time                : $(T_RUN)
+        Hostname                : $(HOSTNAME)
+
+    ***************************************************
+    """
+    # Print to terminal
+    println(report)
+
+    # Save to file
+    open(joinpath(OUTDIR_PATH,"simulation_cqd_report.txt"), "w") do io
+        write(io, report)
+    end
+
+    @info "\e[1;32mDATA COLLECTED : $RUN_STAMP\e[0m"
+
 end
 
-######################################################################
-T_END = Dates.now()
-T_RUN = Dates.canonicalize(T_END-T_START)
-report = """
-***************************************************
-EXPERIMENT
-    Single Stern–Gerlach Experiment
-    atom                    : $(atom)
-    Output directory        : $(OUTDIR_PATH)
-    RUN_STAMP               : $(RUN_STAMP)
 
-CAMERA FEATURES
-    Number of pixels        : $(nx_pixels) × $(nz_pixels)
-    Pixel size              : $(1e6*cam_pixelsize) μm
-
-SETUP FEATURES
-    Temperature             : $(T_K)K
-    Furnace aperture (x,z)  : ($(1e3*x_furnace)mm , $(1e6*z_furnace)μm)
-    Slit (x,z)              : ($(1e3*x_slit)mm , $(1e6*z_slit)μm)
-    Post-SG aperture radius : $(1e3*R_aper)mm
-    Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
-    Slit → SG magnet        : $(1e3*y_SlitToSG)mm
-    SG magnet               : $(1e3*y_SG)mm
-    SG magnet → Screen      : $(1e3*y_SGToScreen)mm
-    SG magnet → Aperture    : $(1e3*y_SGToAperture)mm
-    Tube radius             : $(1e3*R_tube)mm
-
-SIMULATION INFORMATION
-    Number of atoms         : $(Nss)
-    Induction term          : ($(kis))
-    Currents (A)            : $(round.(Icoils,sigdigits=3))
-    No. of currents         : $(nI)
-
-CODE
-    Code name               : $(PROGRAM_FILE)
-    Start date              : $(T_START)
-    End date                : $(T_END)
-    Run time                : $(T_RUN)
-    Hostname                : $(HOSTNAME)
-
-***************************************************
-"""
-# Print to terminal
-println(report)
-
-# Save to file
-open(joinpath(OUTDIR_PATH,"simulation_cqd_report.txt"), "w") do io
-    write(io, report)
-end
-
-@info "\e[1;32mDATA COLLECTED : $RUN_STAMP\e[0m"
 
 
 
