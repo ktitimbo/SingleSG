@@ -32,7 +32,7 @@ using Random, Statistics, NaNStatistics, Distributions, StaticArrays
 using Alert
 # Data manipulation
 using OrderedCollections
-using DelimitedFiles, CSV, DataFrames, JLD2
+using DelimitedFiles, CSV, DataFrames, JLD2, HDF5
 # include("./Modules/MyPolylogarithms.jl");
 # Multithreading setup
 using Base.Threads
@@ -759,6 +759,7 @@ if !isfile(data_screen_path)
         file["meta/levels"]     = quantum_numbers_loaded
         @showprogress desc="Saving screen data to disk..." for (i, data) in data_alive_screen_temp
             file["screen/I$(i)"] = data
+            HDF5.flush(file.plain)  # flush after each Icoil to avoid close() bottleneck
         end
     end
 
@@ -1099,6 +1100,8 @@ else
     open(joinpath(OUTDIR,"simulation_report.txt"), "w") do io
         write(io, report)
     end
+
+    JLD2_MyTools.save_script_copy(OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP)
 
     println("script $RUN_STAMP has finished!")
     alert("script $RUN_STAMP has finished!")
