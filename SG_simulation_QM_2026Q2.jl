@@ -32,7 +32,7 @@ using Random, Statistics, NaNStatistics, Distributions, StaticArrays
 using Alert
 # Data manipulation
 using OrderedCollections
-using DelimitedFiles, CSV, DataFrames, JLD2, HDF5
+using DelimitedFiles, CSV, DataFrames, JLD2
 # include("./Modules/MyPolylogarithms.jl");
 # Multithreading setup
 using Base.Threads
@@ -181,7 +181,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 1000 ; 
+const Nss = 5000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2 ; 
@@ -723,49 +723,39 @@ data_screen_path    = joinpath(OUTDIR,"qm_screen_data.jld2")
 if !isfile(data_screen_path)
     @info "Analyzing particles arriving at the screen"
 
-    particles_trajectories_temp, Icoils_loaded, quantum_numbers_loaded, N_loaded, T_loaded =
-        jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "r") do file
-            _Icoils  = file["meta/Icoils"]
-            _levels  = file["meta/levels"]
-            _Ns      = file["meta/N"]
-            _T       = file["meta/T"] 
-            nI       = length(_Icoils)
-            nlevels  = length(_levels)
+    jldopen(joinpath(OUTDIR, "qm_screen_data.jld2"), "w") do file_out
+        jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "r") do file_in
+            Icoils_loaded          = file_in["meta/Icoils"]
+            quantum_numbers_loaded = file_in["meta/levels"]
+            N_loaded               = file_in["meta/N"]
+            T_loaded               = file_in["meta/T"]
+            nI                     = length(Icoils_loaded)
+            nlevels                = length(quantum_numbers_loaded)
 
-            _traj = OrderedDict{Int8, Vector{Matrix{Float64}}}()
-            @showprogress desc="Loading trajectories from disk..." for i in 1:nI
-                _traj[Int8(i)] = Matrix{Float64}[file["screen/I$(i)/lvl$(j)"] for j in 1:nlevels]
+            file_out["meta/N"]      = N_loaded
+            file_out["meta/T"]      = T_loaded
+            file_out["meta/Icoils"] = Icoils_loaded
+            file_out["meta/levels"] = quantum_numbers_loaded
+
+            for i in 1:nI
+                @info "Processing Icoil $i / $nI" free_memory_GiB=round(Sys.free_memory() / 1024^3, sigdigits=4)
+                traj_i    = Matrix{Float64}[file_in["screen/I$(i)/lvl$(j)"] for j in 1:nlevels]
+                traj_dict = OrderedDict{Int8, Vector{Matrix{Float64}}}(Int8(1) => traj_i)
+
+                TheoreticalSimulation.travelling_particles_summary(Icoils_loaded[[i]], quantum_numbers_loaded, traj_dict)
+                data_i = TheoreticalSimulation.QM_select_flagged(traj_dict, :screen)
+
+                file_out["screen/I$(i)"] = data_i[Int8(1)]
+                flush(file_out.io)
+
+                traj_i    = nothing
+                traj_dict = nothing
+                data_i    = nothing
+                i % 5 == 0 && GC.gc()
             end
-
-            _traj, _Icoils, _levels, _Ns, _T
-        end
-
-    @info "Computing particles summary..."
-    TheoreticalSimulation.travelling_particles_summary(Icoils_loaded, quantum_numbers_loaded, particles_trajectories_temp)
-
-    @info "Selecting particles at screen..."
-    data_alive_screen_temp = TheoreticalSimulation.QM_select_flagged(particles_trajectories_temp, :screen)
-
-    # Drop  memory before the write
-    particles_trajectories_temp = nothing
-    GC.gc()
-    @info "Released trajectory memory" free_memory_GiB=round(Sys.free_memory() / 1024^3, sigdigits=6)
-
-    @info "Saving screen data to disk..."
-    jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
-        file["meta/N"]          = N_loaded
-        file["meta/T"]          = T_loaded
-        file["meta/Icoils"]     = Icoils_loaded
-        file["meta/levels"]     = quantum_numbers_loaded
-        @showprogress desc="Saving screen data to disk..." for (i, data) in data_alive_screen_temp
-            file["screen/I$(i)"] = data
-            HDF5.flush(file.plain)  # flush after each Icoil to avoid close() bottleneck
         end
     end
 
-    data_alive_screen_temp = nothing
-    GC.gc()
-    @info "Released QM screen-analysis memory" free_memory_GiB=round(Sys.free_memory() / 1024^3, sigdigits=6)
 else    
     # data analysis
     @info "QM approach : peak position data analysis"
