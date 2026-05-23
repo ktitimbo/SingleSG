@@ -217,8 +217,9 @@ end
 );
 # TheoreticalSimulation.travelling_particles_summary(Icoils, quantum_numbers, particles_trajectories)
 ############### data saved in block format for easier access ###############
+data_screen_path = joinpath(OUTDIR,"qm_screen_data.jld2")
 jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "w") do file_traj
-    jldopen(joinpath(OUTDIR, "qm_screen_data.jld2"), "w") do file_screen
+    jldopen(data_screen_path, "w") do file_screen
 
         file_traj["meta/N"]      = Nss;    file_screen["meta/N"]      = Nss
         file_traj["meta/T"]      = T_K;    file_screen["meta/T"]      = T_K
