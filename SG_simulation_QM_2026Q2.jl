@@ -425,7 +425,7 @@ plot!(fig,xaxis=:log10,
     background_color_legend=nothing,
     left_margin =2mm,
 );
-savefig(fig,joinpath(OUTDIR,"QM_results_comparison_a.$(FIG_EXT)"))
+savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
 
 # ATOMS PROPAGATION
 r = 1:1:nI;
