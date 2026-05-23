@@ -215,32 +215,47 @@ end
                                 particles_flag,
                                 K39_params
 );
-TheoreticalSimulation.travelling_particles_summary(Icoils, quantum_numbers, particles_trajectories)
+# TheoreticalSimulation.travelling_particles_summary(Icoils, quantum_numbers, particles_trajectories)
 ############### data saved in block format for easier access ###############
-jldopen(joinpath(OUTDIR,"qm_particles_data.jld2"), "w") do file
-    file["meta/N"]          = Nss
-    file["meta/T"]          = T_K
-    file["meta/Icoils"]     = Icoils
-    file["meta/levels"]     = quantum_numbers 
-    for i in 1:nI
-        for j in eachindex(quantum_numbers)
-            file["screen/I$(i)/lvl$(j)"] = particles_trajectories[i][j]
+jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "w") do file_traj
+    jldopen(joinpath(OUTDIR, "qm_screen_data.jld2"), "w") do file_screen
+
+        file_traj["meta/N"]      = Nss;    file_screen["meta/N"]      = Nss
+        file_traj["meta/T"]      = T_K;    file_screen["meta/T"]      = T_K
+        file_traj["meta/Icoils"] = Icoils; file_screen["meta/Icoils"] = Icoils
+        file_traj["meta/levels"] = quantum_numbers; file_screen["meta/levels"] = quantum_numbers
+
+        for i in 1:nI
+            @info "Saving Icoil $i / $nI" free_memory_GiB=round(Sys.free_memory()/1024^3, sigdigits=4)
+            traj_i    = particles_trajectories[i]
+            traj_dict = OrderedDict{Int8, Vector{Matrix{Float64}}}(Int8(1) => traj_i)
+
+            # Summary printout
+            TheoreticalSimulation.travelling_particles_summary(Icoils[[i]], quantum_numbers, traj_dict)
+
+            # Save full trajectories
+            for j in eachindex(quantum_numbers)
+                file_traj["screen/I$(i)/lvl$(j)"] = traj_i[j]
+            end
+            flush(file_traj.io)
+
+            # Filter and save screen data
+            data_i = TheoreticalSimulation.QM_select_flagged(traj_dict, :screen)
+            file_screen["screen/I$(i)"] = data_i[Int8(1)]
+            flush(file_screen.io)
+
+            data_i = nothing
         end
+
     end
 end
 
-data_alive_screen = TheoreticalSimulation.QM_select_flagged(particles_trajectories,:screen)
-############### data saved in block format for easier access ###############
-data_screen_path = joinpath(OUTDIR,"qm_screen_data.jld2")
-jldopen(data_screen_path, "w") do file
-    file["meta/N"]          = Nss
-    file["meta/T"]          = T_K
-    file["meta/Icoils"]     = Icoils
-    file["meta/levels"]     = quantum_numbers 
-    for i in 1:nI
-        file["screen/I$(i)"] = data_alive_screen[i]  
-    end
-end
+# Free the big allocations
+crossing_slit           = nothing
+particles_flag         = nothing
+particles_trajectories = nothing
+GC.gc()
+@info "Released trajectory memory" free_memory_GiB=round(Sys.free_memory()/1024^3, sigdigits=4)
 ############################################################################
 # fname = joinpath(OUTDIR,"qm_screen_data.jld2")
 #  jldopen(fname, "r") do file
@@ -646,10 +661,6 @@ savefig(fig,joinpath(OUTDIR,"qm_comparison_w_n.$(FIG_EXT)"))
 
 #########################################################################################
 # clean memory
-crossing_slit           = nothing
-particles_flag          = nothing
-particles_trajectories  = nothing
-data_alive_screen       = nothing
 GC.gc()
 @info "Memory cleaned after QM data acquired"
 @info "Free system memory $(round(Sys.free_memory() / 1024^3,sigdigits=6)) GiB"
@@ -755,7 +766,6 @@ if !isfile(data_screen_path)
             end
         end
     end
-
 else    
     # data analysis
     @info "QM approach : peak position data analysis"
