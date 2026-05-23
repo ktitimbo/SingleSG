@@ -746,21 +746,24 @@ if !isfile(data_screen_path)
     @info "Selecting particles at screen..."
     data_alive_screen_temp = TheoreticalSimulation.QM_select_flagged(particles_trajectories_temp, :screen)
 
+    # Drop  memory before the write
+    particles_trajectories_temp = nothing
+    GC.gc()
+    @info "Released trajectory memory" free_memory_GiB=round(Sys.free_memory() / 1024^3, sigdigits=6)
+
     @info "Saving screen data to disk..."
     jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
         file["meta/N"]          = N_loaded
         file["meta/T"]          = T_loaded
         file["meta/Icoils"]     = Icoils_loaded
         file["meta/levels"]     = quantum_numbers_loaded
-        for (i, data) in data_alive_screen_temp
+        @showprogress desc="Saving screen data to disk..." for (i, data) in data_alive_screen_temp
             file["screen/I$(i)"] = data
         end
     end
 
-    particles_trajectories_temp = nothing
     data_alive_screen_temp = nothing
     GC.gc()
-
     @info "Released QM screen-analysis memory" free_memory_GiB=round(Sys.free_memory() / 1024^3, sigdigits=6)
 else    
     # data analysis
