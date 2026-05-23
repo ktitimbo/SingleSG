@@ -692,7 +692,7 @@ SIMULATION INFORMATION
 CODE
     Code name               : $(PROGRAM_FILE)
     Start date              : $(T_START)
-    End data                : $(T_END)
+    End date                : $(T_END)
     Run time                : $(T_RUN)
     Hostname                : $(HOSTNAME)
 
@@ -1083,7 +1083,7 @@ else
     CODE
         Code name               : $(PROGRAM_FILE)
         Start date              : $(T_START)
-        End data                : $(T_END)
+        End date                : $(T_END)
         Run time                : $(T_RUN)
         Hostname                : $(HOSTNAME)
 
@@ -1093,7 +1093,7 @@ else
     println(report)
 
     # Save to file
-    open(joinpath(OUTDIR,"simqm_report.txt"), "w") do io
+    open(joinpath(OUTDIR,"simulation_report.txt"), "w") do io
         write(io, report)
     end
 
