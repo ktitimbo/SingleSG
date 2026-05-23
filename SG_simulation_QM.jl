@@ -16,6 +16,7 @@ SAVE_FIG = true
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using LaTeXStrings, Printf, PrettyTables
+using ProgressMeter
 # Time-stamping/logging
 using Dates
 const T_START = Dates.now() ; # Timestamp start for execution timing
@@ -41,7 +42,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 # Set the working directory to the current location
 cd(@__DIR__) ;
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
-const OUTDIR    = joinpath(@__DIR__, "simulation_data", "QM"*RUN_STAMP);
+const OUTDIR    = joinpath(@__DIR__, "simulation_data", "QM2025_"*RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 const TEMP_DIR = joinpath(@__DIR__,"artifacts", "JuliaTemp")
@@ -164,12 +165,8 @@ TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
 TheoreticalSimulation.default_R_tube            = R_tube;
 TheoreticalSimulation.default_c_aperture        = R_aper;
 TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
-
 ##################################################################################################
-# avg_data = load(joinpath(@__DIR__, "EXPDATA_ANALYSIS", "smoothing_binning","data_averaged_2.jld2"), "data" );
-# I_exp  = avg_data[:i_smooth];
-# z_exp  = avg_data[:z_smooth];
-# δz_exp = avg_data[:δz_smooth];
+JLD2_MyTools.save_script_copy(OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP)
 ##################################################################################################
 
 ## Coil currents
@@ -184,7 +181,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 8_000_000 ; 
+const Nss = 1000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2 ; 
@@ -232,7 +229,7 @@ jldopen(joinpath(OUTDIR,"qm_particles_data.jld2"), "w") do file
     end
 end
 
-data_alive_screen = TheoreticalSimulation.QM_select_flagged(particles_trajectories,:screen);
+data_alive_screen = TheoreticalSimulation.QM_select_flagged(particles_trajectories,:screen)
 ############### data saved in block format for easier access ###############
 data_screen_path = joinpath(OUTDIR,"qm_screen_data.jld2")
 jldopen(data_screen_path, "w") do file
@@ -428,14 +425,6 @@ plot!(fig,xaxis=:log10,
     background_color_legend=nothing,
     left_margin =2mm,
 );
-savefig(fig,joinpath(OUTDIR,"QM_results_comparison_a.$(FIG_EXT)"))
-plot!(fig,I_exp[12:end],z_exp[12:end],
-    ribbon=δz_exp[12:end],
-    label="Experiment (combined)",
-    line=(:black,:dot,2),
-    fillalpha=0.23, 
-    fillcolor=:black, 
-);
 savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
 
 # ATOMS PROPAGATION
@@ -468,7 +457,7 @@ anim = @animate for j in iter
     data_set = jldopen(data_screen_path,"r") do file
         file["screen/I$j"][lvl]
     end
-    n = Int(round(size(data_set, 1) / 10)) ; 
+    n = Int(round(size(data_set, 1)/10)) ; 
     
     # --- preallocate arrays for histograms (scaled units) ---
     xs_a = Vector{Float64}(undef, n); zs_a = Vector{Float64}(undef, n)  # furnace (mm, μm)
@@ -492,36 +481,16 @@ anim = @animate for j in iter
         τ_aper  = y_aper  / v0y
         τ_scr   = y_scr   / v0y
 
-        # NOTE: keep your original calling convention (views)
-        rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_slit,  Icoils[j], f, mf,
-                                                      @view(data_set[i,1:3]),
-                                                      @view(data_set[i,4:6]),
-                                                      K39_params)
-        xs_b[i] = 1e3 * rtmp[1] ; zs_b[i] = 1e6 * rtmp[3]
+        eom = (τ) -> TheoreticalSimulation.QM_EqOfMotion(τ, Icoils[j], f, mf,
+                                                        @view(data_set[i, 1:3]),
+                                                        @view(data_set[i, 4:6]),
+                                                        K39_params)
 
-        rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_sgin,  Icoils[j], f, mf,
-                                                      @view(data_set[i,1:3]),
-                                                      @view(data_set[i,4:6]),
-                                                      K39_params)
-        xs_c[i] = 1e3 * rtmp[1] ; zs_c[i] = 1e6 * rtmp[3]
-
-        rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_sgout, Icoils[j], f, mf,
-                                                      @view(data_set[i,1:3]),
-                                                      @view(data_set[i,4:6]),
-                                                      K39_params)
-        xs_d[i] = 1e3 * rtmp[1] ; zs_d[i] = 1e6 * rtmp[3]
-
-        rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_aper,  Icoils[j], f, mf,
-                                                      @view(data_set[i,1:3]),
-                                                      @view(data_set[i,4:6]),
-                                                      K39_params)
-        xs_f[i] = 1e3 * rtmp[1] ; zs_f[i] = 1e6 * rtmp[3]
-
-        rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_scr,   Icoils[j], f, mf,
-                                                      @view(data_set[i,1:3]),
-                                                      @view(data_set[i,4:6]),
-                                                      K39_params)
-        xs_e[i] = 1e3 * rtmp[1] ; zs_e[i] = 1e3 * rtmp[3]
+        xs_b[i], zs_b[i] = let (r, _) = eom(τ_slit);  1e3*r[1], 1e6*r[3] end
+        xs_c[i], zs_c[i] = let (r, _) = eom(τ_sgin);  1e3*r[1], 1e6*r[3] end
+        xs_d[i], zs_d[i] = let (r, _) = eom(τ_sgout); 1e3*r[1], 1e6*r[3] end
+        xs_f[i], zs_f[i] = let (r, _) = eom(τ_aper);  1e3*r[1], 1e6*r[3] end
+        xs_e[i], zs_e[i] = let (r, _) = eom(τ_scr);   1e3*r[1], 1e3*r[3] end
     end
 
     bins_furn  = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a))
@@ -658,13 +627,6 @@ for (jdx,nz) in enumerate(nz_bins_list)
         line=(ls_list[jdx],cls[idx],1.5),)
     end
 end
-plot!(fig,I_exp[2:end], 1.28/1.20* z_exp[2:end],
-    ribbon=δz_exp[5:end],
-    label="Experiment (combined)",
-    line=(:black,:dash,2),
-    fillalpha=0.23, 
-    fillcolor=:black, 
-    );
 plot!(fig,
     xaxis=:log10,
     yaxis=:log10,
@@ -730,7 +692,7 @@ SIMULATION INFORMATION
 CODE
     Code name               : $(PROGRAM_FILE)
     Start date              : $(T_START)
-    End data                : $(T_END)
+    End date                : $(T_END)
     Run time                : $(T_RUN)
     Hostname                : $(HOSTNAME)
 
@@ -761,59 +723,58 @@ data_screen_path    = joinpath(OUTDIR,"qm_screen_data.jld2")
 if !isfile(data_screen_path)
     @info "Analyzing particles arriving at the screen"
 
-    dataQM = jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "r") do file
-        Icoils = file["meta/Icoils"]
-        levels = file["meta/levels"]
+    particles_trajectories_temp, Icoils_loaded, quantum_numbers_loaded, N_loaded, T_loaded =
+        jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "r") do file
+            _Icoils  = file["meta/Icoils"]
+            _levels  = file["meta/levels"]
+            _Ns      = file["meta/N"]
+            _T       = file["meta/T"] 
+            nI       = length(_Icoils)
+            nlevels  = length(_levels)
 
-        nI      = length(Icoils)
-        nlevels = length(levels)
+            _traj = OrderedDict{Int8, Vector{Matrix{Float64}}}()
+            @showprogress desc="Loading trajectories from disk..." for i in 1:nI
+                _traj[Int8(i)] = Matrix{Float64}[file["screen/I$(i)/lvl$(j)"] for j in 1:nlevels]
+            end
 
-        data = OrderedDict(
-            Int8(i) => [file["screen/I$(i)/lvl$(j)"] for j in 1:nlevels]
-            for i in 1:nI
-        )
+            _traj, _Icoils, _levels, _Ns, _T
+        end
 
-        OrderedDict(
-            :Icoils => Icoils,
-            :levels => levels,
-            :data   => data,
-        )
-    end
+    @info "Computing particles summary..."
+    TheoreticalSimulation.travelling_particles_summary(Icoils_loaded, quantum_numbers_loaded, particles_trajectories_temp)
 
-    data_alive_screen = TheoreticalSimulation.QM_select_flagged(dataQM[:data], :screen)
+    @info "Selecting particles at screen..."
+    data_alive_screen_temp = TheoreticalSimulation.QM_select_flagged(particles_trajectories_temp, :screen)
 
-    jldopen(data_screen_path, "w") do file
-        file["meta/N"]      = Ns
-        file["meta/T"]      = T_K
-        file["meta/Icoils"] = dataQM[:Icoils]
-        file["meta/levels"] = dataQM[:levels]
-
-        for i in eachindex(dataQM[:Icoils])
-            file["screen/I$(i)"] = data_alive_screen[i]
+    @info "Saving screen data to disk..."
+    jldopen(joinpath(OUTDIR,"qm_screen_data.jld2"), "w") do file
+        file["meta/N"]          = N_loaded
+        file["meta/T"]          = T_loaded
+        file["meta/Icoils"]     = Icoils_loaded
+        file["meta/levels"]     = quantum_numbers_loaded
+        for (i, data) in data_alive_screen_temp
+            file["screen/I$(i)"] = data
         end
     end
 
-    dataQM = nothing
-    data_alive_screen = nothing
+    particles_trajectories_temp = nothing
+    data_alive_screen_temp = nothing
     GC.gc()
 
-    @info "Released QM screen-analysis memory"
+    @info "Released QM screen-analysis memory" free_memory_GiB=round(Sys.free_memory() / 1024^3, sigdigits=6)
 else    
     # data analysis
     @info "QM approach : peak position data analysis"
 
-    Icoils = jldopen(data_screen_path , "r") do fname
-        fname["meta/Icoils"]
+    Icoils, quantum_numbers = jldopen(data_screen_path, "r") do fname
+        fname["meta/Icoils"], fname["meta/levels"]
     end
-    nI      = length(Icoils);
-    quantum_numbers = jldopen(data_screen_path , "r") do fname
-        fname["meta/levels"]
-    end
+    nI = length(Icoils)
 
     # ATOMS PROPAGATION
     r = 1:1:nI;
     iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
-    lvl = 5 #Int(4*K39_params.Ispin+2)
+    lvl = 5 ; #Int(4*K39_params.Ispin+2)
     f,mf=quantum_numbers[lvl] ; 
     # =========================
     # Precompute geometry overlays (constant)
@@ -864,36 +825,15 @@ else
             τ_aper  = y_aper / v0y;
             τ_scr   = y_scr / v0y;
 
-            # NOTE: keep your original calling convention (views)
-            rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_slit,  Icoils[j], f, mf,
-                                                        @view(data_set[i,1:3]),
-                                                        @view(data_set[i,4:6]),
-                                                        K39_params);
-            xs_b[i] = 1e3 * rtmp[1] ; zs_b[i] = 1e6 * rtmp[3]
-
-            rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_sgin,  Icoils[j], f, mf,
-                                                        @view(data_set[i,1:3]),
-                                                        @view(data_set[i,4:6]),
-                                                        K39_params);
-            xs_c[i] = 1e3 * rtmp[1] ; zs_c[i] = 1e6 * rtmp[3]
-
-            rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_sgout, Icoils[j], f, mf,
-                                                        @view(data_set[i,1:3]),
-                                                        @view(data_set[i,4:6]),
-                                                        K39_params);
-            xs_d[i] = 1e3 * rtmp[1] ; zs_d[i] = 1e6 * rtmp[3]
-
-            rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_aper,  Icoils[j], f, mf,
-                                                        @view(data_set[i,1:3]),
-                                                        @view(data_set[i,4:6]),
-                                                        K39_params);
-            xs_f[i] = 1e3 * rtmp[1] ; zs_f[i] = 1e6 * rtmp[3]
-
-            rtmp, _ = TheoreticalSimulation.QM_EqOfMotion(τ_scr,   Icoils[j], f, mf,
-                                                        @view(data_set[i,1:3]),
-                                                        @view(data_set[i,4:6]),
-                                                        K39_params);
-            xs_e[i] = 1e3 * rtmp[1] ; zs_e[i] = 1e3 * rtmp[3]
+            eom = (τ) -> TheoreticalSimulation.QM_EqOfMotion(τ, Icoils[j], f, mf,
+                                                            @view(data_set[i,1:3]),
+                                                            @view(data_set[i,4:6]),
+                                                            K39_params)
+            xs_b[i], zs_b[i] = let (r,_) = eom(τ_slit);  1e3*r[1], 1e6*r[3] end
+            xs_c[i], zs_c[i] = let (r,_) = eom(τ_sgin);  1e3*r[1], 1e6*r[3] end
+            xs_d[i], zs_d[i] = let (r,_) = eom(τ_sgout); 1e3*r[1], 1e6*r[3] end
+            xs_f[i], zs_f[i] = let (r,_) = eom(τ_aper);  1e3*r[1], 1e6*r[3] end
+            xs_e[i], zs_e[i] = let (r,_) = eom(τ_scr);   1e3*r[1], 1e3*r[3] end
         end
 
         bins_furn  = (FreedmanDiaconisBins(xs_a), FreedmanDiaconisBins(zs_a));
@@ -1005,179 +945,100 @@ else
     )
 
     nx_bins = 32 ;
-    nz_bins = [1,2,4,8];  # try different nz_bins
+    nz_bins = [1,2,4];  # try different nz_bins
     gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
     λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
     λ0_spline         = 0.001;
   
-    # Total combinations (diagnostic only)
-    Ntot = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-    @info "Total combinations : Nnz × Nσ × Nλ0 × Nλs = $(Ntot)"
 
-    param_grid = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list));
-    
-    clrs = palette(:darkrainbow, length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list))
-    line_styles = [:solid, :dash, :dot, :dashdot]
-    
-    # ============================== F=1 manifold ==============================
-    state = states_groups_dict[:F1]
-    outpath_1 = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
-    @info "QM approach : analyzing screen profiles for $(state.family)=$(state.val) manifold"
+    function analyze_and_plot_manifold(state, data_screen_path, Icoils,
+        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+        Ns, T_K, K39_params, OUTDIR, FIG_EXT
+    )
+        # ── parameter grid ────────────────────────────────────────────────────────
+        Ntot        = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
+        param_grid  = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list))
+        clrs        = palette(:darkrainbow, Ntot)
+        line_styles = [:solid, :dash, :dot, :dashdot]
+        @info "Total combinations : Nnz × Nσ × Nλ0 × Nλs = $(Ntot)"
 
-    @time jldopen(outpath_1, "w") do file
-        file["meta/N"]          = Ns
-        file["meta/state"]      = (state.family, state.val)
-        file["meta/T"]          = T_K
-        file["meta/s_spline"]   = λ0_spline
-        file["meta/nx"]         = nx_bins
-        file["meta/nz"]         = sort(nz_bins)
-        file["meta/σw"]         = sort(gaussian_width_mm)
-        file["meta/λ0"]         = sort(λ0_raw_list)
+        @info "QM approach : analyzing screen profiles for $(state.family)=$(state.val) manifold | $Ntot combinations"
 
-        for (nz, gw, λ0) in param_grid
+        # ── compute and save profiles ─────────────────────────────────────────────
+        outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
+        @time jldopen(outpath, "w") do file
+            file["meta/N"]        = Ns
+            file["meta/state"]    = (state.family, state.val)
+            file["meta/T"]        = T_K
+            file["meta/s_spline"] = λ0_spline
+            file["meta/nx"]       = nx_bins
+            file["meta/nz"]       = sort(nz_bins)
+            file["meta/σw"]       = sort(gaussian_width_mm)
+            file["meta/λ0"]       = sort(λ0_raw_list)
 
-            println("Profiles $(state.family)=$(state.val), nz=$nz, σ=$(Int(round(1e3*gw)))μm, λ₀=$λ0")
-
-            profiles_bottom_loop = QM_analyze_profiles_to_dict(
-                data_screen_path, 
-                K39_params;
-                manifold=:F_bottom,
-                n_bins=(nx_bins, nz),
-                width_mm=gw,
-                add_plot=false,
-                plot_xrange=:all,
-                λ_raw=λ0,
-                λ_smooth=λ0_spline,
-                mode=:probability
-            )
-
-            keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0)
-
-            file[keypath] = profiles_bottom_loop
-            
+            prog = Progress(Ntot; desc="Computing profiles $(state.family)=$(state.val)...", showspeed=true)
+            for (nz, gw, λ0) in param_grid
+                profiles = QM_analyze_profiles_to_dict(
+                    data_screen_path,
+                    K39_params;
+                    manifold    = state.branch,
+                    n_bins      = (nx_bins, nz),
+                    width_mm    = gw,
+                    add_plot    = false,
+                    plot_xrange = :all,
+                    λ_raw       = λ0,
+                    λ_smooth    = λ0_spline,
+                    mode        = :probability
+                )
+                file[JLD2_MyTools.make_keypath_qm(nz, gw, λ0)] = profiles
+                next!(prog; showvalues = [
+                    (:manifold, "$(state.family)=$(state.val)"),
+                    (:nz,       nz),
+                    (:σ_μm,     "$(Int(round(1e3*gw))) μm"),
+                    (:λ₀,       λ0),
+                ])
+            end
         end
-    end
-  
-    fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
-    jldopen(outpath_1, "r") do file
-        color_idx = 1
-        for λ0 in λ0_raw_list
-            for gw in gaussian_width_mm
-                nz_idx = 1
-                for nz in nz_bins
-                    keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0)
 
-                    # load only this realization
-                    prof = file[keypath]
-
+        # ── plot ──────────────────────────────────────────────────────────────────
+        fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
+        jldopen(outpath, "r") do file
+            color_idx = 1
+            for λ0 in λ0_raw_list, gw in gaussian_width_mm
+                for (nz_idx, nz) in enumerate(nz_bins)
+                    prof  = file[JLD2_MyTools.make_keypath_qm(nz, gw, λ0)]
                     zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                    mask  = (Icoils .> 0) .& (abs.(zvals) .> 0)
                     label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0)$"
-
-                    plot!(Icoils[2:end], abs.(zvals[2:end]),
-                        line = (line_styles[nz_idx], clrs[color_idx], 2),
-                        label = label)
-
-                    nz_idx += 1
+                    plot!(fig,
+                        Icoils[mask], abs.(zvals[mask]),
+                        line=(line_styles[nz_idx], clrs[color_idx], 2), label=label)
                     color_idx += 1
                 end
             end
         end
-    end
-    plot!(fig,
-        xaxis=:log10, yaxis=:log10,
-        xlims=(8e-3, 2), ylims=(8e-3, 2),
-        xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        size=(1050, 650),
-        rightmargin=5mm,
-        legend=:outerright,
-        legend_fontsize=4,
-        legend_columns=length(nz_bins),
-        background_color_legend = nothing,
-        foreground_color_legend = nothing,
-    );
-    display(fig)
-    savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
-
-    # ============================== F=2 manifold ==============================
-    state = states_groups_dict[:F2]
-    outpath_2 = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
-    @info "QM approach : analyzing screen profiles for $(state.family)=$(state.val) manifold"
-
-    @time jldopen(outpath_2, "w") do file
-        file["meta/N"]          = Ns
-        file["meta/state"]      = (state.family, state.val)
-        file["meta/T"]          = T_K
-        file["meta/s_spline"]   = λ0_spline
-        file["meta/nx"]         = nx_bins
-        file["meta/nz"]         = sort(nz_bins)
-        file["meta/σw"]         = sort(gaussian_width_mm)
-        file["meta/λ0"]         = sort(λ0_raw_list)
-
-        for (nz, gw, λ0) in param_grid
-
-            println("Profiles $(state.family)=$(state.val), nz=$nz, σ=$(Int(round(1e3*gw)))μm, λ₀=$λ0")
-
-            profiles_bottom_loop = QM_analyze_profiles_to_dict(
-                data_screen_path, 
-                K39_params;
-                manifold=:F_top,
-                n_bins=(nx_bins, nz),
-                width_mm=gw,
-                add_plot=false,
-                plot_xrange=:all,
-                λ_raw=λ0,
-                λ_smooth=λ0_spline,
-                mode=:probability
-            )
-
-            keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0)
-
-            file[keypath] = profiles_bottom_loop
-            
-        end
+        plot!(fig,
+            xaxis=:log10, yaxis=:log10,
+            xlims=(8e-3, 2), ylims=(8e-3, 2),
+            xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            size=(1050, 650), rightmargin=5mm,
+            legend=:outerright, legend_fontsize=4,
+            legend_columns=length(nz_bins),
+            background_color_legend=nothing,
+            foreground_color_legend=nothing,
+        )
+        display(fig)
+        savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
     end
 
-    fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
-    jldopen(outpath_2, "r") do file
-        color_idx = 1
-        for λ0 in λ0_raw_list
-            for gw in gaussian_width_mm
-                nz_idx = 1
-                for nz in nz_bins
-                    keypath = JLD2_MyTools.make_keypath_qm(nz, gw, λ0)
-
-                    # load only this realization
-                    prof = file[keypath]
-
-                    zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
-                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0)$"
-
-                    plot!(Icoils[2:end], abs.(zvals[2:end]),
-                        line = (line_styles[nz_idx], clrs[color_idx], 2),
-                        label = label)
-
-                    nz_idx += 1
-                    color_idx += 1
-                end
-            end
-        end
+    # then call it for each manifold
+    for state_key in [:F1, :F2]
+        state   = states_groups_dict[state_key]
+        analyze_and_plot_manifold(state, data_screen_path, Icoils, 
+            nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+            Ns, T_K, K39_params, OUTDIR, FIG_EXT)
     end
-    plot!(fig,
-        xaxis=:log10, yaxis=:log10,
-        xlims=(8e-3, 2), ylims=(8e-3, 2),
-        xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        size=(1050, 650),
-        rightmargin=5mm,
-        legend=:outerright,
-        legend_fontsize=4,
-        legend_columns=length(nz_bins),
-        background_color_legend = nothing,
-        foreground_color_legend = nothing,
-    );
-    display(fig)
-    savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
 
     #########################################################################################
     GC.gc()
@@ -1222,7 +1083,7 @@ else
     CODE
         Code name               : $(PROGRAM_FILE)
         Start date              : $(T_START)
-        End data                : $(T_END)
+        End date                : $(T_END)
         Run time                : $(T_RUN)
         Hostname                : $(HOSTNAME)
 
@@ -1232,7 +1093,7 @@ else
     println(report)
 
     # Save to file
-    open(joinpath(OUTDIR,"simqm_report.txt"), "w") do io
+    open(joinpath(OUTDIR,"simulation_report.txt"), "w") do io
         write(io, report)
     end
 
@@ -1240,7 +1101,6 @@ else
     alert("script $RUN_STAMP has finished!")
 end
 
-JLD2_MyTools.save_script_copy(OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP);
 
 #########################################################################################
 # run1_path = joinpath(dirname(OUTDIR),"QM_T205_8M","run1","qm_screen_profiles_f1_table.jld2")
