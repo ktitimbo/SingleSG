@@ -277,9 +277,6 @@ end
     include(joinpath(@__DIR__, "TheoreticalSimulation_DiscardedParticles.jl"))
     include(joinpath(@__DIR__, "TheoreticalSimulation_Spline.jl"))
     include(joinpath(@__DIR__, "TheoreticalSimulation_Plots.jl"))
-    include(joinpath(@__DIR__, "TheoreticalSimulation_workon.jl"))
-
-
     
 
     export AtomParams, EffusionParams, BeamEffusionParams,
