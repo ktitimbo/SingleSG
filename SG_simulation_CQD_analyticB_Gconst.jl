@@ -189,11 +189,10 @@ Icoils = [0.00,
 ];
 nI = length(Icoils);
 @info "No of currents : $(nI)"
-calibration = TheoreticalSimulation.build_calibration(Icoils);
+calibration = TheoreticalSimulation.build_calibration(Icoils; degree=3, span =0.12);
 
 # Induction terms 
-kis     = unique(round.(vcat([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:5.0],0.001);sigdigits=4))
-kis     = kis[1:8]            
+kis     = unique(round.(vcat([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:4.0],0.001);sigdigits=4))
 @info "Number of ki sampled = $(length(kis))" 
 induction_coeff_for_label     = round.(1e6 .* kis; sigdigits=3)
 ki_labels = [(e = floor(Int, log10(abs(k)) + 1e-9);
@@ -208,7 +207,7 @@ const Nss = 6_000_000 ;
 const DATA_READY = true
 
 if DATA_READY
-    const OUTDIR_PATH = joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_6M_deltaG")
+    const OUTDIR_PATH = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_6M_constG")
     # const OUTDIR_PATH = joinpath(dirname(OUTDIR),"20260521T142848073")
 else
     const OUTDIR_PATH = OUTDIR
@@ -340,7 +339,7 @@ end
 nx_bins             = 32; # fixed nx bins
 nz_bins             = [1, 2];
 gaussian_width_mm   = [0.001, 0.025, 0.050, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.275, 0.300, 0.350, 0.400, 0.500 ]; # try different gaussian widths
-λ0_raw_list         = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
+λ0_raw_list         = [0.001, 0.005, 0.01, 0.02]#, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
 λ0_spline           = 0.001;
 
 # ---------- precompute param grid ----------
