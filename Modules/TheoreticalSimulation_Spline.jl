@@ -725,7 +725,7 @@ function CQD_analyze_profiles_to_dict(filepath::String;
 
         for (idx, Iw) in enumerate(Icoils)
             screen = f["data/final/I$(idx)"]          # columns: x y z vx vy vz (pass already dropped)
-            img    = 1e3 .* screen[:, [1, 3]]   # x and z in mm
+            img    = 1e3 .* screen[:, [9, 10]]   # x and z in mm
 
             result = CQD_analyze_screen_profile(Iw, img;
                          nx_bins     = nx_bins,
