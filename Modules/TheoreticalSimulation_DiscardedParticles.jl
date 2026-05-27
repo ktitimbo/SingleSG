@@ -91,7 +91,6 @@ function QM_flag_travelling_particles(Ix, init_particles, p::AtomParams;
             c = Threads.atomic_add!(progress, 1) + 1
             lock(print_lock); 
             try
-                # println("Analyzing I₀ = $(round(i0, sigdigits=5)) A \t (levels = $nlevels)")
                 @printf "[%02d/%02d]\tAnalyzing I₀ = %.3f A \t (levels = %d)\n" c ncurrents i0 nlevels
             finally
                 unlock(print_lock)
@@ -278,7 +277,6 @@ function QM_flag_travelling_particles_twowires(Ix, init_particles, particles_at_
             c = Threads.atomic_add!(progress, 1) + 1
             lock(print_lock); 
             try
-                # println("Analyzing I₀ = $(round(I0, sigdigits=5)) A \t (levels = $nlevels)")
                 @printf "[%02d/%02d]\tAnalyzing I₀ = %.3f A \t (levels = %d)\n" c ncurrents I0 nlevels
             finally
                 unlock(print_lock)
@@ -758,9 +756,7 @@ function CQD_flag_travelling_particles_twowires(Ix,
 
             # gradient with precomputed B, scaled by S
             _, _, dBdz = grad_normB(xsg, ysg, zsg, Bx, By, Bz; Iw=Iw_eff)
-
             μG = μₑ * S * dBdz
-
 
             # zero-alloc scalar loads
             x0  = init_particles[j, 1]::Float64
