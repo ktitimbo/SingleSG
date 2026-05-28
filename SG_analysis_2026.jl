@@ -38,6 +38,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 @info "Julia threads" count = Threads.nthreads()
 # Set the working directory to the current location
 cd(@__DIR__) ;
+const BASE_PATH = raw"F:\SternGerlachExperiments";
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const OUTDIR    = joinpath(@__DIR__, "data_studies", RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
@@ -120,7 +121,8 @@ SIMULATION INFORMATION
 ***************************************************
 """)
 # Furnace
-T_K = 273.15 + 200 ; # Furnace temperature (K)
+const TCelsius  = 200
+const T_K       = 273.15 + TCelsius ; # Furnace temperature (K)
 # Furnace aperture
 const x_furnace = 2.0e-3 ;
 const z_furnace = 100e-6 ;
@@ -237,19 +239,19 @@ Icoils = [0.00,
 nI = length(Icoils);
 colores_current = palette(:darktest,nI);
 
-data_qmf1_path = joinpath(@__DIR__,"simulation_data",
+data_qmf1_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP",
     "QM_T200_8M",
     "qm_screen_profiles_f1_table.jld2");
 JLD2_MyTools.summarize_meta_qm_jld2(data_qmf1_path)
-data_qmf2_path = joinpath(@__DIR__,"simulation_data",
+data_qmf2_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP",
     "QM_T200_8M",
     "qm_screen_profiles_f2_table.jld2");
 JLD2_MyTools.summarize_meta_qm_jld2(data_qmf2_path)
-data_cqdup_path = joinpath(@__DIR__, "simulation_data",
+data_cqdup_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP",
     "CQD_T200_8M",
     "cqd_8M_up_profiles.jld2");
 JLD2_MyTools.summarize_meta_cqd_jld2(data_cqdup_path)
-data_cqddw_path = joinpath(@__DIR__, "simulation_data",
+data_cqddw_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP",
     "CQD_T200_8M",
     "cqd_8M_dw_profiles.jld2");
 JLD2_MyTools.summarize_meta_cqd_jld2(data_cqddw_path)
@@ -258,12 +260,13 @@ JLD2_MyTools.summarize_meta_cqd_jld2(data_cqddw_path)
 data_directories = [
                     # "20260220", 
                     # "20260225", 
-                    "20260226am",
+                    # "20260226am",
                     # "20260226pm",
                     # "20260227", 
-                    "20260303", 
+                    # "20260303", 
                     # "20260306r1", 
-                    "20260306r2",
+                    # "20260306r2",
+                    # 
 ]
 n_data = length(data_directories);
 colores_data = palette(:darkrainbow, n_data);
