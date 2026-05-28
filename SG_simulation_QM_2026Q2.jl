@@ -41,6 +41,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 @info "Julia threads" count = Threads.nthreads()
 # Set the working directory to the current location
 cd(@__DIR__) ;
+const BASE_PATH = raw"F:\SternGerlachExperiments";
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const OUTDIR    = joinpath(@__DIR__, "simulation_data", "QM2026_"*RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
