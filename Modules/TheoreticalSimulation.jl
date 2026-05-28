@@ -78,6 +78,7 @@ default_R_tube = 35e-3/2 ;
 default_𝒶                   = 2.5e-3 ;
 default_ℓ                   = 0.5*default_y_SG;
 default_center_of_SG_magnet = default_y_FurnaceToSlit + default_y_SlitToSG + default_ℓ
+default_SG_magnet_entrance  = default_y_FurnaceToSlit + default_y_SlitToSG
 
 
 """
