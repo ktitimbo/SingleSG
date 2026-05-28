@@ -1371,18 +1371,18 @@ end
 # then call it for each manifold
 for state_key in [:F1, :F2]
     state   = states_groups_dict[state_key]
-    @info "=== Original: $(state_key) ==="
-    @time analyze_and_plot_manifold(state, data_screen_path, Icoils, 
-        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
-        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
-    @info "=== Optimized (no threading): $(state_key) ==="
-    @time analyze_and_plot_manifold2(state, data_screen_path, Icoils, 
-        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
-        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
-    @info "=== Optimized (batched threads): $(state_key) ==="
-    @time analyze_and_plot_manifold3(state, data_screen_path, Icoils, 
-        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
-        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    # @info "=== Original: $(state_key) ==="
+    # @time analyze_and_plot_manifold(state, data_screen_path, Icoils, 
+    #     nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+    #     Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    # @info "=== Optimized (no threading): $(state_key) ==="
+    # @time analyze_and_plot_manifold2(state, data_screen_path, Icoils, 
+    #     nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+    #     Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    # @info "=== Optimized (batched threads): $(state_key) ==="
+    # @time analyze_and_plot_manifold3(state, data_screen_path, Icoils, 
+    #     nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+    #     Ns, T_K, K39_params, OUTDIR, FIG_EXT)
     @info "=== Optimized single image (batched threads): $(state_key) ==="
     @time analyze_and_plot_manifold4(state, data_screen_path, Icoils, 
         nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
