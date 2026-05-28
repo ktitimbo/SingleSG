@@ -181,7 +181,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 500 ; 
+const Nss = 1500 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2 ; 
@@ -405,7 +405,7 @@ gif(anim, gif_path, fps=2) ; # adjust fps
 anim = nothing
 
 # Peak position (mm) : lower branch
-i_idx = findall(>(0.010), Icoils)[1] ;
+i_idx = findfirst(>(0.010), Icoils) ;
 fig=plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)");
 plot!(fig,Icoils[i_idx:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $\vert 2,-2\rangle$",
@@ -444,7 +444,7 @@ plot!(fig,xaxis=:log10,
 savefig(fig,joinpath(OUTDIR,"QM_results_comparison.$(FIG_EXT)"))
 
 # ATOMS PROPAGATION
-r = 1:1:nI;
+r = 1:3:nI;
 iter = (isempty(r) || last(r) == nI) ? r : Iterators.flatten((r, (nI,)));
 lvl = 5 ; #Int(4*K39_params.Ispin+2)
 f,mf=quantum_numbers[lvl] ;
@@ -615,7 +615,7 @@ anim = nothing
 
 nz_bins_list = [1,2];
 ls_list = [:solid,:dash,:dot];
-gaussian_width_mm_list = [0.010, 0.100, 0.200, 0.300, 0.400];
+gaussian_width_mm_list = [0.010, 0.100, 0.200, 0.300];
 zmax_gaussian_width = zeros(length(nz_bins_list),nI,length(gaussian_width_mm_list));
 for (jdx,nz) in enumerate(nz_bins_list)
     for (idx,val) in enumerate(gaussian_width_mm_list)
@@ -952,14 +952,60 @@ states_groups_dict = OrderedDict(
 
 nx_bins = 32 ;
 nz_bins = [1,2,4];  # try different nz_bins
-gaussian_width_mm = [0.001, 0.010, 0.025, 0.050, 0.065, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
-λ0_raw_list       = [0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
+gaussian_width_mm = [0.001, 0.010, 0.025, 0.050]#, 0.065, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.270, 0.275, 0.300, 0.350, 0.400, 0.450, 0.500 ];  # try different gaussian widths
+λ0_raw_list       = [0.001, 0.005, 0.01, 0.02]#, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
 λ0_spline         = 0.001;
 
 
+function load_manifold_imgs(jld_path::AbstractString, p::AtomParams, manifold)
+    is_group = manifold isa AbstractVector{<:Integer} || manifold isa Tuple{Vararg{Integer}}
+    jldopen(jld_path, "r") do file
+        Ix   = file["meta/Icoils"]
+        imgs = map(1:length(Ix)) do i
+            data_i = file["screen/I$(i)"]
+            if manifold === :F_top
+                1e3 .* vcat((xz[:, 7:8] for xz in data_i[1:Int(2*p.Ispin+2)])...)
+            elseif manifold === :F_bottom
+                1e3 .* vcat((xz[:, 7:8] for xz in data_i[Int(2*p.Ispin+3):Int(4*p.Ispin+2)])...)
+            elseif manifold === :S_up
+                1e3 .* vcat((xz[:, 7:8] for xz in data_i[1:Int(2*p.Ispin+1)])...)
+            elseif manifold === :S_down
+                1e3 .* vcat((xz[:, 7:8] for xz in data_i[Int(2*p.Ispin+2):Int(4*p.Ispin+2)])...)
+            elseif is_group
+                1e3 .* vcat((data_i[lvl][:, 7:8] for lvl in collect(manifold))...)
+            else
+                lvl = manifold isa Integer ? Int(manifold) : parse(Int, string(manifold))
+                1e3 .* data_i[lvl][:, 7:8]
+            end
+        end
+        return Ix, imgs
+    end
+end
+
+function load_single_screen_img(jld_path::AbstractString, p::AtomParams, manifold, i::Int)
+    is_group = manifold isa AbstractVector{<:Integer} || manifold isa Tuple{Vararg{Integer}}
+    jldopen(jld_path, "r") do file
+        data_i = file["screen/I$(i)"]
+        if manifold === :F_top
+            1e3 .* vcat((xz[:, 7:8] for xz in data_i[1:Int(2*p.Ispin+2)])...)
+        elseif manifold === :F_bottom
+            1e3 .* vcat((xz[:, 7:8] for xz in data_i[Int(2*p.Ispin+3):Int(4*p.Ispin+2)])...)
+        elseif manifold === :S_up
+            1e3 .* vcat((xz[:, 7:8] for xz in data_i[1:Int(2*p.Ispin+1)])...)
+        elseif manifold === :S_down
+            1e3 .* vcat((xz[:, 7:8] for xz in data_i[Int(2*p.Ispin+2):Int(4*p.Ispin+2)])...)
+        elseif is_group
+            1e3 .* vcat((data_i[lvl][:, 7:8] for lvl in collect(manifold))...)
+        else
+            lvl = manifold isa Integer ? Int(manifold) : parse(Int, string(manifold))
+            1e3 .* data_i[lvl][:, 7:8]
+        end
+    end
+end
+
 function analyze_and_plot_manifold(state, data_screen_path, Icoils,
     nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
-    Ns, T_K, K39_params, OUTDIR, FIG_EXT
+    Ns, T_K, K39_params, OUTDIR, FIG_EXT; makeplot=false
 )
     # ── parameter grid ────────────────────────────────────────────────────────
     Ntot        = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
@@ -972,7 +1018,7 @@ function analyze_and_plot_manifold(state, data_screen_path, Icoils,
 
     # ── compute and save profiles ─────────────────────────────────────────────
     outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
-    @time jldopen(outpath, "w") do file
+    jldopen(outpath, "w") do file
         file["meta/N"]        = Ns
         file["meta/state"]    = (state.family, state.val)
         file["meta/T"]        = T_K
@@ -1007,44 +1053,342 @@ function analyze_and_plot_manifold(state, data_screen_path, Icoils,
     end
 
     # ── plot ──────────────────────────────────────────────────────────────────
-    fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
-    jldopen(outpath, "r") do file
-        color_idx = 1
-        for λ0 in λ0_raw_list, gw in gaussian_width_mm
-            for (nz_idx, nz) in enumerate(nz_bins)
-                prof  = file[JLD2_MyTools.make_keypath_qm(nz, gw, λ0)]
-                zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
-                mask  = (Icoils .> 0) .& (abs.(zvals) .> 0)
-                label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0)$"
-                plot!(fig,
-                    Icoils[mask], abs.(zvals[mask]),
-                    line=(line_styles[nz_idx], clrs[color_idx], 2), label=label)
-                color_idx += 1
+    if makeplot
+        fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
+        jldopen(outpath, "r") do file
+            color_idx = 1
+            for λ0 in λ0_raw_list, gw in gaussian_width_mm
+                for (nz_idx, nz) in enumerate(nz_bins)
+                    prof  = file[JLD2_MyTools.make_keypath_qm(nz, gw, λ0)]
+                    zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                    mask  = (Icoils .> 0) .& (abs.(zvals) .> 0)
+                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0)$"
+                    plot!(fig,
+                        Icoils[mask], abs.(zvals[mask]),
+                        line=(line_styles[nz_idx], clrs[color_idx], 2), label=label)
+                    color_idx += 1
+                end
+            end
+        end
+        plot!(fig,
+            xaxis=:log10, yaxis=:log10,
+            xlims=(8e-3, 2), ylims=(8e-3, 2),
+            xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            size=(1050, 650), rightmargin=5mm,
+            legend=:outerright, legend_fontsize=4,
+            legend_columns=length(nz_bins),
+            background_color_legend=nothing,
+            foreground_color_legend=nothing,
+        )
+        display(fig)
+        savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
+    end
+end
+
+function analyze_and_plot_manifold2(state, data_screen_path, Icoils,
+    nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+    Ns, T_K, K39_params, OUTDIR, FIG_EXT; makeplot=false
+)
+    # ── parameter grid ────────────────────────────────────────────────────────
+    Ntot        = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
+    param_grid  = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list))
+    clrs        = palette(:darkrainbow, Ntot)
+    line_styles = [:solid, :dash, :dot, :dashdot]
+    @info "Total combinations : Nnz × Nσ × Nλ0 × Nλs = $(Ntot)"
+
+    @info "QM approach : analyzing screen profiles for $(state.family)=$(state.val) manifold | $Ntot combinations"
+
+    # ── load manifold data ONCE ───────────────────────────────────────────────
+    @info "Loading manifold data for $(state.family)=$(state.val)..."
+    Ix, imgs_F = load_manifold_imgs(data_screen_path, K39_params, state.branch)
+
+    # ── compute and save profiles ─────────────────────────────────────────────
+    outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
+    jldopen(outpath, "w") do file
+        file["meta/N"]        = Ns
+        file["meta/state"]    = (state.family, state.val)
+        file["meta/T"]        = T_K
+        file["meta/s_spline"] = λ0_spline
+        file["meta/nx"]       = nx_bins
+        file["meta/nz"]       = sort(nz_bins)
+        file["meta/σw"]       = sort(gaussian_width_mm)
+        file["meta/λ0"]       = sort(λ0_raw_list)
+
+        prog = Progress(Ntot; desc="Computing profiles $(state.family)=$(state.val)...", showspeed=true)
+        for (nz, gw, λ0) in param_grid
+            profiles = QM_analyze_profiles_to_dict(
+                Ix, imgs_F, K39_params;   # ← no path, no file open
+                manifold    = state.branch,
+                n_bins      = (nx_bins, nz),
+                width_mm    = gw,
+                add_plot    = false,
+                plot_xrange = :all,
+                λ_raw       = λ0,
+                λ_smooth    = λ0_spline,
+                mode        = :probability
+            )
+            file[JLD2_MyTools.make_keypath_qm(nz, gw, λ0)] = profiles
+            next!(prog; showvalues = [
+                (:manifold, "$(state.family)=$(state.val)"),
+                (:nz,       nz),
+                (:σ_μm,     "$(Int(round(1e3*gw))) μm"),
+                (:λ₀,       λ0),
+            ])
+        end
+    end
+
+    # ── plot ──────────────────────────────────────────────────────────────────
+    if makeplot
+        fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
+        jldopen(outpath, "r") do file
+            color_idx = 1
+            for λ0 in λ0_raw_list, gw in gaussian_width_mm
+                for (nz_idx, nz) in enumerate(nz_bins)
+                    prof  = file[JLD2_MyTools.make_keypath_qm(nz, gw, λ0)]
+                    zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                    mask  = (Icoils .> 0) .& (abs.(zvals) .> 0)
+                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0)$"
+                    plot!(fig,
+                        Icoils[mask], abs.(zvals[mask]),
+                        line=(line_styles[nz_idx], clrs[color_idx], 2), label=label)
+                    color_idx += 1
+                end
+            end
+        end
+        plot!(fig,
+            xaxis=:log10, yaxis=:log10,
+            xlims=(8e-3, 2), ylims=(8e-3, 2),
+            xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            size=(1050, 650), rightmargin=5mm,
+            legend=:outerright, legend_fontsize=4,
+            legend_columns=length(nz_bins),
+            background_color_legend=nothing,
+            foreground_color_legend=nothing,
+        )
+        display(fig)
+        savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
+    end
+end
+
+function analyze_and_plot_manifold3(state, data_screen_path, Icoils,
+    nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+    Ns, T_K, K39_params, OUTDIR, FIG_EXT; makeplot=false
+)
+    # ── parameter grid ────────────────────────────────────────────────────────
+    Ntot        = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
+    param_grid  = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list))
+    clrs        = palette(:darkrainbow, Ntot)
+    line_styles = [:solid, :dash, :dot, :dashdot]
+    @info "Total combinations : Nnz × Nσ × Nλ0 × Nλs = $(Ntot)"
+    @info "QM approach : analyzing screen profiles for $(state.family)=$(state.val) manifold | $Ntot combinations"
+
+    # ── load manifold data ONCE ───────────────────────────────────────────────
+    @info "Loading manifold data for $(state.family)=$(state.val)..."
+    Ix, imgs_F = load_manifold_imgs(data_screen_path, K39_params, state.branch)
+
+    # ── batched parallel compute + serial write ───────────────────────────────
+    batch_size = Threads.nthreads() * 2
+    n_grid     = length(param_grid)
+    batches    = Iterators.partition(1:n_grid, batch_size)
+    @info "Threading : $(Threads.nthreads()) threads | batch_size = $(batch_size)"
+
+    outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
+    jldopen(outpath, "w") do file
+        file["meta/N"]        = Ns
+        file["meta/state"]    = (state.family, state.val)
+        file["meta/T"]        = T_K
+        file["meta/s_spline"] = λ0_spline
+        file["meta/nx"]       = nx_bins
+        file["meta/nz"]       = sort(nz_bins)
+        file["meta/σw"]       = sort(gaussian_width_mm)
+        file["meta/λ0"]       = sort(λ0_raw_list)
+
+        prog = Progress(n_grid; desc="Computing profiles $(state.family)=$(state.val)...", showspeed=true)
+        for batch in batches
+            results = Vector{Any}(undef, length(batch))
+
+            Threads.@threads for k in 1:length(batch)
+                idx = batch[k]
+                nz, gw, λ0 = param_grid[idx]
+                results[k] = (
+                    nz, gw, λ0,
+                    QM_analyze_profiles_to_dict(
+                        Ix, imgs_F, K39_params;
+                        manifold    = state.branch,
+                        n_bins      = (nx_bins, nz),
+                        width_mm    = gw,
+                        add_plot    = false,
+                        plot_xrange = :all,
+                        λ_raw       = λ0,
+                        λ_smooth    = λ0_spline,
+                        mode        = :probability
+                    )
+                )
+                next!(prog)
+            end
+
+            for (nz, gw, λ0, profiles) in results
+                file[JLD2_MyTools.make_keypath_qm(nz, gw, λ0)] = profiles
             end
         end
     end
-    plot!(fig,
-        xaxis=:log10, yaxis=:log10,
-        xlims=(8e-3, 2), ylims=(8e-3, 2),
-        xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        size=(1050, 650), rightmargin=5mm,
-        legend=:outerright, legend_fontsize=4,
-        legend_columns=length(nz_bins),
-        background_color_legend=nothing,
-        foreground_color_legend=nothing,
-    )
-    display(fig)
-    savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
+
+    # ── plot ──────────────────────────────────────────────────────────────────
+    if makeplot
+        fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
+        jldopen(outpath, "r") do file
+            color_idx = 1
+            for λ0 in λ0_raw_list, gw in gaussian_width_mm
+                for (nz_idx, nz) in enumerate(nz_bins)
+                    prof  = file[JLD2_MyTools.make_keypath_qm(nz, gw, λ0)]
+                    zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                    mask  = (Icoils .> 0) .& (abs.(zvals) .> 0)
+                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0)$"
+                    plot!(fig,
+                        Icoils[mask], abs.(zvals[mask]),
+                        line=(line_styles[nz_idx], clrs[color_idx], 2), label=label)
+                    color_idx += 1
+                end
+            end
+        end
+        plot!(fig,
+            xaxis=:log10, yaxis=:log10,
+            xlims=(8e-3, 2), ylims=(8e-3, 2),
+            xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            size=(1050, 650), rightmargin=5mm,
+            legend=:outerright, legend_fontsize=4,
+            legend_columns=length(nz_bins),
+            background_color_legend=nothing,
+            foreground_color_legend=nothing,
+        )
+        display(fig)
+        savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
+    end
+end
+
+function analyze_and_plot_manifold4(state, data_screen_path, Icoils,
+    nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+    Ns, T_K, K39_params, OUTDIR, FIG_EXT; makeplot=false
+)
+    # ── parameter grid ────────────────────────────────────────────────────────
+    Ntot        = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
+    param_grid  = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list))
+    clrs        = palette(:darkrainbow, Ntot)
+    line_styles = [:solid, :dash, :dot, :dashdot]
+    @info "Total combinations : Nnz × Nσ × Nλ0 × Nλs = $(Ntot)"
+    @info "QM approach : analyzing screen profiles for $(state.family)=$(state.val) manifold | $Ntot combinations"
+    @info "Threading : $(Threads.nthreads()) threads"
+
+    # ── load Ix only (no screen data yet) ────────────────────────────────────
+    Ix = jldopen(f -> f["meta/Icoils"], data_screen_path, "r")
+    nI = length(Ix)
+
+    # ── preallocate results: all_results[k] = OrderedDict for param k ────────
+    # each will collect per-current entries
+    n_grid      = length(param_grid)
+    all_results = [OrderedDict{Int, OrderedDict{Symbol, Any}}() for _ in 1:n_grid]
+
+    # ── outer loop: one screen read per current ───────────────────────────────
+    outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
+    prog = Progress(nI; desc="Computing profiles $(state.family)=$(state.val)...", showspeed=true)
+    for i in 1:nI
+        img_i = load_single_screen_img(data_screen_path, K39_params, state.branch, i)
+
+        # inner parallel loop: all param combos for this current
+        Threads.@threads for k in 1:n_grid
+            nz, gw, λ0 = param_grid[k]
+            all_results[k][i] = QM_analyze_profiles_to_dict(
+                Ix[i], img_i, K39_params;
+                manifold    = state.branch,
+                n_bins      = (nx_bins, nz),
+                width_mm    = gw,
+                add_plot    = false,
+                plot_xrange = :all,
+                λ_raw       = λ0,
+                λ_smooth    = λ0_spline,
+                mode        = :probability
+            )
+        end
+        img_i = nothing
+        next!(prog)
+    end
+
+    # ── serial write ──────────────────────────────────────────────────────────
+    @info "Writing results to disk..."
+    jldopen(outpath, "w") do file
+        file["meta/N"]        = Ns
+        file["meta/state"]    = (state.family, state.val)
+        file["meta/T"]        = T_K
+        file["meta/s_spline"] = λ0_spline
+        file["meta/nx"]       = nx_bins
+        file["meta/nz"]       = sort(nz_bins)
+        file["meta/σw"]       = sort(gaussian_width_mm)
+        file["meta/λ0"]       = sort(λ0_raw_list)
+
+        for k in 1:n_grid
+            nz, gw, λ0 = param_grid[k]
+            file[JLD2_MyTools.make_keypath_qm(nz, gw, λ0)] = all_results[k]
+        end
+    end
+
+    # ── plot ──────────────────────────────────────────────────────────────────
+    if makeplot
+        fig = plot(xlabel="Currents (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)")
+        jldopen(outpath, "r") do file
+            color_idx = 1
+            for λ0 in λ0_raw_list, gw in gaussian_width_mm
+                for (nz_idx, nz) in enumerate(nz_bins)
+                    prof  = file[JLD2_MyTools.make_keypath_qm(nz, gw, λ0)]
+                    zvals = [prof[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)]
+                    mask  = (Icoils .> 0) .& (abs.(zvals) .> 0)
+                    label = L"$n_{z}=%$(nz)$ | $w=%$(Int(round(1000*gw)))\,\mathrm{\mu m}$ | $\lambda_{0} = %$(λ0)$"
+                    plot!(fig,
+                        Icoils[mask], abs.(zvals[mask]),
+                        line=(line_styles[nz_idx], clrs[color_idx], 2), label=label)
+                    color_idx += 1
+                end
+            end
+        end
+        plot!(fig,
+            xaxis=:log10, yaxis=:log10,
+            xlims=(8e-3, 2), ylims=(8e-3, 2),
+            xticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            yticks=([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            size=(1050, 650), rightmargin=5mm,
+            legend=:outerright, legend_fontsize=4,
+            legend_columns=length(nz_bins),
+            background_color_legend=nothing,
+            foreground_color_legend=nothing,
+        )
+        display(fig)
+        savefig(fig, joinpath(OUTDIR, "qm_profiles_$(state.tag)_table_comparison_w_n.$(FIG_EXT)"))
+    end
 end
 
 # then call it for each manifold
 for state_key in [:F1, :F2]
     state   = states_groups_dict[state_key]
-    analyze_and_plot_manifold(state, data_screen_path, Icoils, 
+    @info "=== Original: $(state_key) ==="
+    @time analyze_and_plot_manifold(state, data_screen_path, Icoils, 
+        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    @info "=== Optimized (no threading): $(state_key) ==="
+    @time analyze_and_plot_manifold2(state, data_screen_path, Icoils, 
+        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    @info "=== Optimized (batched threads): $(state_key) ==="
+    @time analyze_and_plot_manifold3(state, data_screen_path, Icoils, 
+        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    @info "=== Optimized single image (batched threads): $(state_key) ==="
+    @time analyze_and_plot_manifold4(state, data_screen_path, Icoils, 
         nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
         Ns, T_K, K39_params, OUTDIR, FIG_EXT)
 end
+
 
 #########################################################################################
 GC.gc()
