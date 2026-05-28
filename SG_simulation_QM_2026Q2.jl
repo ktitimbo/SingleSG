@@ -181,7 +181,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 1500 ; 
+const Nss = 200_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2 ; 
@@ -1104,7 +1104,7 @@ function analyze_and_plot_manifold2(state, data_screen_path, Icoils,
     Ix, imgs_F = load_manifold_imgs(data_screen_path, K39_params, state.branch)
 
     # ── compute and save profiles ─────────────────────────────────────────────
-    outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
+    outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table2.jld2")
     jldopen(outpath, "w") do file
         file["meta/N"]        = Ns
         file["meta/state"]    = (state.family, state.val)
@@ -1194,7 +1194,7 @@ function analyze_and_plot_manifold3(state, data_screen_path, Icoils,
     batches    = Iterators.partition(1:n_grid, batch_size)
     @info "Threading : $(Threads.nthreads()) threads | batch_size = $(batch_size)"
 
-    outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
+    outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table3.jld2")
     jldopen(outpath, "w") do file
         file["meta/N"]        = Ns
         file["meta/state"]    = (state.family, state.val)
@@ -1292,7 +1292,7 @@ function analyze_and_plot_manifold4(state, data_screen_path, Icoils,
     all_results = [OrderedDict{Int, OrderedDict{Symbol, Any}}() for _ in 1:n_grid]
 
     # ── outer loop: one screen read per current ───────────────────────────────
-    outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table.jld2")
+    outpath = joinpath(OUTDIR, "qm_screen_profiles_$(state.tag)_table4.jld2")
     prog = Progress(nI; desc="Computing profiles $(state.family)=$(state.val)...", showspeed=true)
     for i in 1:nI
         img_i = load_single_screen_img(data_screen_path, K39_params, state.branch, i)
@@ -1371,19 +1371,19 @@ end
 # then call it for each manifold
 for state_key in [:F1, :F2]
     state   = states_groups_dict[state_key]
-    # @info "=== Original: $(state_key) ==="
-    # @time analyze_and_plot_manifold(state, data_screen_path, Icoils, 
-    #     nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
-    #     Ns, T_K, K39_params, OUTDIR, FIG_EXT)
-    # @info "=== Optimized (no threading): $(state_key) ==="
-    # @time analyze_and_plot_manifold2(state, data_screen_path, Icoils, 
-    #     nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
-    #     Ns, T_K, K39_params, OUTDIR, FIG_EXT)
-    # @info "=== Optimized (batched threads): $(state_key) ==="
-    # @time analyze_and_plot_manifold3(state, data_screen_path, Icoils, 
-    #     nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
-    #     Ns, T_K, K39_params, OUTDIR, FIG_EXT)
-    @info "=== Optimized single image (batched threads): $(state_key) ==="
+    @info "=== Original: $(state_key) ==="
+    @time analyze_and_plot_manifold(state, data_screen_path, Icoils, 
+        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    @info "=== Optimized (no threading): $(state_key) ==="
+    @time analyze_and_plot_manifold2(state, data_screen_path, Icoils, 
+        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    @info "=== Optimized (batched threads): $(state_key) ==="
+    @time analyze_and_plot_manifold3(state, data_screen_path, Icoils, 
+        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    @info "=== Optimized single image (threads): $(state_key) ==="
     @time analyze_and_plot_manifold4(state, data_screen_path, Icoils, 
         nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
         Ns, T_K, K39_params, OUTDIR, FIG_EXT)
@@ -1532,3 +1532,13 @@ alert("script $RUN_STAMP has finished!")
 # testdata= jldopen(outpath,"r") do file
 #     file[make_keypath(2,0.27,0.01)]
 # end
+
+
+path1 = joinpath(OUTDIR,"qm_screen_profiles_f1_table.jld2")
+path2 = joinpath(OUTDIR,"qm_screen_profiles_f1_table2.jld2")
+path3 = joinpath(OUTDIR,"qm_screen_profiles_f1_table3.jld2")
+path4 = joinpath(OUTDIR,"qm_screen_profiles_f1_table4.jld2")
+
+JLD2_MyTools.compare_jld2_files(path1, path2)
+JLD2_MyTools.compare_jld2_files(path2, path3)
+JLD2_MyTools.compare_jld2_files(path3, path4)
