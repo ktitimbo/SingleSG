@@ -804,4 +804,84 @@ function save_script_copy(outdir::AbstractString;
     return dest
 end
 
+
+"""
+    compare_jld2_files(path1::String, path2::String; rtol=1e-8, atol=1e-10, verbose=true)
+
+Compare two JLD2 files key-by-key. Reports missing keys and value mismatches.
+Returns `true` if files are identical (within tolerance for floats).
+"""
+function compare_jld2_files(path1::String, path2::String; rtol=1e-10, atol=1e-12, verbose=true)
+
+    # ── helpers (local, not exported) ────────────────────────────────────────
+
+    function _all_keys(g, prefix="")
+        result = String[]
+        for k in keys(g)
+            full  = isempty(prefix) ? k : "$prefix/$k"
+            child = g[k]
+            if child isa JLD2.Group
+                append!(result, _all_keys(child, full))
+            else
+                push!(result, full)
+            end
+        end
+        return result
+    end
+
+    function _cmp(key, v1, v2)
+        typeof(v1) != typeof(v2) && return "TYPE MISMATCH [$key]: $(typeof(v1)) vs $(typeof(v2))"
+        if v1 isa AbstractArray{<:Number}
+            size(v1) != size(v2) && return "SIZE MISMATCH [$key]: $(size(v1)) vs $(size(v2))"
+            isapprox(v1, v2; rtol, atol, nans=true) && return nothing
+            return "VALUE MISMATCH [$key]: max|Δ| = $(maximum(abs.(v1 .- v2)))"
+        end
+        if v1 isa Number
+            return isapprox(v1, v2; rtol, atol, nans=true) ? nothing : "VALUE MISMATCH [$key]: $v1 vs $v2"
+        end
+        if v1 isa AbstractString
+            return v1 == v2 ? nothing : "VALUE MISMATCH [$key]: \"$v1\" vs \"$v2\""
+        end
+        if v1 isa Tuple || v1 isa Symbol
+            return v1 == v2 ? nothing : "VALUE MISMATCH [$key]: $v1 vs $v2"
+        end
+        return isequal(v1, v2) ? nothing : "VALUE MISMATCH [$key]: objects differ (no detailed diff available)"
+    end
+
+    # ── main logic ────────────────────────────────────────────────────────────
+
+    issues = String[]
+
+    jldopen(path1, "r") do f1
+    jldopen(path2, "r") do f2
+
+        keys1 = Set(_all_keys(f1))
+        keys2 = Set(_all_keys(f2))
+
+        for k in sort(collect(setdiff(keys1, keys2)))
+            push!(issues, "ONLY IN FILE 1: $k")
+        end
+        for k in sort(collect(setdiff(keys2, keys1)))
+            push!(issues, "ONLY IN FILE 2: $k")
+        end
+        for k in sort(collect(intersect(keys1, keys2)))
+            msg = _cmp(k, f1[k], f2[k])
+            msg !== nothing && push!(issues, msg)
+        end
+
+    end
+    end
+
+    if isempty(issues)
+        verbose && println("✓ Files are identical.")
+        return true
+    else
+        verbose && println("✗ Found $(length(issues)) difference(s):\n")
+        verbose && foreach(s -> println("  • ", s), issues)
+        return false
+    end
+end
+
+
+
 end
