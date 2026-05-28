@@ -118,7 +118,7 @@ SIMULATION INFORMATION
 ***************************************************
 """)
 # Furnace
-T_K = 273.15 + 205 ; # Furnace temperature (K)
+T_K = 273.15 + 200 ; # Furnace temperature (K)
 # Furnace aperture
 const x_furnace = 2.0e-3 ;
 const z_furnace = 100e-6 ;
@@ -207,7 +207,7 @@ const Nss = 6_000_000 ;
 const DATA_READY = true
 
 if DATA_READY
-    const OUTDIR_PATH = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_6M_constG")
+    const OUTDIR_PATH = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_6M_constG")
     # const OUTDIR_PATH = joinpath(dirname(OUTDIR),"20260521T142848073")
 else
     const OUTDIR_PATH = OUTDIR
