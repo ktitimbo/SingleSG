@@ -538,6 +538,41 @@ function QM_analyze_profiles_to_dict(jld_path::AbstractString, p::AtomParams;
     return out
 end
 
+function QM_analyze_profiles_to_dict(Ix::AbstractVector, imgs::Vector, p::AtomParams;
+    manifold = :F_bottom,
+    n_bins::Tuple = (1,4), width_mm::Float64 = 0.150,
+    add_plot::Bool = false, plot_xrange::Symbol = :all,
+    λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, mode::Symbol = :probability)
+
+    is_group     = manifold isa AbstractVector{<:Integer} || manifold isa Tuple{Vararg{Integer}}
+    manifold_tag = is_group ? :custom : manifold
+    nx_bins, nz_bins = n_bins
+    out = OrderedDict{Int, OrderedDict{Symbol, Any}}()
+
+    for i in eachindex(Ix)
+        result = analyze_screen_profile(Ix[i], imgs[i];
+            manifold     = manifold_tag,
+            nx_bins      = nx_bins,
+            nz_bins      = nz_bins,
+            width_mm     = width_mm,
+            add_plot     = add_plot,
+            plot_xrange  = plot_xrange,
+            λ_raw        = λ_raw,
+            λ_smooth     = λ_smooth,
+            mode         = mode)
+
+        out[i] = OrderedDict{Symbol, Any}(
+            :Icoil                  => Ix[i],
+            :z_max_raw_mm           => result.z_max_raw_mm,
+            :z_max_raw_spline_mm    => result.z_max_raw_spline_mm,
+            :z_max_smooth_mm        => result.z_max_smooth_mm,
+            :z_max_smooth_spline_mm => result.z_max_smooth_spline_mm,
+            :z_profile              => result.z_profile,
+        )
+    end
+    return out
+end
+
 
 function CQD_analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
     nx_bins::Integer = 2, nz_bins::Integer = 2, 
