@@ -956,7 +956,6 @@ gaussian_width_mm = [0.001, 0.010, 0.025, 0.050]#, 0.065, 0.075, 0.100, 0.125, 0
 λ0_raw_list       = [0.001, 0.005, 0.01, 0.02]#, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
 λ0_spline         = 0.001;
 
-
 function load_manifold_imgs(jld_path::AbstractString, p::AtomParams, manifold)
     is_group = manifold isa AbstractVector{<:Integer} || manifold isa Tuple{Vararg{Integer}}
     jldopen(jld_path, "r") do file
@@ -1009,7 +1008,7 @@ function analyze_and_plot_manifold(state, data_screen_path, Icoils,
 )
     # ── parameter grid ────────────────────────────────────────────────────────
     Ntot        = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-    param_grid  = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list))
+    param_grid  = vec(collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list)))
     clrs        = palette(:darkrainbow, Ntot)
     line_styles = [:solid, :dash, :dot, :dashdot]
     @info "Total combinations : Nnz × Nσ × Nλ0 × Nλs = $(Ntot)"
@@ -1092,7 +1091,7 @@ function analyze_and_plot_manifold2(state, data_screen_path, Icoils,
 )
     # ── parameter grid ────────────────────────────────────────────────────────
     Ntot        = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-    param_grid  = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list))
+    param_grid  = vec(collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list)))
     clrs        = palette(:darkrainbow, Ntot)
     line_styles = [:solid, :dash, :dot, :dashdot]
     @info "Total combinations : Nnz × Nσ × Nλ0 × Nλs = $(Ntot)"
@@ -1178,7 +1177,7 @@ function analyze_and_plot_manifold3(state, data_screen_path, Icoils,
 )
     # ── parameter grid ────────────────────────────────────────────────────────
     Ntot        = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-    param_grid  = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list))
+    param_grid  = vec(collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list)))
     clrs        = palette(:darkrainbow, Ntot)
     line_styles = [:solid, :dash, :dot, :dashdot]
     @info "Total combinations : Nnz × Nσ × Nλ0 × Nλs = $(Ntot)"
@@ -1275,7 +1274,7 @@ function analyze_and_plot_manifold4(state, data_screen_path, Icoils,
 )
     # ── parameter grid ────────────────────────────────────────────────────────
     Ntot        = length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
-    param_grid  = collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list))
+    param_grid  = vec(collect(Iterators.product(nz_bins, gaussian_width_mm, λ0_raw_list)))
     clrs        = palette(:darkrainbow, Ntot)
     line_styles = [:solid, :dash, :dot, :dashdot]
     @info "Total combinations : Nnz × Nσ × Nλ0 × Nλs = $(Ntot)"
