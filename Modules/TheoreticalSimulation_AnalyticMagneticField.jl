@@ -288,7 +288,7 @@ end
 
 # propagates the particles from the oven to a final position with free motion
 function propagate_to_SG_entrance(data;
-                                y_SG_entrance = default_center_of_SG_magnet)
+                                y_SG_entrance = default_SG_magnet_entrance)
 
     N    = size(data, 1)
     # output: [x y z vx vy vz θ0] at SG entrance
