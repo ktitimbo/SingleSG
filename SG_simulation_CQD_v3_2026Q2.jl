@@ -536,13 +536,13 @@ for (i, ki) in enumerate(kis)
         :N      => Nss,
         :T      => T_K,
         :ki     => ki,
-        :data => TheoreticalSimulation.CQD_select_flagged(tmp_up_traj, :screen))
+        :data   => TheoreticalSimulation.CQD_select_flagged(tmp_up_traj, :screen))
     tmp_dw_screen = OrderedDict(
         :Icoils => ICOILS,
         :N      => Nss,
         :T      => T_K,
         :ki     => ki,
-        :data => TheoreticalSimulation.CQD_select_flagged(tmp_dw_traj, :screen))
+        :data   => TheoreticalSimulation.CQD_select_flagged(tmp_dw_traj, :screen))
  
     jldsave(joinpath(OUTDIR, "up", "cqd$(RUN_STAMP)_$(Nss)_ki$(@sprintf("%03d",i))_up_screen.jld2"),
         screen = tmp_up_screen)
