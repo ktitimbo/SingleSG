@@ -389,7 +389,7 @@ gif(anim, gif_path, fps=2) ; # adjust fps
 anim = nothing
 
 # Peak position (mm) : lower branch
-i_idx = findall(>(0.010), Icoils)[1] ;
+i_idx = findfirst(>(0.010), Icoils) ;
 fig=plot(xlabel=L"$I_{c}$ (A)", ylabel=L"$z_{\mathrm{max}}$ (mm)");
 plot!(fig,Icoils[i_idx:end], [profiles_5[i][:z_max_smooth_spline_mm] for i in eachindex(Icoils)][i_idx:end],
     label=L"Trajectory $\vert 2,-2\rangle$",
@@ -617,7 +617,7 @@ end
 fig=plot(title = L"Quantum Mechanics : $F=1$",
     xlabel="Currents (A)",
     ylabel=L"$z_{\mathrm{max}}$ (mm)",);
-Ic_start_idx = findall(>(0.010), Icoils)[1];
+Ic_start_idx = findfirst(>(0.010), Icoils);
 cls = palette(:darkrainbow,length(gaussian_width_mm_list));
 for (jdx,nz) in enumerate(nz_bins_list)
     for (idx,val) in enumerate(gaussian_width_mm_list)
