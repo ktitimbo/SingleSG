@@ -83,7 +83,17 @@ const Sspin = 1/2 ;                # Electron spin
 const gₑ    = -2.00231930436092 ;  # Electron g-factor
 
 #_____________________________________________________________________________________________________________
-σw = 0.200
+# Coil currents
+Icoils = [0.00,
+            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
+            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
+            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
+            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
+            0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
+];
+nI = length(Icoils);
+
+σw = 0.150
 ki = 2.0 # ×10^-6
 nz = 2
 λ0 = 0.01
@@ -117,8 +127,8 @@ CQD_DW_T200_manual_data = jldopen(CQD_DW_T200_manual,"r") do file
 end
 
 
-CQD_UP_T200_ΔG = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_6M_constG","cqd_6M_up_profiles.jld2")
-CQD_DW_T200_ΔG = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_6M_constG","cqd_6M_dw_profiles.jld2")
+CQD_UP_T200_ΔG = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_6M_constG","cqd_6000000_up_profiles.jld2")
+CQD_DW_T200_ΔG = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_6M_constG","cqd_6000000_dw_profiles.jld2")
 
 CQD_UP_T200_ΔG_data = jldopen(CQD_UP_T200_ΔG,"r") do file
     data = file[JLD2_MyTools.make_keypath_cqd(:up,ki,nz,σw,λ0)]
@@ -146,16 +156,39 @@ end
 
 
 
-
-plot(CQD_UP_T200_manual_data.z_profiles[1][:,1],
-CQD_UP_T200_manual_data.z_profiles[1][:,3]
+i0_idx = 47
+for i0_idx=42:nI
+FIGUP = plot(CQD_UP_T200_manual_data.z_profiles[i0_idx][:,1],
+CQD_UP_T200_manual_data.z_profiles[i0_idx][:,3],
+label="manual",
+line=(:solid,2,:red)
 )
-plot!(CQD_UP_T200_ΔG_data.z_profiles[1][:,1],
-CQD_UP_T200_ΔG_data.z_profiles[1][:,3]
+plot!(CQD_UP_T200_ΔG_data.z_profiles[i0_idx][:,1],
+CQD_UP_T200_ΔG_data.z_profiles[i0_idx][:,3],
+label=L"$\Delta\mathcal{G}$",
+line=(:dashdot,1.5,:dodgerblue3)
+)
+
+FIGDW = plot(CQD_DW_T200_manual_data.z_profiles[i0_idx][:,1],
+CQD_DW_T200_manual_data.z_profiles[i0_idx][:,3],
+label="manual",
+line=(:solid,2,:orange)
+)
+plot!(CQD_DW_T200_ΔG_data.z_profiles[i0_idx][:,1],
+CQD_DW_T200_ΔG_data.z_profiles[i0_idx][:,3],
+label=L"$\Delta\mathcal{G}$",
+line=(:dashdot,1.5,:purple)
 )
 
 
-
+FIG = plot(FIGUP, FIGDW,
+    suptitle = L"CQD | $T=200 \degree \mathrm{C}$ | $I_{c}=%$(Int(1000*Icoils[i0_idx]))\mathrm{mA}$",
+    layout=(2,1),
+    link=:x,
+)
+plot!(FIG[1], xlabel="", xformatter=_->"", bottom_margin=-5mm)
+display(FIG)
+end
 
 
 
