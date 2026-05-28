@@ -573,6 +573,37 @@ function QM_analyze_profiles_to_dict(Ix::AbstractVector, imgs::Vector, p::AtomPa
     return out
 end
 
+function QM_analyze_profiles_to_dict(Ix_i::Real, img_i::Matrix, p::AtomParams;
+    manifold = :F_bottom,
+    n_bins::Tuple = (1,4), width_mm::Float64 = 0.150,
+    add_plot::Bool = false, plot_xrange::Symbol = :all,
+    λ_raw::Float64 = 0.01, λ_smooth::Float64 = 1e-3, mode::Symbol = :probability)
+
+    is_group     = manifold isa AbstractVector{<:Integer} || manifold isa Tuple{Vararg{Integer}}
+    manifold_tag = is_group ? :custom : manifold
+    nx_bins, nz_bins = n_bins
+
+    result = analyze_screen_profile(Ix_i, img_i;
+        manifold    = manifold_tag,
+        nx_bins     = nx_bins,
+        nz_bins     = nz_bins,
+        width_mm    = width_mm,
+        add_plot    = add_plot,
+        plot_xrange = plot_xrange,
+        λ_raw       = λ_raw,
+        λ_smooth    = λ_smooth,
+        mode        = mode)
+
+    return OrderedDict{Symbol, Any}(
+        :Icoil                  => Ix_i,
+        :z_max_raw_mm           => result.z_max_raw_mm,
+        :z_max_raw_spline_mm    => result.z_max_raw_spline_mm,
+        :z_max_smooth_mm        => result.z_max_smooth_mm,
+        :z_max_smooth_spline_mm => result.z_max_smooth_spline_mm,
+        :z_profile              => result.z_profile,
+    )
+end
+
 
 function CQD_analyze_screen_profile(Ix, data_mm::AbstractMatrix; 
     nx_bins::Integer = 2, nz_bins::Integer = 2, 
