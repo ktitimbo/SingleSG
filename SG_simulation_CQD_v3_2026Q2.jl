@@ -635,6 +635,7 @@ SETUP FEATURES
     Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
     Slit → SG magnet        : $(1e3*y_SlitToSG)mm
     SG magnet               : $(1e3*y_SG)mm
+    SG magnet → Aperture    : $(1e3*y_SGToAperture)mm
     SG magnet → Screen      : $(1e3*y_SGToScreen)mm
     Tube radius             : $(1e3*R_tube)mm
 
