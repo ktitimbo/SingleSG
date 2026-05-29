@@ -756,7 +756,7 @@ function CQD_flag_travelling_particles_twowires(Ix,
 
             # gradient with precomputed B, scaled by S
             _, _, dBdz = grad_normB(xsg, ysg, zsg, Bx, By, Bz; Iw=Iw_eff)
-            μG = μₑ * S * dBdz
+            μG = abs(μₑ * S * dBdz)
 
             # zero-alloc scalar loads
             x0  = init_particles[j, 1]::Float64
@@ -837,7 +837,7 @@ function CQD_build_travelling_particles_twowires(
             # gradient with precomputed B, scaled by S
             _, _, dBdz = grad_normB(xsg, ysg, zsg, Bx, By, Bz; Iw=Iw_eff)
 
-            μG = μₑ * S * dBdz
+            μG = abs(μₑ * S * dBdz)
 
             # a_z for this particle
             a_z  = μG / p.M
