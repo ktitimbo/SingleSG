@@ -337,23 +337,23 @@ end
 ######################################################################
 ######################################################################
 
-nx_bins             = 32; # fixed nx bins
-nz_bins             = [1, 2];
-gaussian_width_mm   = [0.001, 0.025, 0.050, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.275, 0.300, 0.350, 0.400, 0.500 ]; # try different gaussian widths
-λ0_raw_list         = [0.001, 0.005, 0.01, 0.02]#, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
-λ0_spline           = 0.001;
+NX_BINS_SWEEP        = 32; # fixed nx bins
+NZ_BINS_SWEEP        = [1, 2];
+GAUSSIAN_WIDTHS_MM   = [0.001, 0.025, 0.050, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.275, 0.300, 0.350, 0.400, 0.500 ]; # try different gaussian widths
+λ0_RAW_SWEEP         = [0.001, 0.005, 0.01, 0.02]#, 0.03, 0.04, 0.05, 0.10]; # try different smoothing factors for raw data
+λ0_SPLINE            = 0.001;
 
 # ---------- precompute param grid ----------
 params = [(nz, gw, λ0_raw)
-          for nz in nz_bins
-          for gw in gaussian_width_mm
-          for λ0_raw in λ0_raw_list];
+          for nz in NZ_BINS_SWEEP
+          for gw in GAUSSIAN_WIDTHS_MM
+          for λ0_raw in λ0_RAW_SWEEP];
 
 
 """
-    process_branch!(branch, OUTDIR, Nss, induction_coeff_for_label, nz_bins,
-                    gaussian_width_mm, λ0_raw_list, params, nx_bins, kis,
-                    T_K, λ0_spline)
+    process_branch!(branch, OUTDIR, Nss, induction_coeff_for_label, NZ_BINS_SWEEP,
+                    GAUSSIAN_WIDTHS_MM, λ0_RAW_SWEEP, params, NX_BINS_SWEEP, kis,
+                    T_K, λ0_SPLINE)
 
 Process all simulation files for a given branch (`:up` or `:dw`), computing
 CQD profiles over all parameter combinations (nz, σw, λ0) and saving results
@@ -367,17 +367,17 @@ making it safe to call repeatedly — progress is always preserved.
 - `OUTDIR`                    : root output directory; files are read from and written to `OUTDIR/branch/`
 - `Nss`                       : number of samples (used in output filename and metadata)
 - `induction_coeff_for_label` : vector of induction coefficients, one per simulation file
-- `nz_bins`                   : vector of z-bin counts to sweep over
-- `gaussian_width_mm`         : vector of Gaussian widths (mm) to sweep over
-- `λ0_raw_list`               : vector of raw λ0 values to sweep over
+- `NZ_BINS_SWEEP`                   : vector of z-bin counts to sweep over
+- `GAUSSIAN_WIDTHS_MM`         : vector of Gaussian widths (mm) to sweep over
+- `λ0_RAW_SWEEP`               : vector of raw λ0 values to sweep over
 - `params`                    : pre-expanded parameter grid (nz, gw, λ0) — e.g. from `Iterators.product`
-- `nx_bins`                   : number of x bins (fixed across all runs)
+- `NX_BINS_SWEEP`                   : number of x bins (fixed across all runs)
 - `kis`                       : vector of induction coefficient labels aligned with `files`
 - `T_K`                       : temperature in Kelvin (metadata only)
-- `λ0_spline`                 : smoothed spline of λ0 (metadata + passed to analyzer)
+- `λ0_SPLINE`                 : smoothed spline of λ0 (metadata + passed to analyzer)
 """
 function process_branch!(branch, OUTDIR, Nss, kis, induction_coeff_for_label, 
-                         nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+                         NX_BINS_SWEEP, NZ_BINS_SWEEP, GAUSSIAN_WIDTHS_MM, λ0_RAW_SWEEP, λ0_SPLINE,
                          params, T_K
 )
 
@@ -392,7 +392,7 @@ function process_branch!(branch, OUTDIR, Nss, kis, induction_coeff_for_label,
     # Nothing to do yet — caller decides whether to retry later
     nfiles == 0 && (@info "No files yet for $(branch), skipping."; return)
 
-    Ntot = nfiles * length(nz_bins) * length(gaussian_width_mm) * length(λ0_raw_list)
+    Ntot = nfiles * length(NZ_BINS_SWEEP) * length(GAUSSIAN_WIDTHS_MM) * length(λ0_RAW_SWEEP)
     @info "\e[93m[$(uppercase(String(branch)))] Files found: $(nfiles), total profiles: $(Ntot)\e[0m"
 
     # Open output JLD2 in append mode so partial results from previous runs are preserved
@@ -404,11 +404,11 @@ function process_branch!(branch, OUTDIR, Nss, kis, induction_coeff_for_label,
             f["meta/N"]        = Nss
             f["meta/T"]        = T_K
             f["meta/branch"]   = String(branch)
-            f["meta/s_spline"] = λ0_spline
-            f["meta/nx"]       = nx_bins
-            f["meta/nz"]       = nz_bins
-            f["meta/σw"]       = gaussian_width_mm
-            f["meta/λ0"]       = λ0_raw_list
+            f["meta/s_spline"] = λ0_SPLINE
+            f["meta/nx"]       = NX_BINS_SWEEP
+            f["meta/nz"]       = NZ_BINS_SWEEP
+            f["meta/σw"]       = GAUSSIAN_WIDTHS_MM
+            f["meta/λ0"]       = λ0_RAW_SWEEP
             f["meta/ki"]       = kis
             f["meta/files"]    = files
         else
@@ -438,13 +438,13 @@ function process_branch!(branch, OUTDIR, Nss, kis, induction_coeff_for_label,
                 # Main expensive call — reads simulation file, returns profile dict
                 profiles = TheoreticalSimulation.CQD_analyze_profiles_to_dict(
                     simpath;
-                    n_bins      = (nx_bins, nz),
+                    n_bins      = (NX_BINS_SWEEP, nz),
                     width_mm    = gw,
                     add_plot    = false,
                     plot_xrange = :all,
                     branch      = branch,
                     λ_raw       = λ0_raw,
-                    λ_smooth    = λ0_spline,
+                    λ_smooth    = λ0_SPLINE,
                     mode        = :probability
                 )
 
@@ -473,7 +473,7 @@ if all(files_ready(b) for b in (:up, :dw))
     @info "All files present, running single pass."
     for branch in (:up, :dw)
         process_branch!(branch, OUTDIR_PATH, Nss, kis, induction_coeff_for_label, 
-                            nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+                            NX_BINS_SWEEP, NZ_BINS_SWEEP, GAUSSIAN_WIDTHS_MM, λ0_RAW_SWEEP, λ0_SPLINE,
                             params, T_K)
     end
 else
@@ -482,7 +482,7 @@ else
     while true
         for branch in (:up, :dw)
             process_branch!(branch, OUTDIR_PATH, Nss, kis, induction_coeff_for_label, 
-                            nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+                            NX_BINS_SWEEP, NZ_BINS_SWEEP, GAUSSIAN_WIDTHS_MM, λ0_RAW_SWEEP, λ0_SPLINE,
                             params, T_K)
         end
 
@@ -527,10 +527,10 @@ SETUP FEATURES
 SIMULATION INFORMATION
     Number of atoms         : $(Nss)
     Induction term          : ($(kis))
-    Binning (nx,nz)         : ($(nx_bins),$(nz_bins))
-    Gaussian width (mm)     : $(gaussian_width_mm)
-    Smoothing raw           : $(λ0_raw_list)
-    Smoothing spline        : $(λ0_spline)
+    Binning (nx,nz)         : ($(NX_BINS_SWEEP),$(NZ_BINS_SWEEP))
+    Gaussian width (mm)     : $(GAUSSIAN_WIDTHS_MM)
+    Smoothing raw           : $(λ0_RAW_SWEEP)
+    Smoothing spline        : $(λ0_SPLINE)
     Currents (A)            : $(round.(Icoils,sigdigits=3))
     No. of currents         : $(nI)
 
