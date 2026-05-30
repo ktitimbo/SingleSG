@@ -185,7 +185,7 @@ nI = length(ICOILS);
 calibration = TheoreticalSimulation.build_calibration(ICOILS; degree=3, span =0.12);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 200_000 ; 
+const Nss = 2_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 # ============================================================================
@@ -586,255 +586,15 @@ for idx=1:nI
     )
 end
 
-idx=1
-force1 = CQD_up_particles_at_screen[idx]
-force2 = CQD_ΔG_up_particles_at_screen[idx]
-
-n1 = size(force1, 1)
-n2 = size(force2, 1)
-
-println("CQD_up:    $n1 rows")
-println("CQD_ΔG_up: $n2 rows")
-println("Difference: $(n1 - n2) rows")
-
-# Extract the key columns as a set of row-tuples
-keys1 = Set(Tuple(force1[i, 1:8])  for i in 1:n1)
-keys2 = Set(Tuple(force2[i, 1:8])  for i in 1:n2)
-
-common_keys = intersect(keys1, keys2)
-println("Rows with matching first-5 columns: $(length(common_keys))")
-
-# Filter each matrix to only those rows
-mask1 = [Tuple(force1[i, 1:8])    in common_keys for i in 1:n1]
-mask2 = [Tuple(force2[i, 1:8]) in common_keys for i in 1:n2]
-
-A_filtered = force1[mask1, :]
-B_filtered = force2[mask2, :]
-
-println("A_filtered: $(size(A_filtered, 1)) rows")
-println("B_filtered: $(size(B_filtered, 1)) rows")
-
-sortby(M) = sortperm([Tuple(M[i, 1:8]) for i in 1:size(M,1)])
-
-A_sorted = A_filtered[sortby(A_filtered), :]
-B_sorted = B_filtered[sortby(B_filtered), :]
-
-@assert A_sorted[:, 1:8] == B_sorted[:, 1:8] "Keys don't align!"
-
-A_data = A_sorted[:, 9:10]
-B_data = B_sorted[:, 9:10]
-
-
-# Three force scenarios
-force_labels = ["Uniform", "xz dependend"]
-force_colors = [:steelblue, :tomato]
-
-raw_data = [
-    A_data,
-    B_data
-]
-
-# ── 3.  STATS (computed on FULL data) ─────────────────────────────────────────
-if !@isdefined(BeamStats)
-    struct BeamStats
-        label :: String
-        x̄     :: Float64
-        z̄     :: Float64
-        σx    :: Float64
-        σz    :: Float64
-        hull  :: Matrix{Float64}
-    end
-end
-# Convex hull via gift-wrapping (pure Julia, no extra dep).
-# For large point sets consider using QHull via Polyhedra.jl instead.
-function cross2d(o, a, b)
-    (a[1]-o[1])*(b[2]-o[2]) - (a[2]-o[2])*(b[1]-o[1])
-end
-
-function convex_hull(x, z)
-    pts = sort(collect(zip(x, z)))
-    n   = length(pts)
-    n < 3 && return hcat(x, z)'
-    lower = Tuple{Float64,Float64}[]
-    for p in pts
-        while length(lower) >= 2 && cross2d(lower[end-1], lower[end], p) <= 0
-            pop!(lower)
-        end
-        push!(lower, p)
-    end
-    upper = Tuple{Float64,Float64}[]
-    for p in reverse(pts)
-        while length(upper) >= 2 && cross2d(upper[end-1], upper[end], p) <= 0
-            pop!(upper)
-        end
-        push!(upper, p)
-    end
-    pop!(lower); pop!(upper)
-    hull = vcat(lower, upper)
-    return hcat(first.(hull), last.(hull))'   # 2×K
-end
-
-beam_stats = map(eachindex(raw_data)) do i
-    x_full = 1e3 * raw_data[i][:, 1]
-    z_full = 1e3 * raw_data[i][:, 2]
-    BeamStats(
-        force_labels[i],
-        mean(x_full), mean(z_full),
-        std(x_full),  std(z_full),
-        convex_hull(x_full, z_full),
-    )
-end
-
-# ── 4.  LAYOUT ────────────────────────────────────────────────────────────────
-# Grid: [scatter | z-marginal]
-#       [x-marginal | empty  ]
-fig = Figure(size = (900, 760), backgroundcolor = :white)
- 
-ax_main = Axis(fig[1, 1],
-    xlabel = "x  (mm)",
-    ylabel = "z  (mm)",
-    title  = "Final particle positions on screen (xz plane)",
-    # aspect = DataAspect(),
-    xgridcolor = (:black, 0.06),
-    ygridcolor = (:black, 0.06),
-    xticks = LinearTicks(10),   # aim for ~10 ticks on x
-    yticks = LinearTicks(10),   # aim for ~10 ticks on z
-)
- 
-ax_mx = Axis(fig[2, 1],
-    xlabel = "x  (mm)",
-    ylabel = "counts",
-    title  = "x marginal",
-    xgridvisible = false,
-    xticks = LinearTicks(10),
-)
- 
-ax_mz = Axis(fig[1, 2],
-    xlabel = "counts",
-    ylabel = "z  (mm)",
-    title  = "z marginal",
-    yaxisposition = :right,
-    ygridvisible = false,
-    yticks = LinearTicks(10),
-)
- 
-# Shrink marginal panels
-rowsize!(fig.layout, 2, Relative(0.22))
-colsize!(fig.layout, 2, Relative(0.22))
-
-# ── 5.  PLOT ──────────────────────────────────────────────────────────────────
-ALPHA_SCATTER = 0.25
-ALPHA_HULL    = 0.12
-N_BINS        = 80
- 
-for i in eachindex(raw_data)
-    c  = force_colors[i]
-    s  = beam_stats[i]
-    xs = 1e3 * raw_data[i][:, 1]
-    zs = 1e3 * raw_data[i][:, 2]
-
-    # — scatter
-    CairoMakie.scatter!(ax_main, xs, zs;
-        color      = (c, ALPHA_SCATTER),
-        markersize = 4,
-        label      = force_labels[i],
-    )
-
-    # — convex hull (filled + outline)
-    hx = vcat(s.hull[1,:], s.hull[1,1])
-    hz = vcat(s.hull[2,:], s.hull[2,1])
-    poly!(ax_main, Point2f.(hx, hz);
-        color       = (c, ALPHA_HULL),
-        strokecolor = (c, 0.7),
-        strokewidth = 1.2,
-        linestyle   = :dash,
-    )
-
-    # — centroid cross
-    CairoMakie.scatter!(ax_main, [s.x̄], [s.z̄];
-        color       = c,
-        marker      = :cross,
-        markersize  = 14,
-        strokewidth = 2,
-    )
-
-# — x marginal histogram
-    hx_hist = StatsBase.fit(Histogram, xs; nbins = N_BINS)
-    stairs!(ax_mx, hx_hist.edges[1], vcat(hx_hist.weights, 0);
-        color = (c, 0.5), step = :post)
-    # lines!(ax_mx, hx_hist.edges[1], vcat(hx_hist.weights, 0);
-    #     color = c, linewidth = 1.2)
-
-    # — z marginal histogram (horizontal: flip x/y)
-    hz_hist = StatsBase.fit(Histogram, zs; nbins = N_BINS)
-    stairs!(ax_mz, vcat(hz_hist.weights, 0), hz_hist.edges[1];
-        color = (c, 0.5), step = :post)
-    # lines!(ax_mz, vcat(hz_hist.weights, 0), hz_hist.edges[1];
-    #     color = c, linewidth = 1.2)
-end
-
-# ── 6.  ANNOTATIONS & LEGEND ──────────────────────────────────────────────────
-# axislegend(ax_main;
-#     position    = :lt,
-#     framevisible = true,
-#     framecolor = (:black, 0.15),
-#     patchsize   = (20, 20),   # width × height of the marker patch in the legend
-#     override_attributes = (markersize = 12,),
-#     fontsize    = 12,
-# )
-
-legend_elements = [
-    MarkerElement(color = (force_colors[i], 0.8), marker = :circle, markersize = 16)
-    for i in eachindex(force_labels)
-]
-
-Legend(fig[1, 1],
-    legend_elements,
-    force_labels;
-    tellwidth  = false,
-    tellheight = false,
-    halign     = :left,
-    valign     = :top,
-    fontsize   = 13,
-    patchsize  = (20, 20),
-    framevisible = false
-)
-
-# Stats text box in main axes
-stats_str = join([
-    @sprintf("%-10s  <x>=%+6.1f  <z>=%+6.1f  σx=%5.1f  σz=%5.1f",
-        s.label, s.x̄, s.z̄, s.σx, s.σz)
-    for s in beam_stats
-], "\n")
- 
-# Requires Printf — add the using block below if not already loaded
-text!(ax_main, -4.5, 3;
-    text     = stats_str,
-    fontsize = 12,
-    font     = "Courier New Bold",
-    color    = :black,
-)
- 
-# Subtitle with sample info
-Label(fig[0, :],
-    "Displayed = $(Nss ÷ 1_000_000)M particles",
-    fontsize  = 11,
-    color     = (:black, 0.5),
-    tellwidth = false,
-)
-
-fig
-
 #_____________________________________________________________________________________________________________
 σw = 0.150
 ki = 2.0 # ×10^-6
 nz = 2
 λ0 = 0.01
 #_____________________________________________________________________________________________________________
-
+# T = 200C
 CQD_UP_T200_manual = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_8M","cqd_8M_up_profiles.jld2")
 CQD_DW_T200_manual = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_8M","cqd_8M_dw_profiles.jld2")
-
 CQD_UP_T200_manual_data = jldopen(CQD_UP_T200_manual,"r") do file
     data = file[JLD2_MyTools.make_keypath_cqd(:up,ki,nz,σw,λ0)]
     nI = length(keys(data))
@@ -846,7 +606,6 @@ CQD_UP_T200_manual_data = jldopen(CQD_UP_T200_manual,"r") do file
             z_profiles = [data[x][:z_profile] for x=1:nI],
     )
 end
-
 CQD_DW_T200_manual_data = jldopen(CQD_DW_T200_manual,"r") do file
     data = file[JLD2_MyTools.make_keypath_cqd(:dw,ki,nz,σw,λ0)]
     nI = length(keys(data))
@@ -859,10 +618,8 @@ CQD_DW_T200_manual_data = jldopen(CQD_DW_T200_manual,"r") do file
     )
 end
 
-
-CQD_UP_T200_ΔG = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_6M_constG","cqd_6000000_up_profiles.jld2")
-CQD_DW_T200_ΔG = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_6M_constG","cqd_6000000_dw_profiles.jld2")
-
+CQD_UP_T200_ΔG = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_6M_constG","cqd_6M_up_profiles.jld2")
+CQD_DW_T200_ΔG = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T200_6M_constG","cqd_6M_dw_profiles.jld2")
 CQD_UP_T200_ΔG_data = jldopen(CQD_UP_T200_ΔG,"r") do file
     data = file[JLD2_MyTools.make_keypath_cqd(:up,ki,nz,σw,λ0)]
     nI = length(keys(data))
@@ -874,7 +631,6 @@ CQD_UP_T200_ΔG_data = jldopen(CQD_UP_T200_ΔG,"r") do file
             z_profiles = [data[x][:z_profile] for x=1:nI],
     )
 end
-
 CQD_DW_T200_ΔG_data = jldopen(CQD_DW_T200_ΔG,"r") do file
     data = file[JLD2_MyTools.make_keypath_cqd(:dw,ki,nz,σw,λ0)]
     nI = length(keys(data))
@@ -887,45 +643,423 @@ CQD_DW_T200_ΔG_data = jldopen(CQD_DW_T200_ΔG,"r") do file
     )
 end
 
+# T = 205C
+CQD_UP_T205_manual = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_7M","cqd_7M_up_profiles.jld2")
+CQD_DW_T205_manual = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_7M","cqd_7M_dw_profiles.jld2")
+CQD_UP_T205_manual_data = jldopen(CQD_UP_T205_manual,"r") do file
+    data = file[JLD2_MyTools.make_keypath_cqd(:up,ki,nz,σw,λ0)]
+    nI = length(keys(data))
+    currents = [data[x][:Icoil] for x=1:nI]
 
+    return (; 
+            Ic      = [data[x][:Icoil] for x=1:nI],
+            z_max   = [data[x][:z_max_smooth_spline_mm] for x=1:nI],
+            z_profiles = [data[x][:z_profile] for x=1:nI],
+    )
+end
+CQD_DW_T205_manual_data = jldopen(CQD_DW_T205_manual,"r") do file
+    data = file[JLD2_MyTools.make_keypath_cqd(:dw,ki,nz,σw,λ0)]
+    nI = length(keys(data))
+    currents = [data[x][:Icoil] for x=1:nI]
 
-i0_idx = 47
-for i0_idx=42:nI
-FIGUP = plot(CQD_UP_T200_manual_data.z_profiles[i0_idx][:,1],
-CQD_UP_T200_manual_data.z_profiles[i0_idx][:,3],
-label="manual",
-line=(:solid,2,:red)
-)
-plot!(CQD_UP_T200_ΔG_data.z_profiles[i0_idx][:,1],
-CQD_UP_T200_ΔG_data.z_profiles[i0_idx][:,3],
-label=L"$\Delta\mathcal{G}$",
-line=(:dashdot,1.5,:dodgerblue3)
-)
+    return (; 
+            Ic      = [data[x][:Icoil] for x=1:nI],
+            z_max   = [data[x][:z_max_smooth_spline_mm] for x=1:nI],
+            z_profiles = [data[x][:z_profile] for x=1:nI],
+    )
+end
 
-FIGDW = plot(CQD_DW_T200_manual_data.z_profiles[i0_idx][:,1],
-CQD_DW_T200_manual_data.z_profiles[i0_idx][:,3],
-label="manual",
-line=(:solid,2,:orange)
-)
-plot!(CQD_DW_T200_ΔG_data.z_profiles[i0_idx][:,1],
-CQD_DW_T200_ΔG_data.z_profiles[i0_idx][:,3],
-label=L"$\Delta\mathcal{G}$",
-line=(:dashdot,1.5,:purple)
-)
+CQD_UP_T205_ΔG = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_6M_constG","cqd_6M_up_profiles.jld2")
+CQD_DW_T205_ΔG = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_6M_constG","cqd_6M_dw_profiles.jld2")
+CQD_UP_T205_ΔG_data = jldopen(CQD_UP_T205_ΔG,"r") do file
+    data = file[JLD2_MyTools.make_keypath_cqd(:up,ki,nz,σw,λ0)]
+    nI = length(keys(data))
+    currents = [data[x][:Icoil] for x=1:nI]
 
+    return (; 
+            Ic      = [data[x][:Icoil] for x=1:nI],
+            z_max   = [data[x][:z_max_smooth_spline_mm] for x=1:nI],
+            z_profiles = [data[x][:z_profile] for x=1:nI],
+    )
+end
+CQD_DW_T205_ΔG_data = jldopen(CQD_DW_T205_ΔG,"r") do file
+    data = file[JLD2_MyTools.make_keypath_cqd(:dw,ki,nz,σw,λ0)]
+    nI = length(keys(data))
+    currents = [data[x][:Icoil] for x=1:nI]
 
-FIG = plot(FIGUP, FIGDW,
-    suptitle = L"CQD | $T=200 \degree \mathrm{C}$ | $I_{c}=%$(Int(1000*ICOILS[i0_idx]))\mathrm{mA}$",
-    layout=(2,1),
-    link=:x,
-)
-plot!(FIG[1], xlabel="", xformatter=_->"", bottom_margin=-5mm)
-display(FIG)
+    return (; 
+            Ic      = [data[x][:Icoil] for x=1:nI],
+            z_max   = [data[x][:z_max_smooth_spline_mm] for x=1:nI],
+            z_profiles = [data[x][:z_profile] for x=1:nI],
+    )
 end
 
 
+#_____________________________________________________________________________________________________________
+function plot_CQD_profiles(
+    up_manual_data, up_ΔG_data,
+    dw_manual_data, dw_ΔG_data,
+    ICOILS, i0_idx;
+    fig_size = (600, 700),
+    title_temp = 200,
+)
+    fig = Figure(size = fig_size)
+
+    axis_common = (
+        xminorticksvisible = true,
+        xminorticks = IntervalsBetween(5),
+        xminorgridvisible = true,
+        yminorgridvisible = false,
+        xminorgridcolor = (:gray, 0.3),
+        yminorgridcolor = (:gray, 0.3),
+        xminorgridwidth = 0.5,
+        yminorgridwidth = 0.5,
+        ylabel = "counts (au)",
+    )
+
+    ax1 = Axis(fig[1, 1];
+        axis_common...,
+        xticklabelsvisible = false,
+        bottomspinevisible = true,
+        xticksvisible = true,
+    )
+
+    ax2 = Axis(fig[2, 1];
+        axis_common...,
+        xlabel = L"$z \ (\mathrm{mm})$",
+    )
+
+    linkxaxes!(ax1, ax2)
+
+    # UP panel
+    lines!(ax1,
+        up_manual_data.z_profiles[i0_idx][:, 1],
+        up_manual_data.z_profiles[i0_idx][:, 3];
+        label = "manual", color = :red, linewidth = 2, linestyle = :solid,
+    )
+    lines!(ax1,
+        up_ΔG_data.z_profiles[i0_idx][:, 1],
+        up_ΔG_data.z_profiles[i0_idx][:, 3];
+        label = L"$\Delta\mathcal{G}$", color = :dodgerblue3, linewidth = 1.5, linestyle = :dashdot,
+    )
+
+    # DW panel
+    lines!(ax2,
+        dw_manual_data.z_profiles[i0_idx][:, 1],
+        dw_manual_data.z_profiles[i0_idx][:, 3];
+        label = "manual", color = :orange, linewidth = 2, linestyle = :solid,
+    )
+    lines!(ax2,
+        dw_ΔG_data.z_profiles[i0_idx][:, 1],
+        dw_ΔG_data.z_profiles[i0_idx][:, 3];
+        label = L"$\Delta\mathcal{G}$", color = :purple, linewidth = 1.5, linestyle = :dashdot,
+    )
+
+    axislegend(ax1, position = :rt)
+    axislegend(ax2, position = :rt)
+
+    Label(fig[0, 1],
+        L"CQD $|$ $T=%$(title_temp)\degree\mathrm{C}$ $|$ $I_c = %$(Int(1000 * ICOILS[i0_idx]))\,\mathrm{mA}$";
+        fontsize = 18, tellwidth = false,
+    )
+
+    rowgap!(fig.layout, 1, 5)
+
+    return fig
+end
+
+for i0_idx = 1:nI
+    fig = plot_CQD_profiles(
+        CQD_UP_T200_manual_data, CQD_UP_T200_ΔG_data,
+        CQD_DW_T200_manual_data, CQD_DW_T200_ΔG_data,
+        ICOILS, i0_idx;
+        title_temp = 200,
+    )
+    display(fig)
+end
+
+for i0_idx = 1:nI
+    fig = plot_CQD_profiles(
+        CQD_UP_T205_manual_data, CQD_UP_T205_ΔG_data,
+        CQD_DW_T205_manual_data, CQD_DW_T205_ΔG_data,
+        ICOILS, i0_idx;
+        title_temp = 205,
+    )
+    display(fig)
+end
 
 
-plot(xlabel="Currents (A)", ylabel=L"$z_{max} \ (\mathrm{mm})$")
-plot!(CQD_UP_T200_manual_data.Ic, CQD_UP_T200_manual_data.z_max)
-plot!(CQD_UP_T200_ΔG_data.Ic, CQD_UP_T200_ΔG_data.z_max)
+function plot_zmax_summary(
+    up_manual_data, up_ΔG_data,
+    dw_manual_data, dw_ΔG_data,
+    ICOILS;
+    fig_size  = (1300, 800),
+    title_temp = 200,
+)
+    fig = Figure(size = fig_size)
+
+    # ── log mask ──────────────────────────────────────────────────────────────
+    log_mask = ICOILS .> 0
+
+    # ── axis templates ────────────────────────────────────────────────────────
+    axis_common = (
+        xminorticksvisible = true,
+        xminorticks        = IntervalsBetween(5),
+        yminorticksvisible = true,
+        yminorticks        = IntervalsBetween(5),
+        xminorgridvisible  = true,
+        yminorgridvisible  = true,
+        xminorgridcolor    = (:gray, 0.3),
+        yminorgridcolor    = (:gray, 0.3),
+        xminorgridwidth    = 0.5,
+        yminorgridwidth    = 0.5,
+        xlabel             = L"$I_c \ (\mathrm{A})$",
+    )
+
+    axis_log = merge(axis_common, (
+        xscale      = log10,
+        yscale      = log10,
+        xlabel      = L"$I_c \ (\mathrm{A})$",
+        xminorticks = IntervalsBetween(9),
+        yminorticks = IntervalsBetween(9),
+    ))
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+    function plot_pair!(axlin, axlog, x, y_manual, y_ΔG;
+            color_manual = :red, color_ΔG = :dodgerblue3)
+        lines!(axlin, x, y_manual;
+            label = "manual", color = color_manual, linewidth = 2, linestyle = :solid)
+        lines!(axlin, x, y_ΔG;
+            label = L"$\Delta\mathcal{G}$", color = color_ΔG, linewidth = 1.5, linestyle = :dashdot)
+        lines!(axlog, x[log_mask], abs.(y_manual[log_mask]);
+            label = "manual", color = color_manual, linewidth = 2, linestyle = :solid)
+        lines!(axlog, x[log_mask], abs.(y_ΔG[log_mask]);
+            label = L"$\Delta\mathcal{G}$", color = color_ΔG, linewidth = 1.5, linestyle = :dashdot)
+    end
+
+    function plot_residual!(ax, x, y_resid)
+        lines!(ax, x, 1e3 .* y_resid;
+            color = :black, linewidth = 1.5)
+        scatter!(ax, x, 1e3 .* y_resid;
+            color = :black, markersize = 6)
+        hlines!(ax, [0.0]; color = (:gray, 0.6), linewidth = 1, linestyle = :dash)
+    end
+
+    # ── axes ──────────────────────────────────────────────────────────────────
+    ax1  = Axis(fig[1, 1]; axis_common...,
+        ylabel = L"$z_\mathrm{max} \ (\mathrm{mm})$",                                          title = "UP")
+    ax1l = Axis(fig[1, 2]; axis_log...,
+        ylabel = L"$|z_\mathrm{max}| \ (\mathrm{mm})$",                                        title = "UP (log, abs)")
+    ax2  = Axis(fig[1, 3]; axis_common...,
+        ylabel = L"$\Delta z_\mathrm{max} \ (\mathrm{\mu m})$",                                title = "UP residual")
+
+    ax3  = Axis(fig[2, 1]; axis_common...,
+        ylabel = L"$z_\mathrm{max} \ (\mathrm{mm})$",                                          title = "DW")
+    ax3l = Axis(fig[2, 2]; axis_log...,
+        ylabel = L"$|z_\mathrm{max}| \ (\mathrm{mm})$",                                        title = "DW (log, abs)")
+    ax4  = Axis(fig[2, 3]; axis_common...,
+        ylabel = L"$\Delta z_\mathrm{max} \ (\mathrm{\mu m})$",                                title = "DW residual")
+
+    ax5  = Axis(fig[3, 1]; axis_common...,
+        ylabel = L"$z_\mathrm{max}^\mathrm{UP} - z_\mathrm{max}^\mathrm{DW} \ (\mathrm{mm})$", title = "UP − DW")
+    ax5l = Axis(fig[3, 2]; axis_log...,
+        ylabel = L"$|z_\mathrm{max}^\mathrm{UP} - z_\mathrm{max}^\mathrm{DW}| \ (\mathrm{mm})$", title = "UP − DW (log, abs)")
+    ax6  = Axis(fig[3, 3]; axis_common...,
+        ylabel = L"$\Delta(z_\mathrm{max}^\mathrm{UP} - z_\mathrm{max}^\mathrm{DW}) \ (\mathrm{\mu m})$", title = "UP − DW residual")
+
+    # ── Row 1: UP ─────────────────────────────────────────────────────────────
+    plot_pair!(ax1, ax1l, ICOILS,
+        up_manual_data.z_max,
+        up_ΔG_data.z_max)
+
+    plot_residual!(ax2, ICOILS,
+        up_manual_data.z_max .- up_ΔG_data.z_max)
+
+    # ── Row 2: DW ─────────────────────────────────────────────────────────────
+    plot_pair!(ax3, ax3l, ICOILS,
+        dw_manual_data.z_max,
+        dw_ΔG_data.z_max;
+        color_manual = :orange, color_ΔG = :purple)
+
+    plot_residual!(ax4, ICOILS,
+        dw_manual_data.z_max .- dw_ΔG_data.z_max)
+
+    # ── Row 3: UP − DW ────────────────────────────────────────────────────────
+    plot_pair!(ax5, ax5l, ICOILS,
+        up_manual_data.z_max .- dw_manual_data.z_max,
+        up_ΔG_data.z_max     .- dw_ΔG_data.z_max)
+
+    plot_residual!(ax6, ICOILS,
+        (up_manual_data.z_max .- dw_manual_data.z_max) .-
+        (up_ΔG_data.z_max     .- dw_ΔG_data.z_max))
+
+    # ── legends ───────────────────────────────────────────────────────────────
+    axislegend(ax1, position = :rb)
+    axislegend(ax3, position = :rt)
+    axislegend(ax5, position = :rb)
+
+    # ── suptitle ──────────────────────────────────────────────────────────────
+    Label(fig[0, 1:3],
+        L"CQD $|$ $T = %$(title_temp)\degree\mathrm{C}$ $|$ $z_\mathrm{max}$ vs $I_c$";
+        fontsize = 18, tellwidth = false)
+
+    colgap!(fig.layout, 10)
+    rowgap!(fig.layout, 10)
+
+    return fig
+end
+
+fig = plot_zmax_summary(
+    CQD_UP_T200_manual_data, CQD_UP_T200_ΔG_data,
+    CQD_DW_T200_manual_data, CQD_DW_T200_ΔG_data,
+    ICOILS;
+    title_temp = 200,
+)
+display(fig)
+
+fig = plot_zmax_summary(
+    CQD_UP_T205_manual_data, CQD_UP_T205_ΔG_data,
+    CQD_DW_T205_manual_data, CQD_DW_T205_ΔG_data,
+    ICOILS;
+    title_temp = 205,
+)
+display(fig)
+
+
+function plot_field_maps(
+    ICOILS, i_idx,
+    calibration, TheoreticalSimulation;
+    n        = 200,
+    fig_size = (800, 1200),
+    quant    = 0.96,
+)
+    Bmanual_reference = TheoreticalSimulation.BvsI(ICOILS[i_idx])
+    Gmanual_reference = TheoreticalSimulation.GvsI(ICOILS[i_idx])
+    Iw_eff            = calibration.I_eff_B(ICOILS[i_idx])
+    S                 = calibration.grad_scale(ICOILS[i_idx])
+
+    # ── shared x range, different z ranges ────────────────────────────────────
+    xrng   = LinRange(-3.75e-3, 3.75e-3, n)
+    zrng_B = LinRange(-2.5e-3,  2.5e-3,  n)
+    zrng_G = LinRange(-2.5e-3,  1.5e-3,  n)
+
+    # ── compute maps ──────────────────────────────────────────────────────────
+    B0_map = [sqrt(sum(TheoreticalSimulation.B_total(x, 0.0, z; Iw=Iw_eff) .^ 2))
+              for x in xrng, z in zrng_B]
+
+    dBdz_map = [begin
+        Bx, By, Bz = TheoreticalSimulation.B_total(x, 0.0, z; Iw=Iw_eff)
+        _, _, dBdz = S .* TheoreticalSimulation.grad_normB(x, 0.0, z, Bx, By, Bz; Iw=Iw_eff)
+        dBdz
+    end for x in xrng, z in zrng_G]
+
+    # ── color limits ──────────────────────────────────────────────────────────
+    finite_B = vec(B0_map[.!isnan.(B0_map) .& .!isinf.(B0_map)])
+    vmin_B   = minimum(finite_B)
+    vmax_B   = maximum(finite_B)
+
+    finite_G = vec(dBdz_map[.!isnan.(dBdz_map) .& .!isinf.(dBdz_map)])
+    vmax_G   = Statistics.quantile(abs.(finite_G), quant)
+
+    # ── colorbar ticks ────────────────────────────────────────────────────────
+    tick_vals_B = collect(range(vmin_B, vmax_B, length=6))
+    tick_labs_B = string.(round.(tick_vals_B, sigdigits=3))
+    all_vals_B  = vcat(tick_vals_B, Bmanual_reference)
+    all_labs_B  = vcat(tick_labs_B, [L"$B_\mathrm{ref}$"])
+
+    tick_vals_G = collect(range(-vmax_G, vmax_G, length=7))
+    tick_labs_G = string.(round.(tick_vals_G, sigdigits=3))
+    all_vals_G  = vcat(tick_vals_G, clamp(Gmanual_reference, -vmax_G, vmax_G))
+    all_labs_G  = vcat(tick_labs_G, [L"$G_\mathrm{ref}$"])
+
+    # ── axis template ─────────────────────────────────────────────────────────
+    axis_common = (
+        xlabelsize         = 24,
+        ylabelsize         = 24,
+        xticklabelsize     = 16,
+        yticklabelsize     = 16,
+        titlesize          = 24,
+        xminorticksvisible = true,
+        yminorticksvisible = true,
+        xminorticks        = IntervalsBetween(5),
+        yminorticks        = IntervalsBetween(5),
+        ylabel             = L"$z \ (\mathrm{mm})$",
+    )
+
+    # ── figure ────────────────────────────────────────────────────────────────
+    fig = Figure(size = fig_size)
+
+    # suptitle
+    Label(fig[0, 1:2],
+        L"$I_c = %$(round(1000*ICOILS[i_idx], digits=1))\,\mathrm{mA}$";
+        fontsize = 28, tellwidth = false,
+    )
+
+    # ── Row 1: |B| ────────────────────────────────────────────────────────────
+    ax1 = Axis(fig[1, 1]; axis_common...,
+        xlabel = "",
+        xticklabelsvisible = true,
+        title  = L"$|\mathbf{B}(x,z)|$",
+    )
+
+    hm1 = heatmap!(ax1,
+        xrng * 1e3, zrng_B * 1e3, B0_map;
+        colormap = :inferno,
+    )
+    contour!(ax1,
+        xrng * 1e3, zrng_B * 1e3, B0_map;
+        levels = 60, color = (:white, 0.4), linewidth = 0.8,
+    )
+    contour!(ax1,
+        xrng * 1e3, zrng_B * 1e3, B0_map;
+        levels = [Bmanual_reference], color = :cyan, linewidth = 2.0, linestyle = :dash,
+    )
+
+    Colorbar(fig[1, 2], hm1;
+        label         = L"$|\mathbf{B}|$ (T)",
+        width         = 15,
+        labelsize     = 18,
+        ticklabelsize = 14,
+        ticks         = (all_vals_B, all_labs_B),
+    )
+
+    # ── Row 2: ∂_z|B| ─────────────────────────────────────────────────────────
+    ax2 = Axis(fig[2, 1]; axis_common...,
+        xlabel = L"$x \ (\mathrm{mm})$",
+        title  = L"$\partial_z |\mathbf{B}(x,z)|$",
+    )
+
+    hm2 = heatmap!(ax2,
+        xrng * 1e3, zrng_G * 1e3, dBdz_map;
+        colormap   = :RdBu,
+        colorrange = (-vmax_G, vmax_G),
+        highclip   = :darkred,
+        lowclip    = :darkblue,
+    )
+    contour!(ax2,
+        xrng * 1e3, zrng_G * 1e3, dBdz_map;
+        levels = 60, color = (:black, 0.3), linewidth = 0.8,
+    )
+    contour!(ax2,
+        xrng * 1e3, zrng_G * 1e3, dBdz_map;
+        levels = [Gmanual_reference], color = :black, linewidth = 2.0, linestyle = :dash,
+    )
+
+    Colorbar(fig[2, 2], hm2;
+        label         = L"$\partial_z |\mathbf{B}|$ (T/m)",
+        width         = 15,
+        labelsize     = 18,
+        ticklabelsize = 14,
+        ticks         = (all_vals_G, all_labs_G),
+    )
+
+    colgap!(fig.layout, 1, 7)
+    rowgap!(fig.layout, 10)
+
+    return fig
+end
+
+for i_idx=1:nI
+    fig = plot_field_maps(ICOILS, i_idx, calibration, TheoreticalSimulation)
+    display(fig)
+end
