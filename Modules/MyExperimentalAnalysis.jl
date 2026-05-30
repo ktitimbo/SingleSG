@@ -2,7 +2,7 @@ module MyExperimentalAnalysis
 # Plotting backend and general appearance settings
 using Plots; gr()
 using Plots.PlotMeasures
-using MAT, JLD2
+using MAT, JLD2, PyCall
 using LinearAlgebra
 using ImageFiltering, FFTW
 using Statistics, StatsBase
@@ -923,6 +923,157 @@ function stack_data(data_directory::AbstractString;
     return out
 end
 
+function stack_data(version::AbstractString, data_directory::AbstractString;
+                    pattern       = r"\.mat$"i,
+                    order::Symbol = :asc,
+                    verbose::Bool = true)
+
+    scipy_io = pyimport("scipy.io")
+
+    # -----------------------------------------------------------------------
+    # Internal helpers
+    # -----------------------------------------------------------------------
+    function mat_read_scalar(filepath, key)
+        mat = scipy_io.loadmat(filepath, variable_names = [key])
+        val = mat[key]
+        return Float64(val[1])
+    end
+
+    function mat_read_string(filepath)
+        mat = scipy_io.loadmat(filepath, variable_names = String[])
+        header = mat["__header__"]
+        m = match(r"Created on:\s*(.+)$", string(header))
+        return m !== nothing ? strip(m.captures[1]) : string(header)
+    end
+
+    # -----------------------------------------------------------------------
+    # 1) Collect .mat files
+    # -----------------------------------------------------------------------
+    all_files = readdir(data_directory; join = true)
+    files     = filter(f -> occursin(pattern, f), all_files)
+    @assert !isempty(files) "No matching .mat files found in $data_directory"
+
+    N = length(files)
+
+    # -----------------------------------------------------------------------
+    # 2) Read scalar metadata — catch per-file errors and report all at once
+    # -----------------------------------------------------------------------
+    MGcurrent  = Vector{Float64}(undef, N)
+    MGfield    = Vector{Float64}(undef, N)
+    SG0current = Vector{Float64}(undef, N)
+    SG0field   = Vector{Float64}(undef, N)
+    SG1current = Vector{Float64}(undef, N)
+    SG1field   = Vector{Float64}(undef, N)
+    acqStep    = Vector{Int}(undef, N)
+    acqTime    = Vector{String}(undef, N)
+
+    scalar_errors = Dict{String, String}()
+
+    for (i, f) in enumerate(files)
+        try
+            MGcurrent[i]  = mat_read_scalar(f, "MGcurrentinA")
+            MGfield[i]    = mat_read_scalar(f, "MGfieldinGauss")   * 1e-4  # G → T
+            SG0current[i] = mat_read_scalar(f, "SG0currentinA")
+            SG0field[i]   = mat_read_scalar(f, "SG0BfieldinGauss") * 1e-4  # G → T
+            SG1current[i] = mat_read_scalar(f, "SG1currentinA")
+            SG1field[i]   = mat_read_scalar(f, "SG1BfieldinGauss") * 1e-4  # G → T
+            acqStep[i]    = Int(mat_read_scalar(f, "stepInAcquistionOrder"))
+            acqTime[i]    = mat_read_string(f)
+        catch e
+            scalar_errors[f] = sprint(showerror, e)
+        end
+    end
+
+    if !isempty(scalar_errors)
+        buf = IOBuffer()
+        println(buf, "\n$(length(scalar_errors)) file(s) failed scalar read:\n")
+        for (f, msg) in sort(collect(scalar_errors))
+            println(buf, "  $(basename(f))\n    ✗  $msg\n")
+        end
+        error(String(take!(buf)))
+    end
+
+    # -----------------------------------------------------------------------
+    # 3) Sort by SG1 current
+    # -----------------------------------------------------------------------
+    p = order === :desc ? sortperm(acqStep; rev = true) :
+        order === :asc  ? sortperm(acqStep) :
+        throw(ArgumentError("order must be :asc or :desc"))
+
+    files      = files[p];      MGcurrent  = MGcurrent[p]
+    MGfield    = MGfield[p];    SG0current = SG0current[p]
+    SG0field   = SG0field[p];   SG1current = SG1current[p]
+    SG1field   = SG1field[p];   acqStep    = acqStep[p]
+    acqTime    = acqTime[p]
+
+    # -----------------------------------------------------------------------
+    # 4) Probe array size & eltype from the first file
+    # -----------------------------------------------------------------------
+    sz, T = let
+        mat = scipy_io.loadmat(files[1])
+        a   = mat["F1"]
+        size(a), eltype(a)
+    end
+
+    # -----------------------------------------------------------------------
+    # 5) Allocate and stack image arrays — catch per-file errors
+    # -----------------------------------------------------------------------
+    F1 = Array{T}(undef, sz[1], sz[2], sz[3], N)
+    F2 = similar(F1)
+    BG = similar(F1)
+
+    println("\nEach component is organized as (Nx, Nz, Nframes, Ncurrents)\n")
+
+    array_errors = Dict{String, String}()
+
+    for (i, f) in enumerate(files)
+        try
+            mat = scipy_io.loadmat(f)
+            f1  = mat["F1"]
+            f2  = mat["F2"]
+            bg  = mat["BG"]
+            @assert size(f1) == sz && size(f2) == sz && size(bg) == sz "Inconsistent array sizes: expected $sz, got $(size(f1))"
+            F1[:, :, :, i] = f1
+            F2[:, :, :, i] = f2
+            BG[:, :, :, i] = bg
+        catch e
+            array_errors[f] = sprint(showerror, e)
+        end
+        verbose && i % 5 == 0 && @info "Loaded $i / $N" file = f
+    end
+
+    if !isempty(array_errors)
+        buf = IOBuffer()
+        println(buf, "\n$(length(array_errors)) file(s) failed array read:\n")
+        for (f, msg) in sort(collect(array_errors))
+            println(buf, "  $(basename(f))\n    ✗  $msg\n")
+        end
+        error(String(take!(buf)))
+    end
+
+    # -----------------------------------------------------------------------
+    # 6) Return
+    # -----------------------------------------------------------------------
+    return OrderedDict(
+        :Directory        => String(data_directory),
+        :Files            => files,
+        :AcquisitionTime  => acqTime,
+        :AcquisitionStep  => acqStep,
+        :MGcurrentInA     => MGcurrent,
+        :MGfieldInTesla   => MGfield,
+        :SG0currentInA    => SG0current,
+        :SG0BfieldInTesla => SG0field,
+        :SGcurrentInA     => SG1current,
+        :SGBfieldInTesla  => SG1field,
+        :F1_data          => F1,
+        :F2_data          => F2,
+        :BG_data          => BG,
+    )
+end
+
+
+
+
 """
     bin_x_mean(A::AbstractMatrix, binsize::Integer) -> AbstractMatrix
 
@@ -1800,6 +1951,9 @@ function mag_factor(directory::String)
     elseif directory >= "20251101"
         # values = (0.996,0.0047)
         values = (1.08,0.03)
+    elseif directory >= "202600501"
+        # values = (0.996,0.0047)
+        values = (1.00,0.0001)
     else
         # values = (1.1198,0.0061) 
         values = (1.28,0.01) 
