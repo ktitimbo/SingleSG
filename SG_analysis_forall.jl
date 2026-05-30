@@ -37,6 +37,7 @@ using .MyExperimentalAnalysis;
 # Set the working directory to the current location
 cd(@__DIR__) ;
 # General setup
+const BASE_PATH = raw"F:\SternGerlachExperiments";
 hostname = gethostname();
 @info "Running on host" hostname=hostname
 # For Plots
@@ -47,16 +48,16 @@ MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
 data_directories =  ["20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"]
-data_directory      = "20260303" ;
+data_directory      = "20260529" ;
 # Furnace 
 TCelsius = 200
 Temperature = 273.15 + TCelsius
 # Blurring (gaussian) width
 σw_um = 0.200
 
-outfile_raw         = joinpath("EXPERIMENTS",data_directory, "data.jld2")
-outfile_processed   = joinpath("EXPERIMENTS",data_directory, "data_processed.jld2")
-data_summary_path   = joinpath(@__DIR__, "EXPDATA_ANALYSIS","summary",data_directory)
+outfile_raw         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
+outfile_processed   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
+data_summary_path   = joinpath(BASE_PATH, "EXPDATA_ANALYSIS","summary",data_directory)
 isdir(data_summary_path) || mkpath(data_summary_path);
 
 
@@ -105,7 +106,7 @@ data_JSF = OrderedDict(
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
 
-data_qm_path = joinpath(@__DIR__,"simulation_data","QM_T$(TCelsius)_8M","qm_screen_profiles_f1_table.jld2")
+data_qm_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP","QM_T$(TCelsius)_8M","qm_screen_profiles_f1_table.jld2")
 
 # Importing data
 if !isfile(outfile_processed) # check if the processed images exists
