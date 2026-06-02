@@ -11,14 +11,14 @@ using Colors, ColorSchemes
 using Printf, LaTeXStrings
 using OrderedCollections
 using Dates
+using ProgressMeter
 # Corresponding to data acquired with no previous binning
 default_camera_pixel_size = 6.5e-6 ; # (mm)
 default_x_pixels = 2160;
 default_z_pixels = 2560;
 
 effective_cam_pixelsize_z = default_camera_pixel_size # along the z axis
-x_pixels = default_x_pixels
-z_pixels = default_z_pixels
+
 
 # runtime helper: is this name defined *and* truthy?
 _has(name::Symbol) = isdefined(@__MODULE__, name) && getfield(@__MODULE__, name) === true
@@ -419,8 +419,8 @@ function process_mean_maxima(signal_key::String, data, n_bins::Integer; half_max
     @info "Processing mean maxima" signal_label=signal_label
 
     # Precompute z-axes (mm)
-    z_full_mm   = 1e3 .* pixel_positions(z_pixels, 1,  effective_cam_pixelsize_z)
-    z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
+    z_full_mm   = 1e3 .* pixel_positions(default_z_pixels, 1,  effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(default_z_pixels, n_bins, effective_cam_pixelsize_z)
 
     peak_positions = zeros(Float64,nI)
 
@@ -560,7 +560,7 @@ function process_framewise_maxima(signal_key::String, data, n_bins::Integer; hal
                 error("Invalid signal_key: choose 'F1' or 'F2'")
 
     # z-axes (mm)
-    z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(default_z_pixels, n_bins, effective_cam_pixelsize_z)
 
     # Determine max number of frames across currents
     n_runs_max = maximum(size(Float64.(data["data"][signal_label][1, i]), 3) for i in 1:nI)
@@ -923,156 +923,6 @@ function stack_data(data_directory::AbstractString;
     return out
 end
 
-function stack_data(version::AbstractString, data_directory::AbstractString;
-                    pattern       = r"\.mat$"i,
-                    order::Symbol = :asc,
-                    verbose::Bool = true)
-
-    scipy_io = pyimport("scipy.io")
-
-    # -----------------------------------------------------------------------
-    # Internal helpers
-    # -----------------------------------------------------------------------
-    function mat_read_scalar(filepath, key)
-        mat = scipy_io.loadmat(filepath, variable_names = [key])
-        val = mat[key]
-        return Float64(val[1])
-    end
-
-    function mat_read_string(filepath)
-        mat = scipy_io.loadmat(filepath, variable_names = String[])
-        header = mat["__header__"]
-        m = match(r"Created on:\s*(.+)$", string(header))
-        return m !== nothing ? strip(m.captures[1]) : string(header)
-    end
-
-    # -----------------------------------------------------------------------
-    # 1) Collect .mat files
-    # -----------------------------------------------------------------------
-    all_files = readdir(data_directory; join = true)
-    files     = filter(f -> occursin(pattern, f), all_files)
-    @assert !isempty(files) "No matching .mat files found in $data_directory"
-
-    N = length(files)
-
-    # -----------------------------------------------------------------------
-    # 2) Read scalar metadata — catch per-file errors and report all at once
-    # -----------------------------------------------------------------------
-    MGcurrent  = Vector{Float64}(undef, N)
-    MGfield    = Vector{Float64}(undef, N)
-    SG0current = Vector{Float64}(undef, N)
-    SG0field   = Vector{Float64}(undef, N)
-    SG1current = Vector{Float64}(undef, N)
-    SG1field   = Vector{Float64}(undef, N)
-    acqStep    = Vector{Int}(undef, N)
-    acqTime    = Vector{String}(undef, N)
-
-    scalar_errors = Dict{String, String}()
-
-    for (i, f) in enumerate(files)
-        try
-            MGcurrent[i]  = mat_read_scalar(f, "MGcurrentinA")
-            MGfield[i]    = mat_read_scalar(f, "MGfieldinGauss")   * 1e-4  # G → T
-            SG0current[i] = mat_read_scalar(f, "SG0currentinA")
-            SG0field[i]   = mat_read_scalar(f, "SG0BfieldinGauss") * 1e-4  # G → T
-            SG1current[i] = mat_read_scalar(f, "SG1currentinA")
-            SG1field[i]   = mat_read_scalar(f, "SG1BfieldinGauss") * 1e-4  # G → T
-            acqStep[i]    = Int(mat_read_scalar(f, "stepInAcquistionOrder"))
-            acqTime[i]    = mat_read_string(f)
-        catch e
-            scalar_errors[f] = sprint(showerror, e)
-        end
-    end
-
-    if !isempty(scalar_errors)
-        buf = IOBuffer()
-        println(buf, "\n$(length(scalar_errors)) file(s) failed scalar read:\n")
-        for (f, msg) in sort(collect(scalar_errors))
-            println(buf, "  $(basename(f))\n    ✗  $msg\n")
-        end
-        error(String(take!(buf)))
-    end
-
-    # -----------------------------------------------------------------------
-    # 3) Sort by SG1 current
-    # -----------------------------------------------------------------------
-    p = order === :desc ? sortperm(acqStep; rev = true) :
-        order === :asc  ? sortperm(acqStep) :
-        throw(ArgumentError("order must be :asc or :desc"))
-
-    files      = files[p];      MGcurrent  = MGcurrent[p]
-    MGfield    = MGfield[p];    SG0current = SG0current[p]
-    SG0field   = SG0field[p];   SG1current = SG1current[p]
-    SG1field   = SG1field[p];   acqStep    = acqStep[p]
-    acqTime    = acqTime[p]
-
-    # -----------------------------------------------------------------------
-    # 4) Probe array size & eltype from the first file
-    # -----------------------------------------------------------------------
-    sz, T = let
-        mat = scipy_io.loadmat(files[1])
-        a   = mat["F1"]
-        size(a), eltype(a)
-    end
-
-    # -----------------------------------------------------------------------
-    # 5) Allocate and stack image arrays — catch per-file errors
-    # -----------------------------------------------------------------------
-    F1 = Array{T}(undef, sz[1], sz[2], sz[3], N)
-    F2 = similar(F1)
-    BG = similar(F1)
-
-    println("\nEach component is organized as (Nx, Nz, Nframes, Ncurrents)\n")
-
-    array_errors = Dict{String, String}()
-
-    for (i, f) in enumerate(files)
-        try
-            mat = scipy_io.loadmat(f)
-            f1  = mat["F1"]
-            f2  = mat["F2"]
-            bg  = mat["BG"]
-            @assert size(f1) == sz && size(f2) == sz && size(bg) == sz "Inconsistent array sizes: expected $sz, got $(size(f1))"
-            F1[:, :, :, i] = f1
-            F2[:, :, :, i] = f2
-            BG[:, :, :, i] = bg
-        catch e
-            array_errors[f] = sprint(showerror, e)
-        end
-        verbose && i % 5 == 0 && @info "Loaded $i / $N" file = f
-    end
-
-    if !isempty(array_errors)
-        buf = IOBuffer()
-        println(buf, "\n$(length(array_errors)) file(s) failed array read:\n")
-        for (f, msg) in sort(collect(array_errors))
-            println(buf, "  $(basename(f))\n    ✗  $msg\n")
-        end
-        error(String(take!(buf)))
-    end
-
-    # -----------------------------------------------------------------------
-    # 6) Return
-    # -----------------------------------------------------------------------
-    return OrderedDict(
-        :Directory        => String(data_directory),
-        :Files            => files,
-        :AcquisitionTime  => acqTime,
-        :AcquisitionStep  => acqStep,
-        :MGcurrentInA     => MGcurrent,
-        :MGfieldInTesla   => MGfield,
-        :SG0currentInA    => SG0current,
-        :SG0BfieldInTesla => SG0field,
-        :SGcurrentInA     => SG1current,
-        :SGBfieldInTesla  => SG1field,
-        :F1_data          => F1,
-        :F2_data          => F2,
-        :BG_data          => BG,
-    )
-end
-
-
-
 
 """
     bin_x_mean(A::AbstractMatrix, binsize::Integer) -> AbstractMatrix
@@ -1165,7 +1015,7 @@ function my_process_framewise_maxima(signal_key::String, data, n_bins::Integer; 
                 error("Invalid signal_key: choose 'F1' or 'F2'")
 
     # z-axes (mm)
-    z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(default_z_pixels, n_bins, effective_cam_pixelsize_z)
 
     # Determine max number of frames across currents
     n_runs_max = maximum(size(Float64.(data[signal_label][:,:,:,i]), 3) for i in 1:nI)
@@ -1261,6 +1111,113 @@ function my_process_framewise_maxima(signal_key::String, data, n_bins::Integer; 
     return max_position_data
 end
 
+function my_process_framewise_maxima(filepath::String, signal_key::String, n_bins::Integer;
+                                      half_max::Bool=false, min_region_size::Int=10,
+                                      peak_threshold::Float64=0.0, λ0::Float64=0.01,
+)
+
+    jld2_key = signal_key == "F1" ? "data/F1ProcessedImages" :
+               signal_key == "F2" ? "data/F2ProcessedImages" :
+               error("Invalid signal_key: choose 'F1' or 'F2'")
+    @info "Processing per-frame maxima" jld2_key=jld2_key
+
+    jldopen(filepath, "r") do file
+        I_current = vec(file["meta/SG1currentInA"])
+        nI        = length(I_current)
+        z_pixels  = size(file[jld2_key], 2)
+
+        @assert z_pixels % n_bins == 0 "z_pixels ($z_pixels) must be divisible by n_bins ($n_bins)"
+
+        z_binned_mm      = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
+        n_runs_max        = maximum(size(file[jld2_key], 3) for _ in 1:nI)
+        max_position_data = fill(NaN, n_runs_max, nI)
+
+        prog = Progress(nI; desc="Processing $signal_key: ", showspeed=true)
+        for j in 1:nI
+            stack    = Float64.(file[jld2_key][:,:,:,j])
+            n_frames = size(stack, 3)
+
+            for i in 1:n_frames
+                # Per-frame z-profile (mean over x → vec)
+                frame_profile     = vec(mean(stack[:,:,i]; dims=1))
+                processed_profile = vec(mean(reshape(frame_profile, n_bins, :); dims=1))
+
+                # Step 1: isolate the dominant peak region
+                # Threshold at `peak_threshold` × global max to find contiguous regions,
+                # then discard narrow ones (isolated noise spikes span very few points
+                # while a real smooth peak spans many). Among surviving regions, pick
+                # the one with the highest peak.
+                z_fit, y_fit = if peak_threshold > 0.0
+                    above   = processed_profile .> peak_threshold * maximum(processed_profile)
+                    edges   = findall(diff([false; above; false]) .!= 0)
+                    starts  = edges[1:2:end]
+                    stops   = edges[2:2:end] .- 1
+                    regions = filter(r -> length(r) ≥ min_region_size,
+                                     [st:sp for (st, sp) in zip(starts, stops)])
+                    @assert !isempty(regions) "No valid peak region found at I=$(round(1e3*I_current[j], digits=3))mA, frame=$i — try lowering peak_threshold or min_region_size"
+                    best = argmax([maximum(processed_profile[r]) for r in regions])
+                    z_binned_mm[regions[best]], processed_profile[regions[best]]
+                else
+                    z_binned_mm, processed_profile
+                end
+
+                # Guard: if region still too small, fall back to full profile
+                if length(z_fit) < min_region_size
+                    @warn "Peak region too small ($(length(z_fit)) points) at I=$(round(1e3*I_current[j], digits=3))mA, frame=$i — falling back to full profile"
+                    z_fit, y_fit = z_binned_mm, processed_profile
+                end
+
+                # Step 2: optional half-maximum window within the peak region
+                z_fit, y_fit = if half_max
+                    keep = findall(yi -> yi > maximum(y_fit)/2, y_fit)
+                    z_fit[keep], y_fit[keep]
+                else
+                    z_fit, y_fit
+                end
+
+                # Spline fit
+                S_fit = BSplineKit.fit(BSplineOrder(4), z_fit, y_fit, λ0;
+                                       weights=compute_weights(z_fit, λ0))
+
+                # Peak finding
+                negative_spline(x) = -S_fit(x[1])
+                initial_guesses = sort([
+                    quantile(z_fit, 0.20), z_fit[argmax(y_fit)],
+                    quantile(z_fit, 0.65), quantile(z_fit, 0.75), quantile(z_fit, 0.90),
+                ])
+                candidates = map(initial_guesses) do g
+                    res = optimize(negative_spline, [minimum(z_fit)], [maximum(z_fit)], [g], Fminbox(LBFGS()))
+                    Optim.minimizer(res)[1]
+                end
+                filtered = unique(x -> round(x; digits=9), sort(candidates))
+
+                @assert !isempty(filtered) "No peak candidates found for j=$j, frame=$i"
+                max_z = filtered[argmax(S_fit.(filtered))]
+                max_position_data[i, j] = max_z
+
+                # Plot
+                xs  = range(minimum(z_fit), maximum(z_fit); length=2001)
+                fig = plot(z_fit, y_fit;
+                    seriestype=:scatter, marker=(:circle,:white,2),
+                    markerstrokecolor=:gray36, markerstrokewidth=0.8,
+                    xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
+                    xlims=extrema(z_binned_mm),
+                    title=L"%$(signal_key) Frame %$(i): $I_c=%$(round(1e3*I_current[j], digits=3))\ \mathrm{mA}$",
+                    label="$(signal_key) processed", legend=:topleft)
+                plot!(fig, collect(xs), S_fit.(xs); line=(:solid,:red,2),
+                    label=L"Spline fit ($\lambda_{0}=%$(λ0)$)")
+                vline!(fig, [max_z]; line=(:dash,:black,1),
+                    label=L"$z_{\max}=%$(round(max_z, digits=3))\ \mathrm{mm}$")
+                display(fig)
+                _has(:SAVE_FIG) && saveplot(fig, "fw$(i)_$(signal_key)_I$(@sprintf("%02d", j))")
+            end
+
+            next!(prog)
+        end
+
+        return max_position_data
+    end
+end
 
 """
     my_process_mean_maxima(signal_key::String, data, n_bins::Integer; 
@@ -1310,7 +1267,7 @@ julia
 peaks_F1 = my_process_mean_maxima("F1", processed_data, 2; half_max=true, λ0=1e-3)
 peaks_F2 = my_process_mean_maxima("F2", processed_data, 2)
 """
-function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_max=false, λ0::Float64=0.01)
+function my_process_mean_maxima(signal_key::String, data::AbstractDict, n_bins::Integer; half_max=false, λ0::Float64=0.01)
     I_current = vec(data[:Currents])
     nI = length(I_current)
     
@@ -1321,8 +1278,8 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
     @info "Processing mean maxima" signal_label=signal_label
 
     # Precompute z-axes (mm)
-    z_full_mm   = 1e3 .* pixel_positions(z_pixels, 1,  effective_cam_pixelsize_z)
-    z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
+    z_full_mm   = 1e3 .* pixel_positions(default_z_pixels, 1,  effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(default_z_pixels, n_bins, effective_cam_pixelsize_z)
 
     peak_positions = zeros(Float64,nI)
 
@@ -1436,6 +1393,111 @@ function my_process_mean_maxima(signal_key::String, data, n_bins::Integer; half_
     return peak_positions, spline_matrix
 end
 
+
+function my_process_mean_maxima(filepath::String, signal_key::String, n_bins::Integer;
+                                 half_max=false, λ0::Float64=0.01
+)
+
+    jld2_key = signal_key == "F1" ? "data/F1ProcessedImages" :
+               signal_key == "F2" ? "data/F2ProcessedImages" :
+               error("Invalid signal_key: choose 'F1' or 'F2'")
+    @info "Processing mean maxima" jld2_key=jld2_key
+
+    jldopen(filepath, "r") do file
+        I_current = vec(file["meta/SG1currentInA"])
+        nI        = length(I_current)
+        z_pixels  = size(file[jld2_key], 2)
+
+        @assert z_pixels % n_bins == 0 "z_pixels ($z_pixels) must be divisible by n_bins ($n_bins)"
+
+        z_full_mm   = 1e3 .* pixel_positions(z_pixels, 1,      effective_cam_pixelsize_z)
+        z_binned_mm = 1e3 .* pixel_positions(z_pixels, n_bins, effective_cam_pixelsize_z)
+
+        peak_positions = zeros(Float64, nI)
+        spline_matrix  = Matrix{Float64}(undef, length(z_binned_mm), nI + 1)
+        spline_matrix[:, 1] = z_binned_mm
+
+        prog = Progress(nI; desc="Processing $signal_key: ", showspeed=true)
+        for j in 1:nI
+            stack    = Float64.(file[jld2_key][:,:,:,j])
+            n_frames = size(stack, 3)
+
+            # Per-frame z-profiles
+            frame_profiles_mat = Matrix{Float64}(undef, n_frames, z_pixels)
+            for i in 1:n_frames
+                frame_profiles_mat[i, :] = vec(mean(stack[:,:,i]; dims=1))
+            end
+
+            # Mean over x and frames simultaneously
+            mean_profile     = vec(mean(stack; dims=(1,3)))
+            processed_signal = vec(mean(reshape(mean_profile, n_bins, :); dims=1))
+
+            # Full spline
+            S_full = BSplineKit.fit(BSplineOrder(4), z_binned_mm, processed_signal, λ0;
+                                    weights=compute_weights(z_binned_mm, λ0))
+            spline_matrix[:, j+1] = S_full.(z_binned_mm)
+
+            # Optional half-maximum window
+            z_fit, y_fit = if half_max
+                keep_ix = findall(yi -> yi > maximum(processed_signal)/2, processed_signal)
+                z_binned_mm[keep_ix], processed_signal[keep_ix]
+            else
+                z_binned_mm, processed_signal
+            end
+
+            # Spline on (possibly windowed) data
+            S_fit = BSplineKit.fit(BSplineOrder(4), z_fit, y_fit, λ0;
+                                   weights=compute_weights(z_fit, λ0))
+
+            # Peak finding
+            negative_spline(x) = -S_fit(x[1])
+            initial_guesses = sort([
+                quantile(z_fit, 0.40), z_fit[argmax(y_fit)],
+                quantile(z_fit, 0.65), quantile(z_fit, 0.75), quantile(z_fit, 0.90),
+            ])
+            minima_candidates = map(initial_guesses) do g
+                res = optimize(negative_spline, [minimum(z_fit)], [maximum(z_fit)], [g], Fminbox(LBFGS()))
+                Optim.minimizer(res)[1]
+            end
+            filtered = unique(x -> round(x; digits=9), sort(minima_candidates))
+            maxima   = filtered[sortperm(-S_fit.(filtered))]
+            peak_positions[j] = maxima[1]
+
+            # Plots
+            cols    = palette(:phase, n_frames)
+            fig_raw = plot(
+                xlabel=L"$z$ (mm)", ylabel="Intensity (a.u.)",
+                title=L"%$(signal_key) Raw: $I_c = %$(round(1000*I_current[j], digits=3))\ \mathrm{mA}$")
+            for i in 1:n_frames
+                plot!(fig_raw, z_full_mm, frame_profiles_mat[i,:]; label=false, line=(:dot, cols[i], 1))
+            end
+            plot!(fig_raw, z_binned_mm, processed_signal; label="mean (bins=$(n_bins))", line=(:solid,:black,2))
+
+            xs      = range(minimum(z_fit), maximum(z_fit); length=2000)
+            fig_fit = plot(z_fit, y_fit;
+                seriestype=:scatter, marker=(:circle,:white,2),
+                markerstrokecolor=:gray36, markerstrokewidth=0.8,
+                xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
+                title=L"%$(signal_key) Processed: $I_c = %$(round(1000*I_current[j], digits=3))\ \mathrm{mA}$",
+                label="$(signal_key) processed", legend=:topleft)
+            plot!(fig_fit, collect(xs), S_fit.(xs); line=(:solid,:red,2),
+                label=L"Spline fit ($\lambda_{0}=%$(λ0)$)")
+            vline!(fig_fit, [maxima[1]]; line=(:dash,:black,1),
+                label=L"$z_{\max}=%$(round(maxima[1], digits=3))\ \mathrm{mm}$")
+
+            fig = plot(fig_raw, fig_fit; layout=@layout([a b]), size=(900,400),
+                       left_margin=3mm, bottom_margin=3mm)
+            display(fig)
+            _has(:SAVE_FIG) && saveplot(fig, "m_$(signal_key)_I$(@sprintf("%02d", j))")
+
+            next!(prog)
+        end
+
+        return peak_positions, spline_matrix
+    end
+end
+
+
 """
     build_processed_dict(raw_data::OrderedDict{Symbol,Any},
                         DK::AbstractMatrix, FL::AbstractMatrix;
@@ -1498,15 +1560,16 @@ function build_processed_dict(raw_data::OrderedDict{Symbol,Any},
     F2proc = (F2 .- BG) #./ flat4
 
     out = OrderedDict(
-        :Currents           => raw_data[:Currents],
-        :CurrentsError      => raw_data[:CurrentsError],
         :F1ProcessedImages  => F1proc,   # size: 540 × 2560 × number of images× number of currents
         :F2ProcessedImages  => F2proc,   # size: 540 × 2560 × number of images× number of currents
     )
 
     # --- optional field ---
-    if haskey(raw_data, :BzTesla)
-        out[:BzTesla] = raw_data[:BzTesla]
+    keys_to_copy = (:BzTesla, :Currents, :CurrentsError)
+    if all(haskey(raw_data, k) for k in keys_to_copy)
+        for k in keys_to_copy
+            out[k] = raw_data[k]
+        end
     end
 
     return out
@@ -1566,7 +1629,8 @@ Returns an `(nI × z_out)` matrix, where `z_out = z_pixels ÷ n_bin`.
 - Binning is along z (the 2nd dimension).
 """
 function extract_profiles(data_processed, key::Symbol, nI::Integer, z_pixels::Integer;
-                        T::Type{<:Real}=Float64, n_bin::Integer=1, with_error::Bool = false)
+                        T::Type{<:Real}=Float64, n_bin::Integer=1, with_error::Bool = false
+)
     @assert n_bin ≥ 1 "n_bin must be ≥ 1"
     @assert z_pixels % n_bin == 0 "z_pixels ($z_pixels) must be divisible by n_bin ($n_bin)"
     z_out = div(z_pixels, n_bin)
@@ -1609,6 +1673,50 @@ function extract_profiles(data_processed, key::Symbol, nI::Integer, z_pixels::In
     end
 
     return with_error ? (mean = P, sem = Q::Matrix{T}) : P
+end
+
+function extract_profiles(filepath::String, key::Symbol, nI::Integer, z_pixels::Integer;
+                          T::Type{<:Real}=Float64, n_bin::Integer=1, with_error::Bool=false
+)
+    @assert n_bin ≥ 1             "n_bin must be ≥ 1"
+    @assert z_pixels % n_bin == 0 "z_pixels ($z_pixels) must be divisible by n_bin ($n_bin)"
+
+    jld2_key = "data/$(String(key))"  # :F1ProcessedImages → "F1ProcessedImages"
+
+    z_out = div(z_pixels, n_bin)
+    P = Matrix{T}(undef, nI, z_out)
+    Q = with_error ? Matrix{T}(undef, nI, z_out) : nothing
+
+    jldopen(filepath, "r") do file
+        @inbounds @views for j in 1:nI
+            stack_raw = file[jld2_key][:,:,:,j]
+            stack = T <: eltype(stack_raw) ? stack_raw : T.(stack_raw)
+
+            Nx, Nz, Nf = size(stack)
+            @assert Nz == z_pixels
+
+            if n_bin == 1
+                xmean = mean(stack; dims=1)
+                prof  = dropdims(mean(xmean; dims=3); dims=(1,3))
+                P[j, :] = prof
+                if with_error
+                    σ_sem = dropdims(std(xmean; dims=3, corrected=true); dims=(1,3)) ./ sqrt(Nf)
+                    Q[j, :] = σ_sem
+                end
+            else
+                B      = reshape(stack, Nx, n_bin, z_out, Nf)
+                xbmean = mean(B; dims=(1,2))
+                prof_binned = dropdims(mean(xbmean; dims=4); dims=(1,2,4))
+                P[j, :] = prof_binned
+                if with_error
+                    σ_sem = dropdims(std(xbmean; dims=4, corrected=true); dims=(1,2,4)) ./ sqrt(Nf)
+                    Q[j, :] = σ_sem
+                end
+            end
+        end
+    end
+
+    return with_error ? (mean=P, sem=Q::Matrix{T}) : P
 end
 
 """
@@ -2847,6 +2955,154 @@ function SG0_stack_data(data_directory::AbstractString;
     return out
 end
 
+function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
+                    pattern       = r"\.mat$"i,
+                    order::Symbol = :asc,
+                    verbose::Bool = true)
+
+    scipy_io = pyimport("scipy.io")
+
+    # -----------------------------------------------------------------------
+    # Internal helpers
+    # -----------------------------------------------------------------------
+    function mat_read_scalar(filepath, key)
+        mat = scipy_io.loadmat(filepath, variable_names = [key])
+        val = mat[key]
+        return Float64(val[1])
+    end
+
+    function mat_read_string(filepath)
+        mat = scipy_io.loadmat(filepath, variable_names = String[])
+        header = mat["__header__"]
+        m = match(r"Created on:\s*(.+)$", string(header))
+        return m !== nothing ? strip(m.captures[1]) : string(header)
+    end
+
+    # -----------------------------------------------------------------------
+    # 1) Collect .mat files
+    # -----------------------------------------------------------------------
+    all_files = readdir(data_directory; join = true)
+    files     = filter(f -> occursin(pattern, f), all_files)
+    @assert !isempty(files) "No matching .mat files found in $data_directory"
+
+    N = length(files)
+
+    # -----------------------------------------------------------------------
+    # 2) Read scalar metadata — catch per-file errors and report all at once
+    # -----------------------------------------------------------------------
+    MGcurrent  = Vector{Float64}(undef, N)
+    MGfield    = Vector{Float64}(undef, N)
+    SG0current = Vector{Float64}(undef, N)
+    SG0field   = Vector{Float64}(undef, N)
+    SG1current = Vector{Float64}(undef, N)
+    SG1field   = Vector{Float64}(undef, N)
+    acqStep    = Vector{Int}(undef, N)
+    acqTime    = Vector{String}(undef, N)
+
+    scalar_errors = Dict{String, String}()
+
+    for (i, f) in enumerate(files)
+        try
+            MGcurrent[i]  = mat_read_scalar(f, "MGcurrentinA")
+            MGfield[i]    = mat_read_scalar(f, "MGfieldinGauss")   * 1e-4  # G → T
+            SG0current[i] = mat_read_scalar(f, "SG0currentinA")
+            SG0field[i]   = mat_read_scalar(f, "SG0BfieldinGauss") * 1e-4  # G → T
+            SG1current[i] = mat_read_scalar(f, "SG1currentinA")
+            SG1field[i]   = mat_read_scalar(f, "SG1BfieldinGauss") * 1e-4  # G → T
+            acqStep[i]    = Int(mat_read_scalar(f, "stepInAcquistionOrder"))
+            acqTime[i]    = mat_read_string(f)
+        catch e
+            scalar_errors[f] = sprint(showerror, e)
+        end
+    end
+
+    if !isempty(scalar_errors)
+        buf = IOBuffer()
+        println(buf, "\n$(length(scalar_errors)) file(s) failed scalar read:\n")
+        for (f, msg) in sort(collect(scalar_errors))
+            println(buf, "  $(basename(f))\n    ✗  $msg\n")
+        end
+        error(String(take!(buf)))
+    end
+
+    # -----------------------------------------------------------------------
+    # 3) Sort by SG1 current
+    # -----------------------------------------------------------------------
+    p = order === :desc ? sortperm(acqStep; rev = true) :
+        order === :asc  ? sortperm(acqStep) :
+        throw(ArgumentError("order must be :asc or :desc"))
+
+    files      = files[p];      MGcurrent  = MGcurrent[p]
+    MGfield    = MGfield[p];    SG0current = SG0current[p]
+    SG0field   = SG0field[p];   SG1current = SG1current[p]
+    SG1field   = SG1field[p];   acqStep    = acqStep[p]
+    acqTime    = acqTime[p]
+
+    # -----------------------------------------------------------------------
+    # 4) Probe array size & eltype from the first file
+    # -----------------------------------------------------------------------
+    sz, T = let
+        mat = scipy_io.loadmat(files[1])
+        a   = mat["F1"]
+        size(a), eltype(a)
+    end
+
+    # -----------------------------------------------------------------------
+    # 5) Allocate and stack image arrays — catch per-file errors
+    # -----------------------------------------------------------------------
+    F1 = Array{T}(undef, sz[1], sz[2], sz[3], N)
+    F2 = similar(F1)
+    BG = similar(F1)
+
+    println("\nEach component is organized as (Nx, Nz, Nframes, Ncurrents)\n")
+
+    array_errors = Dict{String, String}()
+
+    for (i, f) in enumerate(files)
+        try
+            mat = scipy_io.loadmat(f)
+            f1  = mat["F1"]
+            f2  = mat["F2"]
+            bg  = mat["BG"]
+            @assert size(f1) == sz && size(f2) == sz && size(bg) == sz "Inconsistent array sizes: expected $sz, got $(size(f1))"
+            F1[:, :, :, i] = f1
+            F2[:, :, :, i] = f2
+            BG[:, :, :, i] = bg
+        catch e
+            array_errors[f] = sprint(showerror, e)
+        end
+        verbose && i % 5 == 0 && @info "Loaded $i / $N" file = f
+    end
+
+    if !isempty(array_errors)
+        buf = IOBuffer()
+        println(buf, "\n$(length(array_errors)) file(s) failed array read:\n")
+        for (f, msg) in sort(collect(array_errors))
+            println(buf, "  $(basename(f))\n    ✗  $msg\n")
+        end
+        error(String(take!(buf)))
+    end
+
+    # -----------------------------------------------------------------------
+    # 6) Return
+    # -----------------------------------------------------------------------
+    return OrderedDict(
+        :Directory         => String(data_directory),
+        :Files             => files,
+        :AcquisitionTime   => acqTime,
+        :AcquisitionStep   => acqStep,
+        :MGcurrentInA      => MGcurrent,
+        :MGfieldInTesla    => MGfield,
+        :SG0currentInA     => SG0current,
+        :SG0BfieldInTesla  => SG0field,
+        :SG1currentInA     => SG1current,
+        :SG1BfieldInTesla  => SG1field,
+        :F1_data           => F1,
+        :F2_data           => F2,
+        :BG_data           => BG,
+    )
+end
+
 function SG0_build_processed_dict(raw_data::OrderedDict{Symbol,Any};
                             T = Float32, epsval = T(1e-12))
 
@@ -2889,6 +3145,67 @@ function SG0_build_processed_dict(raw_data::OrderedDict{Symbol,Any};
     )
 
     return out
+end
+
+function SG0_process_and_save(raw_data::OrderedDict{Symbol,Any}, outpath::String;
+                               T = Float32, epsval = T(1e-12),
+                               mode::Symbol = :permuted
+)
+
+    @assert mode in (:permuted, :simple) "mode must be :permuted or :simple"
+
+    # Promote to Float32 once
+    F1 = T.(raw_data[:F1_data])
+    F2 = T.(raw_data[:F2_data])
+    BG = T.(raw_data[:BG_data])
+
+    @assert size(F1) == size(F2)
+
+
+    if mode == :permuted
+        nx, nz = size(F1,1), size(F1,2)
+        ni = size(F1,3)
+        nj = size(BG,3)
+        nk = size(F1,4) # number of currents
+        pairs = collect(Iterators.product(1:ni, 1:nj))
+
+        # Background subtract
+        F1proc = Array{T}(undef, nx, nz, ni*nj, nk)
+        F2proc = Array{T}(undef, nx, nz, ni*nj, nk)
+
+        prog = Progress(nk * length(pairs); desc="Background subtracting: ", showspeed=true)
+        for k in 1:nk
+            for (idx,(i,j)) in enumerate(pairs)
+                @views F1proc[:,:,idx,k] .= F1[:,:,i,k] .- BG[:,:,j,k]
+                @views F2proc[:,:,idx,k] .= F2[:,:,i,k] .- BG[:,:,j,k]
+                next!(prog)
+            end
+        end
+    else # :simple
+            F1proc = F1 .- BG
+            F2proc = F2 .- BG
+    end
+
+    @info "Saving to $outpath..."
+    jldopen(outpath, "w") do file
+        # ── meta group ──────────────────────────────────────────────
+        file["meta/Directory"]        = raw_data[:Directory]
+        file["meta/MGcurrentInA"]     = raw_data[:MGcurrentInA]
+        file["meta/MGfieldInTesla"]   = raw_data[:MGfieldInTesla]
+        file["meta/SG0currentInA"]    = raw_data[:SG0currentInA]
+        file["meta/SG0BfieldInTesla"] = raw_data[:SG0BfieldInTesla]
+        file["meta/SG1currentInA"]    = raw_data[:SG1currentInA]
+        file["meta/SG1BfieldInTesla"] = raw_data[:SG1BfieldInTesla]
+
+        # ── data group ──────────────────────────────────────────────
+        # file["data"] = OrderedDict(
+        #     :F1ProcessedImages => F1proc,
+        #     :F2ProcessedImages => F2proc,
+        # )
+            # ── data group ────────────────────────────────────────────────
+        file["data/F1ProcessedImages"] = F1proc
+        file["data/F2ProcessedImages"] = F2proc
+    end
 end
 
 function SG0_mean_maxima(signal_key::String, data, nz_bins::Integer; half_max=false, λ0::Float64=0.01, make_plot::Bool = false)
