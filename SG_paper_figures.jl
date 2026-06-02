@@ -40,6 +40,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 @info "Julia threads" count = Threads.nthreads()
 # Set the working directory to the current location
 cd(@__DIR__) ;
+const BASE_PATH = raw"F:\SternGerlachExperiments";
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const OUTDIR    = joinpath(@__DIR__, "data_studies", RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
@@ -221,7 +222,7 @@ ki_6M = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09,
 
 ki_fit = 2.4e-6
 
-cqd_ki_path = joinpath("Y://SternGerlach//simulations/cqd_simulation_6M","up","cqd_6000000_ki034_up_screen.jld2");
+cqd_ki_path = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_6M","up","cqd_6000000_ki034_up_screen.jld2");
 cqd_ki = load(cqd_ki_path,"screen")[:data]
 
 Ic = Icoils[2:end]
@@ -229,21 +230,22 @@ Ic = Icoils[2:end]
 number_precessions = round(1/(TWOπ*ki_fit))
 collapse_time = inv.(ki_fit * abs(γₑ)* TheoreticalSimulation.BvsI.(Ic))
 
-plot(Ic,1e6*collapse_time,
+fig = plot(Ic,1e6*collapse_time,
     label=L"Collapse time $\tau_{c}$",
     line=(:blue,2),
     xlabel="Current (A)",
     ylabel="Collapse time (μs)",
     xaxis=:log10,
     yaxis=:log10,
-    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1, 10, 100], [L"10^{0}", L"10^{1}", L"10^{2}"]),
-    xlims=(1e-2,1),
-    ylims=(1,200)
+    xlims=(1e-3,1),
+    ylims=(1,3500)
 )
+savefig(fig, joinpath(OUTDIR,"collapse_time.png"))
 
 travel_times = [mean(inv.(cqd_ki[ic][:,5] / y_SG)) for ic=2:47]
-plot(Ic,
+fig = plot(Ic,
     1e6*travel_times,
     ribbon=1e6*[standard_error(inv.(cqd_ki[ic][:,5] / y_SG)) for ic=2:47],
     label=L"Time of flight $\Delta t_{\mathrm{SG}}$",
@@ -253,11 +255,13 @@ plot(Ic,
     xlabel="Current (A)",
     ylabel="Time of flight (μs)",
     xaxis=:log10,
-    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xlims=(1e-2,1),
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xlims=(1e-3,1),
     fillalpha=0.1,
+    legend=:bottomleft,
 )
 @info @sprintf("The mean time of flight is (%d ± %d) μs ",mean(1e6*travel_times),std(1e6*travel_times))
+savefig(fig, joinpath(OUTDIR,"time_flight.png"))
 
 
 
@@ -279,14 +283,14 @@ plot!(Ic,1e6*collapse_time,
     ylabel="Time (μs)",
     xaxis=:log10,
     yaxis=:log10,
-    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    xticks = xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1, 10, 100], [L"10^{0}", L"10^{1}", L"10^{2}"]),
-    xlims=(1e-2,1),
-    ylims=(1,200),
+    xlims=(1e-3,1),
+    ylims=(1,4000),
     legend=:bottomleft
 )
 
-plot(Ic,travel_times ./ collapse_time,
+fig = plot(Ic,travel_times ./ collapse_time,
     label=L"$\Delta t_{\mathrm{SG}} / \tau_{c}$",
     line=(:red,2),
     xaxis=:log10,
@@ -301,6 +305,7 @@ plot(Ic,travel_times ./ collapse_time,
     legendfontsize=12,
 )
 hspan!([0.1,1], color=:black, fillalpha=0.2, label=false)
+savefig(fig, joinpath(OUTDIR,"collapse_cycles.png"))
 
 plot(Ic, inv.(travel_times ./ collapse_time),
     label=L"$\tau_{c} / \Delta t_{\mathrm{SG}} $",
