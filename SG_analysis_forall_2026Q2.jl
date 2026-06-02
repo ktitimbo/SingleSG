@@ -50,8 +50,8 @@ MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 data_directories =  ["20260529"]
 data_directory      = data_directories[1] ;
 # Furnace 
-TCelsius = 200
-Temperature = 273.15 + TCelsius
+TCelsius = 205
+const Temperature = 273.15 + TCelsius
 # Blurring (gaussian) width
 σw_um = 0.200
 
@@ -141,7 +141,7 @@ else
 
     # Process and save
     data_raw = load(outfile_raw)["data"];
-    MyExperimentalAnalysis.SG0_process_and_save(data_raw, outfile_processed; mode=:permuted);
+    MyExperimentalAnalysis.SG0_process_and_save(data_raw, outfile_processed; mode=:simple);
     @info "data ready"
 end
 
@@ -159,11 +159,41 @@ jldopen(outfile_processed, "r") do file
         display(fig)
     end
 
-    global Icoils  = file["meta"]["SG1currentInA"]
+    global Iexp_coil  = file["meta"]["SG1currentInA"]
 
 end
-nI      = length(Icoils)
-ΔIcoils = 0.01 * Icoils
+nI      = length(Iexp_coil)
+ΔIexp_coil = 0.01 * Iexp_coil
+sort_perm = sortperm(Iexp_coil)
+
+fig_I0 = plot(Iexp_coil, 
+    seriestype=:scatter,
+    label = "Currents sampled",
+    marker = (:circle, :white, 2),
+    markerstrokecolor = :orangered,
+    markerstrokewidth = 1,
+);
+plot!(    
+    yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$", :log),
+    ylim = (1e-6,1),
+    title = "Coil Currents",
+    label = data_directory,
+    legend = :bottomright,
+    grid = true,
+    minorgrid = true,
+    gridalpha = 0.5,
+    gridstyle = :dot,
+    minorgridalpha = 0.05,
+    yticks = :log10,
+    framestyle = :box,
+    size=(600,400),
+    tickfontsize=11,
+    guidefontsize=14,
+    legendfontsize=10,
+);
+display(fig_I0) 
+saveplot(fig_I0, joinpath(BASE_PATH,"EXPERIMENTS",data_directory,"current_range.$(FIG_EXT)"))
+
 
 # Binning for the analysis
 nbins_list  = (1, 2, 4)
@@ -183,8 +213,8 @@ base_plot_attrs = (size=(800,600), tickfontsize=11, guidefontsize=14, legendfont
 log_axis_attrs = (;
     xaxis=log_xaxis, xticks=log_xticks, xlims=(1e-3,1.0))
 jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w") do file
-    file["meta/Currents"]      = Icoils
-    file["meta/ErrorCurrents"] = ΔIcoils
+    file["meta/Currents"]      = Iexp_coil
+    file["meta/ErrorCurrents"] = ΔIexp_coil
     file["meta/n_Currents"]    = nI
     file["meta/TemperatureK"]  = Temperature
     file["meta/nz"]            = nbins_list
@@ -209,41 +239,13 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         z_mm        = 1e3 .* pixel_positions(z_pixels, nz, EXP_PIXELSIZE_Z)
         z_mm_error  = 1e3 / sqrt(12) * EXP_PIXELSIZE_Z * nz # assuming uniform distribution within the bin/pixel size
 
-        fig_I0 = plot(Icoils, 
-            seriestype=:scatter,
-            label = "Currents sampled",
-            marker = (:circle, :white, 2),
-            markerstrokecolor = :orangered,
-            markerstrokewidth = 1,
-        );
-        plot!(    
-            yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$", :log),
-            ylim = (1e-6,1),
-            title = "Coil Currents",
-            label = data_directory,
-            legend = :bottomright,
-            grid = true,
-            minorgrid = true,
-            gridalpha = 0.5,
-            gridstyle = :dot,
-            minorgridalpha = 0.05,
-            yticks = :log10,
-            framestyle = :box,
-            size=(600,400),
-            tickfontsize=11,
-            guidefontsize=14,
-            legendfontsize=10,
-        );
-        display(fig_I0) 
-        saveplot(fig_I0, "current_range")
-
         # --- Compute F1 / F2 mean profiles ----------------------------------------
         profiles_F1 = extract_profiles(outfile_processed, :F1ProcessedImages, nI, z_pixels; n_bin=nz, with_error=true);
         profiles_F2 = extract_profiles(outfile_processed, :F2ProcessedImages, nI, z_pixels; n_bin=nz, with_error=true);
 
         # --- Plot ------------------------------------------------------------------
-        fig1 = plot_profiles(z_mm, profiles_F1, Icoils; title="F1 processed data")
-        fig2 = plot_profiles(z_mm, profiles_F2, Icoils; title="F2 processed data")
+        fig1 = plot_profiles(z_mm, profiles_F1, Iexp_coil; title="F1 processed data")
+        fig2 = plot_profiles(z_mm, profiles_F2, Iexp_coil; title="F2 processed data")
         fig = plot(fig1, fig2;
             layout=(2,1),
             size=(1000,600),
@@ -263,14 +265,14 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # ── Centroid ──────────────────────────────────────────────────────────
         data_centroid_mean       = 0.5 .* (f1_mean_max .+ f2_mean_max)
         data_centroid_mean_error = fill(0.5 * sqrt(2) * z_mm_error, length(data_centroid_mean))
-        centroid_mean = post_threshold_mean(data_centroid_mean, Icoils, data_centroid_mean_error;
+        centroid_mean = post_threshold_mean(data_centroid_mean, Iexp_coil, data_centroid_mean_error;
                             threshold=0.020, half_life=5, eps=1e-6, weighted=true)
         saveplot(centroid_mean.plot, "mean_centroid_diagnose")
 
         # ── DataFrame ─────────────────────────────────────────────────────────
         df_mean = sort!(DataFrame(
-            Icoil_A              = Icoils,
-            Icoil_error_A        = ΔIcoils,
+            Icoil_A              = Iexp_coil,
+            Icoil_error_A        = ΔIexp_coil,
             F1_z_peak_mm         = f1_mean_max,
             F2_z_peak_mm         = f2_mean_max,
             Δz_mm                = f1_mean_max .- f2_mean_max,
@@ -284,8 +286,8 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # ── Save profiles ──────────────────────────────────────────────────────
         jldsave(joinpath(OUTDIR, "profiles_mean.jld2"),
             profiles = OrderedDict(
-                :Icoils      => Icoils,
-                :Icoils_err  => ΔIcoils,
+                :Icoils      => Iexp_coil,
+                :Icoils_err  => ΔIexp_coil,
                 :Centroid_mm => (centroid_mean.mean, centroid_mean.sem),
                 :z_mm        => z_mm,
                 :F1_profile  => profiles_F1.mean,
@@ -318,7 +320,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         )
 
         # ── Centroid figure ────────────────────────────────────────────────────
-        fig_centroid = plot(Icoils, data_centroid_mean;
+        fig_centroid = plot(Iexp_coil, data_centroid_mean;
             yerror           = data_centroid_mean_error,
             label            = false,
             color            = :purple,
@@ -467,15 +469,15 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         # ── Centroid ───────────────────────────────────────────────────────────
         data_centroid_fw       = 0.5 .* (f1_z_mm .+ f2_z_mm)
         data_centroid_fw_error = 0.5 .* sqrt.(f1_z_sem_mm.^2 .+ f2_z_sem_mm.^2)
-        centroid_fw = post_threshold_mean(data_centroid_fw, Icoils, data_centroid_fw_error;
+        centroid_fw = post_threshold_mean(data_centroid_fw, Iexp_coil, data_centroid_fw_error;
                             threshold=0.020, half_life=5, eps=1e-6, weighted=true)
         saveplot(centroid_fw.plot, "fw_centroid_diagnose")
 
         # ── DataFrame ──────────────────────────────────────────────────────────
-        res   = summarize_framewise(f1_max, f2_max, Icoils, centroid_fw, z_mm_error)
-        df_fw = DataFrame(
+        res   = summarize_framewise(f1_max, f2_max, Iexp_coil, centroid_fw, z_mm_error)
+        df_fw = sort!(DataFrame(
             Icoil_A             = res.Icoil_A,
-            Icoil_error_A       = ΔIcoils,
+            Icoil_error_A       = ΔIexp_coil,
             F1_z_peak_mm        = res.F1_z_peak_mm,
             F1_z_peak_se_mm     = res.F1_z_se_mm,
             F2_z_peak_mm        = res.F2_z_peak_mm,
@@ -486,7 +488,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             F1_z_centroid_se_mm = res.F1_z_centroid_se_mm,
             F2_z_centroid_mm    = res.F2_z_centroid_mm,
             F2_z_centroid_se_mm = res.F2_z_centroid_se_mm,
-        )
+        ), :Icoil_A)
         CSV.write(joinpath(OUTDIR, "fw_data.csv"), df_fw)
 
         # ── Pretty table ───────────────────────────────────────────────────────
@@ -513,8 +515,8 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
 
 
         # ── Centroid figure ────────────────────────────────────────────────────
-        fig_centroid_fw = plot(Icoils, data_centroid_fw;
-            xerror           = ΔIcoils,
+        fig_centroid_fw = plot(Iexp_coil, data_centroid_fw;
+            xerror           = ΔIexp_coil,
             yerror           = data_centroid_fw_error,
             label            = false,
             color            = :purple,
@@ -697,8 +699,8 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
 
         EXPERIMENT CONDITIONS
-            Currents (A)            : $(Icoils)
-            Currents Error (A)      : $(ΔIcoils)
+            Currents (A)            : $(Iexp_coil)
+            Currents Error (A)      : $(ΔIexp_coil)
             No. of currents         : $(nI)
             Temperature (K)         : $(Temperature)
 
@@ -730,11 +732,11 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             write(io, report)
         end
 
-        Ic_around_0 = filter(v -> v <= 0.010, Icoils)
+        Ic_around_0 = filter(v -> v <= 0.010, Iexp_coil)
         ni_0  = length(Ic_around_0)
         DeltaI = if ni_0 > 4
             δi, _, _, _, _ = curr_error_physical(
-                Icoils, ΔIcoils,
+                Iexp_coil, ΔIexp_coil,
                 collect(df_fw.F1_z_centroid_mm), collect(df_fw.F2_z_centroid_mm);
                 δz1 = collect(df_fw.F1_z_centroid_se_mm),
                 δz2 = collect(df_fw.F2_z_centroid_se_mm),
@@ -744,21 +746,23 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             )
             δi
         else
-            ΔIcoils
+            ΔIexp_coil
         end 
+        @assert df_mean.Icoil_A == df_fw.Icoil_A "Electric Current mismatch"
         file[JLD2_MyTools.make_keypath_exp(data_directory, nz, λ0)] = OrderedDict(
             :RUNSTAMP               => RUN_STAMP,
+            :Currents               => df_fw.Icoil_A,
             :ErrorCurrentsPhys      => DeltaI,
             :z_mm                   => z_mm,
             :z_mm_error             => z_mm_error,
 
             # Mean profiles
-            :F1_profile             => profiles_F1.mean,
-            :F1_err                 => profiles_F1.sem,
-            :F1_profile_spline      => f1_mean_spline_profile,
-            :F2_profile             => profiles_F2.mean,
-            :F2_err                 => profiles_F2.sem,
-            :F2_profile_spline      => f2_mean_spline_profile,
+            :F1_profile             => profiles_F1.mean[sort_perm],
+            :F1_err                 => profiles_F1.sem[sort_perm],
+            :F1_profile_spline      => f1_mean_spline_profile[sort_perm],
+            :F2_profile             => profiles_F2.mean[sort_perm],
+            :F2_err                 => profiles_F2.sem[sort_perm],
+            :F2_profile_spline      => f2_mean_spline_profile[sort_perm],
 
             # Mean analysis
             :mean_F1_peak_pos_raw   => df_mean.F1_z_peak_mm,
@@ -800,3 +804,63 @@ JLD2_MyTools.show_exp_summary(path, data_directory)
 println("EXPERIMENTAL ANALYSIS COMPLETED!")
 alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 
+joinpath(data_summary_path, data_directory * "_report_summary.jld2")
+
+jldopen(outfile_processed, "r") do file
+    if haskey(file["meta"], "SG1BfieldInTesla")
+        fig = plot(abs.(file["meta"]["SG1currentInA"]), file["meta"]["SG1BfieldInTesla"];
+            seriestype=:scatter,
+            label=false,
+            marker=(:circle,2,:white),
+            markerstrokecolor=:blue,
+            xlabel="Coil current (A)",
+            ylabel="Magnetic field (T)"
+            )
+        saveplot(fig, joinpath(BASE_PATH,"EXPERIMENTS",data_directory,"mag_field_exp.$(FIG_EXT)"))
+        display(fig)
+    end
+
+    global Iexp_coil  = file["meta"]["SG1currentInA"]
+
+end
+nI      = length(Iexp_coil)
+
+
+data_exp = jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"),"r") do file
+    label = JLD2_MyTools.make_keypath_exp(data_directory,2,0.001)
+    println(file["meta/Currents"])
+    return file[label]
+end
+c0 = 0.5*(data_exp[:fw_F1_peak_pos_raw][1][1] + data_exp[:fw_F2_peak_pos_raw][1][1])
+
+data_QM = jldopen(data_qm_f1_path, "r") do file
+    file[JLD2_MyTools.make_keypath_qm(2,0.100,0.01)]
+end
+
+data_QM_old = jldopen(joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","QM_T$(TCelsius)_8M","qm_screen_profiles_f1_table.jld2"), "r") do file
+    file[JLD2_MyTools.make_keypath_qm(2,0.100,0.01)]
+end
+
+plot(Iexp_coil, abs.(data_exp[:fw_F1_peak_pos_raw][1] .- c0 ), label=L"Experiment $F=1$",
+    ribbon =abs.(data_exp[:fw_F1_peak_pos_raw][2])  )
+plot!(Iexp_coil, abs.(data_exp[:fw_F2_peak_pos_raw][1] .- c0 ), label=L"Experiment $F=2$",
+    ribbon =abs.(data_exp[:fw_F2_peak_pos_raw][2]))
+plot!([data_QM[x][:Icoil] for x=1:47], [data_QM[x][:z_max_smooth_spline_mm] for x=1:47], label="QM_new" )
+plot!([data_QM_old[x][:Icoil] for x=1:47], [data_QM_old[x][:z_max_smooth_spline_mm] for x=1:47], label="QM_old" )
+plot!(xlims=(0.010,1.02),
+        ylims=(0.005,3),
+    legend=:bottomright,)
+plot!(xscale=:log10)
+plot!(yscale=:log10)
+
+lastI = abs.(data_exp[:fw_F1_peak_pos_raw][1] .- c0 )[end-9:end]
+mean(lastI)
+std(lastI)
+
+Icoils
+
+
+
+
+data_exp[:fw_F1_peak_pos_raw][2]
+data_exp[:fw_F2_peak_pos_raw]
