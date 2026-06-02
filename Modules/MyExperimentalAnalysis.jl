@@ -1176,8 +1176,18 @@ function my_process_framewise_maxima(filepath::String, signal_key::String, n_bin
                 end
 
                 # Spline fit
-                S_fit = BSplineKit.fit(BSplineOrder(4), z_fit, y_fit, λ0;
-                                       weights=compute_weights(z_fit, λ0))
+                S_fit = try
+                    BSplineKit.fit(BSplineOrder(4), z_fit, y_fit, λ0;
+                                weights=compute_weights(z_fit, λ0))
+                catch e
+                    if e isa PosDefException
+                        @warn "Spline fit failed at I=$(round(1e3*I_current[j], digits=3))mA, frame=$i — skipping"
+                        max_position_data[i, j] = NaN
+                        continue
+                    else
+                        rethrow(e)
+                    end
+                end
 
                 # Peak finding
                 negative_spline(x) = -S_fit(x[1])
