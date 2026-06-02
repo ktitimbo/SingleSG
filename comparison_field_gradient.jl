@@ -202,7 +202,7 @@ end
 ##################################################################################################
 #   COQUANTUM DYNAMICS
 ##################################################################################################
-ki_ref = 2.30e-6;
+ki_ref = 1.0e-3;
 
 # Monte Carlo generation of particles traversing the filtering slit and assigning polar angles
 data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set; mode=:balanced);
@@ -587,7 +587,7 @@ for idx=1:nI
 end
 
 #_____________________________________________________________________________________________________________
-σw = 0.150
+σw = 0.100
 ki = 2.0 # ×10^-6
 nz = 2
 λ0 = 0.01
