@@ -812,7 +812,8 @@ function stack_data(data_directory::AbstractString;
                     error_factor = 0.015,
                     order::Symbol = :desc,
                     keynames = ("BG","F1","F2"),
-                    verbose::Bool = true)
+                    verbose::Bool = true
+)
 
     # ----------------------------- -----------------------------------------
     parse_amp(tok::AbstractString) =
@@ -1638,7 +1639,7 @@ Returns an `(nI × z_out)` matrix, where `z_out = z_pixels ÷ n_bin`.
 - Requires `n_bin ≥ 1` and `z_pixels % n_bin == 0`.
 - Binning is along z (the 2nd dimension).
 """
-function extract_profiles(data_processed, key::Symbol, nI::Integer, z_pixels::Integer;
+function extract_profiles(data_processed::AbstractDict, key::Symbol, nI::Integer, z_pixels::Integer;
                         T::Type{<:Real}=Float64, n_bin::Integer=1, with_error::Bool = false
 )
     @assert n_bin ≥ 1 "n_bin must be ≥ 1"
@@ -2978,38 +2979,96 @@ end
 """
     SG0_stack_data(version, data_directory; pattern, order, verbose) -> OrderedDict
 
-Load and stack Stern-Gerlach scan data from a directory of `.mat` files.
+Load, validate, and stack Stern-Gerlach scan data from a directory of `.mat` files
+into a single `OrderedDict`. Files are sorted by acquisition step before stacking.
+
+Loading proceeds in two passes to minimise I/O:
+1. **Pre-scan** — scalars and string metadata only (`variable_names` restricted,
+   no array data deserialised).
+2. **Array pass** — `F1`, `F2`, `BG` only, iterated in sorted order.
+
+Scalar and string fields are discovered dynamically from the first file against
+known field tables — fields present in the tables but absent from the `.mat` files
+are silently skipped (with a notice if `verbose = true`).
+
+Errors across multiple files are accumulated and reported together rather than
+failing on the first bad file.
 
 # Arguments
-- `version`        : dataset version string (reserved for future dispatch, currently unused)
-- `data_directory` : path to the folder containing `.mat` files
-- `pattern`        : regex filter for filenames (default `r"\\.mat\$"i`)
-- `order`          : sort order for acquisition steps, `:asc` or `:desc` (default `:asc`)
-- `verbose`        : print loading progress (default `true`)
+- `version::AbstractString`        : dataset version tag (reserved for future dispatch, currently unused)
+- `data_directory::AbstractString` : path to the folder containing `.mat` files
+
+# Keyword arguments
+- `pattern`        : `Regex` filter applied to filenames (default `r"\\.mat\$"i`)
+- `order::Symbol`  : sort direction for acquisition steps; `:asc` or `:desc` (default `:asc`)
+- `verbose::Bool`  : show progress bar and layout info during loading (default `true`)
 
 # Returns
-`OrderedDict` with keys:
-- `:F1_data`, `:F2_data`, `:BG_data`  — 4D arrays `(Nx, Nz, Nframes, Nfiles)` sorted by acquisition step
-- `:MGfieldInTesla`, `:SG0BfieldInTesla`, `:SG1BfieldInTesla` — field values converted from Gauss to Tesla
-- `:AcquisitionTime`       — timestamps parsed from `.mat` file headers (creation time, not acquisition time)
-- `:TemperatureinCelsius`  — scalar if uniform across files, otherwise a vector
+`OrderedDict{Symbol, Any}` with the following keys. All keys except `:Directory`,
+`:Files`, `:AcquisitionStep`, `:F1_data`, `:F2_data`, and `:BG_data` are present
+only if the corresponding variable exists in the `.mat` files.
+
+| Key                      | Type / value                                               |
+|:-------------------------|:-----------------------------------------------------------|
+| `:Directory`             | `String` — absolute path of `data_directory`              |
+| `:Files`                 | `Vector{String}` — sorted file paths                      |
+| `:AcquisitionStep`       | `Vector{Int}` — sorted acquisition step indices           |
+| `:AcquisitionTime`       | `Vector{String}` — from `acquisitionTime` variable *(if present)* |
+| `:TemperatureinCelsius`  | `Float64` if uniform across files, `Vector{Float64}` otherwise *(if present)* |
+| `:MGcurrentInA`          | `Vector{Float64}` — main coil current (A) *(if present)*  |
+| `:MGfieldInTesla`        | `Vector{Float64}` — main coil field (T, converted from G) *(if present)* |
+| `:SG0currentInA`         | `Vector{Float64}` — SG0 coil current (A) *(if present)*   |
+| `:SG0BfieldInTesla`      | `Vector{Float64}` — SG0 field (T, converted from G) *(if present)* |
+| `:SG1currentInA`         | `Vector{Float64}` — SG1 coil current (A) *(if present)*   |
+| `:SG1BfieldInTesla`      | `Vector{Float64}` — SG1 field (T, converted from G) *(if present)* |
+| `:SG2currentInA`         | `Vector{Float64}` — SG2 coil current (A) *(if present)*   |
+| `:SG2BfieldInTesla`      | `Vector{Float64}` — SG2 field (T, converted from G) *(if present)* |
+| `:F1_data`               | `Array{T, 4}` — shape `(Nx, Nz, Nframes, Nfiles)`         |
+| `:F2_data`               | `Array{T, 4}` — shape `(Nx, Nz, Nframes, Nfiles)`         |
+| `:BG_data`               | `Array{T, 4}` — shape `(Nx, Nz, Nframes, Nfiles)`         |
+
+Array eltype `T` is inferred from the first file.
+
+# Throws
+- `ArgumentError` — if `order` is not `:asc` or `:desc`
+- `ErrorException` — if no files match `pattern` in `data_directory`
+- `ErrorException` — if one or more files fail scalar read or array read,
+  with a combined report listing every failing file and its error message
 
 # Notes
-- All files must have identical array shapes for `F1`, `F2`, `BG`
-- Errors across multiple files are accumulated and reported together rather than failing on the first
-- `version` is accepted for forward compatibility but not used internally
+- Only `F1`, `F2`, `BG`, and `stepInAcquisitionOrder` are guaranteed to exist
+  in every `.mat` file; all other fields are loaded only if present.
+- Struct variables (`F1struct`, `F2struct`, `BGstruct`) are ignored.
+- All matched files must have identical array shapes for `F1`, `F2`, and `BG`.
+- Field values are stored in Tesla; the raw Gauss values in the `.mat` files
+  are multiplied by `1e-4` on load.
+- Scalar field discovery assumes that if a key exists in the first file it
+  exists in all files of the dataset.
+- Requires `scipy.io` to be available in the active Python environment
+  (accessed via a module-level lazy singleton `_get_scipy_io()`).
+
+# Example
+julia
+data = SG0_stack_data("v1", "/path/to/scans")
+
+F1    = data[:F1_data]            # (Nx, Nz, Nframes, Nfiles)
+B_SG0 = data[:SG0BfieldInTesla]  # present only if SG0 fields exist in the files
+
+haskey(data, :AcquisitionTime)   && println(data[:AcquisitionTime])
+haskey(data, :SG2BfieldInTesla)  && println("SG2 data found")
 """
 function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
-                    pattern       = r"\.mat$"i,
-                    order::Symbol = :asc,
-                    verbose::Bool = true)
+                        pattern       = r"\.mat$"i,
+                        order::Symbol = :asc,
+                        verbose::Bool = true
+)
 
     # -----------------------------------------------------------------------
     # 0) Validate order argument up front before doing any I/O
     # -----------------------------------------------------------------------
     order in (:asc, :desc) || throw(ArgumentError("order must be :asc or :desc, got :$order"))
 
-    scipy_io = _get_scipy_io()   # module-level lazy singleton — see below
+    scipy_io = _get_scipy_io()
 
     # -----------------------------------------------------------------------
     # 1) Collect .mat files
@@ -3021,44 +3080,80 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
     N = length(files)
 
     # -----------------------------------------------------------------------
-    # 2) Pre-scan: read scalars + header only (no array data loaded)
-    #    One loadmat call per file, restricted to scalar variable names.
+    # 2) Optional field tables
+    #    Anything not listed here, or not found in the first file, is ignored.
+    #
+    #    Numeric scalars: (mat key, output symbol, transform)
+    #    String fields:   (mat key, output symbol)
     # -----------------------------------------------------------------------
-    MGcurrent  = Vector{Float64}(undef, N)
-    MGfield    = Vector{Float64}(undef, N)
-    SG0current = Vector{Float64}(undef, N)
-    SG0field   = Vector{Float64}(undef, N)
-    SG1current = Vector{Float64}(undef, N)
-    SG1field   = Vector{Float64}(undef, N)
-    acqStep    = Vector{Int}(undef, N)
-    acqTime    = Vector{String}(undef, N)
-    TempC      = Vector{Float64}(undef, N)
+    known_scalar_fields = [
+        ("MGcurrentinA",             :MGcurrentInA,        identity     ),
+        ("MGfieldinGauss",           :MGfieldInTesla,       x -> x * 1e-4),
+        ("SG0currentinA",            :SG0currentInA,        identity     ),
+        ("SG0BfieldinGauss",         :SG0BfieldInTesla,     x -> x * 1e-4),
+        ("SG1currentinA",            :SG1currentInA,        identity     ),
+        ("SG1BfieldinGauss",         :SG1BfieldInTesla,     x -> x * 1e-4),
+        # ("SG2currentinA",            :SG2currentInA,        identity     ),
+        # ("SG2BfieldinGauss",         :SG2BfieldInTesla,     x -> x * 1e-4),
+        ("ovenTemperatureinCelsius", :TemperatureInCelsius, identity     ),
+    ]
 
+    known_string_fields = [
+        ("acquisitionTime", :AcquisitionTime),
+    ]
+
+    # -----------------------------------------------------------------------
+    # 3) Probe first file to discover which optional fields are present
+    # -----------------------------------------------------------------------
+    available_keys = let
+        probe_keys = vcat(
+            first.(known_scalar_fields),
+            first.(known_string_fields),
+            ["stepInAcquisitionOrder"],
+        )
+        mat = scipy_io.loadmat(files[1], variable_names = probe_keys)
+        Set(keys(mat))
+    end
+
+    active_scalars = filter(f -> f[1] in available_keys, known_scalar_fields)
+    active_strings = filter(f -> f[1] in available_keys, known_string_fields)
+
+    # All keys to request in the pre-scan loadmat call
+    prescan_keys = vcat(
+        first.(active_scalars),
+        first.(active_strings),
+        ["stepInAcquisitionOrder"],
+    )
+
+    if verbose
+        skipped = filter(f -> f[1] ∉ available_keys,
+                         vcat(known_scalar_fields, known_string_fields))
+        if !isempty(skipped)
+            @info "Skipping $(length(skipped)) optional field(s) not found in .mat files" fields = first.(skipped)
+        end
+    end
+
+    # -----------------------------------------------------------------------
+    # 4) Pre-scan: one loadmat call per file, no array data loaded
+    # -----------------------------------------------------------------------
+    scalar_data   = Dict(sym => Vector{Float64}(undef, N) for (_, sym, _) in active_scalars)
+    string_data   = Dict(sym => Vector{String}(undef, N)  for (_, sym)    in active_strings)
+    acqStep       = Vector{Int}(undef, N)
     scalar_errors = Dict{String, String}()
-
-    _scalar_keys = ["MGcurrentinA", "MGfieldinGauss",
-                    "SG0currentinA", "SG0BfieldinGauss",
-                    "SG1currentinA", "SG1BfieldinGauss",
-                    "stepInAcquisitionOrder", "ovenTemperatureinCelsius"]
 
     for (i, f) in enumerate(files)
         try
-            mat = scipy_io.loadmat(f, variable_names = _scalar_keys)
+            mat = scipy_io.loadmat(f, variable_names = prescan_keys)
 
-            MGcurrent[i]  = Float64(mat["MGcurrentinA"][1])
-            MGfield[i]    = Float64(mat["MGfieldinGauss"][1])   * 1e-4  # G → T
-            SG0current[i] = Float64(mat["SG0currentinA"][1])
-            SG0field[i]   = Float64(mat["SG0BfieldinGauss"][1]) * 1e-4  # G → T
-            SG1current[i] = Float64(mat["SG1currentinA"][1])
-            SG1field[i]   = Float64(mat["SG1BfieldinGauss"][1]) * 1e-4  # G → T
-            acqStep[i]    = Int(mat["stepInAcquisitionOrder"][1])
-            TempC[i]      = Float64(mat["ovenTemperatureinCelsius"][1])
+            for (mat_key, sym, transform) in active_scalars
+                scalar_data[sym][i] = transform(Float64(mat[mat_key][1]))
+            end
 
-            # Header timestamp — parsed separately since it's metadata, not a variable.
-            # Note: this reflects file creation time, not instrument acquisition time.
-            header = scipy_io.loadmat(f, variable_names = ["__header__"])["__header__"]
-            m = match(r"Created on:\s*(.+)$", string(header))
-            acqTime[i] = m !== nothing ? strip(m.captures[1]) : string(header)
+            for (mat_key, sym) in active_strings
+                string_data[sym][i] = String(mat[mat_key][1][1])
+            end
+
+            acqStep[i] = Int(mat["stepInAcquisitionOrder"][1])
 
         catch e
             scalar_errors[f] = sprint(showerror, e)
@@ -3075,18 +3170,17 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
     end
 
     # -----------------------------------------------------------------------
-    # 3) Sort by acquisition step
+    # 5) Sort everything by acquisition step
     # -----------------------------------------------------------------------
     p = sortperm(acqStep; rev = (order === :desc))
 
-    files      = files[p];      MGcurrent  = MGcurrent[p]
-    MGfield    = MGfield[p];    SG0current = SG0current[p]
-    SG0field   = SG0field[p];   SG1current = SG1current[p]
-    SG1field   = SG1field[p];   acqStep    = acqStep[p]
-    acqTime    = acqTime[p];    TempC      = TempC[p]
+    files   = files[p]
+    acqStep = acqStep[p]
+    for (_, sym, _) in active_scalars; scalar_data[sym] = scalar_data[sym][p] end
+    for (_, sym)    in active_strings; string_data[sym]  = string_data[sym][p]  end
 
     # -----------------------------------------------------------------------
-    # 4) Probe array size & eltype from the first sorted file
+    # 6) Probe array size & eltype from the first sorted file
     # -----------------------------------------------------------------------
     sz, T = let
         mat = scipy_io.loadmat(files[1], variable_names = ["F1"])
@@ -3095,18 +3189,17 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
     end
 
     # -----------------------------------------------------------------------
-    # 5) Full pass: load arrays only — scalars already in hand from step 2
-    #    Files iterated in sorted order so no reordering of array data needed.
+    # 7) Full pass: load arrays only — scalars already in hand from step 4
+    #    Files iterated in sorted order so no post-hoc reordering needed.
     # -----------------------------------------------------------------------
     F1 = Array{T}(undef, sz[1], sz[2], sz[3], N)
     F2 = similar(F1)
     BG = similar(F1)
 
-    verbose && @info "Each component is organized as (Nx, Nz, Nframes, Ncurrents)"
+    verbose && @info "Each component is organised as (Nx, Nz, Nframes, Ncurrents)"
 
     array_errors = Dict{String, String}()
-
-    prog = verbose ? Progress(N; desc = "Loading files: ", showspeed = true) : nothing
+    prog_load    = verbose ? Progress(N; desc = "Loading images: ", showspeed = true) : nothing
 
     for (i, f) in enumerate(files)
         try
@@ -3128,9 +3221,9 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
         catch e
             array_errors[f] = sprint(showerror, e)
         end
-        verbose && next!(prog; showvalues = [(:file, basename(f))])
+        verbose && next!(prog_load; showvalues = [(:file, basename(f))])
     end
-    verbose && println()  # clean newline after bar finishes
+    verbose && println()
 
     if !isempty(array_errors)
         buf = IOBuffer()
@@ -3142,23 +3235,26 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
     end
 
     # -----------------------------------------------------------------------
-    # 6) Return
+    # 8) Assemble and return
     # -----------------------------------------------------------------------
+
+    # Build the optional scalar entries, collapsing TemperatureInCelsius if uniform
+    optional_scalars = OrderedDict(
+        sym => (sym === :TemperatureInCelsius
+                ? (all(==(first(scalar_data[sym])), scalar_data[sym]) ? first(scalar_data[sym]) : scalar_data[sym])
+                : scalar_data[sym])
+        for (_, sym, _) in active_scalars
+    )
+
     return OrderedDict(
-        :Directory              => String(data_directory),
-        :TemperatureinCelsius   => all(==(first(TempC)), TempC) ? first(TempC) : TempC,
-        :Files                  => files,
-        :AcquisitionTime        => acqTime,
-        :AcquisitionStep        => acqStep,
-        :MGcurrentInA           => MGcurrent,
-        :MGfieldInTesla         => MGfield,
-        :SG0currentInA          => SG0current,
-        :SG0BfieldInTesla       => SG0field,
-        :SG1currentInA          => SG1current,
-        :SG1BfieldInTesla       => SG1field,
-        :F1_data                => F1,
-        :F2_data                => F2,
-        :BG_data                => BG,
+        :Directory        => String(data_directory),
+        :Files            => basename.(files),
+        :AcquisitionStep  => acqStep,
+        (sym => string_data[sym] for (_, sym) in active_strings)...,
+        optional_scalars...,
+        :F1_data          => F1,
+        :F2_data          => F2,
+        :BG_data          => BG,
     )
 end
 
@@ -3249,7 +3345,8 @@ function SG0_process_and_save(raw_data::OrderedDict{Symbol,Any}, outpath::String
     jldopen(outpath, "w") do file
         # ── meta group ──────────────────────────────────────────────
         file["meta/Directory"]              = raw_data[:Directory]
-        file["meta/TemperatureinCelsius"]   = raw_data[:TemperatureinCelsius]
+        file["meta/TemperatureInCelsius"]   = raw_data[:TemperatureInCelsius]
+        file["meta/AcquisitionStep"]        = raw_data[:AcquisitionStep]
         file["meta/MGcurrentInA"]           = raw_data[:MGcurrentInA]
         file["meta/MGfieldInTesla"]         = raw_data[:MGfieldInTesla]
         file["meta/SG0currentInA"]          = raw_data[:SG0currentInA]
