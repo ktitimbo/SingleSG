@@ -2065,17 +2065,12 @@ function post_threshold_mean(x, Icoils, δx; threshold,
 end
 
 function mag_factor(directory::String)
-    if directory >= "20260211"
-        values = (1.00, 0.01)
+    if directory >= "20260101"
+        values = (1.00, 0.0001)
     elseif directory >= "20251101"
-        # values = (0.996,0.0047)
-        values = (1.08,0.03)
-    elseif directory >= "202600501"
-        # values = (0.996,0.0047)
-        values = (1.00,0.0001)
+        values = (1.08, 0.03)
     else
-        # values = (1.1198,0.0061) 
-        values = (1.28,0.01) 
+        values = (1.28, 0.01)
     end
     return values
 end
