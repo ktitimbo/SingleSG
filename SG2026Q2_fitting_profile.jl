@@ -83,7 +83,6 @@ const INV_E = exp(-1)
 const ATOM      = "39K"
 const K39_params = TheoreticalSimulation.AtomParams(ATOM)   # [R, μn, γn, Ispin, Ahfs, M]
 
-
 # ==============================================================================
 # CAMERA & SIMULATION GEOMETRY
 # ==============================================================================
@@ -136,7 +135,7 @@ const R_APERTURE  = 5.8e-3 / 2             # Post-SG circular aperture [m]
 const Y_FURNACETOSLIT  = 541.75e-3          # Furnace → slit           [m]
 const Y_SLITTOSG       = 44.0e-3            # Slit → SG magnet         [m]
 const y_SG             = 7.0e-2            # SG magnet length          [m]
-const Y_SGTOSCREEN     = 395.25e-2          # SG magnet → screen       [m]
+const Y_SGTOSCREEN     = 395.25e-3          # SG magnet → screen       [m]
 const Y_SGTOAPERTURE   = 1.0e-3            # SG magnet → post aperture [m]
 # Vacuum pipe
 const R_TUBE = 35e-3 / 2                   # Connecting pipe radius    [m]
@@ -194,7 +193,7 @@ const WANTED_ZBINNING = 2
 const WANTED_SMOOTH   = 0.01
 
 # Polynomial background degree
-const P_DEGREE   = 3
+const P_DEGREE   = 5
 const NCOLS_BG   = P_DEGREE + 1   # number of polynomial coefficients
 
 const NORM_MODE  = :none
@@ -349,7 +348,7 @@ plot!(exp_result.z, exp_result.F1[1,:])
         pdf_th_list[j] = ProfileFitTools.normalize_vec(pdf_th; by = NORM_MODE)
 
         plot(z_theory, exp_list[1])
-        plot!(z_theory, 65*pdf_th_list[1])
+        plot!(z_theory, 25*pdf_th_list[1])
     end
 
     # ── Joint fit: global A & w, per-profile polynomial background ────────────
@@ -363,7 +362,7 @@ plot!(exp_result.z, exp_result.F1[1,:])
             A_mode = :global,
             # d_mode = :per_profile,
             w0     = 0.050,
-            A0     = 65.0,
+            A0     = 15.0,
         );
 
     # Extract polynomial background coefficients (standard basis)
