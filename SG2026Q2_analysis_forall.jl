@@ -47,7 +47,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directories =  ["20260529"]
+data_directories =  ["20260603"]
 data_directory      = data_directories[1] ;
 # Furnace 
 const TCelsius = 205
@@ -55,26 +55,26 @@ const Temperature = 273.15 + TCelsius
 # Blurring (gaussian) width
 σw_um = 0.200
 
-outfile_raw         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
-outfile_processed   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
-data_summary_path   = joinpath(BASE_PATH, "EXPDATA_ANALYSIS","summary",data_directory)
-isdir(data_summary_path) || mkpath(data_summary_path);
+const OUTFILE_RAW         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
+const OUTFILE_PROCESSED   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
+const DATA_SUMMARY_PATH   = joinpath(BASE_PATH, "EXPDATA_ANALYSIS","summary",data_directory)
+isdir(DATA_SUMMARY_PATH) || mkpath(DATA_SUMMARY_PATH);
 
 
 # STERN–GERLACH EXPERIMENT SETUP
 # Camera and pixel geometry : intrinsic properties
-CAM_PIXELSIZE           = 6.5e-6 ;  # Physical pixel size of camera [m]
+const CAM_PIXELSIZE     = 6.5e-6 ;  # Physical pixel size of camera [m]
 NX_PIXELS , NZ_PIXELS   = (2160, 2560); # (Nx,Nz) pixels
 magnification_factor    = mag_factor(data_directory)[1] ;
 # Experiment resolution
 EXP_BIN_X, EXP_BIN_Z    = (4,1) ;  # Camera binning
 EXP_PIXELSIZE_X, EXP_PIXELSIZE_Z = (EXP_BIN_X, EXP_BIN_Z).*CAM_PIXELSIZE ; # Effective pixel size after binning [m]
 # Image dimensions (adjusted for binning)
-x_pixels = Int(NX_PIXELS / EXP_BIN_X);  # Number of x-pixels after binning
-z_pixels = Int(NZ_PIXELS / EXP_BIN_Z);  # Number of z-pixels after binning
+X_PIXELS = Int(NX_PIXELS / EXP_BIN_X);  # Number of x-pixels after binning
+Z_PIXELS = Int(NZ_PIXELS / EXP_BIN_Z);  # Number of z-pixels after binning
 # Spatial axes shifted to center the pixels
-x_position = pixel_positions(x_pixels, 1, EXP_PIXELSIZE_X);
-z_position = pixel_positions(z_pixels, 1, EXP_PIXELSIZE_Z);
+X_POSITION = pixel_positions(X_PIXELS, 1, EXP_PIXELSIZE_X);
+Z_POSITION = pixel_positions(Z_PIXELS, 1, EXP_PIXELSIZE_Z);
 println("""
 ***************************************************
 CAMERA FEATURES
@@ -84,16 +84,16 @@ CAMERA FEATURES
 IMAGES INFORMATION
     Magnification factor    : $magnification_factor
     Binning                 : $(EXP_BIN_X) × $(EXP_BIN_Z)
-    Effective pixels        : $(x_pixels) × $(z_pixels)
+    Effective pixels        : $(X_PIXELS) × $(Z_PIXELS)
     Pixel size              : $(1e6*EXP_PIXELSIZE_X)μm × $(1e6*EXP_PIXELSIZE_Z)μm
-    xlims                   : ($(round(minimum(1e6*x_position), digits=6)) μm, $(round(maximum(1e3*x_position), digits=4)) mm)
-    zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
+    xlims                   : ($(round(minimum(1e6*X_POSITION), digits=6)) μm, $(round(maximum(1e3*X_POSITION), digits=4)) mm)
+    zlims                   : ($(round(minimum(1e6*Z_POSITION), digits=6)) μm, $(round(maximum(1e3*Z_POSITION), digits=4)) mm)
 ***************************************************
 """)
 # Setting the variables for the module
 MyExperimentalAnalysis.effective_cam_pixelsize_z = EXP_PIXELSIZE_Z;
-MyExperimentalAnalysis.default_x_pixels          = x_pixels;
-MyExperimentalAnalysis.default_z_pixels          = z_pixels;
+MyExperimentalAnalysis.default_x_pixels          = X_PIXELS;
+MyExperimentalAnalysis.default_z_pixels          = Z_PIXELS;
 
 # Previous experiment data for comparison
 data_JSF = OrderedDict(
@@ -110,17 +110,17 @@ data_qm_f1_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP","QM_T$(TCelsiu
 data_qm_f2_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP","QM_T$(TCelsius)_8M","qm_screen_profiles_f2_table.jld2")
 
 # Importing data
-if isfile(outfile_processed)
-    @info "Found $outfile_processed → skipping build"
+if isfile(OUTFILE_PROCESSED)
+    @info "Found $OUTFILE_PROCESSED → skipping build"
 else
     # Build raw file if needed
-    if isfile(outfile_raw)
-        @info "Found $outfile_raw → skipping build"
+    if isfile(OUTFILE_RAW)
+        @info "Found $OUTFILE_RAW → skipping build"
     else
-        @info "Not found → building $outfile_raw"
+        @info "Not found → building $OUTFILE_RAW"
         data_in = joinpath(BASE_PATH, "EXPERIMENTS", data_directory)
         data_raw = MyExperimentalAnalysis.SG0_stack_data("2026",data_in; order=:asc)
-        jldsave(outfile_raw, data=data_raw)
+        jldsave(OUTFILE_RAW, data=data_raw)
         data_raw = nothing
     end
 
@@ -128,10 +128,10 @@ else
     img_dk = bin_x_mean(matread(joinpath(BASE_PATH, "EXPERIMENTS", "img_dk.mat"))["DKMean"], EXP_BIN_X);
     img_fl = bin_x_mean(matread(joinpath(BASE_PATH, "EXPERIMENTS", "img_fl.mat"))["FLMean"], EXP_BIN_X);
 
-    p1 = heatmap(1e3*z_position, 1e3*x_position, img_dk;
+    p1 = heatmap(1e3*Z_POSITION, 1e3*X_POSITION, img_dk;
         title=L"$\langle$ Dark Frame $\rangle$",
         xlabel=L"$z\ \mathrm{(mm)}$", ylabel=L"$x\ \mathrm{(mm)}$")
-    p2 = heatmap(1e3*z_position, 1e3*x_position, img_fl;
+    p2 = heatmap(1e3*Z_POSITION, 1e3*X_POSITION, img_fl;
         title=L"$\langle$ Flat Frame $\rangle$",
         xlabel=L"$z\ \mathrm{(mm)}$", ylabel=L"$x\ \mathrm{(mm)}$")
     savefig(
@@ -140,12 +140,12 @@ else
     )
 
     # Process and save
-    data_raw = load(outfile_raw)["data"];
-    MyExperimentalAnalysis.SG0_process_and_save(data_raw, outfile_processed; mode=:simple);
+    data_raw = load(OUTFILE_RAW)["data"];
+    MyExperimentalAnalysis.SG0_process_and_save(data_raw, OUTFILE_PROCESSED; mode=:simple);
     @info "data ready"
 end
 
-jldopen(outfile_processed, "r") do file
+jldopen(OUTFILE_PROCESSED, "r") do file
     if haskey(file["meta"], "TemperatureInCelsius")
         @assert file["meta"]["TemperatureInCelsius"] == TCelsius "Experiment temperature doesn't match with the chosen for the simulation"
         @info "Furnace temperature = $(TCelsius)°C"
@@ -168,9 +168,22 @@ jldopen(outfile_processed, "r") do file
             end
         end
 
+
+        pl = plot(1000*currents[1:20], 1000*fields[1:20],
+            label=false,
+            xlabel="Current (mA)",
+            ylabel="Magnetic field (mT)",
+            xlims=(-10,10),
+            line=(:solid,0.25,:red),
+            marker=(:circle,2,:white),
+            markerstrokecolor=:red,)
+        display(pl)
+        saveplot(pl, joinpath(BASE_PATH, "EXPERIMENTS", data_directory, "data_00.$(FIG_EXT)"))
+
+
         # --- masks ---
         mask_pos = (currents .> 0) .& (fields .> 0)
-        mask_neg = (fields .< 0)
+        mask_neg = (fields .< 0) 
 
         curr_pos  = currents[mask_pos]
         field_pos = fields[mask_pos]
@@ -291,7 +304,7 @@ scatter_attrs = (seriestype=:scatter, marker=(:circle,:white,4),
 base_plot_attrs = (size=(800,600), tickfontsize=11, guidefontsize=14, legendfontsize=10);
 log_axis_attrs = (;
     xaxis=log_xaxis, xticks=log_xticks, xlims=(1e-3,1.0))
-jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w") do file
+jldopen(joinpath(DATA_SUMMARY_PATH, data_directory * "_report_summary.jld2"), "w") do file
     file["meta/Currents"]      = Iexp_coil
     file["meta/ErrorCurrents"] = ΔIexp_coil
     file["meta/n_Currents"]    = nI
@@ -315,12 +328,12 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
 
         # position
-        z_mm        = 1e3 .* pixel_positions(z_pixels, nz, EXP_PIXELSIZE_Z)
+        z_mm        = 1e3 .* pixel_positions(Z_PIXELS, nz, EXP_PIXELSIZE_Z)
         z_mm_error  = 1e3 / sqrt(12) * EXP_PIXELSIZE_Z * nz # assuming uniform distribution within the bin/pixel size
 
         # --- Compute F1 / F2 mean profiles ----------------------------------------
-        profiles_F1 = extract_profiles(outfile_processed, :F1ProcessedImages, nI, z_pixels; n_bin=nz, with_error=true);
-        profiles_F2 = extract_profiles(outfile_processed, :F2ProcessedImages, nI, z_pixels; n_bin=nz, with_error=true);
+        profiles_F1 = extract_profiles(OUTFILE_PROCESSED, :F1ProcessedImages, nI, Z_PIXELS; n_bin=nz, with_error=true);
+        profiles_F2 = extract_profiles(OUTFILE_PROCESSED, :F2ProcessedImages, nI, Z_PIXELS; n_bin=nz, with_error=true);
 
         # --- Plot ------------------------------------------------------------------
         fig1 = plot_profiles(z_mm, profiles_F1, Iexp_coil; title="F1 processed data")
@@ -338,8 +351,8 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         ########################################################################
         ############# MEAN ANALYSIS ###########################################
         ########################################################################
-        f1_mean_max , f1_mean_spline_profile = my_process_mean_maxima( outfile_processed, "F1", nz; half_max=true, λ0=λ0);
-        f2_mean_max , f2_mean_spline_profile = my_process_mean_maxima( outfile_processed, "F2", nz; half_max=true, λ0=λ0);
+        f1_mean_max , f1_mean_spline_profile = my_process_mean_maxima( OUTFILE_PROCESSED, "F1", nz; half_max=true, λ0=λ0);
+        f2_mean_max , f2_mean_spline_profile = my_process_mean_maxima( OUTFILE_PROCESSED, "F2", nz; half_max=true, λ0=λ0);
 
         # ── Centroid ──────────────────────────────────────────────────────────
         data_centroid_mean       = 0.5 .* (f1_mean_max .+ f2_mean_max)
@@ -362,20 +375,6 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
             F2_z_centroid_mm_sem = sqrt.(z_mm_error^2 .+ centroid_mean.sem^2),
         ), :Icoil_A)
         CSV.write(joinpath(OUTDIR, "mean_data.csv"), df_mean)
-
-        # # ── Save profiles ──────────────────────────────────────────────────────
-        # jldsave(joinpath(OUTDIR, "profiles_mean.jld2"),
-        #     profiles = OrderedDict(
-        #         :Icoils      => Iexp_coil,
-        #         :Icoils_err  => ΔIexp_coil,
-        #         :Centroid_mm => (centroid_mean.mean, centroid_mean.sem),
-        #         :z_mm        => z_mm,
-        #         :F1_profile  => profiles_F1.mean,
-        #         :F1_err      => profiles_F1.sem,
-        #         :F2_profile  => profiles_F2.mean,
-        #         :F2_err      => profiles_F2.sem,
-        #     )
-        # )
 
         # ── Pretty table ───────────────────────────────────────────────────────
         pretty_table(df_mean;
@@ -536,8 +535,8 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         ############# FRAMEWISE ANALYSIS ######################################
         ########################################################################
 
-        f1_max = my_process_framewise_maxima(outfile_processed, "F1", nz; peak_threshold=0.1, half_max=false, λ0=λ0)
-        f2_max = my_process_framewise_maxima(outfile_processed, "F2", nz; peak_threshold=0.1, half_max=false, λ0=λ0)
+        f1_max = my_process_framewise_maxima(OUTFILE_PROCESSED, "F1", nz; peak_threshold=0.1, half_max=false, λ0=λ0)
+        f2_max = my_process_framewise_maxima(OUTFILE_PROCESSED, "F2", nz; peak_threshold=0.1, half_max=false, λ0=λ0)
 
 
         # ── Per-current statistics ─────────────────────────────────────────────
@@ -773,10 +772,10 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
         IMAGES INFORMATION
             Magnification factor    : $magnification_factor
             Camera Binning          : $(EXP_BIN_X) × $(EXP_BIN_Z)
-            Effective pixels        : $(x_pixels) × $(z_pixels)
+            Effective pixels        : $(X_PIXELS) × $(Z_PIXELS)
             Pixel size              : $(1e6*EXP_PIXELSIZE_X)μm × $(1e6*EXP_PIXELSIZE_Z)μm
-            xlims                   : ($(round(minimum(1e6*x_position), digits=6)) μm, $(round(maximum(1e3*x_position), digits=4)) mm)
-            zlims                   : ($(round(minimum(1e6*z_position), digits=6)) μm, $(round(maximum(1e3*z_position), digits=4)) mm)
+            xlims                   : ($(round(minimum(1e6*X_POSITION), digits=6)) μm, $(round(maximum(1e3*X_POSITION), digits=4)) mm)
+            zlims                   : ($(round(minimum(1e6*Z_POSITION), digits=6)) μm, $(round(maximum(1e3*Z_POSITION), digits=4)) mm)
 
         EXPERIMENT CONDITIONS
             Currents (A)            : $(Iexp_coil)
@@ -878,7 +877,7 @@ jldopen(joinpath(data_summary_path, data_directory * "_report_summary.jld2"), "w
     
 end
 
-path = joinpath(data_summary_path, data_directory * "_report_summary.jld2")
+path = joinpath(DATA_SUMMARY_PATH, data_directory * "_report_summary.jld2")
 JLD2_MyTools.show_exp_summary(path, data_directory)
 
 println("EXPERIMENTAL ANALYSIS COMPLETED!")
