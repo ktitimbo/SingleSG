@@ -47,7 +47,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directories =  ["20260603"]
+data_directories =  ["20260529"]
 data_directory      = data_directories[1] ;
 # Furnace 
 const TCelsius = 205
@@ -686,7 +686,6 @@ jldopen(joinpath(DATA_SUMMARY_PATH, data_directory * "_report_summary.jld2"), "w
         _add_reference_overlays!(fig_log)
         plot!(fig_log; xaxis=(:log10, L"$I_{c} \ (\mathrm{A})$", :log),
                     yaxis=(:log10, L"$z_{\mathrm{F}_{1}} \ (\mathrm{mm})$", :log))
-        saveplot(fig_log, "fw_000")
 
         fig_lin = plot(df_fw[!,:Icoil_A], y_abs_fw; fw_all_scatter...)
         _add_reference_overlays!(fig_lin)
@@ -846,6 +845,8 @@ jldopen(joinpath(DATA_SUMMARY_PATH, data_directory * "_report_summary.jld2"), "w
             # Mean analysis
             :mean_F1_peak_pos_raw   => df_mean.F1_z_peak_mm,
             :mean_F2_peak_pos_raw   => df_mean.F2_z_peak_mm,
+            :mean_p2p_sep_raw       => df_mean.F1_z_peak_mm .- df_mean.F2_z_peak_mm ,
+
             :centroid_mean_mm       => (centroid_mean.mean, centroid_mean.sem),
             :mean_F1_peak_pos       => (collect(df_mean.F1_z_centroid_mm), collect(df_mean.F1_z_centroid_mm_sem)),
             :mean_F2_peak_pos       => (collect(df_mean.F2_z_centroid_mm), collect(df_mean.F2_z_centroid_mm_sem)),
@@ -853,6 +854,8 @@ jldopen(joinpath(DATA_SUMMARY_PATH, data_directory * "_report_summary.jld2"), "w
             # Framewise analysis
             :fw_F1_peak_pos_raw     => (collect(df_fw.F1_z_peak_mm), collect(df_fw.F1_z_peak_se_mm) ),
             :fw_F2_peak_pos_raw     => (collect(df_fw.F2_z_peak_mm), collect(df_fw.F2_z_peak_se_mm) ),
+            :fw_p2p_sep_raw         => (collect(df_fw.F1_z_peak_mm) .- collect(df_fw.F2_z_peak_mm), sqrt.( collect(df_fw.F1_z_peak_se_mm).^2 .+ collect(df_fw.F2_z_peak_se_mm).^2 ) ),  
+
             :centroid_fw_mm         => (centroid_fw.mean, centroid_fw.sem),         
             :fw_F1_peak_pos         => (collect(df_fw.F1_z_centroid_mm), collect(df_fw.F1_z_centroid_se_mm)),
             :fw_F2_peak_pos         => (collect(df_fw.F2_z_centroid_mm), collect(df_fw.F2_z_centroid_se_mm)),
