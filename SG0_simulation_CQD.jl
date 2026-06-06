@@ -192,7 +192,7 @@ B0_list = 1e-3 .* B0_list_mT
 
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 1_000_000 ; 
+const Nss = 1_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
