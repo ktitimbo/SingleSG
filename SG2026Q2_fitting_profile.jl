@@ -189,8 +189,8 @@ end
 # ==============================================================================
 
 # Experimental data selection
-const WANTED_ZBINNING = 2
-const WANTED_SMOOTH   = 0.01
+const WANTED_ZBINNING = 1
+const WANTED_SMOOTH   = 0.001
 
 # Polynomial background degree
 const P_DEGREE   = 5
