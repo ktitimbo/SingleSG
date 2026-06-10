@@ -3052,18 +3052,226 @@ B_SG0 = data[:SG0BfieldInTesla]  # present only if SG0 fields exist in the files
 haskey(data, :AcquisitionTime)   && println(data[:AcquisitionTime])
 haskey(data, :SG2BfieldInTesla)  && println("SG2 data found")
 """
+# function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
+#                         pattern       = r"\.mat$"i,
+#                         order::Symbol = :asc,
+#                         verbose::Bool = true
+# )
+
+#     # -----------------------------------------------------------------------
+#     # 0) Validate order argument up front before doing any I/O
+#     # -----------------------------------------------------------------------
+#     order in (:asc, :desc) || throw(ArgumentError("order must be :asc or :desc, got :$order"))
+
+#     scipy_io = _get_scipy_io()
+
+#     # -----------------------------------------------------------------------
+#     # 1) Collect .mat files
+#     # -----------------------------------------------------------------------
+#     all_files = readdir(data_directory; join = true)
+#     files     = filter(f -> occursin(pattern, f), all_files)
+#     isempty(files) && error("No matching .mat files found in $data_directory")
+
+#     N = length(files)
+
+#     # -----------------------------------------------------------------------
+#     # 2) Optional field tables
+#     #    Anything not listed here, or not found in the first file, is ignored.
+#     #
+#     #    Numeric scalars: (mat key, output symbol, transform)
+#     #    String fields:   (mat key, output symbol)
+#     # -----------------------------------------------------------------------
+#     known_scalar_fields = [
+#         ("MGcurrentinA",             :MGcurrentInA,        identity     ),
+#         ("MGfieldinGauss",           :MGfieldInTesla,       x -> x * 1e-4),
+#         ("SG0currentinA",            :SG0currentInA,        identity     ),
+#         ("SG0BfieldinGauss",         :SG0BfieldInTesla,     x -> x * 1e-4),
+#         ("SG1currentinA",            :SG1currentInA,        identity     ),
+#         ("SG1BfieldinGauss",         :SG1BfieldInTesla,     x -> x * 1e-4),
+#         # ("SG2currentinA",            :SG2currentInA,        identity     ),
+#         # ("SG2BfieldinGauss",         :SG2BfieldInTesla,     x -> x * 1e-4),
+#         ("ovenTemperatureinCelsius", :TemperatureInCelsius, identity     ),
+#     ]
+
+#     known_string_fields = [
+#         ("acquisitionTime", :AcquisitionTime),
+#     ]
+
+#     # -----------------------------------------------------------------------
+#     # 3) Probe first file to discover which optional fields are present
+#     # -----------------------------------------------------------------------
+#     available_keys = let
+#         probe_keys = vcat(
+#             first.(known_scalar_fields),
+#             first.(known_string_fields),
+#             ["stepInAcquisitionOrder"],
+#         )
+#         mat = scipy_io.loadmat(files[1], variable_names = probe_keys)
+#         Set(keys(mat))
+#     end
+
+#     active_scalars = filter(f -> f[1] in available_keys, known_scalar_fields)
+#     active_strings = filter(f -> f[1] in available_keys, known_string_fields)
+
+#     # All keys to request in the pre-scan loadmat call
+#     prescan_keys = vcat(
+#         first.(active_scalars),
+#         first.(active_strings),
+#         ["stepInAcquisitionOrder"],
+#     )
+
+#     if verbose
+#         skipped = filter(f -> f[1] ∉ available_keys,
+#                          vcat(known_scalar_fields, known_string_fields))
+#         if !isempty(skipped)
+#             @info "Skipping $(length(skipped)) optional field(s) not found in .mat files" fields = first.(skipped)
+#         end
+#     end
+
+#     # -----------------------------------------------------------------------
+#     # 4) Pre-scan: one loadmat call per file, no array data loaded
+#     # -----------------------------------------------------------------------
+#     scalar_data   = Dict(sym => Vector{Float64}(undef, N) for (_, sym, _) in active_scalars)
+#     string_data   = Dict(sym => Vector{String}(undef, N)  for (_, sym)    in active_strings)
+#     acqStep       = Vector{Int}(undef, N)
+#     scalar_errors = Dict{String, String}()
+
+#     for (i, f) in enumerate(files)
+#         try
+#             mat = scipy_io.loadmat(f, variable_names = prescan_keys)
+
+#             for (mat_key, sym, transform) in active_scalars
+#                 scalar_data[sym][i] = transform(Float64(mat[mat_key][1]))
+#             end
+
+#             for (mat_key, sym) in active_strings
+#                 string_data[sym][i] = String(mat[mat_key][1][1])
+#             end
+
+#             acqStep[i] = Int(mat["stepInAcquisitionOrder"][1])
+
+#         catch e
+#             scalar_errors[f] = sprint(showerror, e)
+#         end
+#     end
+
+#     if !isempty(scalar_errors)
+#         buf = IOBuffer()
+#         println(buf, "\n$(length(scalar_errors)) file(s) failed scalar read:\n")
+#         for (f, msg) in sort(collect(scalar_errors))
+#             println(buf, "  $(basename(f))\n    ✗  $msg\n")
+#         end
+#         error(String(take!(buf)))
+#     end
+
+#     # -----------------------------------------------------------------------
+#     # 5) Sort everything by acquisition step
+#     # -----------------------------------------------------------------------
+#     p = sortperm(acqStep; rev = (order === :desc))
+
+#     files   = files[p]
+#     acqStep = acqStep[p]
+#     for (_, sym, _) in active_scalars; scalar_data[sym] = scalar_data[sym][p] end
+#     for (_, sym)    in active_strings; string_data[sym]  = string_data[sym][p]  end
+
+#     # -----------------------------------------------------------------------
+#     # 6) Probe array size & eltype from the first sorted file
+#     # -----------------------------------------------------------------------
+#     sz, T = let
+#         mat = scipy_io.loadmat(files[1], variable_names = ["F1"])
+#         a   = mat["F1"]
+#         size(a), eltype(a)
+#     end
+
+#     # -----------------------------------------------------------------------
+#     # 7) Full pass: load arrays only — scalars already in hand from step 4
+#     #    Files iterated in sorted order so no post-hoc reordering needed.
+#     # -----------------------------------------------------------------------
+#     F1 = Array{T}(undef, sz[1], sz[2], sz[3], N)
+#     F2 = similar(F1)
+#     BG = similar(F1)
+
+#     verbose && @info "Each component is organised as (Nx, Nz, Nframes, Ncurrents)"
+
+#     array_errors = Dict{String, String}()
+#     prog_load    = verbose ? Progress(N; desc = "Loading images: ", showspeed = true) : nothing
+
+#     for (i, f) in enumerate(files)
+#         try
+#             mat = scipy_io.loadmat(f, variable_names = ["F1", "F2", "BG"])
+#             f1  = mat["F1"]
+#             f2  = mat["F2"]
+#             bg  = mat["BG"]
+
+#             size(f1) == sz && size(f2) == sz && size(bg) == sz || error("""
+#                 Inconsistent array sizes in $(basename(f)):
+#                   expected : $sz
+#                   F1       : $(size(f1))
+#                   F2       : $(size(f2))
+#                   BG       : $(size(bg))""")
+
+#             F1[:, :, :, i] = f1
+#             F2[:, :, :, i] = f2
+#             BG[:, :, :, i] = bg
+#         catch e
+#             array_errors[f] = sprint(showerror, e)
+#         end
+#         verbose && next!(prog_load; showvalues = [(:file, basename(f))])
+#     end
+#     verbose && println()
+
+#     if !isempty(array_errors)
+#         buf = IOBuffer()
+#         println(buf, "\n$(length(array_errors)) file(s) failed array read:\n")
+#         for (f, msg) in sort(collect(array_errors))
+#             println(buf, "  $(basename(f))\n    ✗  $msg\n")
+#         end
+#         error(String(take!(buf)))
+#     end
+
+#     # -----------------------------------------------------------------------
+#     # 8) Assemble and return
+#     # -----------------------------------------------------------------------
+
+#     # Build the optional scalar entries, collapsing TemperatureInCelsius if uniform
+#     optional_scalars = OrderedDict(
+#         sym => (sym === :TemperatureInCelsius
+#                 ? (all(==(first(scalar_data[sym])), scalar_data[sym]) ? first(scalar_data[sym]) : scalar_data[sym])
+#                 : scalar_data[sym])
+#         for (_, sym, _) in active_scalars
+#     )
+
+#     return OrderedDict(
+#         :Directory        => String(data_directory),
+#         :Files            => basename.(files),
+#         :AcquisitionStep  => acqStep,
+#         (sym => string_data[sym] for (_, sym) in active_strings)...,
+#         optional_scalars...,
+#         :F1_data          => F1,
+#         :F2_data          => F2,
+#         :BG_data          => BG,
+#     )
+# end
+
+function _parse_acqtime(s::AbstractString)
+    try
+        dt = DateTime(strip(s), dateformat"d-u-yyyy HH:MM:SS")
+        return Dates.format(dt, "yyyymmddTHHMMSS")
+    catch
+        return strip(s)
+    end
+end
+
 function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
-                        pattern       = r"\.mat$"i,
-                        order::Symbol = :asc,
-                        verbose::Bool = true
+                         pattern       = r"\.mat$"i,
+                         order::Symbol = :asc,
+                         verbose::Bool = true
 )
 
     # -----------------------------------------------------------------------
-    # 0) Validate order argument up front before doing any I/O
+    # 0) Validate order argument
     # -----------------------------------------------------------------------
     order in (:asc, :desc) || throw(ArgumentError("order must be :asc or :desc, got :$order"))
-
-    scipy_io = _get_scipy_io()
 
     # -----------------------------------------------------------------------
     # 1) Collect .mat files
@@ -3076,21 +3284,15 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
 
     # -----------------------------------------------------------------------
     # 2) Optional field tables
-    #    Anything not listed here, or not found in the first file, is ignored.
-    #
-    #    Numeric scalars: (mat key, output symbol, transform)
-    #    String fields:   (mat key, output symbol)
     # -----------------------------------------------------------------------
     known_scalar_fields = [
-        ("MGcurrentinA",             :MGcurrentInA,        identity     ),
-        ("MGfieldinGauss",           :MGfieldInTesla,       x -> x * 1e-4),
-        ("SG0currentinA",            :SG0currentInA,        identity     ),
-        ("SG0BfieldinGauss",         :SG0BfieldInTesla,     x -> x * 1e-4),
-        ("SG1currentinA",            :SG1currentInA,        identity     ),
-        ("SG1BfieldinGauss",         :SG1BfieldInTesla,     x -> x * 1e-4),
-        # ("SG2currentinA",            :SG2currentInA,        identity     ),
-        # ("SG2BfieldinGauss",         :SG2BfieldInTesla,     x -> x * 1e-4),
-        ("ovenTemperatureinCelsius", :TemperatureInCelsius, identity     ),
+        ("MGcurrentinA",             :MGcurrentInA,         identity     ),
+        ("MGfieldinGauss",           :MGfieldInTesla,        x -> x * 1e-4),
+        ("SG0currentinA",            :SG0currentInA,         identity     ),
+        ("SG0BfieldinGauss",         :SG0BfieldInTesla,      x -> x * 1e-4),
+        ("SG1currentinA",            :SG1currentInA,         identity     ),
+        ("SG1BfieldinGauss",         :SG1BfieldInTesla,      x -> x * 1e-4),
+        ("ovenTemperatureinCelsius", :TemperatureInCelsius,  identity     ),
     ]
 
     known_string_fields = [
@@ -3101,19 +3303,15 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
     # 3) Probe first file to discover which optional fields are present
     # -----------------------------------------------------------------------
     available_keys = let
-        probe_keys = vcat(
-            first.(known_scalar_fields),
-            first.(known_string_fields),
-            ["stepInAcquisitionOrder"],
-        )
-        mat = scipy_io.loadmat(files[1], variable_names = probe_keys)
-        Set(keys(mat))
+        mf = matopen(files[1])
+        ks = Set(keys(mf))
+        close(mf)
+        ks
     end
 
     active_scalars = filter(f -> f[1] in available_keys, known_scalar_fields)
     active_strings = filter(f -> f[1] in available_keys, known_string_fields)
 
-    # All keys to request in the pre-scan loadmat call
     prescan_keys = vcat(
         first.(active_scalars),
         first.(active_strings),
@@ -3129,26 +3327,36 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
     end
 
     # -----------------------------------------------------------------------
-    # 4) Pre-scan: one loadmat call per file, no array data loaded
+    # 4) Pre-scan: scalars + strings + grab array shape from first file
+    #    One open per file; array shape harvested on i==1 while file is open.
     # -----------------------------------------------------------------------
     scalar_data   = Dict(sym => Vector{Float64}(undef, N) for (_, sym, _) in active_scalars)
     string_data   = Dict(sym => Vector{String}(undef, N)  for (_, sym)    in active_strings)
     acqStep       = Vector{Int}(undef, N)
     scalar_errors = Dict{String, String}()
+    sz            = nothing
+    T             = nothing
 
     for (i, f) in enumerate(files)
         try
-            mat = scipy_io.loadmat(f, variable_names = prescan_keys)
+            mf  = matopen(f)
+            mat = Dict(k => read(mf, k) for k in prescan_keys if haskey(mf, k))
+
+            if i == 1
+                a  = read(mf, "F1")
+                sz = size(a)
+                T  = eltype(a)
+            end
+
+            close(mf)
 
             for (mat_key, sym, transform) in active_scalars
-                scalar_data[sym][i] = transform(Float64(mat[mat_key][1]))
+                scalar_data[sym][i] = transform(Float64(mat[mat_key]))
             end
-
             for (mat_key, sym) in active_strings
-                string_data[sym][i] = String(mat[mat_key][1][1])
+                string_data[sym][i] = _parse_acqtime(string(mat[mat_key]))
             end
-
-            acqStep[i] = Int(mat["stepInAcquisitionOrder"][1])
+            acqStep[i] = Int(mat["stepInAcquisitionOrder"])
 
         catch e
             scalar_errors[f] = sprint(showerror, e)
@@ -3164,6 +3372,9 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
         error(String(take!(buf)))
     end
 
+    (sz === nothing || T === nothing) &&
+        error("Could not determine array shape: first file failed to load")
+
     # -----------------------------------------------------------------------
     # 5) Sort everything by acquisition step
     # -----------------------------------------------------------------------
@@ -3175,17 +3386,7 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
     for (_, sym)    in active_strings; string_data[sym]  = string_data[sym][p]  end
 
     # -----------------------------------------------------------------------
-    # 6) Probe array size & eltype from the first sorted file
-    # -----------------------------------------------------------------------
-    sz, T = let
-        mat = scipy_io.loadmat(files[1], variable_names = ["F1"])
-        a   = mat["F1"]
-        size(a), eltype(a)
-    end
-
-    # -----------------------------------------------------------------------
-    # 7) Full pass: load arrays only — scalars already in hand from step 4
-    #    Files iterated in sorted order so no post-hoc reordering needed.
+    # 6) Full pass: arrays only, one open per file, GC after each iteration
     # -----------------------------------------------------------------------
     F1 = Array{T}(undef, sz[1], sz[2], sz[3], N)
     F2 = similar(F1)
@@ -3198,10 +3399,11 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
 
     for (i, f) in enumerate(files)
         try
-            mat = scipy_io.loadmat(f, variable_names = ["F1", "F2", "BG"])
-            f1  = mat["F1"]
-            f2  = mat["F2"]
-            bg  = mat["BG"]
+            mf = matopen(f)
+            f1 = read(mf, "F1")
+            f2 = read(mf, "F2")
+            bg = read(mf, "BG")
+            close(mf)
 
             size(f1) == sz && size(f2) == sz && size(bg) == sz || error("""
                 Inconsistent array sizes in $(basename(f)):
@@ -3216,6 +3418,8 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
         catch e
             array_errors[f] = sprint(showerror, e)
         end
+
+        f1 = f2 = bg = nothing
         verbose && next!(prog_load; showvalues = [(:file, basename(f))])
     end
     verbose && println()
@@ -3230,10 +3434,8 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
     end
 
     # -----------------------------------------------------------------------
-    # 8) Assemble and return
+    # 7) Assemble and return
     # -----------------------------------------------------------------------
-
-    # Build the optional scalar entries, collapsing TemperatureInCelsius if uniform
     optional_scalars = OrderedDict(
         sym => (sym === :TemperatureInCelsius
                 ? (all(==(first(scalar_data[sym])), scalar_data[sym]) ? first(scalar_data[sym]) : scalar_data[sym])
@@ -3253,8 +3455,10 @@ function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
     )
 end
 
+
 function SG0_build_processed_dict(raw_data::OrderedDict{Symbol,Any};
-                            T = Float32, epsval = T(1e-12))
+                            T = Float32, epsval = T(1e-12),
+)
 
     # Promote to Float32 once
     F1 = T.(raw_data[:F1_data])
