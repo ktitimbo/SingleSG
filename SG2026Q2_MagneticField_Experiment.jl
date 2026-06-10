@@ -9,6 +9,7 @@ const FIG_EXT  = "png"   # Supported: "pdf" | "svg" | "png"
 const SAVE_FIG = true    # Set false for interactive-only sessions
 # ── Standard-library imports ──────────────────────────────────────────────────
 using LinearAlgebra
+using Statistics
 using JLD2
 using Dates
 # ── Timing & run identification ───────────────────────────────────────────────
@@ -42,12 +43,12 @@ TheoreticalSimulation.OUTDIR   = OUTDIR
 
 # --- Parameter Selection ---- 
 Nz_binning = 2
-λ0_smoothing = 0.01
+λ0_smoothing = 0.001
 
 
 # ── Dataset selection ─────────────────────────────────────────────────────────
 data_directories = ["20260529", "20260603"]
-data_directory   = data_directories[2]   # Change index to switch dataset
+data_directory   = data_directories[1]   # Change index to switch dataset
 
 # Canonical paths for raw experiment data and pre-computed analysis summaries
 EXPERIMENT_PATH                  = joinpath(BASE_PATH, "EXPERIMENTS")
@@ -61,10 +62,45 @@ exp_data = load(
 
 # Build a 2-column matrix [current_A | B_field_T], sorted by coil current.
 # Column 1: SG1 coil current  [A]
-# Column 2: SG1 magnetic field [T]
-current_field = let M = hcat(exp_data[:SG1currentInA], exp_data[:SG1BfieldInTesla])
+# Column 2: SG1 magnetic field [T] magnetometer 1
+# Column 3: SG1 magnetic field [T] magnetometer 2
+current_field = let M = hcat(exp_data[:SG1currentInA], exp_data[:SG1BfieldInTesla], exp_data[:SG0BfieldInTesla])
     M[sortperm(M[:, 1]), :]
 end
+
+
+current_field
+
+
+
+fig = Figure(size = (700, 420))
+ax = Axis(fig[1, 1];
+    xlabel             = "Coil current  [A]",
+    ylabel             = L"B_\mathrm{SG1}\,/\,B_\mathrm{SG0}",
+    title              = "Magnetic field ratio — $(data_directory)",
+    limits             = (1e-3, 1.1, nothing, nothing),
+    xscale             = log10,  # must come after limits to avoid log(≤0) on full data range
+    xtickformat        = xs -> [L"10^{%$(Int(round(log10(x))))}" for x in xs],
+    xminorticksvisible = true,
+    yminorticksvisible = true,
+    xminorticks        = IntervalsBetween(9),
+    yminorticks        = IntervalsBetween(5),
+    xgridcolor         = (:gray, 0.35),
+    ygridcolor         = (:gray, 0.35),
+    xminorgridvisible  = true,
+    yminorgridvisible  = true,
+    xminorgridcolor    = (:gray, 0.20),
+    yminorgridcolor    = (:gray, 0.20),
+)
+let m = current_field[:, 1] .> 0
+    scatterlines!(ax, current_field[m, 1], current_field[m, 2] ./ current_field[m, 3];
+        color      = :steelblue,
+        markersize = 8,
+        linewidth  = 1.5,
+    )
+end
+fig
+
 
 # ── Load analysis summary (peak positions) ────────────────────────────────────
 # Retrieves the summary entry for this dataset at the canonical key path
@@ -78,7 +114,11 @@ exp_analysis = jldopen(
 end
 
 
-C0 = 0.5 * (exp_analysis[:fw_F1_peak_pos_raw][1][1] .+
+using Statistics
+mean(dz[1:10])
+std(dz[1:10])
+
+C0 = 0. * (exp_analysis[:fw_F1_peak_pos_raw][1][1] .+
         exp_analysis[:fw_F2_peak_pos_raw][1][1])
 ic     = exp_analysis[:Currents]
 f1     = -(exp_analysis[:fw_F1_peak_pos_raw][1] .- C0)
