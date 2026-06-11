@@ -5,6 +5,12 @@
 # ╚══════════════════════════════════════════════════════════════════════════════
 # ── Output format & persistence ───────────────────────────────────────────────
 using CairoMakie
+set_theme!(fonts = (
+    regular     = "Arial",
+    bold        = "Arial Bold",
+    italic      = "Arial Italic",
+    bold_italic = "Arial Bold Italic",
+))
 const FIG_EXT  = "png"   # Supported: "pdf" | "svg" | "png"
 const SAVE_FIG = true    # Set false for interactive-only sessions
 # ── Standard-library imports ──────────────────────────────────────────────────
@@ -69,18 +75,20 @@ current_field = let M = hcat(exp_data[:SG1currentInA], exp_data[:SG1BfieldInTesl
 end
 
 
-current_field
-
-
-
 fig = Figure(size = (700, 420))
 ax = Axis(fig[1, 1];
     xlabel             = "Coil current  [A]",
-    ylabel             = L"B_\mathrm{SG1}\,/\,B_\mathrm{SG0}",
+    ylabel             = L"B_\mathrm{SG0}\,/\,B_\mathrm{SG1}",
     title              = "Magnetic field ratio — $(data_directory)",
+    xlabelsize         = 16,
+    ylabelsize         = 16,
+    titlesize          = 15,
+    xticklabelsize     = 14,
+    yticklabelsize     = 14,
     limits             = (1e-3, 1.1, nothing, nothing),
     xscale             = log10,  # must come after limits to avoid log(≤0) on full data range
     xtickformat        = xs -> [L"10^{%$(Int(round(log10(x))))}" for x in xs],
+    ytickformat        = xs -> [L"%$(round.(x; sigdigits=2))" for x in xs],
     xminorticksvisible = true,
     yminorticksvisible = true,
     xminorticks        = IntervalsBetween(9),
@@ -93,13 +101,15 @@ ax = Axis(fig[1, 1];
     yminorgridcolor    = (:gray, 0.20),
 )
 let m = current_field[:, 1] .> 0
-    scatterlines!(ax, current_field[m, 1], current_field[m, 2] ./ current_field[m, 3];
+    scatterlines!(ax, current_field[m, 1], current_field[m, 3] ./ current_field[m, 2];
         color      = :steelblue,
         markersize = 8,
         linewidth  = 1.5,
     )
 end
 fig
+
+
 
 
 # ── Load analysis summary (peak positions) ────────────────────────────────────
