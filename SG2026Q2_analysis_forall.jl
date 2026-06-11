@@ -47,13 +47,13 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directories =  ["20260603"]
-data_directory      = data_directories[1] ;
+data_directories =  ["20260529", "20260603"]
+data_directory      = data_directories[2] ;
 # Furnace 
 const TCelsius = 205
 const Temperature = 273.15 + TCelsius
 # Blurring (gaussian) width
-σw_um = 0.200
+σw_um = 0.100
 
 const OUTFILE_RAW         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
 const OUTFILE_PROCESSED   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
@@ -289,7 +289,7 @@ sort_Iexp_perm = sortperm(Iexp_coil);
 
 # Binning for the analysis
 nbins_list  = (1, 2)
-λ0_list     = (0.001, 0.002, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.10)
+λ0_list     = (0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.10)
 PARAM_GRID = [(nz, λ0) for λ0 in λ0_list, nz in nbins_list] |> vec
 const Cell = Union{Missing, String, Int, Float64}
 summary_table = Matrix{Cell}(undef, length(PARAM_GRID), 3)
