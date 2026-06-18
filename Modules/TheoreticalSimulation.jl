@@ -89,38 +89,38 @@ const INV_E = exp(-1);     # 1/e — appears in several effusive-beam / Maxwell�
 # STERN–GERLACH EXPERIMENT GEOMETRY (SI units, all lengths in meters)
 # ============================================================================
 # These are the nominal/default apparatus dimensions used to seed simulations
-# unless a calling script overrides them. Prefixed `default_` to make clear
+# unless a calling script overrides them. Prefixed `DEFAULT_` to make clear
 # they're starting points, not hard physical constants.
-default_camera_pixel_size   = 6.5e-6 ;     # physical size of one camera pixel
-default_x_pixels            = 2160;        # camera sensor width, in pixels
-default_z_pixels            = 2560;        # camera sensor height, in pixels
+DEFAULT_camera_pixel_size   = 6.5e-6 ;     # physical size of one camera pixel
+DEFAULT_x_pixels            = 2160;        # camera sensor width, in pixels
+DEFAULT_z_pixels            = 2560;        # camera sensor height, in pixels
  
 # Furnace aperture (atomic-beam source slit)
-default_x_furnace           = 2.0e-3 ;
-default_z_furnace           = 100e-6 ;
+DEFAULT_x_furnace           = 2.0e-3 ;
+DEFAULT_z_furnace           = 100e-6 ;
  
 # Collimating slit downstream of the furnace
-default_x_slit              = 4.0e-3 ;
-default_z_slit              = 300e-6 ;
+DEFAULT_x_slit              = 4.0e-3 ;
+DEFAULT_z_slit              = 300e-6 ;
  
 # Circular aperture after the SG magnet pole pieces
-default_c_aperture          = 5.8e-3/2;    # stored as a *radius* (hence the /2 on the diameter-looking literal)
+DEFAULT_c_aperture          = 5.8e-3/2;    # stored as a *radius* (hence the /2 on the diameter-looking literal)
  
 # Propagation distances along the beam axis (y)
-default_y_FurnaceToSlit     = 224.0e-3 ;
-default_y_SlitToSG          = 44.0e-3 ;
-default_y_SG                = 7.0e-2 ;     # length of the SG magnet itself
-default_y_SGToAperture      = 42.0e-3 ;
-default_y_SGToScreen        = 32.0e-2 ;
+DEFAULT_y_FurnaceToSlit     = 224.0e-3 ;
+DEFAULT_y_SlitToSG          = 44.0e-3 ;
+DEFAULT_y_SG                = 7.0e-2 ;     # length of the SG magnet itself
+DEFAULT_y_SGToAperture      = 42.0e-3 ;
+DEFAULT_y_SGToScreen        = 32.0e-2 ;
  
 # Connecting vacuum pipe radius (m)
-default_R_tube = 35e-3/2 ;
+DEFAULT_R_tube = 35e-3/2 ;
  
 # Characteristic SG pole-piece geometry (used in the analytic field model)
-default_𝒶                   = 2.5e-3 ;                                   # pole-piece separation parameter
-default_ℓ                   = 0.5*default_y_SG;                          # half the magnet length (-ℓ,ℓ )
-default_center_of_SG_magnet = default_y_FurnaceToSlit + default_y_SlitToSG + default_ℓ      # y-coordinate of the magnet's midpoint
-default_SG_magnet_entrance  = default_y_FurnaceToSlit + default_y_SlitToSG                   # y-coordinate where the beam enters the magnet
+DEFAULT_𝒶                   = 2.5e-3 ;                                   # pole-piece separation parameter
+DEFAULT_ℓ                   = 0.5*DEFAULT_y_SG;                          # half the magnet length (-ℓ,ℓ )
+DEFAULT_center_of_SG_magnet = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_ℓ      # y-coordinate of the magnet's midpoint
+DEFAULT_SG_magnet_entrance  = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG                   # y-coordinate where the beam enters the magnet
 
 
 # ============================================================================
@@ -243,14 +243,12 @@ end
     Compute uniform weights scaled by (1 - λ0). Returns an array of the same size as `x_array`.
 """
 function compute_weights(x_array, λ0)
-    # `similar(x_array)` allocates storage with the same size/eltype as
-    # `x_array` but *uninitialized* contents; `fill!(..., 1)` then sets every
-    # entry to 1, giving a uniform (all data points trusted equally) weight
+    # Gives a uniform (all data points trusted equally) weight
     # vector. Scaling by (1 - λ0) ties the overall weight magnitude to the
     # smoothing parameter λ0 used elsewhere in the BSplineKit fit:
     #   λ0 → 0  ⇒ weights ≈ 1 (trust the data; little smoothing)
     #   λ0 → 1  ⇒ weights ≈ 0 (data barely constrains the fit; smoothing dominates)
-    return (1 - λ0) * fill!(similar(x_array), 1)
+    return fill(1 - λ0, size(x_array))
 end
 
 """
@@ -284,12 +282,11 @@ function FreedmanDiaconisBins(data::AbstractVector{<:Real})
     @assert !isempty(data) "data must not be empty"
     # Promote to Float64 up front so integer/Float32 inputs don't cause
     # truncated/inexact arithmetic in the quantile and bin-width calculations.
-    data_f = Float64.(data)
+    data_f = eltype(data) === Float64 ? data : Float64.(data)
  
     # Interquartile range — robust spread measure, unlike e.g. std(),
     # which is sensitive to outliers/heavy tails.
-    Q1 = quantile(data_f, 0.25)
-    Q3 = quantile(data_f, 0.75)
+    Q1, Q3 = quantile(data_f, (0.25, 0.75))
     IQR = Q3 - Q1
  
     # Edge case: zero spread (degenerate/constant data) would otherwise
@@ -311,35 +308,17 @@ function FreedmanDiaconisBins(data::AbstractVector{<:Real})
 end
 
 # Plot a histogram of `data_list` using the Freedman–Diaconis binning rule.
-#
-# NOTE (maintenance): the IQR / bin-width / bin-count computation here is
-# duplicated verbatim from `FreedmanDiaconisBins` above rather than calling
-# it. Functionally fine, but if the binning rule ever changes, both copies
-# need to be updated in lockstep — consider refactoring this to simply call
-# `bins = FreedmanDiaconisBins(data_list)`.
-function FD_histograms(data_list::Vector{Float64},Label::LaTeXString,color)
-    # Calculate the interquartile range (IQR)
-    Q1 = quantile(data_list, 0.25)
-    Q3 = quantile(data_list, 0.75)
-    IQR = Q3 - Q1
- 
-    # Calculate Freedman-Diaconis bin width
-    n = length(data_list)
-    bin_width = 2 * IQR / (n^(1/3))
- 
-    # Calculate the number of bins using the range of the data
-    data_range = maximum(data_list) - minimum(data_list)
-    bins = ceil(Int, data_range / bin_width)
- 
-    # Plot the histogram, normalized to a probability density (area = 1) so
-    # it's directly comparable to a theoretical PDF overlay.
-    histogram(data_list, bins=bins, normalize=:pdf,
-            label=Label,
-            # xlabel="Polar angle",
-            color=color,
-            alpha=0.8,
-            xlim=(0,π),                                   # assumes `data_list` holds a polar angle ∈ [0, π]
-            xticks=PlottingTools.pitick(0, π, 8; mode=:latex),)   # ticks labeled as fractions of π
+function FD_histograms(data_list::AbstractVector{<:Real}, Label::LaTeXString, color)
+    bins = FreedmanDiaconisBins(data_list)
+    histogram(data_list, 
+        bins=bins, 
+        normalize=:pdf, 
+        label=Label, 
+        color=color, 
+        alpha=0.8,
+        xlim=(0,π), 
+        xticks=PlottingTools.pitick(0, π, 8; mode=:latex)
+    )
 end
 
 
@@ -350,6 +329,8 @@ end
 function bin_centers(edges::AbstractVector)
     # Standard "average adjacent edges" midpoint formula; works for both
     # uniform and non-uniform bin edges.
+    # can be replaced by StatsBase.midpoints(edges) since it is 
+    # the same as (edges[1:end-1] .+ edges[2:end]) ./ 2
     return (edges[1:end-1] .+ edges[2:end]) ./ 2
 end
 
@@ -365,7 +346,7 @@ Centers of binned pixels (1D) in physical units. First center at (bin_size*pixel
     # Centers are placed at Δ/2, 3Δ/2, 5Δ/2, ... — i.e. Δ*(1:n) shifted back
     # by half a bin width so the first center sits in the middle of the
     # first super-pixel rather than at its right edge.
-    return Δ .* (1:n) .- Δ/2
+    return range(Δ/2, step=Δ, length=n)
 end
  
 """Build a zero-centered Gaussian convolution kernel of standard deviation `wd`, sampled at the points `x`, normalized to sum to 1."""
