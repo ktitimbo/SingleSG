@@ -232,3 +232,106 @@ argument should be exactly zero (stretched states at finite field).
     # NOTE: No NaN fallback — every valid (F, mF) pair hits an explicit return.
     # A future missing branch will surface as a compiler warning, not a silent NaN.
 end
+
+
+"""
+    BreitRabi_energy(B, F, mF, p::AtomParams) -> Float64
+
+Exact Breit–Rabi energy eigenvalue for hyperfine state (F, mF) at external
+field strength `B`, for an electron spin-1/2 (J = 1/2) coupled to a nucleus
+of spin `I = p.Ispin`.
+
+# Physics
+The Breit–Rabi Hamiltonian in an external field B gives energy eigenvalues:
+
+    E(F, mF) = -ΔE/(2(2I+1)) - mF·γₙ·ħ·B ± (ΔE/2)·D
+
+where:
+- `ΔE = 2π·ħ·Ahfs·(I + 1/2)` is the zero-field hyperfine splitting (J)
+- `+` is for the upper manifold (F = I + 1/2), `−` for the lower (F = I − 1/2)
+- `D = sqrt(1 + 4·mF/(2I+1)·x_std + x_std²)` is the level-repulsion denominator
+- `x_std` is the standard (positive) dimensionless field parameter
+
+The code uses the internally defined `normalized_B = (γₑ − γₙ)·ħ/ΔE·B`, which
+equals `−x_std` (negative for B > 0 since γₑ < 0), so the sqrt argument becomes
+
+    1 − 4·mF/(2I+1)·normalized_B + normalized_B²  =  D²
+
+which is always non-negative and matches the `denom_arg` convention in
+`μF_effective_B`. Consistency check: `μF = −dE/dB` reproduces `μF_effective_B`
+exactly.
+
+# Stretched states (mF = ±F, upper manifold only)
+The sqrt reduces to a perfect square, giving the field-independent analytic form:
+
+    E(F, +F) = I/(2I+1)·ΔE − (γₑ/2 + γₙ·I)·ħ·B
+    E(F, −F) = I/(2I+1)·ΔE + (γₑ/2 + γₙ·I)·ħ·B
+
+Note: for the lower manifold there is no analogous simplification.
+
+# Arguments
+- `B  :: Real` — external magnetic field magnitude (T).
+- `F  :: Real` — total angular-momentum quantum number; must equal `p.Ispin ± 1/2`.
+- `mF :: Real` — magnetic quantum number; must satisfy `−F ≤ mF ≤ F`.
+- `p  :: AtomParams` — atom parameter struct carrying `Ispin`, `Ahfs`, `γn`.
+
+# Returns
+`Float64` energy eigenvalue in Joules.
+
+# Throws
+- `ArgumentError` if F ≠ I ± 1/2.
+- `ArgumentError` if mF ∉ [−F, F].
+
+# See also
+[`μF_effective_B`](@ref) — computes `−dE/dB` directly from the same expressions.
+"""
+@inline function BreitRabi_energy(B::Real, F::Real, mF::Real, p::AtomParams)
+
+    # ── Promote quantum numbers to Float64 together (they share arithmetic).
+    #    B is converted separately — it is physically unrelated to F and mF.
+    II    = float(p.Ispin)
+    γₙ    = p.γn
+    F, mF = promote(float(F), float(mF))
+
+    # ── Zero-field hyperfine splitting and dimensionless field parameter ───
+    ΔE           = 2π * ħ * p.Ahfs * (II + 0.5)        # hyperfine splitting (J)
+    normalized_B = (γₑ - γₙ) * ħ / ΔE * float(B)      # = −x_std (negative for B > 0)
+
+    # ── Validate quantum numbers ───────────────────────────────────────────
+    is_F_upper = isapprox(F, II + 0.5; atol=1e-12)
+    is_F_lower = isapprox(F, II - 0.5; atol=1e-12)
+
+    if !(is_F_upper || is_F_lower)
+        throw(ArgumentError("F must be I±1/2; got F=$F for I=$II"))
+    end
+    if mF < -F - 1e-12 || mF > F + 1e-12
+        throw(ArgumentError("mF must be in [-F, F]; got mF=$mF for F=$F"))
+    end
+
+    # ── Compute and return the Breit–Rabi energy eigenvalue ───────────────
+    if is_F_upper
+
+        if isapprox(mF, F; atol=1e-12) || isapprox(mF, -F; atol=1e-12)
+            # Stretched states: the sqrt collapses to (1 − normalized_B),
+            # and the full expression reduces to a linear-in-B form.
+            # sign(mF) handles both mF = +F and mF = −F in one line.
+            return Float64(II/(2*II + 1) * ΔE - sign(mF) * (γₑ/2 + γₙ*II) * ħ * float(B))
+        end
+
+        # Non-stretched upper states: full Breit–Rabi expression with +D/2.
+        # D² = 1 − 4·mF/(2I+1)·normalized_B + normalized_B²  (always ≥ 0 analytically;
+        # clamped to avoid NaN from floating-point rounding near zero).
+        D²  = 1 - 4*mF/(2*II + 1) * normalized_B + normalized_B^2
+        D   = sqrt(max(D², 0.0))
+        return Float64(ΔE * (-1/(2*(2*II + 1)) - mF*γₙ/(γₑ - γₙ)*normalized_B + 0.5*D))
+
+    else  # is_F_lower: identical structure but −D/2 (levels repel downward)
+
+        D²  = 1 - 4*mF/(2*II + 1) * normalized_B + normalized_B^2
+        D   = sqrt(max(D², 0.0))
+        return Float64(ΔE * (-1/(2*(2*II + 1)) - mF*γₙ/(γₑ - γₙ)*normalized_B - 0.5*D))
+
+    end
+    # NOTE: No NaN fallback — every valid (F, mF) pair hits an explicit return.
+    # A future missing branch will surface as a compiler warning, not a silent NaN.
+end
