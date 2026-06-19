@@ -153,20 +153,20 @@ SETUP FEATURES
 ***************************************************
 """)
 # Setting the variables for the module
-TheoreticalSimulation.default_camera_pixel_size = cam_pixelsize;
-TheoreticalSimulation.default_x_pixels          = nx_pixels;
-TheoreticalSimulation.default_z_pixels          = nz_pixels;
-TheoreticalSimulation.default_x_furnace         = x_furnace;
-TheoreticalSimulation.default_z_furnace         = z_furnace;
-TheoreticalSimulation.default_x_slit            = x_slit;
-TheoreticalSimulation.default_z_slit            = z_slit;
-TheoreticalSimulation.default_y_FurnaceToSlit   = y_FurnaceToSlit;
-TheoreticalSimulation.default_y_SlitToSG        = y_SlitToSG;
-TheoreticalSimulation.default_y_SG              = y_SG;
-TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
-TheoreticalSimulation.default_R_tube            = R_tube;
-TheoreticalSimulation.default_c_aperture        = R_aper;
-TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
+TheoreticalSimulation.DEFAULT_camera_pixel_size = cam_pixelsize;
+TheoreticalSimulation.DEFAULT_x_pixels          = nx_pixels;
+TheoreticalSimulation.DEFAULT_z_pixels          = nz_pixels;
+TheoreticalSimulation.DEFAULT_x_furnace         = x_furnace;
+TheoreticalSimulation.DEFAULT_z_furnace         = z_furnace;
+TheoreticalSimulation.DEFAULT_x_slit            = x_slit;
+TheoreticalSimulation.DEFAULT_z_slit            = z_slit;
+TheoreticalSimulation.DEFAULT_y_FurnaceToSlit   = y_FurnaceToSlit;
+TheoreticalSimulation.DEFAULT_y_SlitToSG        = y_SlitToSG;
+TheoreticalSimulation.DEFAULT_y_SG              = y_SG;
+TheoreticalSimulation.DEFAULT_y_SGToScreen      = y_SGToScreen;
+TheoreticalSimulation.DEFAULT_R_tube            = R_tube;
+TheoreticalSimulation.DEFAULT_c_aperture        = R_aper;
+TheoreticalSimulation.DEFAULT_y_SGToAperture    = y_SGToAperture;
 ##################################################################################################
 JLD2_MyTools.save_script_copy(OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP)
 ##################################################################################################
@@ -195,10 +195,11 @@ gaussian_width_mm = 0.270 ;
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
 jldsave( joinpath(OUTDIR,"cross_slit_particles_$(Nss).jld2"), data = crossing_slit)
 
-if SAVE_FIG
-    plot_μeff(K39_params,"mm_effective")
-    plot_SG_geometry("SG_geometry")
-    plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf")
+# if SAVE_FIG
+    TheoreticalSimulation.plot_μeff(K39_params,"mm_effective")
+    TheoreticalSimulation.plot_SG_geometry("SG_geometry")
+    TheoreticalSimulation.plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf")
+    TheoreticalSimulation.plot_BreitRabi_energy(K39_params,(1e-4,0.05),"energy_breitrabi"; xaxis_scale=:identity)
 end
 
 ##################################################################################################
