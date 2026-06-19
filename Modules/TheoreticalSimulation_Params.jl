@@ -122,7 +122,7 @@ end
 # Fudge factor on the geometric half-angle that widens the sampled cone slightly
 # beyond the strict furnace→slit line-of-sight, accounting for diffraction and
 # finite aperture effects. Calibrated empirically; treat as a tuning parameter.
-const _BEAM_ANGLE_FUDGE = 1.25
+const _BEAM_ANGLE_FUDGE = 1.15
 
 """
     BeamEffusionParams(xx_furnace, zz_furnace, xx_slit, zz_slit,
