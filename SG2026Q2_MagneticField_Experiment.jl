@@ -90,10 +90,10 @@ end
 
 
 # --- Parameter Selection ---- 
-Nz_binning = 2
+Nz_binning   = 2
 λ0_smoothing = 0.001
-σw_conv = 0.100
-ki = 1.5
+σw_conv      = 0.100
+ki           = 1.0
 
 
 # ── Load QM simulation peak positions ─────────────────────────────────────────
