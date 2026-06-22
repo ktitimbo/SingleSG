@@ -449,14 +449,14 @@ end
 """
     generate_CQDinitial_conditions(No, alive, rng; mode=:partition)
         -> (up_batch::Matrix{T}, down_batch::Matrix{T})
-
+ 
 Generate two sets of initial conditions by drawing per-particle angles and
 classifying each draw as “up” (`θe < θn`) or “down” (`θe > θn`).
-
+ 
 Each output matrix has 8 columns:
 1–6: copied from `alive[:, 1:6]` (e.g. `x0,y0,z0,v0x,v0y,v0z`),  
 7–8: the drawn angles `(θe, θn)`, where `θ = 2asin(sqrt(u))` with `u ~ U(0,1)`.
-
+ 
 # Arguments
 - `No::Integer`: number of particles (must equal `size(alive,1)`).
 - `alive::AbstractMatrix{T}`: at least 6 columns with the base kinematic state;
@@ -470,12 +470,12 @@ Each output matrix has 8 columns:
   - `:balanced` → **single-pass balanced batches.**
     - Generates until both “up” and “down” reach size `No`, returning two
       `No×8` matrices (both reuse `alive[:,1:6]`).
-
+ 
 # Returns
 A tuple `(up_batch, down_batch)` of `Matrix{T}`.  
 For `:partition`, sizes are `n_up×8` and `n_down×8` with `n_up + n_down = No`.  
 For `:balanced`, both are `No×8`.
-
+ 
 # Notes
 - Preconditions: `No > 0`, `size(alive,1) == No`, and `size(alive,2) ≥ 6`.
 - `:partition` requires `copy(rng)` to exist so the counting pass doesn’t
@@ -484,28 +484,38 @@ For `:balanced`, both are `No×8`.
 - Equality `θe == θn` is effectively measure-zero with continuous RNGs and is
   not handled specially.
 - All work is in-place friendly and uses `@inbounds`/`@views` in hot loops.
-
+ 
 # Example
 julia
 using StableRNGs
 rng = StableRNG(42)
 No = size(alive, 1)
-
+ 
 up, down = generate_CQDinitial_conditions(No, alive, rng; mode=:partition)
 # or
 upB, downB = generate_CQDinitial_conditions(No, alive, rng; mode=:balanced)
 """
-function generate_CQDinitial_conditions(No::Integer, alive::AbstractMatrix{T}, rng::AbstractRNG;
-                                        mode::Symbol = :partition) where {T<:Real}
+function generate_CQDinitial_conditions(
+    No::Integer, alive::AbstractMatrix{T}, rng::AbstractRNG;
+    mode::Symbol = :partition,
+) where {T<:Real}
     @assert No > 0 "No must be > 0"
     @assert No == size(alive,1) "Total number of particles $No"
     @assert size(alive,2) ≥ 6 "alive must have at least 6 columns (x0,y0,z0,v0x,v0y,v0z)"
-
-    # one-liner to draw θ with your distribution, in the target element type T
+ 
+    # Draw one CQD angle θ ∈ [0, π] in the target element type T.
+    # θ = 2·asin(√u) with u ~ U(0,1) is the inverse-CDF transform for a
+    # polar angle distributed as f(θ) ∝ sin(θ) — i.e. the standard
+    # "uniform on a sphere, restricted to the polar angle" distribution
+    # used for the CQD electron/nuclear angle draws.
     @inline sample_theta() = T(2asin(sqrt(rand(rng))))
-
+ 
     if mode === :partition
-        # Two-pass: count UP with a cloned RNG → allocate exact sizes → fill.
+        # ── Two-pass exact split ──────────────────────────────────────
+        # Pass 1 (counting): clone the RNG so this pass doesn't consume any
+        # of the draws the fill pass will need. Replaying the *same* draw
+        # sequence (θe, θn) on the clone lets us count exactly how many
+        # particles will classify as "up" before allocating any output.
         @assert hasmethod(copy, Tuple{typeof(rng)}) "RNG must support copy() for two-pass mode"
         rng1 = copy(rng)
         n_up = 0
@@ -515,20 +525,27 @@ function generate_CQDinitial_conditions(No::Integer, alive::AbstractMatrix{T}, r
             n_up += (θe < θn)
         end
         n_down = No - n_up
-
+ 
+        # Pass 2 (fill): now that the exact split sizes are known, allocate
+        # tightly sized output matrices and fill them using the *original*
+        # `rng` (untouched by the counting pass above, so it reproduces the
+        # identical (θe, θn) sequence in the same order).
         up_batch   = Matrix{T}(undef, n_up,   8)
         down_batch = Matrix{T}(undef, n_down, 8)
-
+ 
         iu = 0; id = 0
         @inbounds @views for i in 1:No
             θe = sample_theta()
             θn = sample_theta()
             if θe < θn
+                # "Up" branch: copy this particle's kinematics (cols 1-6)
+                # plus its drawn angles (cols 7-8) into the next free row.
                 iu += 1
                 up_batch[iu, 1:6] = alive[i, 1:6]
                 up_batch[iu, 7]   = θe
                 up_batch[iu, 8]   = θn
             else
+                # "Down" branch: same, into down_batch instead.
                 id += 1
                 down_batch[id, 1:6] = alive[i, 1:6]
                 down_batch[id, 7]   = θe
@@ -536,9 +553,16 @@ function generate_CQDinitial_conditions(No::Integer, alive::AbstractMatrix{T}, r
             end
         end
         return up_batch, down_batch
-
+ 
     elseif mode === :balanced
-        # Single pass: preallocate No×8 for both; write angles as we generate.
+        # ── Single-pass balanced batches ─────────────────────────────
+        # Unlike :partition, this mode does NOT split the No original
+        # particles between the two branches. Instead, it draws fresh
+        # (θe, θn) pairs repeatedly until No "up" classifications AND No
+        # "down" classifications have each been collected, producing two
+        # full-size (No×8) batches — every original kinematic row appears
+        # in BOTH up_batch and down_batch, just paired with different
+        # independently-drawn angles in each.
         up_batch   = Matrix{T}(undef, No, 8)
         down_batch = Matrix{T}(undef, No, 8)
         nup = 0; ndn = 0
@@ -555,13 +579,14 @@ function generate_CQDinitial_conditions(No::Integer, alive::AbstractMatrix{T}, r
                 down_batch[ndn, 8] = θn
             end
         end
-        # copy kinematics once for both batches
+        # Kinematic columns (1-6) are identical for every row in both
+        # batches — copied once in bulk rather than per-row inside the loop.
         @inbounds @views begin
             up_batch[:,   1:6] .= alive[:, 1:6]
             down_batch[:, 1:6] .= alive[:, 1:6]
         end
         return up_batch, down_batch
-
+ 
     else
         error("Unknown mode=$mode. Use :partition or :balanced.")
     end
