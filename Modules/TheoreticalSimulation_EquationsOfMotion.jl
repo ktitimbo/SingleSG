@@ -23,9 +23,9 @@ Stern–Gerlach (SG) setup. Motion in `x` and `y` is purely ballistic; only `z`
 is modified by CQD terms while the atom is inside the SG region.
 
 Segment boundaries (seconds; beam advances along +y with v0y ≠ 0):
-- `tf1 =  default_y_FurnaceToSlit / v0y`
-- `tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG) / v0y`
-- `tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG) / v0y`
+- `tf1 =  DEFAULT_y_FurnaceToSlit / v0y`
+- `tf2 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG) / v0y`
+- `tf3 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG) / v0y`
 
 Definitions used:
 - `cqd_sign = sign(θn - θe)`
@@ -54,11 +54,11 @@ Piecewise z–dynamics (matches the implementation):
               + 0.5*acc_0/kω^2 * ( polylogarithm(2, -EΔ*tanθ2)
                                    - polylogarithm(2, -tanθ2) )`
 
-3) SG exit → Screen (`t > tf3`), let `τ_SG = default_y_SG / v0y`, `Eτ = exp(-2*kω*τ_SG)`:
+3) SG exit → Screen (`t > tf3`), let `τ_SG = DEFAULT_y_SG / v0y`, `Eτ = exp(-2*kω*τ_SG)`:
    - `z  = z0 + v0z*t
               + 0.5*acc_0 * ( (t - tf2)^2 - (t - tf3)^2 )
               + (acc_0/kω) * τ_SG * ( log(cosθ2)
-                                      + (v0y/default_y_SG) * log(cosθ2 + Eτ*sinθ2) * (t - tf3) )
+                                      + (v0y/DEFAULT_y_SG) * log(cosθ2 + Eτ*sinθ2) * (t - tf3) )
               + 0.5*acc_0/kω^2 * ( polylogarithm(2, -Eτ*tanθ2)
                                    - polylogarithm(2, -tanθ2) )`
    - `vz = v0z + acc_0*τ_SG
@@ -73,7 +73,7 @@ Arguments
 - `θe::Float64`, `θn::Float64`: electron and nuclear angles (radians).
 - `kx::Float64`: dimensionless coupling multiplying `ωL`.
 - `p::AtomParams`: atomic parameters (must include mass `M`). Assumes `γₑ`, `GvsI`, `BvsI`,
-  and `default_y_*` geometry constants are in scope.
+  and `DEFAULT_y_*` geometry constants are in scope.
 
 Returns
 - `(r, v)` with `r::SVector{3,Float64}` and `v::SVector{3,Float64}` at time `t`.
@@ -99,10 +99,10 @@ Numerical notes
 
 
     # Key times
-    tf1 =  default_y_FurnaceToSlit / v0y
-    tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG) / v0y
-    tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG) / v0y
-    # tF  = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToScreen) / v0y  # (unused here)
+    tf1 =  DEFAULT_y_FurnaceToSlit / v0y
+    tf2 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG) / v0y
+    tf3 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG) / v0y
+    # tF  = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG + DEFAULT_y_SGToScreen) / v0y  # (unused here)
 
     cqd_sign = sign(θn-θe) 
     ωL       = abs(γₑ * BvsI(Ix) )
@@ -132,7 +132,7 @@ Numerical notes
         z = z0 + v0z*t + 0.5*acc_0*Δt^2 + acc_0/kω*log(cosθ2)*Δt + 
             0.5/(kω)^2 * acc_0 * ( polylogarithm(2,-EΔ*tanθ2) - polylogarithm(2,-tanθ2) )
     else # t > tf3 # Travel to the Screen
-        τ_SG = default_y_SG / v0y
+        τ_SG = DEFAULT_y_SG / v0y
         Eτ = exp(-2*kω*τ_SG)
         z = z0 + v0z*t + acc_0*τ_SG*(t-tf2-0.5*τ_SG) + acc_0/kω*τ_SG * ( log(cosθ2) + inv(τ_SG)*log(cosθ2+Eτ*sinθ2)*(t-tf3) ) + 0.5*acc_0/kω^2*( polylogarithm(2,-Eτ*tanθ2) - polylogarithm(2,-tanθ2) )
         vz = v0z + acc_0*τ_SG + acc_0/kω*log(cosθ2 + Eτ*sinθ2)
@@ -154,8 +154,8 @@ model in a Stern–Gerlach (SG) setup. Motion is divided into three segments:
 3) Post-SG (ballistic with accumulated CQD effect).
 
 Segment boundaries (s):
-- `tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG) / v0y`
-- `tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG) / v0y`
+- `tf2 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG) / v0y`
+- `tf3 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG) / v0y`
 
 Definitions:
 - `cqd_sign = sign(θn - θe)`
@@ -166,7 +166,7 @@ Definitions:
 - `tanθ2 = tan(θe_half)^2`, `cosθ2 = cos(θe_half)^2`, `sinθ2 = sin(θe_half)^2`
 - `log_cos2 = log(cosθ2)`
 - `polylog_0 = polylogarithm(2, -tanθ2)`
-- `τ_SG = default_y_SG / v0y`
+- `τ_SG = DEFAULT_y_SG / v0y`
 
 Piecewise result:
 - Pre-SG (`t ≤ tf2`):
@@ -215,8 +215,8 @@ Numerical notes:
     @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
     
     
-    tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG ) / v0y
-    tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG ) / v0y
+    tf2 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG ) / v0y
+    tf3 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG ) / v0y
 
     cqd_sign = sign(θn-θe) 
     ωL       = abs( γₑ * BvsI(Ix) )
@@ -243,7 +243,7 @@ Numerical notes:
     else # t > tf3 # Travel to the Screen
         Δt2 = t - tf2
         Δt3 = t - tf3
-        τ_SG = default_y_SG / v0y
+        τ_SG = DEFAULT_y_SG / v0y
         exp_SG = exp(-2 * kω * τ_SG)
         polylog_SG = polylogarithm(2, -exp_SG * tanθ2)
         log_term = log(cosθ2 + exp_SG * sinθ2)
@@ -262,10 +262,10 @@ coordinate includes CQD-dependent terms derived in closed form (logs and a dilog
 
 # Geometry (meters, along +y)
 Let
-- `L1 = default_y_FurnaceToSlit`
-- `L2 = default_y_SlitToSG`
-- `Lsg = default_y_SG`
-- `Ld = default_y_SGToScreen`
+- `L1 = DEFAULT_y_FurnaceToSlit`
+- `L2 = DEFAULT_y_SlitToSG`
+- `Lsg = DEFAULT_y_SG`
+- `Ld = DEFAULT_y_SGToScreen`
 - `Ltot = L1 + L2 + Lsg + Ld`.
 
 # Physics definitions
@@ -302,7 +302,7 @@ coordinates are
 # Assumptions
 - Non-relativistic; gravity, collisions, and fringe-field variation neglected.
 - Gradient aligned with `+z`; only `z` is accelerated inside the SG.
-- Uses global geometry constants `default_y_*`.
+- Uses global geometry constants `DEFAULT_y_*`.
 
 # Throws
 - Assertion errors if `length(r0) ≠ 3`, `length(v0) ≠ 3`, or `v0y == 0`.
@@ -320,10 +320,10 @@ function CQD_Screen_position(Ix,μ::Float64,r0::AbstractVector{<:Real},v0::Abstr
     x0, y0, z0 = r0
     v0x, v0y, v0z = v0
 
-    L1   = default_y_FurnaceToSlit 
-    L2   = default_y_SlitToSG
-    Lsg  = default_y_SG
-    Ld   = default_y_SGToScreen
+    L1   = DEFAULT_y_FurnaceToSlit 
+    L2   = DEFAULT_y_SlitToSG
+    Lsg  = DEFAULT_y_SG
+    Ld   = DEFAULT_y_SGToScreen
     Ltot = L1 + L2 + Lsg + Ld
 
     # Physics parameters
@@ -352,11 +352,11 @@ end
 
 Final **velocity at the screen** under a Continuous Quantum Dynamics (CQD) model.
 Motion is ballistic in `x` and `y`; only the `z` component is affected inside the
-Stern–Gerlach (SG) region of length `default_y_SG`.
+Stern–Gerlach (SG) region of length `DEFAULT_y_SG`.
 
 # Model / Definitions
 Let
-- `Lsg = default_y_SG` (m), `τ_SG = Lsg / v0y` (s),
+- `Lsg = DEFAULT_y_SG` (m), `τ_SG = Lsg / v0y` (s),
 - `acc_z = μ * GvsI(Ix) / p.M`  (m/s²),
 - `ωL = |γₑ| * BvsI(Ix)`        (rad/s),
 - `kω = sign(θn − θe) * kx * ωL`,
@@ -383,13 +383,13 @@ The implementation is continuous at `kω → 0`, using the limit
 
 # Assumptions
 - Non-relativistic; gravity, collisions, and fringe-field variations neglected.
-- SG gradient aligned with `+z` and treated constant across `default_y_SG`.
+- SG gradient aligned with `+z` and treated constant across `DEFAULT_y_SG`.
 
 # Throws
 - Assertion error if `length(v0) ≠ 3` or `v0y == 0`.
 
 # Notes
-- Uses `default_y_SG` for the SG length; adjust the function if you need it configurable.
+- Uses `DEFAULT_y_SG` for the SG length; adjust the function if you need it configurable.
 - Handles the `kω → 0` case internally for numerical stability.
 """
 function CQD_Screen_velocity(Ix,μ::Float64,v0::AbstractVector{<:Real},θe::Float64, θn::Float64, kx::Float64, p::AtomParams)
@@ -398,7 +398,7 @@ function CQD_Screen_velocity(Ix,μ::Float64,v0::AbstractVector{<:Real},θe::Floa
     v0x, v0y, v0z = v0
     @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
 
-    Lsg = default_y_SG
+    Lsg = DEFAULT_y_SG
 
     # Physics parameters
     cqd_sign = sign(θn-θe) 
@@ -555,7 +555,7 @@ and a simplified analytic path is used.
 ### Assumptions
 - Wall profiles `z_magnet_edge(x)` and `z_magnet_trench(x)` are defined,
   pure functions returning `Float64`.
-- Geometry constants `default_y_*`, `default_R_tube`, `default_c_aperture`,
+- Geometry constants `DEFAULT_y_*`, `DEFAULT_R_tube`, `DEFAULT_c_aperture`,
   and `γₑ` exist and share consistent units with positions and velocities.
 - `ygrid` is in the **lab frame** (absolute y); linear terms use `y - y0`,
   while cavity-specific terms use `y - y_in`.
@@ -605,14 +605,14 @@ and a simplified analytic path is used.
     @assert v0y != 0.0 "v0y must be nonzero"
 
     # ---- geometry (leave as you had it; these are scalars) ----
-    y_in   = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
-    Lsg    = (default_y_SG)::Float64
-    Ld     = (default_y_SGToScreen)::Float64
+    y_in   = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG)::Float64
+    Lsg    = (DEFAULT_y_SG)::Float64
+    Ld     = (DEFAULT_y_SGToScreen)::Float64
     Ltot   = (y_in + Lsg + Ld)::Float64
-    R2tube = (default_R_tube * default_R_tube)::Float64
-    LA     = (default_y_SGToAperture)::Float64
+    R2tube = (DEFAULT_R_tube * DEFAULT_R_tube)::Float64
+    LA     = (DEFAULT_y_SGToAperture)::Float64
     Lapert = (y_in + Lsg + LA)::Float64
-    R2circ = (default_c_aperture * default_c_aperture)::Float64
+    R2circ = (DEFAULT_c_aperture * DEFAULT_c_aperture)::Float64
 
     # ---- kinematics ----
     cqd_sign = sign(θn - θe)
@@ -736,7 +736,7 @@ Inside the SG, the `z`-acceleration is
 - `p::AtomParams`: Atomic parameters (must provide mass `M` and anything required by `μF_effective`).
 
 # Geometry (constants used)
-Uses `default_y_FurnaceToSlit`, `default_y_SlitToSG`, `default_y_SG`, `default_y_SGToScreen`
+Uses `DEFAULT_y_FurnaceToSlit`, `DEFAULT_y_SlitToSG`, `DEFAULT_y_SG`, `DEFAULT_y_SGToScreen`
 (measured along +y, in meters).
 
 # Returns
@@ -763,10 +763,10 @@ velocity at time `t`.
     @assert t >= 0 "time t must be ≥ 0" 
 
         # Segment times (in seconds)
-    _tf1 =  default_y_FurnaceToSlit / v0y                               # slit entrance
-    tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG) / v0y                 # SG entrance
-    tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG) / v0y          # SG exit
-    _tF  = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToScreen) / v0y  # screen
+    _tf1 =  DEFAULT_y_FurnaceToSlit / v0y                               # slit entrance
+    tf2 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG) / v0y                 # SG entrance
+    tf3 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG) / v0y          # SG exit
+    _tF  = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG + DEFAULT_y_SGToScreen) / v0y  # screen
 
     μ =  μF_effective(Ix,f,mf,p)
     acc_z    = μ * GvsI(Ix) / p.M
@@ -789,7 +789,7 @@ velocity at time `t`.
         vz = v0z + acc_z * Δt
     else # t > tf3 # Travel to the Screen
         # Post-SG: ballistic with boosted vz
-        Δt_SG = default_y_SG / v0y
+        Δt_SG = DEFAULT_y_SG / v0y
         z = z0 + v0z * t + acc_z * Δt_SG * (t - 0.5*(tf2+tf3))
         vz = v0z + acc_z * Δt_SG 
     end
@@ -823,7 +823,7 @@ Inside the SG, the acceleration along z is
 - `p::AtomParams`: Atomic parameters (must provide mass `M` and whatever `μF_effective` needs).
 
 # Geometry constants (meters, along +y)
-Uses `default_y_FurnaceToSlit`, `default_y_SlitToSG`, `default_y_SG`, `default_y_SGToScreen`.
+Uses `DEFAULT_y_FurnaceToSlit`, `DEFAULT_y_SlitToSG`, `DEFAULT_y_SG`, `DEFAULT_y_SGToScreen`.
 
 # Returns
 - `z::Float64`: z-position at time `t`.  
@@ -858,8 +858,8 @@ z = QM_EqOfMotion_z(0.012, 0.65, 2, 2, [0.0,0.0,0.0], [5.0,800.0,0.0], p)
     @assert t >= 0 "time t must be ≥ 0"
     @assert !iszero(v0y) "y-velocity must be nonzero."
     
-    tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG ) / v0y
-    tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG ) / v0y
+    tf2 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG ) / v0y
+    tf3 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG ) / v0y
 
     # z-acceleration inside SG
     μ =  μF_effective(Ix,f,mf,p)
@@ -871,17 +871,17 @@ z = QM_EqOfMotion_z(0.012, 0.65, 2, 2, [0.0,0.0,0.0], [5.0,800.0,0.0], p)
         Δt = t - tf2
         return  z0 + v0z * t + 0.5 * acc_z * Δt^2
     else # t > tf3 # Travel to the Screen
-        τ_SG = default_y_SG / v0y
+        τ_SG = DEFAULT_y_SG / v0y
         return z0 + v0z * t + acc_z * τ_SG * (t - 0.5*(tf2+tf3))
     end
 end
 
 """
     QM_Screen_position(Ix, f, mf, r0, v0, p; 
-                       y_FurnaceToSlit=default_y_FurnaceToSlit,
-                       y_SlitToSG=default_y_SlitToSG,
-                       y_SG=default_y_SG,
-                       y_SGToScreen=default_y_SGToScreen) -> r
+                       y_FurnaceToSlit=DEFAULT_y_FurnaceToSlit,
+                       y_SlitToSG=DEFAULT_y_SlitToSG,
+                       y_SG=DEFAULT_y_SG,
+                       y_SGToScreen=DEFAULT_y_SGToScreen) -> r
 
 Final 3D position of an atom at the **screen plane** after traversing a Stern–Gerlach (SG) region.
 Model: ballistic motion in `x` and `y`; constant acceleration in `z` **only inside** the SG of length `y_SG`.
@@ -926,9 +926,9 @@ keeps continuity of both position and `v_z` at the SG exit.
 #     @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
 
 #     # Geometry
-#     Lsg  = default_y_SG::Float64
-#     Ld   = default_y_SGToScreen::Float64
-#     Ltot = (default_y_FurnaceToSlit  + default_y_SlitToSG + Lsg + Ld)::Float64
+#     Lsg  = DEFAULT_y_SG::Float64
+#     Ld   = DEFAULT_y_SGToScreen::Float64
+#     Ltot = (DEFAULT_y_FurnaceToSlit  + DEFAULT_y_SlitToSG + Lsg + Ld)::Float64
 
 #     # Physics parameters
 #     μG =  μF_effective(Ix,f,mf,p) * GvsI(Ix)
@@ -951,9 +951,9 @@ Base.@propagate_inbounds @inline function QM_Screen_position(
     @assert v0y != 0.0 "v0y must be nonzero (beam must advance toward the screen)."
 
     # bind geometry to concrete locals (avoid Any from non-const globals)
-    y_in  = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
-    Lsg   = default_y_SG::Float64
-    Ld    = default_y_SGToScreen::Float64
+    y_in  = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG)::Float64
+    Lsg   = DEFAULT_y_SG::Float64
+    Ld    = DEFAULT_y_SGToScreen::Float64
     Ltot  = (y_in + Lsg + Ld)::Float64
 
     # physics
@@ -1002,10 +1002,10 @@ end
 
 Final **velocity at the screen** for an atom that traverses a Stern–Gerlach (SG) region.
 The model assumes ballistic motion in `x` and `y`, and uniform acceleration along `z`
-only while inside the SG of length `default_y_SG`.
+only while inside the SG of length `DEFAULT_y_SG`.
 
 Let
-`a_z = μF_effective(Ix, f, mf, p) * GvsI(Ix) / p.M`  and  `τ_SG = default_y_SG / v0y`.
+`a_z = μF_effective(Ix, f, mf, p) * GvsI(Ix) / p.M`  and  `τ_SG = DEFAULT_y_SG / v0y`.
 Then
 - `v_x = v0x`
 - `v_y = v0y`
@@ -1021,7 +1021,7 @@ Then
 - `v::SVector{3,Float64}`: Velocity at the screen.
 
 # Uses/Assumes
-- `default_y_SG` (meters) as the SG length along `+y`.
+- `DEFAULT_y_SG` (meters) as the SG length along `+y`.
 - Non-relativistic kinematics; gravity, collisions, and fringe-field variation neglected.
 - Only the `z` component accelerates inside the SG.
 
@@ -1043,7 +1043,7 @@ Then
 
 #     vx = v0x
 #     vy = v0y
-#     vz = v0z + acc_z * default_y_SG / v0y
+#     vz = v0z + acc_z * DEFAULT_y_SG / v0y
 #     return SVector{3,Float64}(vx, vy, vz)
 # end
 # ---------- FAST SCALAR CORE ----------
@@ -1055,7 +1055,7 @@ Base.@propagate_inbounds @inline function QM_Screen_velocity(
     @assert v0y != 0.0 "v0y must be nonzero (beam must advance toward the screen)."
 
     # bind geometry to concrete locals (avoid Any from globals)
-    Lsg = default_y_SG::Float64
+    Lsg = DEFAULT_y_SG::Float64
 
     # physics
     μG     = μF_effective(Ix, f, mf, p) * GvsI(Ix)
@@ -1146,10 +1146,10 @@ end
                     ygrid=nothing)
 
 Return 1 if z(y) exceeds the TOP wall, -1 if it goes below the BOTTOM wall,
-and 0 if neither happens, for y ∈ [y_in, y_in + default_y_SG].
+and 0 if neither happens, for y ∈ [y_in, y_in + DEFAULT_y_SG].
 
 - `eps` is a safety/touch tolerance (set >0 to require clearance).
-- Pass a precomputed `ygrid` (vector of y values spanning [y_in,y_in + default_y_SG]) to avoid rebuilding it per call.
+- Pass a precomputed `ygrid` (vector of y values spanning [y_in,y_in + DEFAULT_y_SG]) to avoid rebuilding it per call.
 """
 @inline function QM_cavity_crash(μG_ix::Float64,
                          x0::Float64, y0::Float64, z0::Float64,
@@ -1162,14 +1162,14 @@ and 0 if neither happens, for y ∈ [y_in, y_in + default_y_SG].
     @assert v0y != 0 "v0y must be nonzero"
 
     # Cavity y-span (replace globals with fields in `p` if available)
-    y_in   = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
-    Lsg    = (default_y_SG)::Float64
-    Ld     = (default_y_SGToScreen)::Float64
+    y_in   = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG)::Float64
+    Lsg    = (DEFAULT_y_SG)::Float64
+    Ld     = (DEFAULT_y_SGToScreen)::Float64
     Ltot   = (y_in + Lsg + Ld)::Float64
-    R2tube = (default_R_tube * default_R_tube)::Float64
-    LA  = (default_y_SGToAperture)::Float64
+    R2tube = (DEFAULT_R_tube * DEFAULT_R_tube)::Float64
+    LA  = (DEFAULT_y_SGToAperture)::Float64
     Lapert = (y_in+Lsg+LA)::Float64
-    R2circ = (default_c_aperture * default_c_aperture)::Float64
+    R2circ = (DEFAULT_c_aperture * DEFAULT_c_aperture)::Float64
 
     # Kinematics
     inv_vy  = 1.0 / v0y
@@ -1207,8 +1207,6 @@ end
 ########################################################################################################################################
 # Co-Quantum Dynamics : B = B₀ + Bₙ cos(θₙ)
 ########################################################################################################################################
-# for potassium
-Bn = 0.016475308514918384
 
 # CQD Equations of motion
 @inline function CQD_Bn_EqOfMotion(t,Ix,μ,r0::AbstractVector{<:Real},v0::AbstractVector{<:Real},θe::Float64, θn::Float64, kx::Float64, p::AtomParams)
@@ -1221,13 +1219,13 @@ Bn = 0.016475308514918384
 
 
     # Key times
-    tf1 =  default_y_FurnaceToSlit / v0y
-    tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG) / v0y
-    tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG) / v0y
-    # tF  = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToScreen) / v0y  # (unused here)
+    tf1 =  DEFAULT_y_FurnaceToSlit / v0y
+    tf2 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG) / v0y
+    tf3 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG) / v0y
+    # tF  = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG + DEFAULT_y_SGToScreen) / v0y  # (unused here)
 
     cqd_sign = sign(θn-θe) 
-    ωL       = abs(γₑ * (BvsI(Ix) + Bn*cos(θn)) )
+    ωL       = abs(γₑ * (BvsI(Ix) + DEFAULT_CQD_Bn*cos(θn)) )
     acc_0    = μ*GvsI(Ix)/p.M
     kω       = cqd_sign*kx*ωL
 
@@ -1254,9 +1252,9 @@ Bn = 0.016475308514918384
         z = z0 + v0z*t + 0.5*acc_0*Δt^2 + acc_0/kω*log(cosθ2)*Δt + 
             0.5/(kω)^2 * acc_0 * ( polylogarithm(2,-EΔ*tanθ2) - polylogarithm(2,-tanθ2) )
     else # t > tf3 # Travel to the Screen
-        τ_SG = default_y_SG / v0y
+        τ_SG = DEFAULT_y_SG / v0y
         Eτ = exp(-2*kω*τ_SG)
-        z = z0 + v0z*t + 0.5*acc_0*( (t-tf2)^2 - (t-tf3)^2) + acc_0/kω*τ_SG * ( log(cosθ2) + v0y/default_y_SG*log(cosθ2+Eτ*sinθ2)*(t-tf3) ) + 0.5*acc_0/kω^2*( polylogarithm(2,-Eτ*tanθ2) - polylogarithm(2,-tanθ2) )
+        z = z0 + v0z*t + 0.5*acc_0*( (t-tf2)^2 - (t-tf3)^2) + acc_0/kω*τ_SG * ( log(cosθ2) + v0y/DEFAULT_y_SG*log(cosθ2+Eτ*sinθ2)*(t-tf3) ) + 0.5*acc_0/kω^2*( polylogarithm(2,-Eτ*tanθ2) - polylogarithm(2,-tanθ2) )
         vz = v0z + acc_0*τ_SG + acc_0/kω*log(cosθ2 + Eτ*sinθ2)
     end
 
@@ -1279,11 +1277,11 @@ end
     @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
     
     
-    tf2 = (default_y_FurnaceToSlit + default_y_SlitToSG ) / v0y
-    tf3 = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG ) / v0y
+    tf2 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG ) / v0y
+    tf3 = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG ) / v0y
 
     cqd_sign = sign(θn-θe) 
-    ωL       = abs( γₑ * (BvsI(Ix) + Bn*cos(θn)) )
+    ωL       = abs( γₑ * (BvsI(Ix) + DEFAULT_CQD_Bn*cos(θn)) )
     acc_z    = μ*GvsI(Ix)/p.M
     kω       = cqd_sign*kx*ωL
 
@@ -1307,7 +1305,7 @@ end
     else # t > tf3 # Travel to the Screen
         Δt2 = t - tf2
         Δt3 = t - tf3
-        τ_SG = default_y_SG / v0y
+        τ_SG = DEFAULT_y_SG / v0y
         exp_SG = exp(-2 * kω * τ_SG)
         polylog_SG = polylogarithm(2, -exp_SG * tanθ2)
         log_term = log(cosθ2 + exp_SG * sinθ2)
@@ -1323,16 +1321,16 @@ function CQD_Bn_Screen_position(Ix,μ::Float64,r0::AbstractVector{<:Real},v0::Ab
     x0, y0, z0 = r0
     v0x, v0y, v0z = v0
 
-    L1   = default_y_FurnaceToSlit 
-    L2   = default_y_SlitToSG
-    Lsg  = default_y_SG
-    Ld   = default_y_SGToScreen
+    L1   = DEFAULT_y_FurnaceToSlit 
+    L2   = DEFAULT_y_SlitToSG
+    Lsg  = DEFAULT_y_SG
+    Ld   = DEFAULT_y_SGToScreen
     Ltot = L1 + L2 + Lsg + Ld
 
     # Physics parameters
     cqd_sign = sign(θn-θe) 
     acc_z = μ * GvsI(Ix) / p.M
-    ωL = abs(γₑ * (BvsI(Ix)+Bn*cos(θn)))
+    ωL = abs(γₑ * (BvsI(Ix)+DEFAULT_CQD_Bn*cos(θn)))
     kω = cqd_sign * kx * ωL
 
     # Common trig values
@@ -1355,12 +1353,12 @@ function CQD_Bn_Screen_velocity(Ix,μ::Float64,v0::AbstractVector{<:Real},θe::F
     v0x, v0y, v0z = v0
     @assert !iszero(v0y) "v0y must be nonzero (beam must advance toward the screen)."
 
-    Lsg = default_y_SG
+    Lsg = DEFAULT_y_SG
 
     # Physics parameters
     cqd_sign = sign(θn-θe) 
     acc_z = μ * GvsI(Ix) / p.M
-    ωL = abs(γₑ *  (BvsI(Ix)+Bn*cos(θn)) )
+    ωL = abs(γₑ *  (BvsI(Ix)+DEFAULT_CQD_Bn*cos(θn)) )
     kω = cqd_sign * kx * ωL
 
     # Common trig values
@@ -1444,15 +1442,15 @@ function CQD_Bn_cavity_crash(μG_ix::Float64, B0_ix::Float64,
     @assert v0y != 0 "v0y must be nonzero"
 
     # Cavity y-span
-    y_in   = (default_y_FurnaceToSlit + default_y_SlitToSG)::Float64
-    Lsg    = (default_y_SG)::Float64
-    Ld     = (default_y_SGToScreen)::Float64
+    y_in   = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG)::Float64
+    Lsg    = (DEFAULT_y_SG)::Float64
+    Ld     = (DEFAULT_y_SGToScreen)::Float64
     Ltot   = (y_in + Lsg + Ld)::Float64
-    R2tube = (default_R_tube * default_R_tube)::Float64
+    R2tube = (DEFAULT_R_tube * DEFAULT_R_tube)::Float64
 
     # Kinematics
     cqd_sign = sign(θn-θe) 
-    ωL       = abs(γₑ * (B0_ix+Bn*cos(θn)))
+    ωL       = abs(γₑ * (B0_ix+DEFAULT_CQD_Bn*cos(θn)))
     acc_0    = μG_ix/p.M
     kω       = cqd_sign*kx*ωL
 
