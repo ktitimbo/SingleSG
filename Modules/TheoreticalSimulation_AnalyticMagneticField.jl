@@ -1,30 +1,30 @@
 # Finite parallel wires
 
 # Helpers
-G(y, ρ) = (y+default_ℓ)/sqrt((y+default_ℓ)^2+ρ^2) - (y-default_ℓ)/sqrt((y-default_ℓ)^2+ρ^2)
+G(y, ρ) = (y+DEFAULT_ℓ)/sqrt((y+DEFAULT_ℓ)^2+ρ^2) - (y-DEFAULT_ℓ)/sqrt((y-DEFAULT_ℓ)^2+ρ^2)
 F(y, ρ) = G(y, ρ) / ρ^2
 
-Ap(y, ρ) = 1 / ((y + default_ℓ)^2 + ρ^2)^(3/2)
-Am(y, ρ) = 1 / ((y - default_ℓ)^2 + ρ^2)^(3/2)
+Ap(y, ρ) = 1 / ((y + DEFAULT_ℓ)^2 + ρ^2)^(3/2)
+Am(y, ρ) = 1 / ((y - DEFAULT_ℓ)^2 + ρ^2)^(3/2)
 dFdy(y, ρ) = Ap(y, ρ) - Am(y, ρ)
-dFdρ(y, ρ) = -((y+default_ℓ)*Ap(y, ρ) - (y-default_ℓ)*Am(y, ρ))/ρ - 2*G(y, ρ)/ρ^3
+dFdρ(y, ρ) = -((y+DEFAULT_ℓ)*Ap(y, ρ) - (y-DEFAULT_ℓ)*Am(y, ρ))/ρ - 2*G(y, ρ)/ρ^3
 
 
-function B_total(x,y,z; z0=1.3*default_𝒶 ,Iw=0.2)
-    ρ1, ρ2 = hypot(x-default_𝒶 , z-z0), hypot(x+default_𝒶 , z-z0)
+function B_total(x,y,z; z0=1.3*DEFAULT_𝒶 ,Iw=0.2)
+    ρ1, ρ2 = hypot(x-DEFAULT_𝒶 , z-z0), hypot(x+DEFAULT_𝒶 , z-z0)
     if ρ1 == 0 || ρ2 == 0
         throw(DomainError("Point lies on a wire (ρ=0): field/gradient undefined."))
     end
     F1, F2 = F(y, ρ1), F(y, ρ2)
     C = -μ₀*Iw/(4π)
     Bx = C*(z-z0)*(F2-F1)
-    Bz = C*((x-default_𝒶 )*F1 - (x+default_𝒶 )*F2)
+    Bz = C*((x-DEFAULT_𝒶 )*F1 - (x+DEFAULT_𝒶 )*F2)
     return (Bx,0.0,Bz)
 end
 
-function grad_B(x, y, z; z0=1.3*default_𝒶, Iw=0.2)
-    ρ1 = hypot(x-default_𝒶, z-z0)
-    ρ2 = hypot(x+default_𝒶, z-z0)
+function grad_B(x, y, z; z0=1.3*DEFAULT_𝒶, Iw=0.2)
+    ρ1 = hypot(x-DEFAULT_𝒶, z-z0)
+    ρ2 = hypot(x+DEFAULT_𝒶, z-z0)
     if ρ1 == 0 || ρ2 == 0
         throw(DomainError("Point lies on a wire (ρ=0): field/gradient undefined."))
     end
@@ -34,7 +34,7 @@ function grad_B(x, y, z; z0=1.3*default_𝒶, Iw=0.2)
     Δz = z - z0
 
     # dρ/dx, dρ/dz
-    dρ1dx = (x - default_𝒶)/ρ1;   dρ2dx = (x + default_𝒶)/ρ2
+    dρ1dx = (x - DEFAULT_𝒶)/ρ1;   dρ2dx = (x + DEFAULT_𝒶)/ρ2
     dρ1dz = Δz/ρ1;        dρ2dz = Δz/ρ2
 
 
@@ -48,9 +48,9 @@ function grad_B(x, y, z; z0=1.3*default_𝒶, Iw=0.2)
     dBxdz = C * (F2-F1 + Δz*(dF2dρ*dρ2dz - dF1dρ*dρ1dz))
     # ∂ᵢBy = 0 ∀ i
     # ∂ᵢBz
-    dBzdx = C * ( F1 - F2 + (x-default_𝒶)*dF1dρ*dρ1dx - (x+default_𝒶)*dF2dρ*dρ2dx )
-    dBzdy = C * ( (x-default_𝒶)*dF1dy - (x+default_𝒶)*dF2dy )
-    dBzdz = C * ( (x-default_𝒶)*dF1dρ*dρ1dz - (x+default_𝒶)*dF2dρ*dρ2dz )
+    dBzdx = C * ( F1 - F2 + (x-DEFAULT_𝒶)*dF1dρ*dρ1dx - (x+DEFAULT_𝒶)*dF2dρ*dρ2dx )
+    dBzdy = C * ( (x-DEFAULT_𝒶)*dF1dy - (x+DEFAULT_𝒶)*dF2dy )
+    dBzdz = C * ( (x-DEFAULT_𝒶)*dF1dρ*dρ1dz - (x+DEFAULT_𝒶)*dF2dρ*dρ2dz )
 
     return [
         dBxdx dBxdy dBxdz;
@@ -61,7 +61,7 @@ end
 
 function grad_normB(x::Real, y::Real, z::Real;
                     Iw::Real = 0.2,
-                    z0::Real = 1.3 * default_𝒶
+                    z0::Real = 1.3 * DEFAULT_𝒶
 )
 
     Bx, By, Bz = B_total(x, y, z; z0=z0, Iw=Iw)
@@ -87,7 +87,7 @@ end
 function grad_normB(x::Real, y::Real, z::Real,
                     Bx::Real, By::Real, Bz::Real;
                     Iw::Real = 0.2,
-                    z0::Real = 1.3 * default_𝒶
+                    z0::Real = 1.3 * DEFAULT_𝒶
 )
     Bmag = sqrt(Bx^2 + By^2 + Bz^2)
     iszero(Bmag) && return (0.0, 0.0, 0.0)
@@ -103,8 +103,8 @@ end
 
 
 # In the limit ℓ → ∞
-function approx_B_total(x,y,z; z0=1.3*default_𝒶,Iw=0.2)
-    ρ1, ρ2 = hypot(x-default_𝒶, z-z0), hypot(x+default_𝒶, z-z0)
+function approx_B_total(x,y,z; z0=1.3*DEFAULT_𝒶,Iw=0.2)
+    ρ1, ρ2 = hypot(x-DEFAULT_𝒶, z-z0), hypot(x+DEFAULT_𝒶, z-z0)
     if ρ1 == 0 || ρ2 == 0
         throw(DomainError("Point lies on a wire (ρ=0): field/gradient undefined."))
     end
@@ -112,14 +112,14 @@ function approx_B_total(x,y,z; z0=1.3*default_𝒶,Iw=0.2)
     inv_sq_ρ2 = 1/ρ2^2
     C = μ₀*Iw/(2π)
     Bx = C*(z-z0)*(inv_sq_ρ2 - inv_sq_ρ1)
-    Bz = C*((x-default_𝒶)*inv_sq_ρ1 - (x+default_𝒶)*inv_sq_ρ2)
+    Bz = C*((x-DEFAULT_𝒶)*inv_sq_ρ1 - (x+DEFAULT_𝒶)*inv_sq_ρ2)
     return (Bx,0.0,Bz)
 end
 
 # In the limit ℓ → ∞
-function approx_grad_B(x, y, z; z0=1.3*default_𝒶, Iw=0.2)
-    ρ1 = hypot(x-default_𝒶, z-z0)
-    ρ2 = hypot(x+default_𝒶, z-z0)
+function approx_grad_B(x, y, z; z0=1.3*DEFAULT_𝒶, Iw=0.2)
+    ρ1 = hypot(x-DEFAULT_𝒶, z-z0)
+    ρ2 = hypot(x+DEFAULT_𝒶, z-z0)
     if ρ1 == 0 || ρ2 == 0
         throw(DomainError("Point lies on a wire (ρ=0): field/gradient undefined."))
     end
@@ -131,12 +131,12 @@ function approx_grad_B(x, y, z; z0=1.3*default_𝒶, Iw=0.2)
 
 
     # ∂ᵢBx
-    dBxdx = -2 * C * Δz * ( (x+default_𝒶)*inv_sq_ρ2^2 - (x-default_𝒶)*inv_sq_ρ1^2 )
+    dBxdx = -2 * C * Δz * ( (x+DEFAULT_𝒶)*inv_sq_ρ2^2 - (x-DEFAULT_𝒶)*inv_sq_ρ1^2 )
     dBxdz = C * (inv_sq_ρ2-inv_sq_ρ1) + 2 * C * Δz^2 * (inv_sq_ρ1^2-inv_sq_ρ2^2 )
     # ∂ᵢBy = 0 ∀ i
     # ∂ᵢBz
-    dBzdx = C * (inv_sq_ρ1-inv_sq_ρ2) - 2 * C * ((x-default_𝒶)^2*inv_sq_ρ1^2-(x+default_𝒶)^2*inv_sq_ρ2^2 )
-    dBzdz = -2* C * Δz * ( (x-default_𝒶)*inv_sq_ρ1^2 - (x+default_𝒶)*inv_sq_ρ2^2 )
+    dBzdx = C * (inv_sq_ρ1-inv_sq_ρ2) - 2 * C * ((x-DEFAULT_𝒶)^2*inv_sq_ρ1^2-(x+DEFAULT_𝒶)^2*inv_sq_ρ2^2 )
+    dBzdz = -2* C * Δz * ( (x-DEFAULT_𝒶)*inv_sq_ρ1^2 - (x+DEFAULT_𝒶)*inv_sq_ρ2^2 )
 
     return [
         dBxdx 0.0 dBxdz;
@@ -148,7 +148,7 @@ end
 # In the limit ℓ → ∞
 function approx_grad_normB(x::Real, y::Real, z::Real;
                     Iw::Real = 0.2,
-                    z0::Real = 1.3 * default_𝒶
+                    z0::Real = 1.3 * DEFAULT_𝒶
 )
 
     Bx, By, Bz = approx_B_total(x, y, z; z0=z0, Iw=Iw)
@@ -170,14 +170,14 @@ function approx_grad_normB(x::Real, y::Real, z::Real;
 end
 
 # In the limit ℓ → ∞
-function approx_dnormBdz(x,z; Iw=0.2, z0=1.3*default_𝒶)
-    ρ1 = hypot(x-default_𝒶, z-z0)
-    ρ2 = hypot(x+default_𝒶, z-z0)
+function approx_dnormBdz(x,z; Iw=0.2, z0=1.3*DEFAULT_𝒶)
+    ρ1 = hypot(x-DEFAULT_𝒶, z-z0)
+    ρ2 = hypot(x+DEFAULT_𝒶, z-z0)
 
     Δz = z - z0
     C = μ₀*Iw/(2π)
 
-    return -4 * default_𝒶 * C * Δz / (ρ1^3 * ρ2^3) * ( x^2 + default_𝒶^2 + Δz^2)
+    return -4 * DEFAULT_𝒶 * C * Δz / (ρ1^3 * ρ2^3) * ( x^2 + DEFAULT_𝒶^2 + Δz^2)
 end
 
 function calibrate_Ieff_for_Bz(I_list; plot_check=true)
@@ -288,7 +288,7 @@ end
 
 # propagates the particles from the oven to a final position with free motion
 function propagate_to_SG_entrance(data;
-                                y_SG_entrance = default_SG_magnet_entrance)
+                                y_SG_entrance = DEFAULT_SG_magnet_entrance)
 
     N    = size(data, 1)
     # output: [x y z vx vy vz θ0] at SG entrance
@@ -365,9 +365,9 @@ function propagate_SG(Iw, r_in, v_in, cal::SGCalibration;
                       μ_over_m,
                       k,
                       θ0,
-                      y_field_start = default_y_FurnaceToSlit,
-                      y_field_end   = default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToAperture,
-                      y_SG_center   = default_center_of_SG_magnet,
+                      y_field_start = DEFAULT_y_FurnaceToSlit,
+                      y_field_end   = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG + DEFAULT_y_SGToAperture,
+                      y_SG_center   = DEFAULT_center_of_SG_magnet,
                       grad_mask     = (0.0, 0.0, 1.0))
 
     # resolve calibration once per particle — never inside the ODE
@@ -378,9 +378,9 @@ function propagate_SG(Iw, r_in, v_in, cal::SGCalibration;
     vy          = v_in[2]
     t_in        = y_field_start                                              / vy
     t_out       = y_field_end                                                / vy
-    t_SG_in     = (default_y_FurnaceToSlit + default_y_SlitToSG)            / vy
-    t_SG_center = (default_y_FurnaceToSlit + default_y_SlitToSG + 0.5 * default_y_SG) / vy
-    t_SG_out    = (default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG)        / vy
+    t_SG_in     = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG)            / vy
+    t_SG_center = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + 0.5 * DEFAULT_y_SG) / vy
+    t_SG_out    = (DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG)        / vy
 
     eom! = make_eom(Iw_eff, S,
                     Float64(μ_over_m), Float64(k), Float64(θ0),
@@ -407,12 +407,12 @@ function full_trajectory(Iw, r0, v0, cal::SGCalibration;
                          μ_over_m,
                          k,
                          θ0,
-                         y_slit      = default_y_FurnaceToSlit,
-                         y_aperture  = default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToAperture,
-                         y_screen    = default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToScreen,
-                         y_SG_center = default_center_of_SG_magnet,
-                         R_aperture  = default_c_aperture,
-                         R_screen    = default_R_tube,
+                         y_slit      = DEFAULT_y_FurnaceToSlit,
+                         y_aperture  = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG + DEFAULT_y_SGToAperture,
+                         y_screen    = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG + DEFAULT_y_SGToScreen,
+                         y_SG_center = DEFAULT_center_of_SG_magnet,
+                         R_aperture  = DEFAULT_c_aperture,
+                         R_screen    = DEFAULT_R_tube,
                          grad_mask   = (0.0, 0.0, 1.0))
 
     # 1. free flight: oven → slit
@@ -451,12 +451,12 @@ function run_ensemble(Iw, data, cal::SGCalibration;
                       μ_over_m,
                       k,
                       θ0_col      = 7,
-                      y_slit      = default_y_FurnaceToSlit,
-                      y_aperture  = default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToAperture,
-                      y_screen    = default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToScreen,
-                      y_SG_center = default_center_of_SG_magnet,
-                      R_aperture  = default_c_aperture,
-                      R_screen    = default_R_tube,
+                      y_slit      = DEFAULT_y_FurnaceToSlit,
+                      y_aperture  = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG + DEFAULT_y_SGToAperture,
+                      y_screen    = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG + DEFAULT_y_SGToScreen,
+                      y_SG_center = DEFAULT_center_of_SG_magnet,
+                      R_aperture  = DEFAULT_c_aperture,
+                      R_screen    = DEFAULT_R_tube,
                       grad_mask   = (0.0, 0.0, 1.0))
 
     N           = size(data, 1)
@@ -497,12 +497,12 @@ end
 function run_ensemble2(Iw, data, cal::SGCalibration;
                       μ_over_m,
                       k,
-                      y_slit      = default_y_FurnaceToSlit,
-                      y_aperture  = default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToAperture,
-                      y_screen    = default_y_FurnaceToSlit + default_y_SlitToSG + default_y_SG + default_y_SGToScreen,
-                      y_SG_center = default_center_of_SG_magnet,
-                      R_aperture  = default_c_aperture,
-                      R_screen    = default_R_tube,
+                      y_slit      = DEFAULT_y_FurnaceToSlit,
+                      y_aperture  = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG + DEFAULT_y_SGToAperture,
+                      y_screen    = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_y_SG + DEFAULT_y_SGToScreen,
+                      y_SG_center = DEFAULT_center_of_SG_magnet,
+                      R_aperture  = DEFAULT_c_aperture,
+                      R_screen    = DEFAULT_R_tube,
                       grad_mask   = (0.0, 0.0, 1.0))
 
     N = size(data, 1)
