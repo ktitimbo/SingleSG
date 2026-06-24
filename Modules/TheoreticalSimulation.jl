@@ -122,6 +122,9 @@ DEFAULT_ℓ                   = 0.5*DEFAULT_y_SG;                          # hal
 DEFAULT_center_of_SG_magnet = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG + DEFAULT_ℓ      # y-coordinate of the magnet's midpoint
 DEFAULT_SG_magnet_entrance  = DEFAULT_y_FurnaceToSlit + DEFAULT_y_SlitToSG                   # y-coordinate where the beam enters the magnet
 
+# CQD values
+# for potassium
+DEFAULT_CQD_Bn = 0.016475308514918384
 
 # ============================================================================
 # SESSION / WORKSPACE UTILITIES
