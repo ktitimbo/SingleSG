@@ -183,7 +183,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 200_000 ; 
+const Nss = 20_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2 ; 
@@ -195,7 +195,7 @@ gaussian_width_mm = 0.270 ;
 crossing_slit = generate_samples(Nss, effusion_params; v_pdf=:v3, rng = rng_set, multithreaded = false, base_seed = base_seed_set);
 jldsave( joinpath(OUTDIR,"cross_slit_particles_$(Nss).jld2"), data = crossing_slit)
 
-# if SAVE_FIG
+if SAVE_FIG
     TheoreticalSimulation.plot_μeff(K39_params,"mm_effective")
     TheoreticalSimulation.plot_SG_geometry("SG_geometry")
     TheoreticalSimulation.plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf")
@@ -232,10 +232,10 @@ jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "w") do file_traj
         for i in 1:nI
             @info "Saving Icoil $i / $nI" free_memory_GiB=round(Sys.free_memory()/1024^3, sigdigits=4)
             traj_i    = particles_trajectories[i]
-            traj_dict = OrderedDict{Int8, Vector{Matrix{Float64}}}(Int8(1) => traj_i)
+            traj_dict = OrderedDict{Int, Vector{Matrix{Float64}}}(Int(1) => traj_i)
 
             # Summary printout
-            TheoreticalSimulation.travelling_particles_summary(Icoils[[i]], quantum_numbers, traj_dict)
+            TheoreticalSimulation.QM_travelling_particles_summary(Icoils[[i]], quantum_numbers, traj_dict)
 
             # Save full trajectories
             for j in eachindex(quantum_numbers)
@@ -245,7 +245,7 @@ jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "w") do file_traj
 
             # Filter and save screen data
             data_i = TheoreticalSimulation.QM_select_flagged(traj_dict, :screen)
-            file_screen["screen/I$(i)"] = data_i[Int8(1)]
+            file_screen["screen/I$(i)"] = data_i[Int(1)]
             flush(file_screen.io)
 
             data_i = nothing
