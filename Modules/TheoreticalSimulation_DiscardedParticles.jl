@@ -1799,7 +1799,7 @@ function CQD_Bn_build_travelling_particles(
             ωL  = abs(γₑ * (B0 + DEFAULT_CQD_Bn*cos(θn0)))   # only the θn0 term is genuinely per-particle
             kω  = sign(θn0 - θe0) * kx * ωL
 
-            x, z, vz = CQD_Bn_screen_x_z_vz(x0, z0, v0x, v0y, v0z, θe0, a_z, kω, Lsg, Ld, Ltot, ΔL)
+            x, z, vz = CQD_screen_x_z_vz(x0, z0, v0x, v0y, v0z, θe0, a_z, kω, Lsg, Ld, Ltot, ΔL)
             M[j,9]  = x
             M[j,10] = z
             M[j,11] = vz
