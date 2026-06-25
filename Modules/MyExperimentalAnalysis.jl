@@ -13,11 +13,11 @@ using OrderedCollections
 using Dates
 using ProgressMeter
 # Corresponding to data acquired with no previous binning
-default_camera_pixel_size = 6.5e-6 ; # (mm)
-default_x_pixels = 2160;
-default_z_pixels = 2560;
+DEFAULT_camera_pixel_size = 6.5e-6 ; # (mm)
+DEFAULT_x_pixels = 2160;
+DEFAULT_z_pixels = 2560;
 
-effective_cam_pixelsize_z = default_camera_pixel_size # along the z axis
+effective_cam_pixelsize_z = DEFAULT_camera_pixel_size # along the z axis
 
 
 # runtime helper: is this name defined *and* truthy?
@@ -419,8 +419,8 @@ function process_mean_maxima(signal_key::String, data, n_bins::Integer; half_max
     @info "Processing mean maxima" signal_label=signal_label
 
     # Precompute z-axes (mm)
-    z_full_mm   = 1e3 .* pixel_positions(default_z_pixels, 1,  effective_cam_pixelsize_z)
-    z_binned_mm = 1e3 .* pixel_positions(default_z_pixels, n_bins, effective_cam_pixelsize_z)
+    z_full_mm   = 1e3 .* pixel_positions(DEFAULT_z_pixels, 1,  effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(DEFAULT_z_pixels, n_bins, effective_cam_pixelsize_z)
 
     peak_positions = zeros(Float64,nI)
 
@@ -560,7 +560,7 @@ function process_framewise_maxima(signal_key::String, data, n_bins::Integer; hal
                 error("Invalid signal_key: choose 'F1' or 'F2'")
 
     # z-axes (mm)
-    z_binned_mm = 1e3 .* pixel_positions(default_z_pixels, n_bins, effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(DEFAULT_z_pixels, n_bins, effective_cam_pixelsize_z)
 
     # Determine max number of frames across currents
     n_runs_max = maximum(size(Float64.(data["data"][signal_label][1, i]), 3) for i in 1:nI)
@@ -1016,7 +1016,7 @@ function my_process_framewise_maxima(signal_key::String, data, n_bins::Integer; 
                 error("Invalid signal_key: choose 'F1' or 'F2'")
 
     # z-axes (mm)
-    z_binned_mm = 1e3 .* pixel_positions(default_z_pixels, n_bins, effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(DEFAULT_z_pixels, n_bins, effective_cam_pixelsize_z)
 
     # Determine max number of frames across currents
     n_runs_max = maximum(size(Float64.(data[signal_label][:,:,:,i]), 3) for i in 1:nI)
@@ -1289,8 +1289,8 @@ function my_process_mean_maxima(signal_key::String, data::AbstractDict, n_bins::
     @info "Processing mean maxima" signal_label=signal_label
 
     # Precompute z-axes (mm)
-    z_full_mm   = 1e3 .* pixel_positions(default_z_pixels, 1,  effective_cam_pixelsize_z)
-    z_binned_mm = 1e3 .* pixel_positions(default_z_pixels, n_bins, effective_cam_pixelsize_z)
+    z_full_mm   = 1e3 .* pixel_positions(DEFAULT_z_pixels, 1,  effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(DEFAULT_z_pixels, n_bins, effective_cam_pixelsize_z)
 
     peak_positions = zeros(Float64,nI)
 
