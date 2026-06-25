@@ -73,7 +73,7 @@ end
 """
     CQD_EqOfMotion(t, Ix, μ, r0, v0, θe, θn, kx, p) -> (r, v)
  
-Full 3D equations of motion for a Continuous Quantum Dynamics (CQD) model in a
+Full 3D equations of motion for a Co-Quantum Dynamics (CQD) model in a
 Stern–Gerlach (SG) setup. Motion in `x` and `y` is purely ballistic; only `z`
 is modified by CQD terms while the atom is inside the SG region.
  
@@ -222,7 +222,7 @@ end
 """
     CQD_EqOfMotion_z(t, Ix, μ, r0, v0, θe, θn, kx, p) -> Float64
 
-z–coordinate as a function of time `t` under a Continuous Quantum Dynamics (CQD)
+z–coordinate as a function of time `t` under a Co-Quantum Dynamics (CQD)
 model in a Stern–Gerlach (SG) setup. Motion is divided into three segments:
 1) Pre-SG (ballistic), 2) In-SG (CQD dynamics with uniform base acceleration),
 3) Post-SG (ballistic with accumulated CQD effect).
@@ -355,7 +355,7 @@ end
 """
     CQD_Screen_position(Ix, μ, r0, v0, θe, θn, kx, p) -> SVector{3,Float64}
 
-Final **position at the screen** for an atom under a Continuous Quantum Dynamics (CQD)
+Final **position at the screen** for an atom under a Co-Quantum Dynamics (CQD)
 model in a Stern–Gerlach (SG) setup. Motion in `x` and `y` is ballistic; the `z`
 coordinate includes CQD-dependent terms derived in closed form (logs and a dilogarithm).
 
@@ -486,7 +486,7 @@ end
 """
     CQD_Screen_velocity(Ix, μ, v0, θe, θn, kx, p) -> SVector{3,Float64}
 
-Final **velocity at the screen** under a Continuous Quantum Dynamics (CQD) model.
+Final **velocity at the screen** under a Co-Quantum Dynamics (CQD) model.
 Motion is ballistic in `x` and `y`; only the `z` component is affected inside the
 Stern–Gerlach (SG) region of length `DEFAULT_y_SG`.
 
@@ -683,7 +683,7 @@ end
                      eps::Float64) -> UInt8
 
 Trace a particle through the Stern–Gerlach (SG) cavity under the
-**Continuous Quantum Dynamics (CQD)** model and report whether it collides
+**Co-Quantum Dynamics (CQD)** model and report whether it collides
 with the **top edge**, **bottom trench**, or clears the cavity but
 **misses the exit tube** at the screen.
 
@@ -1455,7 +1455,7 @@ end
 """
     CQD_Bn_EqOfMotion(t, Ix, μ, r0, v0, θe, θn, kx, p) -> (r, v)
 
-Full 3D equations of motion for a Continuous Quantum Dynamics (CQD) model,
+Full 3D equations of motion for a Co-Quantum Dynamics (CQD) model,
 with a nuclear-field correction to the Larmor frequency, in a Stern–Gerlach
 (SG) setup. Motion in `x` and `y` is purely ballistic; only `z` is modified
 by CQD terms while the atom is inside the SG region.
@@ -1609,7 +1609,7 @@ end
 """
     CQD_Bn_EqOfMotion_z(t, Ix, μ, r0, v0, θe, θn, kx, p) -> Float64
 
-z–coordinate as a function of time `t` under a Continuous Quantum Dynamics
+z–coordinate as a function of time `t` under a Co-Quantum Dynamics
 (CQD) model with a nuclear-field correction to the Larmor frequency, in a
 Stern–Gerlach (SG) setup. Motion is divided into three segments:
 1) Pre-SG (ballistic), 2) In-SG (CQD dynamics with uniform base acceleration),
@@ -1866,7 +1866,7 @@ end
 """
     CQD_Bn_Screen_velocity(Ix, μ, v0, θe, θn, kx, p) -> SVector{3,Float64}
 
-Final **velocity at the screen** under a Continuous Quantum Dynamics (CQD)
+Final **velocity at the screen** under a Co-Quantum Dynamics (CQD)
 model with a nuclear-field correction to the Larmor frequency. Motion is
 ballistic in `x` and `y`; only the `z` component is affected inside the
 Stern–Gerlach (SG) region of length `DEFAULT_y_SG`.
@@ -1972,7 +1972,7 @@ end
                         eps::Float64) -> UInt8
 
 Trace a particle through the Stern–Gerlach (SG) cavity under the
-**Continuous Quantum Dynamics (CQD)** model with a nuclear-field correction
+**Co-Quantum Dynamics (CQD)** model with a nuclear-field correction
 to the Larmor frequency, and report whether it collides with the **top
 edge**, **bottom trench**, or clears the cavity but **misses the exit
 tube** at the screen.
