@@ -3586,8 +3586,8 @@ function SG0_mean_maxima(signal_key::String, data, nz_bins::Integer; half_max=fa
     # - z_full_mm   : full-resolution z-grid
     # - z_binned_mm : z-grid after grouping nz_bins neighboring pixels
     # ------------------------------------------------------------------
-    z_full_mm   = 1e3 .* pixel_positions(z_pixels, 1,      effective_cam_pixelsize_z)
-    z_binned_mm = 1e3 .* pixel_positions(z_pixels, nz_bins, effective_cam_pixelsize_z)
+    z_full_mm   = 1e3 .* pixel_positions(DEFAULT_z_pixels, 1,      effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(DEFAULT_z_pixels, nz_bins, effective_cam_pixelsize_z)
 
     Nz_full   = length(z_full_mm)
     Nz_binned = length(z_binned_mm)
@@ -3807,7 +3807,7 @@ function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer;
                 error("Invalid signal_key: choose 'F1' or 'F2'")
 
     # z-axes (mm)
-    z_binned_mm = 1e3 .* pixel_positions(z_pixels, nz_bin, effective_cam_pixelsize_z)
+    z_binned_mm = 1e3 .* pixel_positions(DEFAULT_z_pixels, nz_bin, effective_cam_pixelsize_z)
 
     # Determine max number of frames across currents
     n_runs_max = maximum(size(data[signal_label][:,:,:,i], 3) for i in 1:nI0)
