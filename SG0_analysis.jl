@@ -40,6 +40,7 @@ using .MyExperimentalAnalysis;
 # Set the working directory to the current location
 cd(@__DIR__) ;
 # General setup
+const BASE_PATH = raw"F:\SternGerlachExperiments";
 hostname = gethostname();
 @info "Running on host" hostname=hostname
 # For Plots
@@ -76,11 +77,8 @@ IMAGES INFORMATION
 """)
 # Setting the variables for the module
 MyExperimentalAnalysis.effective_cam_pixelsize_z    = exp_pixelsize_z;
-MyExperimentalAnalysis.x_pixels                     = x_pixels;
-MyExperimentalAnalysis.z_pixels                     = z_pixels;
-
-BASE_PATH = raw"F:\SternGerlachExperiments"
-
+MyExperimentalAnalysis.DEFAULT_x_pixels             = x_pixels;
+MyExperimentalAnalysis.DEFAULT_z_pixels             = z_pixels;
 
 data_2025 = CSV.read(joinpath(@__DIR__,"data_studies","FITki20260519T160646328","data_exp.csv"), DataFrame)
 
@@ -92,16 +90,16 @@ RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 
 K39_params = TheoreticalSimulation.AtomParams("39K"); # [R μn γn Ispin Ahfs M ] 
 nz = 2 ;
-λ0 = 0.005 ;
+λ0 = 0.001 ;
 σw = 0.200;
 ki = 2.3;
 
 # position
-z_mm        = 1e3 .* pixel_positions(z_pixels, nz, exp_pixelsize_z) ; 
+z_mm        = 1e3 .* pixel_positions(z_pixels, nz, exp_pixelsize_z) 
 z_mm_error  = 1/sqrt(12) * 1e3 * exp_pixelsize_z * nz ;
 
 
-d_qm_f1 = jldopen(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_profiles_f1_table.jld2"),"r") do f
+d_qm_f1 = jldopen(joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","QM_T205_8M","qm_screen_profiles_f1_table.jld2"),"r") do f
     select_key = JLD2_MyTools.make_keypath_qm(nz,0.200,λ0)
     data = f[select_key]
     nI = length(keys(data))
@@ -112,7 +110,7 @@ d_qm_f1 = jldopen(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_profi
         )
 end
 
-d_qm_f2 = jldopen(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_profiles_f2_table.jld2"),"r") do f
+d_qm_f2 = jldopen(joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","QM_T205_8M","qm_screen_profiles_f2_table.jld2"),"r") do f
     select_key = JLD2_MyTools.make_keypath_qm(nz,0.200,λ0)
     data = f[select_key]
     nI = length(keys(data))
@@ -122,15 +120,15 @@ d_qm_f2 = jldopen(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_profi
         F2s = [data[x][:z_max_smooth_spline_mm] for x=1:nI] )
 end
 
-profiles_1    = TheoreticalSimulation.QM_analyze_profiles_to_dict(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_data.jld2"), K39_params;
+profiles_1    = TheoreticalSimulation.QM_analyze_profiles_to_dict(joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","QM_T205_8M","qm_screen_data.jld2"), K39_params;
                     manifold=1,    n_bins= (32 , nz), width_mm=σw, add_plot=false, plot_xrange=:all, λ_raw=λ0, λ_smooth = 0.001, mode=:probability);
-profiles_5    = TheoreticalSimulation.QM_analyze_profiles_to_dict(joinpath(BASE_PATH,"SIMULATIONS","QM_T205_8M","qm_screen_data.jld2"), K39_params;
+profiles_5    = TheoreticalSimulation.QM_analyze_profiles_to_dict(joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","QM_T205_8M","qm_screen_data.jld2"), K39_params;
                     manifold=5,    n_bins= (32 , nz), width_mm=σw, add_plot=false, plot_xrange=:all, λ_raw=λ0, λ_smooth = 0.001, mode=:probability);
 
 d_qm_lvl1 = [profiles_1[x][:z_max_smooth_spline_mm] for x=1:47]
 d_qm_lvl5 = [profiles_5[x][:z_max_smooth_spline_mm] for x=1:47]
 
-d_cqd_up = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","up","cqd_7M_up_profiles.jld2"),"r") do f
+d_cqd_up = jldopen(joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_7M","cqd_7M_up_profiles.jld2"),"r") do f
     select_key = JLD2_MyTools.make_keypath_cqd(:up,ki,nz,0.200,λ0)
     data = f[select_key]
     nI = length(keys(data))
@@ -140,7 +138,7 @@ d_cqd_up = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","up","cqd_7M_u
         ups = [data[x][:z_max_smooth_spline_mm] for x=1:nI] )
 end
 
-d_cqd_dw = jldopen(joinpath(BASE_PATH,"SIMULATIONS","CQD_T205_7M","dw","cqd_7M_dw_profiles.jld2"),"r") do f
+d_cqd_dw = jldopen(joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_7M","cqd_7M_dw_profiles.jld2"),"r") do f
     select_key = JLD2_MyTools.make_keypath_cqd(:dw,ki,nz,0.200,λ0)
     data = f[select_key]
     nI = length(keys(data))
@@ -379,50 +377,15 @@ plot!(
 
 
 
-
-
-
-
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX MARCH DATA XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+#xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 data_directories = [
-        # "20260318/Round1",
-        # "20260318/Round2",
+        "20260318/Round1",
+        "20260318/Round2",
         # "20260318/Round3",
         # "20260318/Round4",
-        # "20260415A", 
-        # "20260415B", 
-        # "20260416A", 
-        # "20260416B",
-        # "20260427A",
-        # "20260427B",
-        # "20260427C",
-        # "20260429A",
-        # "20260429B",
-        # "20260429C",
-        # "20260429D",
-        # "20260429E",
-        # "20260429F",
-        # "20260504/Round1_SG1=0mA_SG0=+MG=3A",
-        # "20260504/Round2_SG1=0mA_SG0=-MG=3A",
-        # "20260504/Round3_SG1=40mA_SG0=+MG=3A",
-        # "20260504/Round4_SG1=40mA_SG0=-MG=3A",
-        # "20260504/Round5_SG1=500mA_SG0=+MG=3A",
-        # "20260504/Round6_SG1=500mA_SG0=-MG=3A",
-        # "20260507/Round1_SG1=278mA_SG0=+_MG=2300mA",
-        # "20260507/Round2_SG1=278mA_SG0=-_MG=2300mA",
-        # "20260507/Round3_SG1=279mA_SG0=+_MG=2020mA",
-        # "20260507/Round4_SG1=279mA_SG0=-_MG=2020mA",
-        # "20260507/Round5_SG1=279mA_SG0=+_MG=1530mA",
-        # "20260507/Round6_SG1=279mA_SG0=-_MG=1530mA",
-        # "20260507/Round7_SG1=278mA_SG0=+_MG=1070mA",
-        # "20260507/Round8_SG1=278mA_SG0=-_MG=1070mA",
-        # "20260507/Round9_SG1=279mA_SG0=+_MG=540mA",
-        # "20260507/Round10_SG1=279mA_SG0=-_MG=540mA",
-        "20260513/Round1_SG1=40mA_SG0=+_MG=40G",
-        "20260513/Round2_SG1=40mA_SG0=-_MG=40G",
-        "20260515/Round2_SG1=223mA_SG0=+_MG=40G",
-        "20260515/Round3_SG1=223mA_SG0=-_MG=40G"
         ];
 nd = length(data_directories);
 
@@ -457,6 +420,7 @@ for data_directory in data_directories
     println("\n$(data_directory) PROCESSING COMPLETED\n\n")
 end
 
+
 tables = Vector{DataFrame}(undef, nd);
 jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(RUN_STAMP).jld2"), "w") do f
     f["meta/nz"]               = nz
@@ -477,31 +441,24 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
         # ── Currents & fields ────────────────────────────────────────────────────
         SG0_current = data_processed[:SG0Currents];
         SG1_current = data_processed[:SG1Currents];
-        MG_current  = data_processed[:MGCurrents];
         
         Bz0 = 1e3 .* data_processed[:SG0Bz];
         Bz1 = 1e3 .* data_processed[:SG1Bz];
-        MG_fields   = 1e3 * data_processed[:MGFields];
 
         # ── Framewise maxima & statistics ────────────────────────────────────────
-        f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=false,λ0=λ0);
-        f2_max = MyExperimentalAnalysis.SG0_framewise_maxima("F2", data_processed, nz ; half_max=false,λ0=λ0);
+        f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=false, λ0=λ0);
+        f2_max = MyExperimentalAnalysis.SG0_framewise_maxima("F2", data_processed, nz ; half_max=false, λ0=λ0);
 
-        # MyExperimentalAnalysis.SG0_mean_maxima("F1", data_processed, nz ; half_max=false,λ0=λ0);
-        # MyExperimentalAnalysis.SG0_mean_maxima("F2", data_processed, nz ; half_max=false,λ0=λ0);
+        f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ 0*z_mm_error^2 );
+        f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ 0*z_mm_error^2 );
 
-        f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ z_mm_error^2 );
-        f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
-
-        Δz_mm = -(f1_z_mm .- f2_z_mm);
+        Δz_mm = (f1_z_mm .- f2_z_mm);
         Δz_sem_mm = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2 );
 
         # ── Summary DataFrame ────────────────────────────────────────────────────
         data = DataFrame(
-            Ig        = MG_current,
             I0        = SG0_current,
             I1        = SG1_current,
-            Bg        = MG_fields,
             B0        = Bz0,
             B1        = Bz1,
             zf1       = f1_z_mm,
@@ -517,11 +474,11 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
 
         pretty_table(data;
                 title         = data_directory,
-                formatters    = [ fmt__printf("%8.3f", [1]), fmt__printf("%8.5f", 2:3), fmt__printf("%8.3f", 4:6),  fmt__printf("%8.3f", [7,9,11]), fmt__printf("%8.4f", [8,10,12])],
+                formatters    = [ fmt__printf("%8.5f", 1:2), fmt__printf("%8.3f", 3:4), fmt__printf("%8.3f", [5,7,9]), fmt__printf("%8.4f", [6,8,10])],
                 alignment     = :c,
                 column_labels  = [
-                    ["IG current", "I0 Current", "I1 Current", "BG field", "B0 field", "B1 field", "F1", "F1 err", "F2", "F2 err", "Δz", "Δz err"], 
-                    ["[A]", "[A]", "[A]", "[mT]" ,"[mT]", "[mT]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
+                    ["I0 Current", "I1 Current", "B0 field", "B1 field", "F1", "F1 err", "F2", "F2 err", "Δz", "Δz err"], 
+                    ["[A]", "[A]", "[mT]" ,"[mT]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
                 ],
                 table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
                 style = TextTableStyle(
@@ -537,7 +494,6 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
         data_pos = data[data.I0 .> 0, :]
         # ── Colour palette (one colour per SG0 current step) ─────────────────────
         colors_sg0 = palette(:darkrainbow, size(data,1));
-
         sg1_label = "$(round(1000 * data.I1[end], digits=2))mA"   # reused in titles
 
         # ── Overlay of all SG0 currents: z-position vs current ───────────────────
@@ -662,7 +618,423 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
             )
 
             plt = plot(plt1, plt2, plt3, plt4;
-                suptitle      = sg1_label,
+                suptitle      = "$(data_directory) | SG1: $(round(1000*data.I1[i], digits=2))mA",
+                layout        = (2, 2),
+                link          = :x,
+                size          = (800, 450),
+                left_margin   = 3mm,
+                bottom_margin = 2mm,
+            )
+            plot!(plt[1]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
+            plot!(plt[2]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
+            display(plt)
+        end
+
+        # ── Overlay: all currents on one z-profile plot per state ─────────────────
+        overlay_kw = (
+            legend                  = :topleft,
+            legend_font             = 8,
+            foreground_color_legend = nothing,
+            legend_columns          = 2,
+            xlabel                  = L"$z \ \ (\mathrm{px})$",
+        );
+
+        plt_f1 = plot(; overlay_kw...);
+        plt_f2 = plot(; overlay_kw...);
+
+        for i in eachindex(SG0_current)
+            plot!(plt_f1, f1_profiles[i]; line=(:solid, 1, colors_sg0[i]), label=current_label(i))
+            plot!(plt_f2, f2_profiles[i]; line=(:solid, 1, colors_sg0[i]), label=current_label(i))
+        end
+        
+        plot!(plt_f1; legend_title=L"$F=1$");
+        plot!(plt_f2; legend_title=L"$F=2$");
+
+        fig = plot(plt_f1, plt_f2;
+            suptitle      = sg1_label,
+            layout        = (2, 1),
+            size          = (900, 850),
+            left_margin   = 3mm,
+            bottom_margin = 2mm,
+        )
+        plot!(fig[1]; xlabel="", xformatter=_->"", bottom_margin=-6mm)
+        display(fig)
+
+        GC.gc()
+    end
+end
+
+
+2+2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+data_directories = [
+        "20260318/Round1",
+        "20260318/Round2",
+        "20260318/Round3",
+        "20260318/Round4",
+        # "20260415A", 
+        # "20260415B", 
+        # "20260416A", 
+        # "20260416B",
+        # "20260427A",
+        # "20260427B",
+        # "20260427C",
+        # "20260429A",
+        # "20260429B",
+        # "20260429C",
+        # "20260429D",
+        # "20260429E",
+        # "20260429F",
+        # "20260504/Round1_SG1=0mA_SG0=+MG=3A",
+        # "20260504/Round2_SG1=0mA_SG0=-MG=3A",
+        # "20260504/Round3_SG1=40mA_SG0=+MG=3A",
+        # "20260504/Round4_SG1=40mA_SG0=-MG=3A",
+        # "20260504/Round5_SG1=500mA_SG0=+MG=3A",
+        # "20260504/Round6_SG1=500mA_SG0=-MG=3A",
+        # "20260507/Round1_SG1=278mA_SG0=+_MG=2300mA",
+        # "20260507/Round2_SG1=278mA_SG0=-_MG=2300mA",
+        # "20260507/Round3_SG1=279mA_SG0=+_MG=2020mA",
+        # "20260507/Round4_SG1=279mA_SG0=-_MG=2020mA",
+        # "20260507/Round5_SG1=279mA_SG0=+_MG=1530mA",
+        # "20260507/Round6_SG1=279mA_SG0=-_MG=1530mA",
+        # "20260507/Round7_SG1=278mA_SG0=+_MG=1070mA",
+        # "20260507/Round8_SG1=278mA_SG0=-_MG=1070mA",
+        # "20260507/Round9_SG1=279mA_SG0=+_MG=540mA",
+        # "20260507/Round10_SG1=279mA_SG0=-_MG=540mA",
+        # "20260513/Round1_SG1=40mA_SG0=+_MG=40G",
+        # "20260513/Round2_SG1=40mA_SG0=-_MG=40G",
+        # "20260515/Round2_SG1=223mA_SG0=+_MG=40G",
+        # "20260515/Round3_SG1=223mA_SG0=-_MG=40G"
+        ];
+nd = length(data_directories);
+
+for data_directory in data_directories
+    printstyled("\t" * data_directory * "\n"; color=:cyan, bold=true)
+    outfile_raw         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
+    outfile_processed   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
+    data_summary_path   = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS","summary",data_directory)
+    isdir(data_summary_path) || mkpath(data_summary_path);
+
+
+    if !isfile(outfile_processed) # check if the processed images exists
+        if !isfile(outfile_raw) # check if the raw data exists
+            @info "Not found → building $outfile_raw"
+            data_in = joinpath(BASE_PATH,"EXPERIMENTS", data_directory)
+            data_raw = MyExperimentalAnalysis.SG0_stack_data(data_in)
+            jldsave(outfile_raw, data=data_raw)
+            data_raw = nothing
+        else
+            @info "Found $outfile_raw → skipping build"
+        end
+
+        data_raw = load(outfile_raw)["data"]
+        data_processed = MyExperimentalAnalysis.SG0_build_processed_dict(data_raw)
+        jldsave(outfile_processed, data=data_processed)
+        data_processed = nothing
+        data_raw = nothing
+    else
+        @info "Found $outfile_processed → skipping build"
+    end
+
+    println("\n$(data_directory) PROCESSING COMPLETED\n\n")
+end
+
+
+
+tables = Vector{DataFrame}(undef, nd);
+jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(RUN_STAMP).jld2"), "w") do f
+    f["meta/nz"]               = nz
+    f["meta/λ0"]               = λ0
+    f["meta/data_directories"] = data_directories
+
+    for (idx,data_directory) in enumerate(data_directories)
+        # idx = 2
+        # data_directory = data_directories[idx]
+        printstyled("\t" * data_directory * "\n"; color=:cyan, bold=true);
+        data_processed = load(joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2"))["data"];
+
+        OUTDIR    = joinpath(BASE_PATH,"SG0_EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
+        isdir(OUTDIR) || mkpath(OUTDIR);
+        @info "Created output directory" OUTDIR
+        MyExperimentalAnalysis.OUTDIR   = OUTDIR;
+
+        # ── Currents & fields ────────────────────────────────────────────────────
+        SG0_current = data_processed[:SG0Currents];
+        SG1_current = data_processed[:SG1Currents];
+        # MG_current  = data_processed[:MGCurrents];
+        
+        Bz0 = 1e3 .* data_processed[:SG0Bz];
+        Bz1 = 1e3 .* data_processed[:SG1Bz];
+        # MG_fields   = 1e3 * data_processed[:MGFields];
+
+        # ── Framewise maxima & statistics ────────────────────────────────────────
+        f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=false, λ0=λ0);
+        f2_max = MyExperimentalAnalysis.SG0_framewise_maxima("F2", data_processed, nz ; half_max=false, λ0=λ0);
+
+        # MyExperimentalAnalysis.SG0_mean_maxima("F1", data_processed, nz ; half_max=false,λ0=λ0);
+        # MyExperimentalAnalysis.SG0_mean_maxima("F2", data_processed, nz ; half_max=false,λ0=λ0);
+
+        f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ z_mm_error^2 );
+        f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
+
+        Δz_mm = -(f1_z_mm .- f2_z_mm);
+        Δz_sem_mm = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2 );
+
+        # ── Summary DataFrame ────────────────────────────────────────────────────
+        data = DataFrame(
+            Ig        = MG_current,
+            I0        = SG0_current,
+            I1        = SG1_current,
+            Bg        = MG_fields,
+            B0        = Bz0,
+            B1        = Bz1,
+            zf1       = f1_z_mm,
+            errzf1    = f1_z_sem_mm,
+            zf2       = f2_z_mm,
+            errzf2    = f2_z_sem_mm,
+            split     = Δz_mm,
+            errsplit  = round.(Δz_sem_mm; sigdigits=1)
+        )
+        tables[idx] = data
+        f[data_directory] = data  # ← save immediately
+        @info "Saved table" data_directory
+
+        pretty_table(data;
+                title         = data_directory,
+                formatters    = [ fmt__printf("%8.3f", [1]), fmt__printf("%8.5f", 2:3), fmt__printf("%8.3f", 4:6),  fmt__printf("%8.3f", [7,9,11]), fmt__printf("%8.4f", [8,10,12])],
+                alignment     = :c,
+                column_labels  = [
+                    ["IG current", "I0 Current", "I1 Current", "BG field", "B0 field", "B1 field", "F1", "F1 err", "F2", "F2 err", "Δz", "Δz err"], 
+                    ["[A]", "[A]", "[A]", "[mT]" ,"[mT]", "[mT]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
+                ],
+                table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+                style = TextTableStyle(
+                            first_line_column_label = crayon"yellow bold",
+                            column_label  = crayon"yellow",
+                            table_border  = crayon"blue bold",
+                            title = crayon"bold red"
+                            ),
+                equal_data_column_widths = true,
+        )
+
+
+        data_pos = data[data.I0 .> 0, :]
+        # ── Colour palette (one colour per SG0 current step) ─────────────────────
+        colors_sg0 = palette(:darkrainbow, size(data,1));
+
+        sg1_label = "$(round(1000 * data.I1[end], digits=2))mA"   # reused in titles
+
+        # ── Overlay of all SG0 currents: z-position vs current ───────────────────
+        common_scatter_kw = (seriestype=:scatter, marker=(:circle, 2, :white))
+
+        fig1 = plot(data.I0, data.zf1;
+            common_scatter_kw..., yerror=data.errzf1,
+            label=L"$F=1$", markerstrokecolor=:red);
+        plot!(fig1, data.I0, data.zf2;
+            common_scatter_kw..., yerror=data.errzf2,
+            label=L"$F=2$", markerstrokecolor=:blue);
+        plot!(fig1, data.I0, mean([data.zf1, data.zf2]);
+            label="Centre", marker=(:diamond, :white),
+            markerstrokecolor=:gray47, line=(:dash, 1, :gray47));
+        plot!(fig1;
+            xlabel="SG0 Current (A)",
+            foreground_color_legend=nothing, background_color_legend=nothing,
+            yformatter=y -> @sprintf("%.3f", y));
+
+        fig2 = plot(data_pos.I0, data_pos.zf1;
+            common_scatter_kw..., yerror=data_pos.errzf1,
+            label=L"$F=1$", markerstrokecolor=:red);
+        plot!(fig2, data_pos.I0, data_pos.zf2;
+            common_scatter_kw..., yerror=data_pos.errzf2,
+            label=L"$F=2$", markerstrokecolor=:blue);
+        plot!(fig2, data_pos.I0, mean([data_pos.zf1, data_pos.zf2]),
+            label="Centre", marker=(:diamond, :white),
+            markerstrokecolor=:gray47, line=(:dash, 1, :gray47));
+        plot!(fig2;
+            xscale=:log10,
+            foreground_color_legend=nothing, background_color_legend=nothing,
+            xlabel="SG0 Current (A)",
+            yformatter=y -> @sprintf("%.3f", y));
+
+        fig3 = plot(data.I0, data.split ./ 6.5e-3;
+            common_scatter_kw..., yerror=data.errsplit ./ 6.5e-3,
+            label=L"$\Delta z$", markerstrokecolor=:darkgreen);
+        plot!(fig3;
+            foreground_color_legend=nothing, background_color_legend=nothing,
+            xlabel="SG0 Current (A)", ylabel="Separation (px)", yminorticks=false);
+
+        fig4 = plot(data_pos.I0, data_pos.split ./ 6.5e-3;
+            common_scatter_kw..., yerror=data_pos.errsplit ./ 6.5e-3,
+            label=L"$\Delta z$", markerstrokecolor=:darkgreen);
+        plot!(fig4;
+            xscale=:log10,
+            foreground_color_legend=nothing, background_color_legend=nothing,
+            xlabel="SG0 Current (A)", ylabel="Separation (px)", yminorticks=false);
+
+        fig = plot(fig1, fig2, fig3, fig4;
+            suptitle     = "$(data_directory) | SG1: $sg1_label",
+            layout       = (2, 2),
+            size         = (1000, 600),
+            link         = :x,
+            left_margin  = 5mm,
+            bottom_margin= 3mm,
+        )
+        plot!(fig[1]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
+        plot!(fig[2]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
+        display(fig)
+        
+        # ── Extract image arrays once, outside all loops ─────────────────────────
+        f1imgs = data_processed[:F1ProcessedImages];
+        f2imgs = data_processed[:F2ProcessedImages];
+        current_label(i) = L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$";
+        sg1_label    = "$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA";
+
+        legend_kw = (
+            legend                  = :topleft,
+            legend_title            = "SG0",
+            background_color_legend = :white,
+            foreground_color_legend = nothing,
+        );
+
+        # ── Pre-compute cleaned images and profiles for all currents ──────────────
+        # Store so each quantity is computed once and reused in both plot blocks
+        f1_images   = Vector{Matrix{Float64}}(undef, length(SG0_current));
+        f2_images   = Vector{Matrix{Float64}}(undef, length(SG0_current));
+        f1_profiles = Vector{Vector{Float64}}(undef, length(SG0_current));
+        f2_profiles = Vector{Vector{Float64}}(undef, length(SG0_current));
+
+
+        for i in eachindex(SG0_current)
+            # Average over frames (dim 3), then mask
+            f1img = dropdims(mean(f1imgs[:,:,:,i], dims=3), dims=3)
+            f1img .*= isfinite.(f1img) .& (f1img .>= -10) .& (f1img .<= 1000)
+
+            f2img = dropdims(mean(f2imgs[:,:,:,i], dims=3), dims=3)
+            f2img .*= isfinite.(f2img) .& (f2img .>=  -5) .& (f2img .<= 500)
+
+            f1_images[i]   = f1img
+            f2_images[i]   = f2img
+
+            # Profile: average over x (dim 1) after frame-averaging and masking
+            f1_profiles[i] = vec(mean(f1img, dims=1))
+            f2_profiles[i] = vec(mean(f2img, dims=1))
+
+        end
+
+        # ── Per-current panels: heatmap (left) + z-profile (right) ───────────────
+        for i in eachindex(SG0_current)
+            f1vmax = Statistics.quantile(vec(f1_images[i]), 0.999)
+            f2vmax = Statistics.quantile(vec(f2_images[i]), 0.999)
+
+            plt1 = heatmap(f1_images[i];
+                xlabel = L"$z\ \ (\mathrm{px})$",
+                ylabel = L"$x\ \ (\mathrm{px})$",
+                cbar   = true, clims = (0, f1vmax),
+            )
+            plt2 = plot(f1_profiles[i];
+                line = (:solid, 1, colors_sg0[i]), label = current_label(i),
+                xlabel = L"$z\ \ (\mathrm{px})$", legend_kw...,
+            )
+            plt3 = heatmap(f2_images[i];
+                xlabel = L"$z\ \ (\mathrm{px})$",
+                ylabel = L"$x\ \ (\mathrm{px})$",
+                cbar   = true, clims = (0, f2vmax),
+            )
+            plt4 = plot(f2_profiles[i];
+                line = (:solid, 1, colors_sg0[i]), label = current_label(i),
+                xlabel = L"$z\ \ (\mathrm{px})$", legend_kw...,
+            )
+
+            plt = plot(plt1, plt2, plt3, plt4;
+                suptitle      = "$(data_directory) | SG1: $(round(1000*data.I1[i], digits=2))mA",
                 layout        = (2, 2),
                 link          = :x,
                 size          = (800, 450),
