@@ -89,8 +89,8 @@ RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 
 
 K39_params = TheoreticalSimulation.AtomParams("39K"); # [R μn γn Ispin Ahfs M ] 
-nz = 2 ;
-λ0 = 0.001 ;
+nz = 1 ;
+λ0 = 0.01 ;
 σw = 0.200;
 ki = 2.3;
 
@@ -421,15 +421,16 @@ for data_directory in data_directories
 end
 
 
-tables = Vector{DataFrame}(undef, nd);
-jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(RUN_STAMP).jld2"), "w") do f
-    f["meta/nz"]               = nz
-    f["meta/λ0"]               = λ0
-    f["meta/data_directories"] = data_directories
 
-    for (idx,data_directory) in enumerate(data_directories)
-        # idx = 2
-        # data_directory = data_directories[idx]
+# tables = Vector{DataFrame}(undef, nd);
+# jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", dirname.(data_directories[1]), "data_analysis_$(RUN_STAMP).jld2"), "w") do f
+#     f["meta/nz"]               = nz
+#     f["meta/λ0"]               = λ0
+#     f["meta/data_directories"] = data_directories
+
+#     for (idx,data_directory) in enumerate(data_directories)
+        idx = 2
+        data_directory = data_directories[idx]
         printstyled("\t" * data_directory * "\n"; color=:cyan, bold=true);
         data_processed = load(joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2"))["data"];
 
@@ -449,11 +450,14 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
         f1_max = MyExperimentalAnalysis.SG0_framewise_maxima("F1", data_processed, nz ; half_max=false, λ0=λ0);
         f2_max = MyExperimentalAnalysis.SG0_framewise_maxima("F2", data_processed, nz ; half_max=false, λ0=λ0);
 
-        f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ 0*z_mm_error^2 );
-        f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ 0*z_mm_error^2 );
+        f1_z_mm , f1_z_sem_mm  = vec(mean(f1_max, dims=1)) , sqrt.(vec(std(f1_max, dims=1; corrected=true) ./ sqrt(size(f1_max,1))).^2 .+ z_mm_error^2 );
+        f2_z_mm , f2_z_sem_mm  = vec(mean(f2_max, dims=1)) , sqrt.(vec(std(f2_max, dims=1; corrected=true) ./ sqrt(size(f2_max,1))).^2 .+ z_mm_error^2 );
 
         Δz_mm = (f1_z_mm .- f2_z_mm);
         Δz_sem_mm = sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2 );
+
+        centroid_mm     = 0.5 * (f1_z_mm .+ f2_z_mm);
+        centroid_sem_mm = 0.5 * sqrt.( (f1_z_sem_mm).^2 .+ (f2_z_sem_mm).^2 );
 
         # ── Summary DataFrame ────────────────────────────────────────────────────
         data = DataFrame(
@@ -466,7 +470,9 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
             zf2       = f2_z_mm,
             errzf2    = f2_z_sem_mm,
             split     = Δz_mm,
-            errsplit  = round.(Δz_sem_mm; sigdigits=1)
+            errsplit  = round.(Δz_sem_mm; sigdigits=2),
+            c0        = centroid_mm,
+            errc0     = round.(centroid_sem_mm; sigdigits=2)
         )
         tables[idx] = data
         f[data_directory] = data  # ← save immediately
@@ -474,11 +480,11 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
 
         pretty_table(data;
                 title         = data_directory,
-                formatters    = [ fmt__printf("%8.5f", 1:2), fmt__printf("%8.3f", 3:4), fmt__printf("%8.3f", [5,7,9]), fmt__printf("%8.4f", [6,8,10])],
+                formatters    = [ fmt__printf("%8.5f", 1:2), fmt__printf("%8.3f", 3:4), fmt__printf("%8.3f", [5,7,9,11]), fmt__printf("%8.4f", [6,8,10,12])],
                 alignment     = :c,
                 column_labels  = [
-                    ["I0 Current", "I1 Current", "B0 field", "B1 field", "F1", "F1 err", "F2", "F2 err", "Δz", "Δz err"], 
-                    ["[A]", "[A]", "[mT]" ,"[mT]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
+                    ["I0 Current", "I1 Current", "B0 field", "B1 field", "F1", "F1 err", "F2", "F2 err", "Δz", "Δz err", "C₀", "C₀ err "], 
+                    ["[A]", "[A]", "[mT]" ,"[mT]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"]
                 ],
                 table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
                 style = TextTableStyle(
@@ -579,10 +585,11 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
         for i in eachindex(SG0_current)
             # Average over frames (dim 3), then mask
             f1img = dropdims(mean(f1imgs[:,:,:,i], dims=3), dims=3)
-            f1img .*= isfinite.(f1img) .& (f1img .>= -10) .& (f1img .<= 1000)
+            f1img = mapwindow(median, f1img, (3, 3))
+            # f1img .*= isfinite.(f1img) .& (f1img .>= -10) .& (f1img .<= 1000)
 
             f2img = dropdims(mean(f2imgs[:,:,:,i], dims=3), dims=3)
-            f2img .*= isfinite.(f2img) .& (f2img .>=  -5) .& (f2img .<= 500)
+            # f2img .*= isfinite.(f2img) .& (f2img .>=  -5) .& (f2img .<= 500)
 
             f1_images[i]   = f1img
             f2_images[i]   = f2img
@@ -590,10 +597,10 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
             # Profile: average over x (dim 1) after frame-averaging and masking
             f1_profiles[i] = vec(mean(f1img, dims=1))
             f2_profiles[i] = vec(mean(f2img, dims=1))
-
         end
 
         # ── Per-current panels: heatmap (left) + z-profile (right) ───────────────
+        camera_z_mm = 1e3 .* pixel_positions(z_pixels, 1, exp_pixelsize_z) 
         for i in eachindex(SG0_current)
             f1vmax = Statistics.quantile(vec(f1_images[i]), 0.999)
             f2vmax = Statistics.quantile(vec(f2_images[i]), 0.999)
@@ -603,19 +610,21 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
                 ylabel = L"$x\ \ (\mathrm{px})$",
                 cbar   = true, clims = (0, f1vmax),
             )
-            plt2 = plot(f1_profiles[i];
+            plt2 = plot(camera_z_mm, f1_profiles[i];
                 line = (:solid, 1, colors_sg0[i]), label = current_label(i),
                 xlabel = L"$z\ \ (\mathrm{px})$", legend_kw...,
             )
+            vline!(plt2, [f1_max[i]], line = (:dot, 1, colors_sg0[i]), label = false)
             plt3 = heatmap(f2_images[i];
                 xlabel = L"$z\ \ (\mathrm{px})$",
                 ylabel = L"$x\ \ (\mathrm{px})$",
                 cbar   = true, clims = (0, f2vmax),
             )
-            plt4 = plot(f2_profiles[i];
+            plt4 = plot(camera_z_mm, f2_profiles[i];
                 line = (:solid, 1, colors_sg0[i]), label = current_label(i),
                 xlabel = L"$z\ \ (\mathrm{px})$", legend_kw...,
             )
+            vline!(plt4, [f2_max[i]], line = (:dot, 1, colors_sg0[i]), label = false)
 
             plt = plot(plt1, plt2, plt3, plt4;
                 suptitle      = "$(data_directory) | SG1: $(round(1000*data.I1[i], digits=2))mA",
@@ -665,14 +674,292 @@ jldopen(joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", "summary", "data_analysis_$(
 end
 
 
+
+scale_factor = 6.5e-3
+mark_symbol = [:circle, :rect]
+colores = (:darkgreen, :indigo)
+current_polarity = ("+", "–")
+fig1a = plot(xlabel = "SG0 Current (A)", ylabel = L"$\Delta z$ (px)")
+for (k, data) in enumerate(tables)
+    data_pos = data[data.I0 .> 0, :]
+
+    # Positive polarity branch
+    plot!(fig1a,
+        data_pos.I0, data_pos.split ./ scale_factor,
+        yerror            = data_pos.errsplit ./ scale_factor,
+        label             = "($(current_polarity[k])) " * data_directories[k],
+        line              = (:solid, 1, colores[k], 0.5),
+        marker            = (mark_symbol[k], 2, :white),
+        markerstrokecolor = colores[k],
+    )
+
+end
+ymin, ymax = ylims(fig1a)
+plot!(fig1a,
+    xscale                  = :log10,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+    yminorticks             = 5,
+    yticks                  = floor(ymin):1:ceil(ymax),
+    legend                  = :topright,
+)
+display(fig1a)
+
+
+
+
+
+
+
+
+
+
+data = tables[1]
+scale_factor = 6.5e-3
+mark_symbol = [:circle, :rect]
+colores = (:darkgreen, :indigo)
+current_polarity = ("+", "–")
+sg1_filter(df) = iszero(40) ? df : df[df.I0 .> 0, :]
+
+fig1a = plot(xlabel = "SG0 Current (A)", ylabel = L"$\Delta z$ (px)")
+# for (k, dir) in enumerate(local_dirs)
+    # data = tables[k + offset]
+    data_pos = sg1_filter(data[data.I0 .> 0, :])
+    plot!(fig1a,
+        data_pos.I0, data_pos.split ./ scale_factor,
+        yerror            = data_pos.errsplit ./ scale_factor,
+        # label             = "($(current_polarity[1])) " * dir,
+        line              = (:solid, 1, colores[1], 0.5),
+        marker            = (mark_symbol[1], 2, :white),
+        markerstrokecolor = colores[1],
+    )
+# end
+plot!(fig1a,
+    xscale                  = :log10,
+    foreground_color_legend = nothing,
+    background_color_legend = nothing,
+    yminorticks             = 5,
+)
+
+
+
 2+2
 
 
+function plot_sg1_fig(
+    indices::UnitRange{Int},
+    sg1_current_mA::Float64;
+    tables = tables,
+    data_directories = data_directories,
+    mark_symbol = [:circle, :rect],
+    colores = (:darkgreen, :indigo),
+    current_polarity = ("+", "–"),
+    scale_factor = 6.5e-3,
+)
+    offset = first(indices) - 1
+    local_dirs = data_directories[indices]
+
+    # Helper: optionally filter by positive SG1 current
+    sg1_filter(df) = iszero(sg1_current_mA) ? df : df[df.I1 .> 0, :]
+
+    # ── fig1a : log scale, positive current only ──────────────────────────────
+    fig1a = plot(xlabel = "SG0 Current (A)", ylabel = L"$\Delta z$ (px)")
+    for (k, dir) in enumerate(local_dirs)
+        data = tables[k + offset]
+        data_pos = sg1_filter(data[data.I0 .> 0, :])
+        plot!(fig1a,
+            data_pos.I0, data_pos.split ./ scale_factor,
+            yerror            = data_pos.errsplit ./ scale_factor,
+            label             = "($(current_polarity[k])) " * dir,
+            line              = (:solid, 1, colores[k], 0.5),
+            marker            = (mark_symbol[k], 2, :white),
+            markerstrokecolor = colores[k],
+        )
+    end
+    plot!(fig1a,
+        xscale                  = :log10,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        yminorticks             = 5,
+    )
+
+    # ── fig1b : linear, zoomed to I0 < 50 mA ─────────────────────────────────
+    fig1b = plot(xlabel = "SG0 Current (mA)", ylabel = L"$\Delta z$ (px)")
+    for (k, dir) in enumerate(local_dirs)
+        data = tables[k + offset]
+        data_pos = sg1_filter(data[data.I0 .< 0.050, :])
+        plot!(fig1b,
+            1000 .* data_pos.I0, data_pos.split ./ scale_factor,
+            label = false,
+            line  = (:dashdot, 1, colores[k], 0.5),
+        )
+        plot!(fig1b,
+            1000 .* data_pos.I0, data_pos.split ./ scale_factor,
+            yerror            = data_pos.errsplit ./ scale_factor,
+            seriestype        = :scatter,
+            label             = "($(current_polarity[k])) " * dir,
+            marker            = (mark_symbol[k], 2, :white),
+            lw                = 2,
+            markerstrokecolor = colores[k],
+        )
+    end
+    plot!(fig1b,
+        xlims                   = (-1, 10),
+        legend                  = :bottomright,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        yminorticks             = 5,
+    )
+
+    # ── fig1c : full current range ────────────────────────────────────────────
+    fig1c = plot(xlabel = "SG0 Current (A)", ylabel = L"$\Delta z$ (px)")
+    for (k, dir) in enumerate(local_dirs)
+        data = tables[k + offset]
+        data_pos = sg1_filter(data)
+        plot!(fig1c,
+            data_pos.I0, data_pos.split ./ scale_factor,
+            label = false,
+            line  = (:dashdot, 1, colores[k], 0.5),
+        )
+        plot!(fig1c,
+            data_pos.I0, data_pos.split ./ scale_factor,
+            yerror            = data_pos.errsplit ./ scale_factor,
+            seriestype        = :scatter,
+            label             = "($(current_polarity[k])) " * dir,
+            marker            = (mark_symbol[k], 2, :white),
+            lw                = 2,
+            markerstrokecolor = colores[k],
+        )
+    end
+    plot!(fig1c,
+        legend                  = :bottomright,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        yminorticks             = 5,
+    )
+
+    # ── composite figure ──────────────────────────────────────────────────────
+    fig = plot(fig1a, fig1b, fig1c,
+        layout       = @layout([a1 a2; a3]),
+        size         = (850, 550),
+        link         = :y,
+        left_margin  = 3mm,
+    )
+    plot!(fig[1], legend = false, title = "")
+    plot!(fig[2], ylabel = "", yformatter = _ -> "", left_margin = -4mm,
+          legend = false, title = "")
+    plot!(fig[3],
+        title          = "",
+        bottom_margin  = -7mm,
+        legend_title   = L"SG1 $\sim %$(sg1_current_mA)\mathrm{mA}$",
+        legend_columns = 2,
+        legend         = :outerbottom,
+    )
+
+    # display(fig)
+    return fig
+end
+
+
+
+plot_sg1_fig(
+    1:2,
+    40.0;
+)
+
+function plot_sg0_sweep(
+    table_indices::AbstractVector{Int};
+    tables        = tables,
+    cam_pixelsize = cam_pixelsize,
+    mark_symbols  = (:circle, :rect, :diamond, :utriangle, :dtriangle, :circle, :rect, :diamond, :utriangle, :dtriangle, :xcross, :cross),
+    color_list    = palette(:darkrainbow, length(table_indices)),
+)
+    scale = 1e3 * cam_pixelsize
+
+    function make_label(df)
+        sg1 = Int(round(1000 * df.I1[1]))
+        mg  = Int(round(1000 * df.Ig[1]))
+        L"SG1=$%$(sg1)\mathrm{mA}$ - MG=$%$(mg)\mathrm{mA}$"
+    end
+
+    function plot_series!(ax, df, i; x_slice=Colon(), connect_slice=Colon())
+        scatter!(ax,
+            df.I0[x_slice], df.split[x_slice] ./ scale,
+            yerror           = df.errsplit[x_slice] ./ scale,
+            marker           = (mark_symbols[i], :white, 2),
+            markerstrokecolor = color_list[i],
+            label            = make_label(df),
+        )
+        plot!(ax,
+            df.I0[connect_slice], df.split[connect_slice] ./ scale,
+            line  = (:solid, 1, color_list[i], 0.25),
+            label = false,
+        )
+    end
+
+    legend_kw = (
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        yminorticks             = 5,
+        legend                  = :outerright,
+    )
+
+    # ── a1 : full range ───────────────────────────────────────────────────────
+    a1 = plot(xlabel = "SG0 (A)", ylabel = "Separation (px)")
+    for (i, idx) in enumerate(table_indices)
+        df = tables[idx]
+        plot_series!(a1, df, i; x_slice = 2:nrow(df), connect_slice = 2:nrow(df))
+    end
+    plot!(a1; xscale=:identity, legend_kw...)
+
+    # ── a2 : zoomed, I0 < 50 mA ───────────────────────────────────────────────
+    a2 = plot(xlabel = "SG0 (A)", ylabel = "Separation (px)")
+    for (i, idx) in enumerate(table_indices)
+        df = tables[idx][tables[idx].I0 .< 0.050, :]
+        plot_series!(a2, df, i)
+    end
+    plot!(a2; xscale = :identity, legend_kw...)
+
+    # ── a3 : log scale, skip first point ─────────────────────────────────────
+    a3 = plot(xlabel = "SG0 (A)", ylabel = "Separation (px)")
+    for (i, idx) in enumerate(table_indices)
+        df = tables[idx]
+        plot_series!(a3, df, i)
+    end
+    plot!(a3; xscale = :identity, legend_kw...)
+
+    # ── composite ─────────────────────────────────────────────────────────────
+    # Build legend title from first table as representative
+    df_first = tables[first(table_indices)]
+    leg_title = make_label(df_first)
+
+    fig = plot(a1, a2, a3,
+        layout       = @layout([a1 a2; a3]),
+        size         = (850, 550),
+        link         = :y,
+        left_margin  = 3mm,
+    )
+    plot!(fig[1], legend = false, title = "")
+    plot!(fig[2], ylabel = "", yformatter = _ -> "", left_margin = -4mm,
+          legend = false, title = "")
+    plot!(fig[3],
+        title          = "",
+        bottom_margin  = -7mm,
+        legend_columns = 3,
+        legend         = :outerbottom,
+    )
+
+    display(fig)
+    return fig
+end
 
 
 
 
+plot_sg0_sweep([1,2])
 
+
+2+2
 
 
 
