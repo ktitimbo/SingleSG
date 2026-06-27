@@ -3826,6 +3826,10 @@ function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer;
         stack    = Float64.(data[signal_label][:,:,:,j])
         n_frames = size(stack, 3)
 
+        # --- NEW: despike each frame along x (dim 1) before averaging ---
+        # window (5,1,1): median over 5 pixels along x, no mixing across z or frames
+        stack = mapwindow(median, stack, (5, 1, 1))
+
         # Average over x for all frames at once: Nz × Nframes
         profiles = dropdims(mean(stack, dims=1), dims=1)
 
