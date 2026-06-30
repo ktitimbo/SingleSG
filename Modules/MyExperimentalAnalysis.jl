@@ -3821,7 +3821,7 @@ function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer;
 
     @info "Processing per-frame maxima" signal_label=signal_label
 
-    for j in 1:nI0
+    @showprogress "Processing currents..." for j in 1:nI0
         # Load stack (Nx × Nz × Nframes)
         stack    = Float64.(data[signal_label][:,:,:,j])
         n_frames = size(stack, 3)
@@ -3936,7 +3936,161 @@ function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer;
 end
 
 
+# function SG0_framewise_maxima(signal_key::String, data, nz_bin::Integer; 
+#         half_max::Bool=false, λ0::Float64=0.01, make_plot::Bool=false,
+#         mad_thresh::Float64=8.0)
 
+#     I_SG0   = vec(data[:SG0Currents])
+#     nI0     = length(I_SG0) # Number of SG0 currents
+#     I_SG1   = vec(data[:SG1Currents])
+#     nI1     = length(I_SG1) # Number of SG0 currents
+
+#     @assert nI0 == nI1 
+
+#     # Validate signal_key → dataset key
+#     signal_label = signal_key == "F1" ? :F1ProcessedImages :
+#                 signal_key == "F2" ? :F2ProcessedImages :
+#                 error("Invalid signal_key: choose 'F1' or 'F2'")
+
+#     # z-axes (mm)
+#     z_binned_mm = 1e3 .* pixel_positions(DEFAULT_z_pixels, nz_bin, effective_cam_pixelsize_z)
+
+#     # Determine max number of frames across currents
+#     n_runs_max = maximum(size(data[signal_label][:,:,:,i], 3) for i in 1:nI0)
+#     max_position_data = fill(NaN, n_runs_max, nI0)  # (n_runs_max × nI)
+
+#     Nz_full = size(data[signal_label][:,:,:,1], 2)
+#     @assert Nz_full % nz_bin == 0 "Signal length Nz=$Nz_full is not divisible by nz_bin=$nz_bin"
+
+#     # precompute weights for full z-grid if half_max=false
+#     full_weights = compute_weights(z_binned_mm, λ0)
+
+#     @info "Processing per-frame maxima" signal_label=signal_label
+
+#     @showprogress "Processing currents..." for j in 1:nI0
+#         # Load stack (Nx × Nz × Nframes)
+#         stack    = Float64.(data[signal_label][:,:,:,j])
+#         n_frames = size(stack, 3)
+
+#         # --- Despike each frame along x (dim 1) before averaging ---
+#         # window (5,15,1): median over 5 pixels along x, no mixing across z or frames
+#         stack = mapwindow(median, stack, (5, 15, 1))
+
+#         # Average over x for all frames at once: Nz × Nframes
+#         profiles = dropdims(mean(stack, dims=1), dims=1)
+
+#         # Bin along z for all frames at once: (Nz/nz_bin) × Nframes
+#         profiles_binned = dropdims(mean(reshape(profiles, nz_bin, :, n_frames), dims=1), dims=1)
+
+#         for i in 1:n_frames
+#             y_fit = Float64.(view(profiles_binned, :, i))
+#             z_fit = z_binned_mm
+
+#             # --- Optional half-maximum window
+#             w_fit = full_weights
+#             if half_max
+#                 y_max  = maximum(y_fit)
+#                 keep   = findall(>(y_max/2), y_fit)
+#                 z_fit  = z_fit[keep]
+#                 y_fit  = y_fit[keep]
+#                 w_fit  = compute_weights(z_fit, λ0)
+#             end
+
+#             # --- Reject points clearly off-trend (broken-pixel-level outliers only)
+#             # Local rolling-window MAD: each point is compared only to its own
+#             # neighborhood, not the whole profile. This matters right next to
+#             # a genuine peak — a global median/MAD there is already pulled up
+#             # by the real peak, which can hide a narrow spike sitting beside it.
+#             # A local window keeps that region's own trend as the reference,
+#             # so a sharp 1-3 bin excursion still stands out regardless of where
+#             # it falls. Smooth points are untouched: value and weight unchanged.
+#             n_pts = length(y_fit)
+#             if n_pts >= 5
+#                 half_w   = 2  # window radius → 5-point window, mirrors mapwindow(median, stack, (5,...))
+#                 keep_idx = trues(n_pts)
+#                 for k in 1:n_pts
+#                     lo = max(1, k - half_w)
+#                     hi = min(n_pts, k + half_w)
+#                     nbrs = [y_fit[m] for m in lo:hi if m != k]
+#                     local_med = median(nbrs)
+#                     local_mad = median(abs.(nbrs .- local_med))
+#                     if local_mad > 0 && abs(y_fit[k] - local_med) / (1.4826 * local_mad) > mad_thresh
+#                         keep_idx[k] = false
+#                     end
+#                 end
+#                 if !all(keep_idx)
+#                     idx  = findall(keep_idx)
+#                     z_fit = z_fit[idx]
+#                     y_fit = y_fit[idx]
+#                     w_fit = w_fit[idx]
+#                 end
+#             end
+
+#             # --- Spline fit (cubic) on (z_fit, y_fit)
+#             S_fit = BSplineKit.fit(BSplineOrder(4), z_fit, y_fit, λ0; weights=w_fit)
+
+#             # --- Maxima via minimizing negative spline from multiple guesses
+#             negative_spline(x) = -S_fit(x[1])
+#             initial_guesses = sort([
+#                 quantile(z_fit, 0.20),
+#                 quantile(z_fit, 0.40),
+#                 quantile(z_fit, 0.50),
+#                 z_fit[argmax(y_fit)],
+#                 quantile(z_fit, 0.60),
+#                 quantile(z_fit, 0.70),
+#                 quantile(z_fit, 0.80),
+#                 quantile(z_fit, 0.90),
+#             ])
+
+#             candidates = Float64[]
+#             for g in initial_guesses
+#                 res = optimize(negative_spline, [minimum(z_fit)], [maximum(z_fit)], [g], Fminbox(LBFGS()))
+#                 push!(candidates, Optim.minimizer(res)[1])
+#             end
+#             sort!(candidates)
+
+#             # Deduplicate (within 1e-9)
+#             dedup = [candidates[1]]
+#             for v in candidates[2:end]
+#                 if all(abs(v - x) > 1e-9 for x in dedup)
+#                     push!(dedup, v)
+#                 end
+#             end
+
+#             @assert !isempty(dedup) "No peak candidates found"
+
+#             filtered = copy(dedup)
+
+#             # --- Rank surviving candidates by actual spline height
+#             vals    = S_fit.(filtered)      # evaluate spline (not negated)
+#             best_ix = argmax(vals)          # tallest peak index
+#             max_z   = filtered[best_ix]     # z of tallest peak
+
+#             # Store result for this frame/current
+#             max_position_data[i, j] = max_z
+
+#             # --- Plot per-frame processed profile + spline + peak
+#             if make_plot
+#                 fig = plot(
+#                     z_fit, y_fit,
+#                     seriestype=:scatter, marker=(:circle, :white, 2),
+#                     markerstrokecolor=:gray36, markerstrokewidth=0.8,
+#                     xlabel=L"$z\ (\mathrm{mm})$", ylabel="Intensity (a.u.)",
+#                     xlims=extrema(z_binned_mm),
+#                     title=L"%$(signal_key) Frame %$(i): $I_{c0}=%$(round(1e3*I_SG0[j], digits=3))\ \mathrm{mA}$ | $I_{c1}=%$(round(1e3*I_SG1[j], digits=3))\ \mathrm{mA}$",
+#                     label="$(signal_key) processed", legend=:topleft,
+#                 );
+#                 xs = collect(range(minimum(z_fit), maximum(z_fit), length=2001));
+#                 plot!(fig, xs, S_fit.(xs), line=(:solid, :red, 2), label=L"Spline fit ($n_{z}=%$(nz_bin)$, $\lambda_{0}=%$(λ0)$)");
+#                 vline!(fig, [max_z], line=(:dash, :black, 1), label=L"$z_{\max}=%$(round(max_z, digits=3))\ \mathrm{mm}$");
+#                 display(fig)
+#                 saveplot(fig, "fw$(i)_$(signal_key)_I$(@sprintf("%02d", j))")            
+#             end
+#         end
+#     end
+
+#     return max_position_data
+# end
 
 
 
