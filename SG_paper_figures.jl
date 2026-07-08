@@ -155,20 +155,20 @@ SETUP FEATURES
 ***************************************************
 """)
 # Setting the variables for the module
-TheoreticalSimulation.default_camera_pixel_size = cam_pixelsize;
-TheoreticalSimulation.default_x_pixels          = nx_pixels;
-TheoreticalSimulation.default_z_pixels          = nz_pixels;
-TheoreticalSimulation.default_x_furnace         = x_furnace;
-TheoreticalSimulation.default_z_furnace         = z_furnace;
-TheoreticalSimulation.default_x_slit            = x_slit;
-TheoreticalSimulation.default_z_slit            = z_slit;
-TheoreticalSimulation.default_y_FurnaceToSlit   = y_FurnaceToSlit;
-TheoreticalSimulation.default_y_SlitToSG        = y_SlitToSG;
-TheoreticalSimulation.default_y_SG              = y_SG;
-TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
-TheoreticalSimulation.default_R_tube            = R_tube;
-TheoreticalSimulation.default_c_aperture        = R_aper;
-TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
+TheoreticalSimulation.DEFAULT_camera_pixel_size = cam_pixelsize;
+TheoreticalSimulation.DEFAULT_x_pixels          = nx_pixels;
+TheoreticalSimulation.DEFAULT_z_pixels          = nz_pixels;
+TheoreticalSimulation.DEFAULT_x_furnace         = x_furnace;
+TheoreticalSimulation.DEFAULT_z_furnace         = z_furnace;
+TheoreticalSimulation.DEFAULT_x_slit            = x_slit;
+TheoreticalSimulation.DEFAULT_z_slit            = z_slit;
+TheoreticalSimulation.DEFAULT_y_FurnaceToSlit   = y_FurnaceToSlit;
+TheoreticalSimulation.DEFAULT_y_SlitToSG        = y_SlitToSG;
+TheoreticalSimulation.DEFAULT_y_SG              = y_SG;
+TheoreticalSimulation.DEFAULT_y_SGToScreen      = y_SGToScreen;
+TheoreticalSimulation.DEFAULT_R_tube            = R_tube;
+TheoreticalSimulation.DEFAULT_c_aperture        = R_aper;
+TheoreticalSimulation.DEFAULT_y_SGToAperture    = y_SGToAperture;
 ##################################################################################################
 function standard_error(x)
     return std(x; corrected=true) ./ sqrt.(length(x))
@@ -779,3 +779,45 @@ label="Zero positions (mm)",
  line=(:solid,2,:blue),
  yerror = centroid_fw[:,2] )
 
+
+
+
+
+
+      "1008": {
+        "homeScore": 3,
+        "awayScore": 1
+      },
+      "1009": {
+        "homeScore": 2,
+        "awayScore": 0
+      },
+      "1010": {
+        "homeScore": 2,
+        "awayScore": 1
+      },
+      "1011": {
+        "homeScore": 2,
+        "awayScore": 2,
+        "penaltyWinner": "Spain"
+      },
+      "1012": {
+        "homeScore": 2,
+        "awayScore": 0
+      },
+      "1013": {
+        "homeScore": 2,
+        "awayScore": 1
+      },
+      "1014": {
+        "homeScore": 1,
+        "awayScore": 0
+      },
+      "1015": {
+        "homeScore": 2,
+        "awayScore": 3
+      },
+      "1016": {
+        "homeScore": 0,
+        "awayScore": 2
+      },
