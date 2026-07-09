@@ -806,20 +806,26 @@ display(fig1)
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directories = [
-        "20260617/Round1",
-        "20260617/Round2",
-        "20260618/Round1",
-        "20260618/Round2",
-        "20260622/Round1",
-        "20260622/Round2",
-        "20260623/Round1",
-        "20260623/Round2",
-        "20260624/Round1",
-        "20260624/Round2",
-        "20260626/Round1",
-        "20260626/Round2",
+        # "20260617/Round1",
+        # "20260617/Round2",
+        # "20260618/Round1",
+        # "20260618/Round2",
+        # "20260622/Round1",
+        # "20260622/Round2",
+        # "20260623/Round1",
+        # "20260623/Round2",
+        # "20260624/Round1",
+        # "20260624/Round2",
+        # "20260626/Round1",
+        # "20260626/Round2",
         "20260629/Round1",
         "20260629/Round2",
+        "20260701/Round1",
+        "20260701/Round2",
+        "20260702/Round1",
+        "20260702/Round2",
+        "20260706/Round1",
+        "20260706/Round2",
 ]
 nd = length(data_directories);
 
@@ -933,7 +939,7 @@ for (dirname, dirs_in_group) in grouped
             )
 
             # ── Splitting and centroid ───────────────────────────────────────────────────
-            Δz_mm = -(f1_z_mm .- f2_z_mm)
+            Δz_mm = f1_z_mm .- f2_z_mm
 
             Δz_sem_mm = sqrt.(
                 f1_z_sem_mm.^2 .+
@@ -1187,115 +1193,2132 @@ for (dirname, dirs_in_group) in grouped
     end
 end
 
-scale_factor = 6.5e-3
+function make_pair_plots(tables, data_directories; xmode = :log10)
 
-mark_symbol      = [:circle, :rect]
-colores          = (:darkgreen, :indigo)
-current_polarity = ("+", "–")
+    scale_factor = 6.5e-3
 
-tol = 1e-9
+    mark_symbol      = [:circle, :rect]
+    colores          = (:darkgreen, :indigo)
+    current_polarity = ("+", "–")
 
-plot_specs = [
-    (:split, :errsplit, L"$\Delta z$ (px)", scale_factor),
-    (:c0,    :errc0,    L"$c_{0}$ (mm)",    1.0),
-    (:zf1,   :errzf1,   L"$F=1$ (mm)",      1.0),
-    (:zf2,   :errzf2,   L"$F=2$ (mm)",      1.0),
-]
+    tol = 1e-9
 
-figs = []
+    plot_specs = [
+        (:split, :errsplit, L"$\Delta z$ (px)", scale_factor),
+        (:c0,    :errc0,    L"$c_{0}$ (mm)",    1.0),
+        (:zf1,   :errzf1,   L"$F=1$ (mm)",      1.0),
+        (:zf2,   :errzf2,   L"$F=2$ (mm)",      1.0),
+    ]
 
-for (ycol, errcol, ylabel_text, sf) in plot_specs
+    pair_indices = [(1, 2), (3, 4), (5, 6), (7, 8)]
 
-    fig = plot(
-        xlabel = "SG0 Current (A)",
-        ylabel = ylabel_text,
+    fig_pairs = []
+
+    for pair in pair_indices
+
+        figs = []
+
+        for (ycol, errcol, ylabel_text, sf) in plot_specs
+
+            fig = plot(
+                xlabel = "SG0 Current (A)",
+                ylabel = ylabel_text,
+            )
+
+            for (j, k) in enumerate(pair)
+
+                data = tables[k]
+
+                data_pos = data[data.I0 .> 0, :]
+
+                mask = isapprox.(data.I0, 0.0; atol=tol) .&&
+                       .!isapprox.(data.I1, 0.0; atol=tol)
+
+                rows_zero = data[mask, :]
+
+                if nrow(rows_zero) > 0
+                    rows_zero = DataFrame(
+                        [name => mean(rows_zero[!, name]) for name in names(rows_zero)]
+                    )
+                end
+
+                plot!(fig,
+                    data_pos.I0,
+                    data_pos[!, ycol] ./ sf,
+                    yerror            = data_pos[!, errcol] ./ sf,
+                    label             = "($(current_polarity[j])) " * data_directories[k],
+                    line              = (:solid, 1, colores[j], 0.5),
+                    marker            = (mark_symbol[j], 2, :white),
+                    markerstrokecolor = colores[j],
+                )
+
+                if nrow(rows_zero) > 0
+                    y0  = only(rows_zero[!, ycol]) / sf
+                    dy0 = only(rows_zero[!, errcol]) / sf
+
+                    hline!(fig, [y0],
+                        label = false,
+                        line  = (:dash, 1, colores[j], 0.5),
+                    )
+
+                    hspan!(fig, [y0 - dy0, y0 + dy0],
+                        label     = false,
+                        color     = colores[j],
+                        fillalpha = 0.15,
+                        linealpha = 0,
+                    )
+                end
+            end
+
+            if xmode == :log10
+                plot!(fig,
+                    xlims = (0.95e-3, 5.0),
+                    xticks = (
+                        [1e-3, 1e-2, 1e-1, 1.0],
+                        [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]
+                    ),
+                    xscale = :log10,
+                )
+            elseif xmode == :linear
+                plot!(fig,
+                    xlims = (-0.2,4.0),
+                    xscale = :identity,
+                )
+            else
+                error("xmode must be either :log10 or :linear")
+            end
+
+            plot!(fig,
+                foreground_color_legend = nothing,
+                background_color_legend = nothing,
+                yminorticks             = 5,
+                legend                  = :topleft,
+            )
+
+            push!(figs, fig)
+        end
+
+        fig1a, fig1b, fig1c, fig1d = figs
+
+        fig_pair = plot(
+            fig1a, fig1b, fig1c, fig1d,
+            size   = (800, 600),
+            layout = (2, 2),
+            link   = :x,
+        )
+
+        if xmode == :log10
+            xtick_vals   = [1e-3, 1e-2, 1e-1, 1.0]
+            xtick_labels = [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]
+            empty_labels = fill("", length(xtick_vals))
+
+            plot!(fig_pair, subplot = 1,
+                xticks = (xtick_vals, empty_labels),
+                xlabel = "",
+                bottom_margin = -5mm,
+            )
+
+            plot!(fig_pair, subplot = 2,
+                xticks = (xtick_vals, empty_labels),
+                xlabel = "",
+                bottom_margin = -5mm,
+            )
+
+            plot!(fig_pair, subplot = 3,
+                xticks = (xtick_vals, xtick_labels),
+                xlabel = "SG0 Current (A)",
+            )
+
+            plot!(fig_pair, subplot = 4,
+                xticks = (xtick_vals, xtick_labels),
+                xlabel = "SG0 Current (A)",
+            )
+
+        elseif xmode == :linear
+
+            plot!(fig_pair, subplot = 1,
+                xlabel = "",
+                xformatter = _ -> "",
+                bottom_margin = -5mm,
+            )
+
+            plot!(fig_pair, subplot = 2,
+                xformatter = _ -> "",
+                xlabel = "",
+                bottom_margin = -5mm,
+            )
+
+            plot!(fig_pair, subplot = 3,
+                xlabel = "SG0 Current (A)",
+            )
+
+            plot!(fig_pair, subplot = 4,
+                xlabel = "SG0 Current (A)",
+            )
+        end
+
+        ymin, ymax = ylims(fig1a)
+
+        plot!(fig_pair, subplot = 1,
+            # xlabel = "",
+            # xformatter = _ -> "",
+            yticks = floor(ymin):1:ceil(ymax),
+        )
+
+        plot!(fig_pair, subplot = 2,
+            # xlabel = "",
+            # xformatter = _ -> "",
+            yformatter = y -> @sprintf("%.3f", y),
+        )
+
+        plot!(fig_pair, subplot = 3,
+            yformatter = y -> @sprintf("%.3f", y),
+        )
+
+        plot!(fig_pair, subplot = 4,
+            yformatter = y -> @sprintf("%.3f", y),
+        )
+
+        push!(fig_pairs, fig_pair)
+
+        display(fig_pair)
+    end
+
+    return fig_pairs
+end
+
+load_tables = Vector{DataFrame}(undef, nd)
+for (i,data_directory) in enumerate(data_directories)
+    load_path = joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", dirname(data_directory), "data_analysis_20260706T145140446.jld2")
+    load_data = load(load_path)
+    load_tables[i] = load_data[data_directory]
+end
+tables = load_tables
+
+make_pair_plots(tables, data_directories; xmode = :log10)
+make_pair_plots(tables, data_directories; xmode = :linear)
+
+for s_table in tables
+    show(stdout, s_table, allcols = true)
+    println("\n")
+end
+
+
+tol = 1e-9;
+# Reference / Baseline
+ref0 = OrderedDict{Int, DataFrame}()
+for (i, idx) in enumerate(3:4)
+
+    @info "Data set : $(data_directories[idx])"
+
+    ref00 = copy(tables[idx])
+    show(stdout, ref00, allcols = true, allrows = true)
+    println()
+
+    group_cols = [:I0, :I1]
+
+    err_cols = Symbol.(filter(name -> startswith(String(name), "err"), names(ref00)))
+    mean_cols = setdiff(Symbol.(names(ref00)), vcat(group_cols, err_cols))
+
+    grouped = groupby(ref00, group_cols, sort = false)
+
+    df_reduced = combine(grouped) do sdf
+
+        out = (;)
+
+        for col in mean_cols
+            out = merge(out, (; col => mean(sdf[!, col])))
+        end
+
+        for col in err_cols
+            n = nrow(sdf)
+            propagated_err = round(sqrt(sum(sdf[!, col].^2)) / n; digits=4)
+            out = merge(out, (; col => propagated_err))
+        end
+
+        return out
+    end
+
+    # Restore original column order
+    df_reduced = df_reduced[:, names(ref00)]
+
+    ref0[idx] = df_reduced
+
+    println()
+    println("Reduced dataframe for data set : $(data_directories[idx])")
+    println("-"^100)
+    show(stdout, df_reduced, allcols = true, allrows = true)
+    println("\n\n")
+
+end
+
+# Experiment data
+selected_indices = vcat(1:2, 5:8)
+sg0_data = OrderedDict{Int, DataFrame}()
+for idx in selected_indices
+
+    @info "Data set : $(data_directories[idx])"
+
+    df = copy(tables[idx])
+
+    println()
+    println("Original dataframe for data set $(idx): $(data_directories[idx])")
+    println("-"^100)
+    show(stdout, df, allcols = true, allrows = true)
+    println("\n")
+
+    group_cols = [:I0, :I1]
+
+    # Error columns: errzf1, errzf2, errsplit, errc0, etc.
+    err_cols = Symbol.(filter(name -> startswith(String(name), "err"), names(df)))
+
+    # Ordinary columns: averaged normally
+    mean_cols = setdiff(Symbol.(names(df)), vcat(group_cols, err_cols))
+
+    # ------------------------------------------------------------
+    # Create groups only for consecutive repeated I0, I1 blocks
+    # ------------------------------------------------------------
+    same_as_previous = [
+        false;
+        (isapprox.(df.I0[2:end], df.I0[1:end-1]; atol=tol) .&&
+         isapprox.(df.I1[2:end], df.I1[1:end-1]; atol=tol))
+    ]
+
+    df.block_id = cumsum(.!same_as_previous)
+
+    grouped = groupby(df, :block_id, sort = false)
+
+    df_reduced = combine(grouped) do sdf
+
+        out = (;)
+
+        # Keep representative I0 and I1.
+        # Since rows inside each block have the same I0/I1,
+        # mean and first are equivalent up to tolerance.
+        for col in group_cols
+            out = merge(out, (; col => mean(sdf[!, col])))
+        end
+
+        # Average ordinary columns
+        for col in mean_cols
+            out = merge(out, (; col => mean(sdf[!, col])))
+        end
+
+        # Propagate independent errors:
+        # σ_mean = sqrt(σ₁² + σ₂² + ... + σₙ²) / n
+        for col in err_cols
+            n = nrow(sdf)
+            propagated_err = sqrt(sum(sdf[!, col].^2)) / n
+            out = merge(out, (; col => propagated_err))
+        end
+
+        return out
+    end
+
+    # Remove block_id if present
+    if :block_id in propertynames(df_reduced)
+        select!(df_reduced, Not(:block_id))
+    end
+
+    # Restore original column order
+    df_reduced = df_reduced[:, names(tables[idx])]
+
+    # Store using the original table index as the key
+    sg0_data[idx] = df_reduced
+
+    println()
+    println("Reduced consecutive-block dataframe for data set $(idx): $(data_directories[idx])")
+    println("-"^100)
+    show(stdout, df_reduced, allcols = true, allrows = true)
+    println("\n")
+
+end
+
+## SPLITTING
+#linear plots
+tol = 1e-6
+ref_idx = 3
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlin_1 = plot(
+    title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = | z_{F=1} - z_{F=2} |  \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlin_1,
+    ref0[ref_idx].I0,
+    abs.(ref0[ref_idx].split ./ scale_factor),
+    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+
+    plot!(fig_linlin_1,
+        df.I0[mask_I1_nonzero],
+        abs.(df.split[mask_I1_nonzero] ./ scale_factor),
+        yerror = df.errsplit[mask_I1_nonzero] ./ scale_factor,
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
     )
 
-    for (k, data) in enumerate(tables)
-
-        data_pos = data[data.I0 .> 0, :]
-
-        mask = isapprox.(data.I0, 0.0; atol=tol) .&& .!isapprox.(data.I1, 0.0; atol=tol)
-        rows_zero = data[mask, :]
-        rows_zero = DataFrame(
-            [name => mean(rows_zero[!, name]) for name in names(rows_zero)]
-        )
-
-        plot!(fig,
-            data_pos.I0,
-            data_pos[!, ycol] ./ sf,
-            yerror            = data_pos[!, errcol] ./ sf,
-            label             = "($(current_polarity[k])) " * data_directories[k],
-            line              = (:solid, 1, colores[k], 0.5),
-            marker            = (mark_symbol[k], 2, :white),
-            markerstrokecolor = colores[k],
-        )
-        y0  = only(rows_zero[!, ycol]) / sf
-        dy0 = only(rows_zero[!, errcol]) / sf
-        hline!(fig, [y0],
-            label = false,
-            line  = (:dash, 1, colores[k], 0.5),
-        )
-        hspan!(fig, [y0 - dy0, y0 + dy0],
-            label     = false,
-            color     = colores[k],
-            fillalpha = 0.15,
-            linealpha = 0,
+    if any(mask_both_zero)
+        scatter!(fig,
+            df.I0[mask_both_zero],
+            abs.(df.split[mask_both_zero] ./ scale_factor),
+            yerror = df.errsplit[mask_both_zero] ./ scale_factor,
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
         )
     end
-    plot!(fig,
-        xlims = (0.95e-3, 5.0),
-        xticks = (
-            [1e-3, 1e-2, 1e-1, 1.0],
-            [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]
-        ),
-        xscale                  = :log10,
-        foreground_color_legend = nothing,
-        background_color_legend = nothing,
-        yminorticks             = 5,
-        legend                  = :topleft,
-    )
-    push!(figs, fig)
 end
-fig1a, fig1b, fig1c, fig1d = figs
-xtick_vals   = [1e-3, 1e-2, 1e-1, 1.0]
-xtick_labels = [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]
-empty_labels = fill("", length(xtick_vals))
-fig1 = plot(
-    fig1a, fig1b, fig1c, fig1d,
-    size   = (800, 600),
-    layout = (2, 2),
-    link   = :x,
+ymin, ymax = ylims(fig_linlin_1) ./ 10
+plot!(fig_linlin_1,
+    xlims=(-0.02,4),
+    ylims= (0,10*ymax),
+    yticks = floor(ymin):5:ceil(ymax)*10,
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
 )
-# plot!(fig1[1], xlabel = "", xformatter = _ -> "", bottom_margin = -8mm)
-# plot!(fig1[2], xlabel = "", xformatter = _ -> "", bottom_margin = -8mm)
-ymin, ymax = ylims(fig1a)
-plot!(fig1, subplot = 1,
+display(fig_linlin_1)
+
+
+tol = 1e-6
+ref_idx = 4
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlin_2 = plot(
+    title  = "Parallel (↑↑) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = | z_{F=1} - z_{F=2} | \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlin_2,
+    ref0[ref_idx].I0,
+    abs.(ref0[ref_idx].split ./ scale_factor),
+    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> 2e3*tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= 2e3*tol)
+
+    plot!(fig_linlin_2,
+        df.I0[mask_I1_nonzero],
+        abs.(df.split[mask_I1_nonzero] ./ scale_factor),
+        yerror = df.errsplit[mask_I1_nonzero] ./ scale_factor,
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlin_2,
+            df.I0[mask_both_zero],
+            abs.(df.split[mask_both_zero] ./ scale_factor),
+            yerror = df.errsplit[mask_both_zero] ./ scale_factor,
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = ylims(fig_linlin_2) ./ 10
+plot!(fig_linlin_2,
+    xlims=(-0.02,4),
+    ylims= (0,10*ymax),
+    yticks = 0:5:ceil(ymax)*10,
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig_linlin_2)
+
+
+
+#linear-log plots
+tol = 1e-6
+ref_idx = 3
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlog_1 = plot(
+    title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = | z_{F=1} - z_{F=2} |  \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlog_1,
+    ref0[ref_idx].I0,
+    abs.(ref0[ref_idx].split ./ scale_factor),
+    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+
+    plot!(fig_linlog_1,
+        df.I0[mask_I1_nonzero],
+        abs.(df.split[mask_I1_nonzero] ./ scale_factor),
+        yerror = df.errsplit[mask_I1_nonzero] ./ scale_factor,
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlog_1,
+            df.I0[mask_both_zero],
+            abs.(df.split[mask_both_zero] ./ scale_factor),
+            yerror = df.errsplit[mask_both_zero] ./ scale_factor,
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = ylims(fig_linlog_1) ./ 10
+plot!(fig_linlog_1,
+    xlims=(3e-3,4),
+    ylims= (0,10*ymax),
+    yticks = floor(ymin):5:ceil(ymax)*10,
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+plot!(fig_linlog_1,
+    xscale=:log10,                    
+    xticks = (
+        [1e-2, 1e-1, 1.0],
+        [L"10^{-2}", L"10^{-1}", L"10^{0}"]
+    ),
+)
+display(fig_linlog_1)
+
+
+tol = 1e-6
+ref_idx = 4
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlog_2 = plot(
+    title  = "Parallel (↑↑) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = | z_{F=1} - z_{F=2} | \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlog_2,
+    ref0[ref_idx].I0,
+    abs.(ref0[ref_idx].split ./ scale_factor),
+    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> 2e3*tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= 2e3*tol)
+
+    plot!(fig_linlog_2,
+        df.I0[mask_I1_nonzero],
+        abs.(df.split[mask_I1_nonzero] ./ scale_factor),
+        yerror = df.errsplit[mask_I1_nonzero] ./ scale_factor,
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlog_2,
+            df.I0[mask_both_zero],
+            abs.(df.split[mask_both_zero] ./ scale_factor),
+            yerror = df.errsplit[mask_both_zero] ./ scale_factor,
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = ylims(fig_linlog_2) ./ 10
+plot!(fig_linlog_2,
+    xlims=(3e-3,4),
+    ylims= (0,10*ymax),
+    yticks = 0:5:ceil(ymax)*10,
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+plot!(fig_linlog_2,
+    xscale=:log10,                    
+    xticks = (
+        [1e-2, 1e-1, 1.0],
+        [L"10^{-2}", L"10^{-1}", L"10^{0}"]
+    ),
+)
+display(fig_linlog_2)
+
+
+#log-log plots
+tol = 1e-6
+ref_idx = 3
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_loglog_1 = plot(
+    title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = | z_{F=1} - z_{F=2} |  \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_loglog_1,
+    ref0[ref_idx].I0,
+    abs.(ref0[ref_idx].split ./ scale_factor),
+    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+
+    plot!(fig_loglog_1,
+        df.I0[mask_I1_nonzero],
+        abs.(df.split[mask_I1_nonzero] ./ scale_factor),
+        yerror = df.errsplit[mask_I1_nonzero] ./ scale_factor,
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_loglog_1,
+            df.I0[mask_both_zero],
+            abs.(df.split[mask_both_zero] ./ scale_factor),
+            yerror = df.errsplit[mask_both_zero] ./ scale_factor,
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = ylims(fig_loglog_1) ./ 10
+plot!(fig_loglog_1,
+    xlims=(3e-3,4),
+    ylims= (0.5,10*ymax),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+plot!(fig_loglog_1,
+    xscale=:log10,                    
+    xticks = (
+        [1e-2, 1e-1, 1.0],
+        [L"10^{-2}", L"10^{-1}", L"10^{0}"]
+    ),
+    yscale=:log10,
+    yticks = (
+        [1e-1, 1.0, 10],
+        [L"10^{-1}", L"10^{0}", L"10^{1}"]
+    ),
+
+)
+display(fig_loglog_1)
+
+
+tol = 1e-6
+ref_idx = 4
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_loglog_2 = plot(
+    title  = "Parallel (↑↑) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = | z_{F=1} - z_{F=2} | \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_loglog_2,
+    ref0[ref_idx].I0,
+    abs.(ref0[ref_idx].split ./ scale_factor),
+    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> 2e3*tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= 2e3*tol)
+
+    plot!(fig_loglog_2,
+        df.I0[mask_I1_nonzero],
+        abs.(df.split[mask_I1_nonzero] ./ scale_factor),
+        yerror = df.errsplit[mask_I1_nonzero] ./ scale_factor,
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_loglog_2,
+            df.I0[mask_both_zero],
+            abs.(df.split[mask_both_zero] ./ scale_factor),
+            yerror = df.errsplit[mask_both_zero] ./ scale_factor,
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = ylims(fig_loglog_2) ./ 10
+plot!(fig_loglog_2,
+    xlims=(3e-3,4),
+    ylims= (0.5,10*ymax),
+    yticks = 0:5:ceil(ymax)*10,
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+plot!(fig_loglog_2,
+    xscale=:log10,                    
+    xticks = (
+        [1e-2, 1e-1, 1.0],
+        [L"10^{-2}", L"10^{-1}", L"10^{0}"]
+    ),
+    yscale=:log10,
+    yticks = (
+        [1e-1, 1.0, 10],
+        [L"10^{-1}", L"10^{0}", L"10^{1}"]
+    ),
+
+)
+display(fig_loglog_2)
+
+
+## CENTROID
+#linear plots
+tol = 1e-6
+ref_idx = 3
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlin_1 = plot(
+    title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$c_{0} \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlin_1,
+    ref0[ref_idx].I0,
+    abs.(ref0[ref_idx].c0),
+    yerror = ref0[ref_idx].errsplit,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+
+    plot!(fig_linlin_1,
+        df.I0[mask_I1_nonzero],
+        df.c0[mask_I1_nonzero],
+        yerror = df.errc0[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig,
+            df.I0[mask_both_zero],
+            df.c0[mask_both_zero],
+            yerror = df.errc0[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_1); digits=3)
+plot!(fig_linlin_1,
+    xlims=(-0.02,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig_linlin_1)
+
+
+
+tol = 1e-6
+ref_idx = 4
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlin_2 = plot(
+    title  = "Parallel (↑↑) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$c_{0} \quad (\mathrm{mm})$",
+)
+# Reference curve
+ref0[ref_idx]
+plot!(fig_linlin_2,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].c0,
+    yerror = ref0[ref_idx].errc0,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> 2e3*tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= 2e3*tol)
+
+    plot!(fig_linlin_2,
+        df.I0[mask_I1_nonzero],
+        df.c0[mask_I1_nonzero],
+        yerror = df.errc0[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlin_2,
+            df.I0[mask_both_zero],
+            df.c0[mask_both_zero],
+            yerror = df.errc0[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_2); digits=3)
+plot!(fig_linlin_2,
+    xlims=(-0.02,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig_linlin_2)
+
+
+#linear-log plots
+tol = 1e-6
+ref_idx = 3
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlog_1 = plot(
+    title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$c_{0} \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlog_1,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].c0,
+    yerror = ref0[ref_idx].errc0,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+
+    plot!(fig_linlog_1,
+        df.I0[mask_I1_nonzero],
+        df.c0[mask_I1_nonzero],
+        yerror = df.errc0[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlog_1,
+            df.I0[mask_both_zero],
+            df.c0[mask_both_zero],
+            yerror = df.errc0[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_1); digits=3)
+plot!(fig_linlog_1,
+    xlims=(3e-3,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+plot!(fig_linlog_1,
+    xscale=:log10,                    
+    xticks = (
+        [1e-2, 1e-1, 1.0],
+        [L"10^{-2}", L"10^{-1}", L"10^{0}"]
+    ),
+)
+display(fig_linlog_1)
+
+
+tol = 1e-6
+ref_idx = 4
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlog_2 = plot(
+    title  = "Parallel (↑↑) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$c_{0} \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlog_2,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].c0,
+    yerror = ref0[ref_idx].errc0,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> 2e3*tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= 2e3*tol)
+
+    plot!(fig_linlog_2,
+        df.I0[mask_I1_nonzero],
+        df.c0[mask_I1_nonzero],
+        yerror = df.errc0[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlog_2,
+            df.I0[mask_both_zero],
+            df.c0[mask_both_zero],
+            yerror = df.errc0[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_2); digits=3)
+plot!(fig_linlog_2,
+    xlims=(3e-3,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+plot!(fig_linlog_2,
+    xscale=:log10,                    
+    xticks = (
+        [1e-2, 1e-1, 1.0],
+        [L"10^{-2}", L"10^{-1}", L"10^{0}"]
+    ),
+)
+display(fig_linlog_2)
+
+
+
+
+## F1
+#linear plots
+tol = 1e-6
+ref_idx = 3
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlin_1 = plot(
+    title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"Peak position $F=1 \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlin_1,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].zf1,
+    yerror = ref0[ref_idx].errzf1,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+
+    plot!(fig_linlin_1,
+        df.I0[mask_I1_nonzero],
+        df.zf1[mask_I1_nonzero],
+        yerror = df.errzf1[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig,
+            df.I0[mask_both_zero],
+            df.zf1[mask_both_zero],
+            yerror = df.errzf1[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_1); digits=3)
+plot!(fig_linlin_1,
+    xlims=(-0.02,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig_linlin_1)
+
+
+tol = 1e-6
+ref_idx = 4
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlin_2 = plot(
+    title  = "Parallel (↑↑) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$c_{0} \quad (\mathrm{mm})$",
+)
+# Reference curve
+ref0[ref_idx]
+plot!(fig_linlin_2,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].zf1,
+    yerror = ref0[ref_idx].errzf1,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> 2e3*tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= 2e3*tol)
+
+    plot!(fig_linlin_2,
+        df.I0[mask_I1_nonzero],
+        df.zf1[mask_I1_nonzero],
+        yerror = df.errzf1[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlin_2,
+            df.I0[mask_both_zero],
+            df.zf1[mask_both_zero],
+            yerror = df.errzf1[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_2); digits=3)
+plot!(fig_linlin_2,
+    xlims=(-0.02,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig_linlin_2)
+
+
+#linear-log plots
+tol = 1e-6
+ref_idx = 3
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlog_1 = plot(
+    title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$c_{0} \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlog_1,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].zf1,
+    yerror = ref0[ref_idx].errzf1,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+
+    plot!(fig_linlog_1,
+        df.I0[mask_I1_nonzero],
+        df.zf1[mask_I1_nonzero],
+        yerror = df.errzf1[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlog_1,
+            df.I0[mask_both_zero],
+            df.zf1[mask_both_zero],
+            yerror = df.errzf1[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_1); digits=3)
+plot!(fig_linlog_1,
+    xlims=(3e-3,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+plot!(fig_linlog_1,
+    xscale=:log10,                    
+    xticks = (
+        [1e-2, 1e-1, 1.0],
+        [L"10^{-2}", L"10^{-1}", L"10^{0}"]
+    ),
+)
+display(fig_linlog_1)
+
+
+tol = 1e-6
+ref_idx = 4
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlog_2 = plot(
+    title  = "Parallel (↑↑) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$c_{0} \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlog_2,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].zf1,
+    yerror = ref0[ref_idx].errzf1,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> 2e3*tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= 2e3*tol)
+
+    plot!(fig_linlog_2,
+        df.I0[mask_I1_nonzero],
+        df.zf1[mask_I1_nonzero],
+        yerror = df.errzf1[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlog_2,
+            df.I0[mask_both_zero],
+            df.zf1[mask_both_zero],
+            yerror = df.errzf1[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_2); digits=3)
+plot!(fig_linlog_2,
+    xlims=(3e-3,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+plot!(fig_linlog_2,
+    xscale=:log10,                    
+    xticks = (
+        [1e-2, 1e-1, 1.0],
+        [L"10^{-2}", L"10^{-1}", L"10^{0}"]
+    ),
+)
+display(fig_linlog_2)
+
+
+## F2
+#linear plots
+tol = 1e-6
+ref_idx = 3
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlin_1 = plot(
+    title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"Peak position $F=2 \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlin_1,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].zf2,
+    yerror = ref0[ref_idx].errzf2,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+
+    plot!(fig_linlin_1,
+        df.I0[mask_I1_nonzero],
+        df.zf2[mask_I1_nonzero],
+        yerror = df.errzf2[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig,
+            df.I0[mask_both_zero],
+            df.zf2[mask_both_zero],
+            yerror = df.errzf2[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_1); digits=3)
+plot!(fig_linlin_1,
+    xlims=(-0.02,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig_linlin_1)
+
+
+tol = 1e-6
+ref_idx = 4
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlin_2 = plot(
+    title  = "Parallel (↑↑) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$c_{0} \quad (\mathrm{mm})$",
+)
+# Reference curve
+ref0[ref_idx]
+plot!(fig_linlin_2,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].zf2,
+    yerror = ref0[ref_idx].errzf2,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> 2e3*tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= 2e3*tol)
+
+    plot!(fig_linlin_2,
+        df.I0[mask_I1_nonzero],
+        df.zf2[mask_I1_nonzero],
+        yerror = df.errzf2[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlin_2,
+            df.I0[mask_both_zero],
+            df.zf2[mask_both_zero],
+            yerror = df.errzf2[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_2); digits=3)
+plot!(fig_linlin_2,
+    xlims=(-0.02,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig_linlin_2)
+
+
+#linear-log plots
+tol = 1e-6
+ref_idx = 3
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlog_1 = plot(
+    title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$c_{0} \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlog_1,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].zf2,
+    yerror = ref0[ref_idx].errzf2,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+
+    plot!(fig_linlog_1,
+        df.I0[mask_I1_nonzero],
+        df.zf2[mask_I1_nonzero],
+        yerror = df.errzf2[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlog_1,
+            df.I0[mask_both_zero],
+            df.zf2[mask_both_zero],
+            yerror = df.errzf2[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_1); digits=3)
+plot!(fig_linlog_1,
+    xlims=(3e-3,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+plot!(fig_linlog_1,
+    xscale=:log10,                    
+    xticks = (
+        [1e-2, 1e-1, 1.0],
+        [L"10^{-2}", L"10^{-1}", L"10^{0}"]
+    ),
+)
+display(fig_linlog_1)
+
+
+tol = 1e-6
+ref_idx = 4
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlog_2 = plot(
+    title  = "Parallel (↑↑) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$c_{0} \quad (\mathrm{mm})$",
+)
+# Reference curve
+plot!(fig_linlog_2,
+    ref0[ref_idx].I0,
+    ref0[ref_idx].zf2,
+    yerror = ref0[ref_idx].errzf2,
+    label  = data_directories[ref_idx],
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> 2e3*tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= 2e3*tol)
+
+    plot!(fig_linlog_2,
+        df.I0[mask_I1_nonzero],
+        df.zf2[mask_I1_nonzero],
+        yerror = df.errzf2[mask_I1_nonzero],
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig_linlog_2,
+            df.I0[mask_both_zero],
+            df.zf2[mask_both_zero],
+            yerror = df.errzf2[mask_both_zero],
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = round.(ylims(fig_linlin_2); digits=3)
+plot!(fig_linlog_2,
+    xlims=(3e-3,4),
+    ylims= (ymin,ymax),
+    yformatter = y -> @sprintf("%.3f", y),
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+plot!(fig_linlog_2,
+    xscale=:log10,                    
+    xticks = (
+        [1e-2, 1e-1, 1.0],
+        [L"10^{-2}", L"10^{-1}", L"10^{0}"]
+    ),
+)
+display(fig_linlog_2)
+
+
+
+###########################################################################################################################
+###########################################################################################################################
+###########################################################################################################################
+## SPLITTING
+#linear plots
+tol = 1e-6
+ref_idx = 3
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+
+fig_linlin_1 = plot(
+    # title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = | z_{F=1} - z_{F=2} |  \quad (\mathrm{mm})$",
+)
+# ------------------------------------------------------------
+# Reference curve
+# ------------------------------------------------------------
+df = copy(ref0[ref_idx])
+sort!(df, :I0)
+df[!, :split] = df[!, :split] .- df[1, :split]
+df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
+plot!(fig_linlin_1,
+    df.I0,
+    df.split ./ scale_factor,
+    yerror = df.errsplit ./ scale_factor,
+    label = dirname(data_directories[ref_idx]) *
+            L" $I_{1} = %$(round(1000 * mean(df.I1); digits=1)) \mathrm{mA}$",
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+
+# ------------------------------------------------------------
+# SG0 curves
+# ------------------------------------------------------------
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = copy(sg0_data[idx])
+
+    # Keep only rows with nonzero I1
+    df = df[abs.(df.I1) .> tol, :]
+
+    # Optional row removal for dataset 1
+    if idx == 1
+        df = df[Not(14), :]
+    end
+
+    # Subtract first point as reference
+    df[!, :split] = df[!, :split] .- df[1, :split]
+    df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
+
+    # Sort by I0
+    sort!(df, :I0)
+
+    plot!(fig_linlin_1,
+        df.I0,
+        df.split ./ scale_factor,
+        yerror = df.errsplit ./ scale_factor,
+        label = dirname(data_directories[idx]) *
+                L" $I_{1} = %$(round(1000 * mean(df.I1); digits=1)) \mathrm{mA}$",
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+end
+plot!(fig_linlin_1,
+    legend = :outerright,
+    legend_columns = 1,
+    legend_title = "Antiparallel (↑↓)",
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig_linlin_1)
+
+
+tol = 1.5e-3
+ref_idx = 4
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlin_2 = plot(
+    # title  = "Parallel (↑↑) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = | z_{F=1} - z_{F=2} |  \quad (\mathrm{mm})$",
+)
+# ------------------------------------------------------------
+# Reference curve
+# ------------------------------------------------------------
+df = copy(ref0[ref_idx])
+sort!(df, :I0)
+df[!, :split] = df[!, :split] .- df[1, :split]
+df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
+plot!(fig_linlin_2,
+    df.I0,
+    df.split ./ scale_factor,
+    yerror = df.errsplit ./ scale_factor,
+    label = dirname(data_directories[ref_idx]) *
+            L" $I_{1} = %$(round(1000 * mean(df.I1); digits=1)) \mathrm{mA}$",
+    marker = (:circle, 2, :white),
+    markerstrokecolor = :darkgreen,
+    line = (:solid, 1, :darkgreen),
+)
+
+# ------------------------------------------------------------
+# SG0 curves
+# ------------------------------------------------------------
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = copy(sg0_data[idx])
+
+    # Keep only rows with nonzero I1
+    df = df[abs.(df.I1) .> tol, :]
+
+    # Subtract first point as reference
+    df[!, :split] = df[!, :split] .- df[1, :split]
+    df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
+
+    # Sort by I0
+    sort!(df, :I0)
+
+    plot!(fig_linlin_2,
+        df.I0,
+        df.split ./ scale_factor,
+        yerror = df.errsplit ./ scale_factor,
+        label = dirname(data_directories[idx]) *
+                L" $I_{1} = %$(round(1000 * mean(df.I1); digits=1)) \mathrm{mA}$",
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+end
+plot!(fig_linlin_2,
+    legend = :outerright,
+    legend_columns = 1,
+    legend_title = "Parallel (↑↑)",
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig_linlin_2)
+
+
+fig=plot(fig_linlin_1, fig_linlin_2,
+layout=(2,1),
+size=(1920,1080),
+link=:x,
+    markersize = 6,
+    legendtitlefontsize = 18,
+    legendfontsize = 14,
+    guidefontsize = 20,   # xlabel and ylabel size
+    tickfontsize  = 14,   # x and y tick label size
+left_margin   = 12mm,
+bottom_margin = 8mm,
+)
+plot!(fig[1]; 
+    xlabel="", 
+    xformatter=_->"", 
+    bottom_margin=-6mm,
+)
+display(fig)
+
+
+
+###########################################################################################################################
+###########################################################################################################################
+###########################################################################################################################
+## SPLITTING
+
+fig_linlin_1 = plot(
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = z_{F=1} - z_{F=2} \quad (\mathrm{mm})$",
+);
+plot_list = [
+    (1, :purple,     :rect,    "(↑↓)", 1e-6),
+    (2, :purple,     :diamond, "(↑↑)", 1.5e-3),
+
+    (6, :dodgerblue, :rect,    "(↑↓)", 1e-6),
+    (5, :dodgerblue, :diamond, "(↑↑)", 1.5e-3),
+
+    (8, :orange,     :rect,    "(↑↓)", 1e-6),
+    (7, :orange,     :diamond, "(↑↑)", 1.5e-3),
+];
+for (idx, color, marker_symbol, config_label, tol) in plot_list
+
+    df = copy(sg0_data[idx])
+
+    # Keep only rows with nonzero I1
+    df = df[abs.(df.I1) .> tol, :]
+
+    # Optional row removal for dataset 1
+    if idx == 1
+        df = df[Not(14), :]
+    end
+
+    # Subtract first point as reference
+    df[!, :split] = df[!, :split] .- df[1, :split]
+    df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
+
+    # Sort by I0
+    sort!(df, :I0)
+
+    plot!(fig_linlin_1,
+        df.I0,
+        df.split ./ scale_factor,
+        yerror = df.errsplit ./ scale_factor,
+        label = dirname(data_directories[idx]) * " " * config_label * " " *
+                L" $I_{1} = %$(round(1000 * mean(df.I1); digits=1)) \mathrm{mA}$",
+        marker = (marker_symbol, 8, color, 0.60),
+        markerstrokecolor = color,
+        line = (:solid, 2, color),
+    )
+end
+ymin, ymax = ylims(fig_linlin_1)
+plot!(fig_linlin_1,
+    ylims = (floor(ymin), ceil(ymax)),
     yticks = floor(ymin):1:ceil(ymax),
-    xlabel = "",
-    xticks = (xtick_vals, empty_labels),
-    bottom_margin = -5mm,
+);
+plot!(fig_linlin_1,
+    legendtitle = "",
+    legend = :bottomleft,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size = (1920, 1080),
+    legendtitlefontsize = 18,
+    legendfontsize = 18,
+    guidefontsize = 24,
+    tickfontsize = 18,
+    left_margin = 12mm,
+    bottom_margin =12mm,
 )
-plot!(fig1, subplot = 2,
-    yformatter = y -> @sprintf("%.3f", y),
-    xlabel = "",
-    xticks = (xtick_vals, empty_labels),
-    bottom_margin = -5mm,
-)
-plot!(fig1, subplot = 3,
-    yformatter = y -> @sprintf("%.3f", y),
-    xticks = (xtick_vals, xtick_labels),
-)
-plot!(fig1, subplot = 4,
-    yformatter = y -> @sprintf("%.3f", y),
-    xticks = (xtick_vals, xtick_labels),
-)
-display(fig1)
+display(fig_linlin_1)
+plot!(fig_linlin_1,
+    xlims=(4e-3,4),
+    xscale=:log10,
+);
+display(fig_linlin_1)
 
 
-ymin, ymax = ylims(fig1a)
+
+
+
+#linear plots
+sg0_indices = [1, 6, 8]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+fig_linlin_1 = plot(
+    # title  = "Antiparallel (↑↓) configuration",
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = z_{F=1} - z_{F=2} \quad (\mathrm{mm})$",
+)
+# ------------------------------------------------------------
+# SG0 curves
+# ------------------------------------------------------------
+tol = 1e-6
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = copy(sg0_data[idx])
+
+    # Keep only rows with nonzero I1
+    df = df[abs.(df.I1) .> tol, :]
+
+    # Optional row removal for dataset 1
+    if idx == 1
+        df = df[Not(14), :]
+    end
+
+    # Subtract first point as reference
+    df[!, :split] = df[!, :split] .- df[1, :split]
+    df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
+
+    # Sort by I0
+    sort!(df, :I0)
+
+    plot!(fig_linlin_1,
+        df.I0,
+        df.split ./ scale_factor,
+        yerror = df.errsplit ./ scale_factor,
+        label = dirname(data_directories[idx]) * " (↑↓) " * 
+                L" $I_{1} = %$(round(1000 * mean(df.I1); digits=1)) \mathrm{mA}$",
+        marker = (:rect, 6, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+end
+tol = 1.5e-3
+sg0_indices = [2, 5, 7]
+sg0_colors  = [:purple, :dodgerblue, :orange]
+# ------------------------------------------------------------
+# SG0 curves
+# ------------------------------------------------------------
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = copy(sg0_data[idx])
+
+    # Keep only rows with nonzero I1
+    df = df[abs.(df.I1) .> tol, :]
+
+    # Subtract first point as reference
+    df[!, :split] = df[!, :split] .- df[1, :split]
+    df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
+
+    # Sort by I0
+    sort!(df, :I0)
+
+    plot!(fig_linlin_1,
+        df.I0,
+        df.split ./ scale_factor,
+        yerror = df.errsplit ./ scale_factor,
+        label = dirname(data_directories[idx]) * " (↑↑) " * 
+                L" $I_{1} = %$(round(1000 * mean(df.I1); digits=1)) \mathrm{mA}$",
+        marker = (:diamond, 6, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+end
+ymin , ymax = ylims(fig_linlin_1)
+plot!(fig_linlin_1,
+    ylims=(floor(ymin),ceil(ymax)),
+    yticks=floor(ymin):1:ceil(ymax)
+)
+plot!(fig_linlin_1,
+    legendtitle="",
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size=(1920,1080),
+    legendtitlefontsize = 18,
+    legendfontsize = 18,
+    guidefontsize = 24,   # xlabel and ylabel size
+    tickfontsize  = 18,   # x and y tick label size
+    left_margin=10mm,
+    bottom_margin=8mm,
+)
+display(fig_linlin_1)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# SG0 curves
+for (idx, color) in zip(sg0_indices, sg0_colors)
+
+    df = sg0_data[idx]
+
+    # Optional special trimming for idx = 8
+    if idx == 8
+        df = df[1:end-1, :]
+    end
+
+    mask_I1_nonzero = abs.(df.I1) .> tol
+    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+
+    plot!(fig_linlin_1,
+        df.I0[mask_I1_nonzero],
+        abs.(df.split[mask_I1_nonzero] ./ scale_factor),
+        yerror = df.errsplit[mask_I1_nonzero] ./ scale_factor,
+        label  = data_directories[idx],
+        marker = (:rect, 2, :white),
+        markerstrokecolor = color,
+        line = (:solid, 1, color),
+    )
+
+    if any(mask_both_zero)
+        scatter!(fig,
+            df.I0[mask_both_zero],
+            abs.(df.split[mask_both_zero] ./ scale_factor),
+            yerror = df.errsplit[mask_both_zero] ./ scale_factor,
+            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
+            label=false,
+            marker = (:square, 2, :white),
+            markerstrokecolor = color,
+            color = color,
+        )
+    end
+end
+ymin, ymax = ylims(fig_linlin_1) ./ 10
+plot!(fig_linlin_1,
+    xlims=(-0.02,4),
+    ylims= (0,10*ymax),
+    yticks = floor(ymin):5:ceil(ymax)*10,
+    legend = :outerright,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+)
+display(fig_linlin_1)
+
+
 
 2+2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
