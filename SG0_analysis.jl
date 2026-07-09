@@ -3060,6 +3060,8 @@ for (idx, color, marker_symbol, config_label, tol) in plot_list
     # Sort by I0
     sort!(df, :I0)
 
+    show(stdout, df)
+
     plot!(fig_linlin_1,
         df.I0,
         df.split ./ scale_factor,
@@ -3089,7 +3091,7 @@ plot!(fig_linlin_1,
     tickfontsize = 18,
     left_margin = 12mm,
     bottom_margin =12mm,
-)
+);
 display(fig_linlin_1)
 plot!(fig_linlin_1,
     xlims=(4e-3,4),
@@ -3100,21 +3102,17 @@ display(fig_linlin_1)
 
 
 
+## INTERPOLATIONS
+split_itp    = Dict{Int, Any}()
+errsplit_itp = Dict{Int, Any}()
+processed_df = Dict{Int, DataFrame}()
 
-#linear plots
-sg0_indices = [1, 6, 8]
-sg0_colors  = [:purple, :dodgerblue, :orange]
-fig_linlin_1 = plot(
-    # title  = "Antiparallel (↑↓) configuration",
-    xlabel = "SG0 Current (A)",
-    ylabel = L"$\Delta z = z_{F=1} - z_{F=2} \quad (\mathrm{mm})$",
-)
-# ------------------------------------------------------------
-# SG0 curves
-# ------------------------------------------------------------
-tol = 1e-6
-for (idx, color) in zip(sg0_indices, sg0_colors)
+Itest = collect(range(0.001,3.55, length=1001)) 
 
+
+for (idx, color, marker_symbol, config_label, tol) in plot_list
+
+    @info index = idx 
     df = copy(sg0_data[idx])
 
     # Keep only rows with nonzero I1
@@ -3124,162 +3122,46 @@ for (idx, color) in zip(sg0_indices, sg0_colors)
     if idx == 1
         df = df[Not(14), :]
     end
-
-    # Subtract first point as reference
-    df[!, :split] = df[!, :split] .- df[1, :split]
-    df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
-
-    # Sort by I0
-    sort!(df, :I0)
-
-    plot!(fig_linlin_1,
-        df.I0,
-        df.split ./ scale_factor,
-        yerror = df.errsplit ./ scale_factor,
-        label = dirname(data_directories[idx]) * " (↑↓) " * 
-                L" $I_{1} = %$(round(1000 * mean(df.I1); digits=1)) \mathrm{mA}$",
-        marker = (:rect, 6, :white),
-        markerstrokecolor = color,
-        line = (:solid, 1, color),
-    )
-end
-tol = 1.5e-3
-sg0_indices = [2, 5, 7]
-sg0_colors  = [:purple, :dodgerblue, :orange]
-# ------------------------------------------------------------
-# SG0 curves
-# ------------------------------------------------------------
-for (idx, color) in zip(sg0_indices, sg0_colors)
-
-    df = copy(sg0_data[idx])
-
-    # Keep only rows with nonzero I1
-    df = df[abs.(df.I1) .> tol, :]
-
-    # Subtract first point as reference
-    df[!, :split] = df[!, :split] .- df[1, :split]
-    df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
-
-    # Sort by I0
-    sort!(df, :I0)
-
-    plot!(fig_linlin_1,
-        df.I0,
-        df.split ./ scale_factor,
-        yerror = df.errsplit ./ scale_factor,
-        label = dirname(data_directories[idx]) * " (↑↑) " * 
-                L" $I_{1} = %$(round(1000 * mean(df.I1); digits=1)) \mathrm{mA}$",
-        marker = (:diamond, 6, :white),
-        markerstrokecolor = color,
-        line = (:solid, 1, color),
-    )
-end
-ymin , ymax = ylims(fig_linlin_1)
-plot!(fig_linlin_1,
-    ylims=(floor(ymin),ceil(ymax)),
-    yticks=floor(ymin):1:ceil(ymax)
-)
-plot!(fig_linlin_1,
-    legendtitle="",
-    legend = :outerright,
-    legend_columns = 1,
-    background_color_legend = nothing,
-    foreground_color_legend = nothing,
-    size=(1920,1080),
-    legendtitlefontsize = 18,
-    legendfontsize = 18,
-    guidefontsize = 24,   # xlabel and ylabel size
-    tickfontsize  = 18,   # x and y tick label size
-    left_margin=10mm,
-    bottom_margin=8mm,
-)
-display(fig_linlin_1)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# SG0 curves
-for (idx, color) in zip(sg0_indices, sg0_colors)
-
-    df = sg0_data[idx]
-
-    # Optional special trimming for idx = 8
     if idx == 8
         df = df[1:end-1, :]
     end
 
-    mask_I1_nonzero = abs.(df.I1) .> tol
-    mask_both_zero  = (abs.(df.I0) .<= tol) .&& (abs.(df.I1) .<= tol)
+    # Subtract first point as reference
+    df[!, :split] = df[!, :split] .- df[1, :split]
+    df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
 
-    plot!(fig_linlin_1,
-        df.I0[mask_I1_nonzero],
-        abs.(df.split[mask_I1_nonzero] ./ scale_factor),
-        yerror = df.errsplit[mask_I1_nonzero] ./ scale_factor,
-        label  = data_directories[idx],
-        marker = (:rect, 2, :white),
-        markerstrokecolor = color,
-        line = (:solid, 1, color),
-    )
+    # Sort by I0 before interpolation
+    sort!(df, :I0)
 
-    if any(mask_both_zero)
-        scatter!(fig,
-            df.I0[mask_both_zero],
-            abs.(df.split[mask_both_zero] ./ scale_factor),
-            yerror = df.errsplit[mask_both_zero] ./ scale_factor,
-            # label = data_directories[idx] * L" $(I_{0}=I_{1}=0\mathrm{A})$",
-            label=false,
-            marker = (:square, 2, :white),
-            markerstrokecolor = color,
-            color = color,
-        )
-    end
+    show(stdout, df)
+    # Store processed dataframe
+    processed_df[idx] = df
+
+    # Interpolation variables
+    x  = df.I0
+    y  = df.split ./ scale_factor
+    dy = df.errsplit ./ scale_factor
+    w = 1.0 ./ dy
+
+    # Cubic interpolations
+    split_itp[idx] = Dierckx.Spline1D(x, y; w = w, k = 5, s = 5)
+
+    errsplit_itp[idx] = Dierckx.Spline1D(x, dy; k = 3, s = 1e-4)
+
+    plt = scatter(df.I0, df.split ./ scale_factor,
+        yerror = df.errsplit ./ scale_factor)
+    plot!(Itest, split_itp[idx].(Itest))
+    plot!(xlims=(1e-3,4))
+    plot!(xscale=:log10)
+    display(plt)
+
 end
-ymin, ymax = ylims(fig_linlin_1) ./ 10
-plot!(fig_linlin_1,
-    xlims=(-0.02,4),
-    ylims= (0,10*ymax),
-    yticks = floor(ymin):5:ceil(ymax)*10,
-    legend = :outerright,
-    legend_columns = 1,
-    background_color_legend = nothing,
-    foreground_color_legend = nothing,
-)
-display(fig_linlin_1)
 
 
 
+plot(Itest,split_itp[1].(Itest))
+scatter!(sg0_data[1].I0, (sg0_data[1].split .- sg0_data[1].split[1])./ scale_factor)
+plot!(Itest, split_itp[2].(Itest))
 2+2
 
 
