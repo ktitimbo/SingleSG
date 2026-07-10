@@ -18,7 +18,7 @@ using LinearAlgebra
 using ImageFiltering, FFTW
 using DataStructures
 using Statistics, StatsBase
-using Interpolations, BSplineKit, Optim, Dierckx
+using Interpolations, BSplineKit, Optim, Dierckx, LsqFit
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using Printf, LaTeXStrings, PrettyTables
@@ -870,7 +870,6 @@ end
 
 tables = Vector{DataFrame}(undef, nd)  # nd = total number of round-directories (flat count)
 flat_idx = Ref(0)  # global counter across all groups
-
 for (dirname, dirs_in_group) in grouped
     printstyled("== $dirname ==\n"; color=:yellow, bold=true)
 
@@ -1387,13 +1386,18 @@ function make_pair_plots(tables, data_directories; xmode = :log10)
     return fig_pairs
 end
 
+
+
+
+scale_factor = 6.5e-3;
+
 load_tables = Vector{DataFrame}(undef, nd)
 for (i,data_directory) in enumerate(data_directories)
     load_path = joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", dirname(data_directory), "data_analysis_20260706T145140446.jld2")
     load_data = load(load_path)
     load_tables[i] = load_data[data_directory]
 end
-tables = load_tables
+tables = load_tables;
 
 make_pair_plots(tables, data_directories; xmode = :log10)
 make_pair_plots(tables, data_directories; xmode = :linear)
@@ -1404,9 +1408,8 @@ for s_table in tables
 end
 
 
-tol = 1e-9;
 # Reference / Baseline
-ref0 = OrderedDict{Int, DataFrame}()
+sg0_ref = OrderedDict{Int, DataFrame}()
 for (i, idx) in enumerate(3:4)
 
     @info "Data set : $(data_directories[idx])"
@@ -1442,7 +1445,7 @@ for (i, idx) in enumerate(3:4)
     # Restore original column order
     df_reduced = df_reduced[:, names(ref00)]
 
-    ref0[idx] = df_reduced
+    sg0_ref[idx] = df_reduced
 
     println()
     println("Reduced dataframe for data set : $(data_directories[idx])")
@@ -1456,7 +1459,7 @@ end
 selected_indices = vcat(1:2, 5:8)
 sg0_data = OrderedDict{Int, DataFrame}()
 for idx in selected_indices
-
+    tol = 1e-9;
     @info "Data set : $(data_directories[idx])"
 
     df = copy(tables[idx])
@@ -1536,7 +1539,6 @@ end
 
 ## SPLITTING
 #linear plots
-tol = 1e-6
 ref_idx = 3
 sg0_indices = [1, 6, 8]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -1547,9 +1549,9 @@ fig_linlin_1 = plot(
 )
 # Reference curve
 plot!(fig_linlin_1,
-    ref0[ref_idx].I0,
-    abs.(ref0[ref_idx].split ./ scale_factor),
-    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    sg0_ref[ref_idx].I0,
+    abs.(sg0_ref[ref_idx].split ./ scale_factor),
+    yerror = sg0_ref[ref_idx].errsplit ./ scale_factor,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -1557,6 +1559,7 @@ plot!(fig_linlin_1,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -1579,7 +1582,7 @@ for (idx, color) in zip(sg0_indices, sg0_colors)
     )
 
     if any(mask_both_zero)
-        scatter!(fig,
+        scatter!(fig_linlin_1,
             df.I0[mask_both_zero],
             abs.(df.split[mask_both_zero] ./ scale_factor),
             yerror = df.errsplit[mask_both_zero] ./ scale_factor,
@@ -1604,7 +1607,6 @@ plot!(fig_linlin_1,
 display(fig_linlin_1)
 
 
-tol = 1e-6
 ref_idx = 4
 sg0_indices = [2, 5, 7]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -1615,9 +1617,9 @@ fig_linlin_2 = plot(
 )
 # Reference curve
 plot!(fig_linlin_2,
-    ref0[ref_idx].I0,
-    abs.(ref0[ref_idx].split ./ scale_factor),
-    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    sg0_ref[ref_idx].I0,
+    abs.(sg0_ref[ref_idx].split ./ scale_factor),
+    yerror = sg0_ref[ref_idx].errsplit ./ scale_factor,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -1625,6 +1627,7 @@ plot!(fig_linlin_2,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -1674,7 +1677,6 @@ display(fig_linlin_2)
 
 
 #linear-log plots
-tol = 1e-6
 ref_idx = 3
 sg0_indices = [1, 6, 8]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -1685,9 +1687,9 @@ fig_linlog_1 = plot(
 )
 # Reference curve
 plot!(fig_linlog_1,
-    ref0[ref_idx].I0,
-    abs.(ref0[ref_idx].split ./ scale_factor),
-    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    sg0_ref[ref_idx].I0,
+    abs.(sg0_ref[ref_idx].split ./ scale_factor),
+    yerror = sg0_ref[ref_idx].errsplit ./ scale_factor,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -1695,6 +1697,7 @@ plot!(fig_linlog_1,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -1749,7 +1752,6 @@ plot!(fig_linlog_1,
 display(fig_linlog_1)
 
 
-tol = 1e-6
 ref_idx = 4
 sg0_indices = [2, 5, 7]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -1760,9 +1762,9 @@ fig_linlog_2 = plot(
 )
 # Reference curve
 plot!(fig_linlog_2,
-    ref0[ref_idx].I0,
-    abs.(ref0[ref_idx].split ./ scale_factor),
-    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    sg0_ref[ref_idx].I0,
+    abs.(sg0_ref[ref_idx].split ./ scale_factor),
+    yerror = sg0_ref[ref_idx].errsplit ./ scale_factor,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -1770,6 +1772,7 @@ plot!(fig_linlog_2,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -1825,7 +1828,6 @@ display(fig_linlog_2)
 
 
 #log-log plots
-tol = 1e-6
 ref_idx = 3
 sg0_indices = [1, 6, 8]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -1836,9 +1838,9 @@ fig_loglog_1 = plot(
 )
 # Reference curve
 plot!(fig_loglog_1,
-    ref0[ref_idx].I0,
-    abs.(ref0[ref_idx].split ./ scale_factor),
-    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    sg0_ref[ref_idx].I0,
+    abs.(sg0_ref[ref_idx].split ./ scale_factor),
+    yerror = sg0_ref[ref_idx].errsplit ./ scale_factor,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -1846,7 +1848,7 @@ plot!(fig_loglog_1,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
-
+    tol = 1e-6
     df = sg0_data[idx]
 
     # Optional special trimming for idx = 8
@@ -1905,7 +1907,6 @@ plot!(fig_loglog_1,
 display(fig_loglog_1)
 
 
-tol = 1e-6
 ref_idx = 4
 sg0_indices = [2, 5, 7]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -1916,9 +1917,9 @@ fig_loglog_2 = plot(
 )
 # Reference curve
 plot!(fig_loglog_2,
-    ref0[ref_idx].I0,
-    abs.(ref0[ref_idx].split ./ scale_factor),
-    yerror = ref0[ref_idx].errsplit ./ scale_factor,
+    sg0_ref[ref_idx].I0,
+    abs.(sg0_ref[ref_idx].split ./ scale_factor),
+    yerror = sg0_ref[ref_idx].errsplit ./ scale_factor,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -1926,7 +1927,7 @@ plot!(fig_loglog_2,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
-
+    tol = 1e-6
     df = sg0_data[idx]
 
     # Optional special trimming for idx = 8
@@ -1988,7 +1989,6 @@ display(fig_loglog_2)
 
 ## CENTROID
 #linear plots
-tol = 1e-6
 ref_idx = 3
 sg0_indices = [1, 6, 8]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -1999,9 +1999,9 @@ fig_linlin_1 = plot(
 )
 # Reference curve
 plot!(fig_linlin_1,
-    ref0[ref_idx].I0,
-    abs.(ref0[ref_idx].c0),
-    yerror = ref0[ref_idx].errsplit,
+    sg0_ref[ref_idx].I0,
+    abs.(sg0_ref[ref_idx].c0),
+    yerror = sg0_ref[ref_idx].errsplit,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2009,7 +2009,7 @@ plot!(fig_linlin_1,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
-
+    tol = 1e-6
     df = sg0_data[idx]
 
     # Optional special trimming for idx = 8
@@ -2031,7 +2031,7 @@ for (idx, color) in zip(sg0_indices, sg0_colors)
     )
 
     if any(mask_both_zero)
-        scatter!(fig,
+        scatter!(fig_linlin_1,
             df.I0[mask_both_zero],
             df.c0[mask_both_zero],
             yerror = df.errc0[mask_both_zero],
@@ -2056,8 +2056,6 @@ plot!(fig_linlin_1,
 display(fig_linlin_1)
 
 
-
-tol = 1e-6
 ref_idx = 4
 sg0_indices = [2, 5, 7]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2067,11 +2065,11 @@ fig_linlin_2 = plot(
     ylabel = L"$c_{0} \quad (\mathrm{mm})$",
 )
 # Reference curve
-ref0[ref_idx]
+sg0_ref[ref_idx]
 plot!(fig_linlin_2,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].c0,
-    yerror = ref0[ref_idx].errc0,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].c0,
+    yerror = sg0_ref[ref_idx].errc0,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2079,6 +2077,7 @@ plot!(fig_linlin_2,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -2127,7 +2126,6 @@ display(fig_linlin_2)
 
 
 #linear-log plots
-tol = 1e-6
 ref_idx = 3
 sg0_indices = [1, 6, 8]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2138,9 +2136,9 @@ fig_linlog_1 = plot(
 )
 # Reference curve
 plot!(fig_linlog_1,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].c0,
-    yerror = ref0[ref_idx].errc0,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].c0,
+    yerror = sg0_ref[ref_idx].errc0,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2148,6 +2146,7 @@ plot!(fig_linlog_1,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -2202,7 +2201,6 @@ plot!(fig_linlog_1,
 display(fig_linlog_1)
 
 
-tol = 1e-6
 ref_idx = 4
 sg0_indices = [2, 5, 7]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2213,9 +2211,9 @@ fig_linlog_2 = plot(
 )
 # Reference curve
 plot!(fig_linlog_2,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].c0,
-    yerror = ref0[ref_idx].errc0,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].c0,
+    yerror = sg0_ref[ref_idx].errc0,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2223,6 +2221,7 @@ plot!(fig_linlog_2,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -2281,7 +2280,6 @@ display(fig_linlog_2)
 
 ## F1
 #linear plots
-tol = 1e-6
 ref_idx = 3
 sg0_indices = [1, 6, 8]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2292,9 +2290,9 @@ fig_linlin_1 = plot(
 )
 # Reference curve
 plot!(fig_linlin_1,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].zf1,
-    yerror = ref0[ref_idx].errzf1,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].zf1,
+    yerror = sg0_ref[ref_idx].errzf1,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2302,7 +2300,7 @@ plot!(fig_linlin_1,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
-
+    tol = 1e-6
     df = sg0_data[idx]
 
     # Optional special trimming for idx = 8
@@ -2324,7 +2322,7 @@ for (idx, color) in zip(sg0_indices, sg0_colors)
     )
 
     if any(mask_both_zero)
-        scatter!(fig,
+        scatter!(fig_linlin_1,
             df.I0[mask_both_zero],
             df.zf1[mask_both_zero],
             yerror = df.errzf1[mask_both_zero],
@@ -2349,7 +2347,6 @@ plot!(fig_linlin_1,
 display(fig_linlin_1)
 
 
-tol = 1e-6
 ref_idx = 4
 sg0_indices = [2, 5, 7]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2359,11 +2356,11 @@ fig_linlin_2 = plot(
     ylabel = L"$c_{0} \quad (\mathrm{mm})$",
 )
 # Reference curve
-ref0[ref_idx]
+sg0_ref[ref_idx]
 plot!(fig_linlin_2,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].zf1,
-    yerror = ref0[ref_idx].errzf1,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].zf1,
+    yerror = sg0_ref[ref_idx].errzf1,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2371,6 +2368,7 @@ plot!(fig_linlin_2,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -2419,7 +2417,6 @@ display(fig_linlin_2)
 
 
 #linear-log plots
-tol = 1e-6
 ref_idx = 3
 sg0_indices = [1, 6, 8]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2430,9 +2427,9 @@ fig_linlog_1 = plot(
 )
 # Reference curve
 plot!(fig_linlog_1,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].zf1,
-    yerror = ref0[ref_idx].errzf1,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].zf1,
+    yerror = sg0_ref[ref_idx].errzf1,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2440,7 +2437,7 @@ plot!(fig_linlog_1,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
-
+    tol = 1e-6
     df = sg0_data[idx]
 
     # Optional special trimming for idx = 8
@@ -2494,7 +2491,6 @@ plot!(fig_linlog_1,
 display(fig_linlog_1)
 
 
-tol = 1e-6
 ref_idx = 4
 sg0_indices = [2, 5, 7]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2505,9 +2501,9 @@ fig_linlog_2 = plot(
 )
 # Reference curve
 plot!(fig_linlog_2,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].zf1,
-    yerror = ref0[ref_idx].errzf1,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].zf1,
+    yerror = sg0_ref[ref_idx].errzf1,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2515,6 +2511,7 @@ plot!(fig_linlog_2,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -2571,7 +2568,6 @@ display(fig_linlog_2)
 
 ## F2
 #linear plots
-tol = 1e-6
 ref_idx = 3
 sg0_indices = [1, 6, 8]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2582,9 +2578,9 @@ fig_linlin_1 = plot(
 )
 # Reference curve
 plot!(fig_linlin_1,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].zf2,
-    yerror = ref0[ref_idx].errzf2,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].zf2,
+    yerror = sg0_ref[ref_idx].errzf2,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2592,6 +2588,7 @@ plot!(fig_linlin_1,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -2614,7 +2611,7 @@ for (idx, color) in zip(sg0_indices, sg0_colors)
     )
 
     if any(mask_both_zero)
-        scatter!(fig,
+        scatter!(fig_linlin_1,
             df.I0[mask_both_zero],
             df.zf2[mask_both_zero],
             yerror = df.errzf2[mask_both_zero],
@@ -2638,8 +2635,6 @@ plot!(fig_linlin_1,
 )
 display(fig_linlin_1)
 
-
-tol = 1e-6
 ref_idx = 4
 sg0_indices = [2, 5, 7]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2649,11 +2644,11 @@ fig_linlin_2 = plot(
     ylabel = L"$c_{0} \quad (\mathrm{mm})$",
 )
 # Reference curve
-ref0[ref_idx]
+sg0_ref[ref_idx]
 plot!(fig_linlin_2,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].zf2,
-    yerror = ref0[ref_idx].errzf2,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].zf2,
+    yerror = sg0_ref[ref_idx].errzf2,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2661,6 +2656,7 @@ plot!(fig_linlin_2,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -2709,7 +2705,6 @@ display(fig_linlin_2)
 
 
 #linear-log plots
-tol = 1e-6
 ref_idx = 3
 sg0_indices = [1, 6, 8]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2720,9 +2715,9 @@ fig_linlog_1 = plot(
 )
 # Reference curve
 plot!(fig_linlog_1,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].zf2,
-    yerror = ref0[ref_idx].errzf2,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].zf2,
+    yerror = sg0_ref[ref_idx].errzf2,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2730,6 +2725,7 @@ plot!(fig_linlog_1,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -2784,7 +2780,6 @@ plot!(fig_linlog_1,
 display(fig_linlog_1)
 
 
-tol = 1e-6
 ref_idx = 4
 sg0_indices = [2, 5, 7]
 sg0_colors  = [:purple, :dodgerblue, :orange]
@@ -2795,9 +2790,9 @@ fig_linlog_2 = plot(
 )
 # Reference curve
 plot!(fig_linlog_2,
-    ref0[ref_idx].I0,
-    ref0[ref_idx].zf2,
-    yerror = ref0[ref_idx].errzf2,
+    sg0_ref[ref_idx].I0,
+    sg0_ref[ref_idx].zf2,
+    yerror = sg0_ref[ref_idx].errzf2,
     label  = data_directories[ref_idx],
     marker = (:circle, 2, :white),
     markerstrokecolor = :darkgreen,
@@ -2805,6 +2800,7 @@ plot!(fig_linlog_2,
 )
 # SG0 curves
 for (idx, color) in zip(sg0_indices, sg0_colors)
+    tol = 1e-6
 
     df = sg0_data[idx]
 
@@ -2878,7 +2874,7 @@ fig_linlin_1 = plot(
 # ------------------------------------------------------------
 # Reference curve
 # ------------------------------------------------------------
-df = copy(ref0[ref_idx])
+df = copy(sg0_ref[ref_idx])
 sort!(df, :I0)
 df[!, :split] = df[!, :split] .- df[1, :split]
 df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
@@ -2948,7 +2944,7 @@ fig_linlin_2 = plot(
 # ------------------------------------------------------------
 # Reference curve
 # ------------------------------------------------------------
-df = copy(ref0[ref_idx])
+df = copy(sg0_ref[ref_idx])
 sort!(df, :I0)
 df[!, :split] = df[!, :split] .- df[1, :split]
 df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
@@ -3029,38 +3025,55 @@ display(fig)
 
 fig_linlin_1 = plot(
     xlabel = "SG0 Current (A)",
-    ylabel = L"$\Delta z = z_{F=1} - z_{F=2} \quad (\mathrm{mm})$",
+    ylabel = L"$\Delta z = z_{F=1} - z_{F=2} \quad (\mathrm{px})$",
 );
+ref_idxs = (3, 4)
 plot_list = [
+    (3, :darkgreen,     :rect,    "(↑↓)", 1e-6),
+    (4, :darkgreen,     :diamond, "(↑↑)", 1.5e-3),
+
     (1, :purple,     :rect,    "(↑↓)", 1e-6),
     (2, :purple,     :diamond, "(↑↑)", 1.5e-3),
 
     (6, :dodgerblue, :rect,    "(↑↓)", 1e-6),
     (5, :dodgerblue, :diamond, "(↑↑)", 1.5e-3),
 
-    (8, :orange,     :rect,    "(↑↓)", 1e-6),
-    (7, :orange,     :diamond, "(↑↑)", 1.5e-3),
+    (8, :orange,     :rect, "(↑↓)", 1.5e-3),
+    (7, :orange,     :diamond,    "(↑↑)", 1e-6),
 ];
 for (idx, color, marker_symbol, config_label, tol) in plot_list
 
-    df = copy(sg0_data[idx])
+    df = copy(idx in ref_idxs ? sg0_ref[idx] : sg0_data[idx])
 
-    # Keep only rows with nonzero I1
-    df = df[abs.(df.I1) .> tol, :]
+    @info "Processing dataset" idx
+    println()
+    show(stdout, df)
+    println()
 
-    # Optional row removal for dataset 1
+    # Keep only rows with nonzero I1, except for reference datasets
+    if idx ∉ ref_idxs
+        df = df[abs.(df.I1) .> tol, :]
+    end
+
+    # Dataset-specific row removals
     if idx == 1
         df = df[Not(14), :]
+    elseif idx == 8
+        df = df[1:end-1, :]
     end
 
     # Subtract first point as reference
-    df[!, :split] = df[!, :split] .- df[1, :split]
-    df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
+    split0 = df[1, :split]
+    err0   = df[1, :errsplit]
 
-    # Sort by I0
+    df[!, :split]    .-= split0
+    df[!, :errsplit] .= sqrt.(df[!, :errsplit].^2 .+ err0^2)
+
     sort!(df, :I0)
 
+    println()
     show(stdout, df)
+    println()
 
     plot!(fig_linlin_1,
         df.I0,
@@ -3107,33 +3120,40 @@ split_itp    = Dict{Int, Any}()
 errsplit_itp = Dict{Int, Any}()
 processed_df = Dict{Int, DataFrame}()
 
-Itest = collect(range(0.001,3.55, length=1001)) 
+Itest = collect(range(0.001,3.55, length=1001)) ;
 
-
+ref_idxs = (3, 4)
 for (idx, color, marker_symbol, config_label, tol) in plot_list
 
-    @info index = idx 
-    df = copy(sg0_data[idx])
+    @info "Processing dataset" idx
 
-    # Keep only rows with nonzero I1
-    df = df[abs.(df.I1) .> tol, :]
+    # Select source dataframe
+    df = copy(idx in ref_idxs ? sg0_ref[idx] : sg0_data[idx])
 
-    # Optional row removal for dataset 1
+    # Keep only rows with nonzero I1, except for reference datasets
+    if idx ∉ ref_idxs
+        df = df[abs.(df.I1) .> tol, :]
+    end
+
+    # Optional row removals
     if idx == 1
         df = df[Not(14), :]
-    end
-    if idx == 8
+    elseif idx == 8
         df = df[1:end-1, :]
     end
 
     # Subtract first point as reference
-    df[!, :split] = df[!, :split] .- df[1, :split]
-    df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
+    split0 = df[1, :split]
+    err0   = df[1, :errsplit]
+
+    df[!, :split]    .-= split0
+    df[!, :errsplit] .= sqrt.(df[!, :errsplit].^2 .+ err0^2)
 
     # Sort by I0 before interpolation
     sort!(df, :I0)
 
     show(stdout, df)
+
     # Store processed dataframe
     processed_df[idx] = df
 
@@ -3141,45 +3161,285 @@ for (idx, color, marker_symbol, config_label, tol) in plot_list
     x  = df.I0
     y  = df.split ./ scale_factor
     dy = df.errsplit ./ scale_factor
-    w = 1.0 ./ dy
+    w  = 1.0 ./ dy
 
-    # Cubic interpolations
-    split_itp[idx] = Dierckx.Spline1D(x, y; w = w, k = 5, s = 5)
+    # Cubic/quintic interpolations
+    split_itp[idx] = Dierckx.Spline1D(x, y; w = w, k = 5, s = 8)
 
-    errsplit_itp[idx] = Dierckx.Spline1D(x, dy; k = 3, s = 1e-4)
+    errsplit_itp[idx] = Dierckx.Spline1D(x, dy; k = 5, s = 8)
 
-    plt = scatter(df.I0, df.split ./ scale_factor,
-        yerror = df.errsplit ./ scale_factor)
-    plot!(Itest, split_itp[idx].(Itest))
-    plot!(xlims=(1e-3,4))
-    plot!(xscale=:log10)
+    plt = scatter(
+        df.I0,
+        df.split ./ scale_factor,
+        yerror = df.errsplit ./ scale_factor,
+        label = "Experiment",
+        marker = (marker_symbol, 8, color, 0.60),
+        markerstrokecolor = color,
+    )
+
+    plot!(
+        plt,
+        Itest,
+        split_itp[idx].(Itest),
+        ribbon = errsplit_itp[idx].(Itest),
+        label = "Interpolation",
+        line = (:solid, 2, color),
+    )
+
+    plot!(
+        plt,
+        xlims = (1e-3, 4),
+        xscale = :log10,
+        title = "Data set idx : $(idx)",
+        xlabel = "SG0 Current (A)",
+        ylabel = L"$\Delta z$ (px)",
+    )
+
     display(plt)
-
 end
 
+idxs = [1, 2, 3, 4, 6, 5, 8, 7]
+asymptote_results = Dict{Int, NamedTuple}()
+for idx in idxs
+
+    # Choose low-current fitting window
+    Imin_fit = 1e-3
+    Imax_fit = 0.100
+
+    # Dense current grid for evaluating the interpolated function
+    Ifit = collect(range(Imin_fit, Imax_fit, length = 300))
+
+    # Evaluate interpolated function
+    yfit = split_itp[idx].(Ifit)
+
+    # Model: y(I) = y0 + a I^p
+    model(I, p) = @. p[1] + p[2] * I^p[3]
+
+    # Initial guess
+    p0 = [
+        yfit[1],              # y0 guess
+        yfit[end] - yfit[1],  # amplitude guess
+        1.0                   # power guess
+    ]
+
+    fit = curve_fit(model, Ifit, yfit, p0)
+
+    pars = coef(fit)
+    errs = stderror(fit)
+
+    y0   = pars[1]
+    dy0  = errs[1]
+    a    = pars[2]
+    pexp = pars[3]
+
+    asymptote_results[idx] = (
+        y0 = y0,
+        dy0 = dy0,
+        a = a,
+        p = pexp,
+        Imin_fit = Imin_fit,
+        Imax_fit = Imax_fit,
+        npoints = length(Ifit),
+    )
+
+    println()
+    println("idx = $idx")
+    println("asymptotic y0 = $(round(y0; digits=4)) ± $(round(dy0; digits=4)) px")
+    println("power p       = $(round(pexp; digits=3))")
+    println("fit range     = $Imin_fit A ≤ I0 ≤ $Imax_fit A")
+end
+
+idx_pairs = [(1, 2), (3,4), (6, 5), (8,7)]
+y0_pair_mean = Dict{Tuple{Int,Int}, NamedTuple}()
+for pair in idx_pairs
+
+    i, j = pair
+
+    y0_i  = asymptote_results[i].y0
+    y0_j  = asymptote_results[j].y0
+
+    dy0_i = asymptote_results[i].dy0
+    dy0_j = asymptote_results[j].dy0
+
+    y0_mean = mean([y0_i, y0_j])
+
+    # Error propagation for mean of two independent values:
+    # σ_mean = sqrt(σ₁² + σ₂²) / 2
+    dy0_mean = sqrt(dy0_i^2 + dy0_j^2) / 2
+
+    y0_pair_mean[pair] = (
+        y0_mean = y0_mean,
+        dy0_mean = dy0_mean,
+        y0_values = (y0_i, y0_j),
+        dy0_values = (dy0_i, dy0_j),
+    )
+
+    println()
+    println("pair = $pair")
+    println("y0 mean = $(round(y0_mean; digits=4)) ± $(round(dy0_mean; digits=4)) px")
+end
+
+y0_pair_mean[(1, 2)].y0_mean
+y0_pair_mean[(3, 4)].y0_mean
+y0_pair_mean[(6, 5)].y0_mean
+y0_pair_mean[(8, 7)].y0_mean
+
+Iexp_sampled = sg0_data[2].I0[2:end]
+
+plot(Iexp_sampled,split_itp[1].(Iexp_sampled) .- y0_pair_mean[(1, 2)].y0_mean,
+    )
+plot!(Iexp_sampled,split_itp[2].(Iexp_sampled).- y0_pair_mean[(1, 2)].y0_mean,
+    )
+plot!(Iexp_sampled,split_itp[3].(Iexp_sampled) .- y0_pair_mean[(3, 4)].y0_mean )
+plot!(Iexp_sampled,split_itp[4].(Iexp_sampled).- y0_pair_mean[(3, 4)].y0_mean)
+plot!(Iexp_sampled,split_itp[6].(Iexp_sampled) .- y0_pair_mean[(6, 5)].y0_mean )
+plot!(Iexp_sampled,split_itp[5].(Iexp_sampled).- y0_pair_mean[(6, 5)].y0_mean)
+plot!(Iexp_sampled,split_itp[8].(Iexp_sampled) .- y0_pair_mean[(8, 7)].y0_mean )
+plot!(Iexp_sampled,split_itp[7].(Iexp_sampled).- y0_pair_mean[(8, 7)].y0_mean)
+plot!(xscale=:log10)
 
 
-plot(Itest,split_itp[1].(Itest))
 scatter!(sg0_data[1].I0, (sg0_data[1].split .- sg0_data[1].split[1])./ scale_factor)
 plot!(Itest, split_itp[2].(Itest))
 2+2
 
 
 
+# Pairs used to define the common offset y0
+pairs = [
+    (3, 4), 
+    (1, 2), 
+    (6, 5), 
+    (8, 7)]
+
+# Map each index to its pair
+pair_of_idx = Dict(idx => pair for pair in pairs for idx in pair)
+
+plt = plot(
+    xlabel = "SG0 current (A)",
+    ylabel = "Spin-resolved beam separation (pixels)",
+    yticks = -5:1:4,
+    yminorticks=2,
+    legend = :outerright,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size = (1920, 1080),
+    legendtitlefontsize = 32,
+    legendfontsize = 32,
+    guidefontsize = 32,
+    tickfontsize = 30,
+    left_margin = 12mm,
+    bottom_margin =12mm,
+);
+hline!([0.0], line=(:dot,1,:black), label=false);
+for (idx, color, marker_symbol, config_label, tol) in plot_list
+
+    pair = pair_of_idx[idx]
+    y0   = y0_pair_mean[pair].y0_mean
+
+    y = split_itp[idx].(Iexp_sampled) .- y0
+    dy = errsplit_itp[idx].(Iexp_sampled)
+
+    plot!(
+        plt,
+        Iexp_sampled,
+        y,
+        yerror = dy,
+        label = data_directories[idx] * " $(config_label)",
+        color = color,
+        line = (:solid, 2),
+        marker = (marker_symbol, 10, color, 0.6),
+        markerstrokecolor = color,
+    )
+
+
+end
+display(plt)
+plot!(plt,
+    xlims=(100e-3,4),
+    xscale=:log10
+);
+display(plt)
+
+
+
+
+# Discussed with Dr. Wamg
+
+plot_list = [
+    (7, :red,     :diamond, "(↑↑)", 1.5e-3),
+    (8, :blue,     :rect,    "(↑↓)", 1e-6),
+];
+# Pairs used to define the common offset y0
+pairs = [
+    (8, 7)
+];
+
+# Map each index to its pair
+pair_of_idx = Dict(idx => pair for pair in pairs for idx in pair)
+
+plt = plot(
+    xlabel = "SG0 current (A)",
+    ylabel = "Spin-resolved beam separation (pixels)",
+    yticks = -5:1:4,
+    yminorticks=2,
+    legend = :bottomleft,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size = (1920, 1080),
+    legendtitlefontsize = 32,
+    legendfontsize = 24,
+    guidefontsize = 32,
+    tickfontsize = 30,
+    left_margin = 12mm,
+    bottom_margin =12mm,
+);
+hline!([0.0], line=(:dot,1,:black), label=false);
+for (idx, color, marker_symbol, config_label, tol) in plot_list
+
+    pair = pair_of_idx[idx]
+    y0   = y0_pair_mean[pair].y0_mean
+
+    y = split_itp[idx].(Iexp_sampled) .- y0
+    dy = errsplit_itp[idx].(Iexp_sampled)
+
+    if idx == 7
+    plot!(
+        plt,
+        Iexp_sampled,
+        y,
+        yerror = dy,
+        label = "↑↑ (parallel)",
+        color = color,
+        line = (:solid, 2),
+        marker = (marker_symbol, 18, color, 0.6),
+        markerstrokecolor = color,
+    )
+    else
+    plot!(
+        plt,
+        Iexp_sampled,
+        y,
+        yerror = dy,
+        label = "↑↓ (antiparallel)",
+        color = color,
+        line = (:solid, 2),
+        marker = (marker_symbol, 10, color, 0.6),
+        markerstrokecolor = color,
+    )
+    end
+
+end
+display(plt)
+savefig(plt, "spin_resolved_sep.pdf")
+savefig(plt, "spin_resolved_sep.svg")
 
 
 
 
 
 
-
-
-
-
-
-
-
-
+2+2
 
 
 
