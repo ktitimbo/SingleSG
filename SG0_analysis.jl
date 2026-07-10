@@ -3366,9 +3366,100 @@ display(plt)
 
 # Discussed with Dr. Wamg
 
+fig_linlin_1 = plot(
+    xlabel = "SG0 Current (A)",
+    ylabel = L"$\Delta z = z_{F=1} - z_{F=2} \quad (\mathrm{px})$",
+);
+ref_idxs = (3, 4)
+plot_list = [
+    # (3, :darkgreen,     :rect,    "(↑↓)", 1e-6),
+    # (4, :darkgreen,     :diamond, "(↑↑)", 1.5e-3),
+
+    # (1, :purple,     :rect,    "(↑↓)", 1e-6),
+    # (2, :purple,     :diamond, "(↑↑)", 1.5e-3),
+
+    # (6, :dodgerblue, :rect,    "(↑↓)", 1e-6),
+    # (5, :dodgerblue, :diamond, "(↑↑)", 1.5e-3),
+
+    (8, :orange,     :rect, "(↑↓)", 1.5e-3),
+    (7, :orange,     :diamond,    "(↑↑)", 1e-6),
+];
+for (idx, color, marker_symbol, config_label, tol) in plot_list
+
+    df = copy(idx in ref_idxs ? sg0_ref[idx] : sg0_data[idx])
+
+    @info "Processing dataset" idx
+    println()
+    show(stdout, df)
+    println()
+
+    # Keep only rows with nonzero I1, except for reference datasets
+    if idx ∉ ref_idxs
+        df = df[abs.(df.I1) .> tol, :]
+    end
+
+    # Dataset-specific row removals
+    if idx == 1
+        df = df[Not(14), :]
+    elseif idx == 8
+        df = df[1:end-1, :]
+    end
+
+    # Subtract first point as reference
+    split0 = df[1, :split]
+    err0   = df[1, :errsplit]
+
+    df[!, :split]    .-= split0
+    df[!, :errsplit] .= sqrt.(df[!, :errsplit].^2 .+ err0^2)
+
+    sort!(df, :I0)
+
+    println()
+    show(stdout, df)
+    println()
+
+    plot!(fig_linlin_1,
+        df.I0,
+        df.split ./ scale_factor,
+        yerror = df.errsplit ./ scale_factor,
+        label = dirname(data_directories[idx]) * " " * config_label * " " *
+                L" $I_{1} = %$(round(1000 * mean(df.I1); digits=1)) \mathrm{mA}$",
+        marker = (marker_symbol, 8, color, 0.60),
+        markerstrokecolor = color,
+        line = (:solid, 2, color),
+    )
+end
+ymin, ymax = ylims(fig_linlin_1)
+plot!(fig_linlin_1,
+    ylims = (floor(ymin), ceil(ymax)),
+    yticks = floor(ymin):1:ceil(ymax),
+);
+plot!(fig_linlin_1,
+    legendtitle = "",
+    legend = :bottomleft,
+    legend_columns = 1,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size = (1920, 1080),
+    legendtitlefontsize = 18,
+    legendfontsize = 18,
+    guidefontsize = 24,
+    tickfontsize = 18,
+    left_margin = 12mm,
+    bottom_margin =12mm,
+);
+display(fig_linlin_1)
+plot!(fig_linlin_1,
+    xlims=(4e-3,4),
+    xscale=:log10,
+);
+display(fig_linlin_1)
+
+
+
 plot_list = [
     (7, :red,     :diamond, "(↑↑)", 1.5e-3),
-    (8, :blue,     :rect,    "(↑↓)", 1e-6),
+    (8, :blue,    :rect,    "(↑↓)", 1e-6),
 ];
 # Pairs used to define the common offset y0
 pairs = [
