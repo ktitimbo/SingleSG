@@ -529,12 +529,12 @@ function plot_heatmap_with_top_profile(
         data;
         colormap    = :viridis,
         colorrange  = extrema(filter(isfinite, data)),
-        size        = (1050, 600),
+        size        = (600, 400),
         cb_label    = "Mean intensity",
         profile_label = L"Intensity ($\mathrm{a.u.}$)",
         aspect      = 4.75,   # width:height ratio, e.g. 2.0 → twice as wide as tall
 )
-    fig = Figure(; size=size, backgroundcolor=:white)
+    fig = Figure(; size=size, backgroundcolor=:white, figure_padding=(4, 8, 4, 4))
 
     layout = GridLayout(fig[1, 1])
 
@@ -547,9 +547,11 @@ function plot_heatmap_with_top_profile(
 
     _latexfmt(vs) = [L"%$(Int(round(Int, v)))" for v in vs]
 
-    # Upper y-limit = next power-of-10 above the profile maximum
+    # Upper y-limit: ceil to the next multiple of the leading decade
+    # e.g. 750 → 800 (decade=100),  32 → 40 (decade=10)
     _y_max  = max(maximum(filter(isfinite, mean_over_y)), 1.0)
-    y_upper = 10.0^ceil(log10(_y_max))
+    _decade = 10.0^floor(log10(_y_max))
+    y_upper = ceil(_y_max / _decade) * _decade
 
     ax_top = Axis(
         layout[1, 1];
@@ -621,10 +623,9 @@ function plot_heatmap_with_top_profile(
     #     flipaxis = false,
     # )
 
-    rowgap!(layout, 1, 6)
-    # rowgap!(layout, 2, 12)
+    rowgap!(layout, 1, 0)
 
-    # Makie.trim!(layout)
+    resize_to_layout!(fig)
 
     return fig
 end
