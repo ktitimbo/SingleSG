@@ -527,14 +527,18 @@ fig_F2 = plot_heatmap_with_profile(
 
 function plot_heatmap_with_top_profile(
         data;
-        colormap    = :viridis,
-        colorrange  = extrema(filter(isfinite, data)),
-        size        = (600, 400),
-        cb_label    = "Mean intensity",
+        colormap      = :viridis,
+        colorrange    = extrema(filter(isfinite, data)),
+        size          = (600, 400),
+        save_name     = "SG_img_profile",
         profile_label = L"Intensity ($\mathrm{a.u.}$)",
-        aspect      = 4.75,   # width:height ratio, e.g. 2.0 → twice as wide as tall
+        aspect        = 4.75,
+        label_size      = 18,
+        ticklabel_size  = 14,
+        y_scale         = 4,
+        x_tick_step     = 400,
 )
-    fig = Figure(; size=size, backgroundcolor=:white, figure_padding=(4, 8, 4, 4))
+    fig = Figure(; size=size, backgroundcolor=:white)
 
     layout = GridLayout(fig[1, 1])
 
@@ -546,6 +550,10 @@ function plot_heatmap_with_top_profile(
     mean_over_y = vec(mean(data, dims=2))   # transverse profile vs x, shown on top
 
     _latexfmt(vs) = [L"%$(Int(round(Int, v)))" for v in vs]
+    _yfmt   = isnothing(y_scale) ? _latexfmt :
+                  (vs -> [L"%$(Int(round(Int, y_scale * v)))" for v in vs])
+    _xticks = isnothing(x_tick_step) ? Makie.automatic :
+                  range(0, xlims[2]; step=x_tick_step)
 
     # Upper y-limit: ceil to the next multiple of the leading decade
     # e.g. 750 → 800 (decade=100),  32 → 40 (decade=10)
@@ -555,27 +563,35 @@ function plot_heatmap_with_top_profile(
 
     ax_top = Axis(
         layout[1, 1];
-        ylabel        = profile_label,
-        limits        = (xlims, (0, y_upper)),
+        ylabel         = profile_label,
+        ylabelsize     = label_size,
+        yticklabelsize = ticklabel_size,
+        limits         = (xlims, (0, y_upper)),
         xautolimitmargin = (0, 0),
         yautolimitmargin = (0, 0),
-        xticksvisible = true,
-        xtickalign    = 0.5,
-        ytickformat   = _latexfmt,
+        xticksvisible  = true,
+        xtickalign     = 0.5,
+        xticks         = _xticks,
+        ytickformat    = _latexfmt,
     )
 
     ax_heatmap = Axis(
         layout[2, 1];
-        xlabel = L"$x$ (pixels)",
-        ylabel = L"$z$ (pixels)",
-        aspect = AxisAspect(aspect),
-        yreversed = true,
-        limits = (xlims, ylims),
+        xlabel         = L"$z$ (pixels)",
+        ylabel         = L"$x$ (pixels)",
+        xlabelsize     = label_size,
+        ylabelsize     = label_size,
+        xticklabelsize = ticklabel_size,
+        yticklabelsize = ticklabel_size,
+        aspect         = AxisAspect(aspect),
+        yreversed      = false,
+        limits         = (xlims, ylims),
         xautolimitmargin = (0, 0),
         yautolimitmargin = (0, 0),
-        xtickalign  = 0.5,
-        xtickformat = _latexfmt,
-        ytickformat = _latexfmt,
+        xtickalign     = 0.5,
+        xticks         = _xticks,
+        xtickformat    = _latexfmt,
+        ytickformat    = _yfmt,
     )
 
     hm = heatmap!(
@@ -609,28 +625,18 @@ function plot_heatmap_with_top_profile(
         minorticks = false,
     )
 
-    # Tie row 2's height to column 1's width via the aspect ratio, so the
-    # cell is exactly as tall as the axis needs — no leftover whitespace.
-    rowsize!(layout, 1, Relative(0.25))
+    rowsize!(layout, 1, Relative(0.35))
     rowsize!(layout, 2, Aspect(1, 1/aspect))
 
-    # Colorbar on the bottom of the heatmap
-    # Colorbar(
-    #     layout[3, 1],
-    #     hm;
-    #     label = cb_label,
-    #     vertical = false,
-    #     flipaxis = false,
-    # )
+    rowgap!(layout, 1, 12)
 
-    rowgap!(layout, 1, 0)
+    save(joinpath(OUTDIR, "$(save_name).png"), fig; px_per_unit = 3)
+    save(joinpath(OUTDIR, "$(save_name).pdf"), fig; px_per_unit = 3)
 
-    resize_to_layout!(fig)
-
-    return fig
+    return display(fig)
 end
 
 # fig_F1_transverse = plot_heatmap_with_top_profile(F1_mean)
 
-fig_F1_transverse = plot_heatmap_with_top_profile(F1_mean')
-fig_F1_transverse = plot_heatmap_with_top_profile(F2_mean')
+fig_F1_transverse = plot_heatmap_with_top_profile(F1_mean'; save_name="SG_img_profile_f1")
+fig_F1_transverse = plot_heatmap_with_top_profile(F2_mean'; save_name="SG_img_profile_f2")
