@@ -235,22 +235,25 @@ end
 # colors_down = clipped_cmap(:deep, length(mf_down); lo=0.3)
 # colorsF = vcat(colors_up, colors_down)
 
-
+function anchored_cmap(c1, c2, n)
+    g = cgrad([c1, c2])
+    return [g[t] for t in range(0.0, 1.0, length=n)]
+end
 
 function anchored_cmap3(c1, c2, c3, n)
     g = cgrad([c1, c2, c3])
     return [g[t] for t in range(0.0, 1.0, length=n)]
 end
 
-colors_up   = anchored_cmap3(colorant"darkred", colorant"orangered", colorant"chocolate4", length(mf_up))
-colors_down = anchored_cmap(colorant"navy",          colorant"deepskyblue3", length(mf_down))
-colorsF = vcat(colors_up, colors_down)
-
 F_up   = K39_params.Ispin + 0.5
 F_down = K39_params.Ispin - 0.5
 mf_up   = F_up:-1.0:-F_up
 mf_down = -F_down:1.0:F_down
 dimF = Int(4*K39_params.Ispin + 2)
+
+colors_up   = anchored_cmap3(colorant"darkred", colorant"orangered", colorant"chocolate4", length(mf_up))
+colors_down = anchored_cmap(colorant"navy", colorant"deepskyblue3", length(mf_down))
+colorsF = vcat(colors_up, colors_down)
 
 current_range = exp10.(range(log10(0.0009), log10(1.01), length=600))
 
@@ -405,7 +408,7 @@ end
 
 exp_data = print_experiment_table(experiment_path);
 
-nI_idx = 13
+nI_idx = 19
 
 F1_mean = dropdims(
     mean(@view(exp_data[:F1ProcessedImages][:, :, :, nI_idx]), dims=3),
@@ -520,15 +523,15 @@ fig_F1 = plot_heatmap_with_profile(
 
 fig_F2 = plot_heatmap_with_profile(
     F2_mean;
-    save_path  = "f2_heatmap.pdf",
     colorrange = extrema(filter(isfinite, F2_mean)),
 )
 
+F1_mean_norm = (x -> max(x, 0)).(F1_mean) ./ maximum(max.(F1_mean, 0))
+F2_mean_norm = (x -> max(x, 0)).(F2_mean) ./ maximum(max.(F2_mean, 0))
 
 function plot_heatmap_with_top_profile(
         data;
         colormap      = :viridis,
-        colorrange    = extrema(filter(isfinite, data)),
         size          = (600, 400),
         save_name     = "SG_img_profile",
         profile_label = L"Intensity ($\mathrm{a.u.}$)",
@@ -543,9 +546,11 @@ function plot_heatmap_with_top_profile(
     layout = GridLayout(fig[1, 1])
 
     x = axes(data, 1)
-    y = axes(data, 2)
+    y = axes(data, 2) 
     xlims = (minimum(x), maximum(x))
     ylims = (minimum(y), maximum(y))
+
+    data_norm = (x -> max(x, 0)).(data) ./ maximum(max.(data, 0))
 
     mean_over_y = vec(mean(data, dims=2))   # transverse profile vs x, shown on top
 
@@ -594,11 +599,12 @@ function plot_heatmap_with_top_profile(
         ytickformat    = _yfmt,
     )
 
+    colorrange    = extrema(filter(isfinite, data_norm))
     hm = heatmap!(
         ax_heatmap,
         x,
         y,
-        data;
+        data_norm;
         colormap=colormap,
         colorrange=colorrange,
     )
@@ -636,7 +642,12 @@ function plot_heatmap_with_top_profile(
     return display(fig)
 end
 
+01, 03, 04.03, 05, 09.01, 09.07, 10, 11, 13, 14, 16, 19.01, 19.05, 23, 24, 25, 26, 27, 31.01, 31.05, 38, 40, 41, 42, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 60
+
 # fig_F1_transverse = plot_heatmap_with_top_profile(F1_mean)
 
 fig_F1_transverse = plot_heatmap_with_top_profile(F1_mean'; save_name="SG_img_profile_f1")
-fig_F1_transverse = plot_heatmap_with_top_profile(F2_mean'; save_name="SG_img_profile_f2")
+fig_F2_transverse = plot_heatmap_with_top_profile(F2_mean'; save_name="SG_img_profile_f2")
+
+
+extrema(filter(isfinite, F1_mean))
