@@ -167,7 +167,9 @@ TheoreticalSimulation.DEFAULT_y_SGToAperture    = y_SGToAperture;
 ##################################################################################################
 
 
-# STERN--GERLACH GEOMETRY
+##################################################################################################
+##################################################################################################
+## STERN--GERLACH GEOMETRY
 x_line = range(-10e-3, 10e-3; length=10_001)
 x_mm   = 1e3 .* x_line
 
@@ -223,7 +225,8 @@ display(fig)
 save(joinpath(OUTDIR, "SG_geometry.png"), fig; px_per_unit = 2)
 save(joinpath(OUTDIR, "SG_geometry.pdf"), fig; px_per_unit = 2)
 
-
+##################################################################################################
+##################################################################################################
 ## POTASSIUM 39 - ZEEMAN DIAGRAM
 
 function clipped_cmap(scheme::Symbol, n::Int; lo=0.25, hi=1.0)
@@ -365,6 +368,8 @@ display(fig)
 save(joinpath(OUTDIR, "SG_mm_effective.png"), fig; px_per_unit = 3)
 save(joinpath(OUTDIR, "SG_mm_effective.pdf"), fig; px_per_unit = 3)
 
+##################################################################################################
+##################################################################################################
 ## Experimental pattern
 
 experiment_path = joinpath(BASE_PATH,"EXPERIMENTS","20260220","data_processed.jld2");
@@ -642,7 +647,6 @@ function plot_heatmap_with_top_profile(
     return display(fig)
 end
 
-01, 03, 04.03, 05, 09.01, 09.07, 10, 11, 13, 14, 16, 19.01, 19.05, 23, 24, 25, 26, 27, 31.01, 31.05, 38, 40, 41, 42, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 60
 
 # fig_F1_transverse = plot_heatmap_with_top_profile(F1_mean)
 
@@ -651,3 +655,13 @@ fig_F2_transverse = plot_heatmap_with_top_profile(F2_mean'; save_name="SG_img_pr
 
 
 extrema(filter(isfinite, F1_mean))
+
+
+##################################################################################################
+##################################################################################################
+## Main plot
+
+BASE_PATH
+
+load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_xkl","data_averaged_2.jld2"),"data")
+load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_2025","data_averaged_2.jld2"),"data")
