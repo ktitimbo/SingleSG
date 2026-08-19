@@ -2026,6 +2026,34 @@ end
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 
+"""
+    fit_ki_joint_scaling_fitsubset(data, zqm, ki_itp, thresholdI, ki_range;
+        fit_ki_mode=:low_high, n_front=n_front, n_back=n_back, w=0.5,
+        ref_type=:arith, conf=0.95, use_Zse=false, profile=true, profile_grid=400)
+ 
+Most complete fitter: **jointly** estimates an overall magnification/scale
+factor and the induction coefficient `kᵢ`, then reports full uncertainty.
+ 
+Procedure:
+  1. Build a tail reference from the high-current data (`I ≥ thresholdI`) as a
+     blend of the QM and CQD curves, `z_ref = w·z_QM + (1-w)·z_CQD` (`:arith`)
+     or the geometric mean `z_QM^w · z_CQD^(1-w)` (`:geom`).
+  2. For each candidate `kᵢ`, solve the 1-parameter least-squares scale
+     `s(kᵢ) = ⟨y_tail, z_ref⟩ / ⟨z_ref, z_ref⟩` from the tail projection.
+  3. Fit `kᵢ` by minimizing the (optionally weighted) log10-space RSS of the
+     scaled data `y/s(kᵢ)` against `z_CQD`, restricted to a chosen index subset
+     (`fit_ki_mode`: `:full`, `:low` = first `n_front`, `:high` = last `n_back`,
+     or `:low_high` = both), via bounded Brent search over `ki_range`.
+  4. Uncertainty: linearized SE + Student-t interval `ci_t`, and a likelihood
+     profile interval `ci_profile`, exactly as in `fit_ki_with_error`.
+ 
+# Returns
+NamedTuple including `ki_fit`, `scale_factor` (and `scale_inv`, `scale_pct`),
+`rss`/`mse`/`rmse_log10`, `se`/`k_err`/`ci_t`, `ci_profile` and its targets,
+`R2` (log10 space), fractional-error summaries (`mult_rmse`, `med_abs_frac`,
+`p90/p99/max_abs_frac`, `n_bad_2pct`, `n_bad_5pct`), point counts, `converged`,
+and the raw Optim `result`.
+"""
 function fit_ki_joint_scaling_fitsubset(
     data,
     zqm,
@@ -2367,7 +2395,13 @@ end
 
 
 # =============================================================================
-# Joint scaling + kᵢ fit on the COMBINED experimental curve (exp_avg)
+#  ANALYSIS PART 3 of 3 — Joint (scale + kᵢ) fit on the COMBINED curve (exp_avg)
+# -----------------------------------------------------------------------------
+#  The most complete stage: back on the combined curve, the scale factor and kᵢ
+#  are estimated jointly from a QM/CQD tail blend via
+#  `fit_ki_joint_scaling_fitsubset`. It then produces the publication figures
+#  (single_SG_comparison.*), exports data_exp.csv / data_sim.csv, and prints the
+#  CQD-vs-QM goodness-of-fit comparison table.
 # =============================================================================
 
 # Build the combined dataset matrix expected by the pipeline:
@@ -2607,6 +2641,15 @@ savefig(fig,joinpath(OUTDIR,"single_SG_comparison_vsg.png"))
 CSV.write( joinpath(OUTDIR,"data_exp.csv") , DataFrame(data_scaled, ["Ic", "sIc", "zmax", "szmax"]))
 CSV.write( joinpath(OUTDIR,"data_sim.csv") , DataFrame(hcat(I_scan, zqm.(I_scan), ki_itp.(I_scan, Ref(fit_scaled.ki))), ["Ic","QM","CQD"])  )
 
+
+"""
+    FitStats
+ 
+Container for the log-space goodness-of-fit metrics returned by
+`goodness_of_fit`: `logMSE`, `logRMSE`, `R2_log`, `chi2_log`, `chi2_red`
+(reduced χ²), `p_chi2` (χ² tail p-value), `AIC`, `BIC`, and `NMAD`
+(normalized median absolute deviation of the residuals).
+"""
 struct FitStats
     logMSE::Float64
     logRMSE::Float64
@@ -2619,7 +2662,21 @@ struct FitStats
     NMAD::Float64
 end
 
-
+"""
+    goodness_of_fit(x, y, ypred; σ=nothing, k=0)
+ 
+Evaluate how well model predictions `ypred` match observations `y` (over
+support `x`), working in **natural-log** space where the SG curves are roughly
+power-law. `k` is the number of fitted model parameters (used by AIC/BIC).
+ 
+Always returns `logMSE`, `logRMSE`, `R2_log`, and the robust scatter `NMAD`.
+When per-point uncertainties `σ` are supplied, they are propagated to log space
+(`σ_log ≈ σ/y`) and the χ² statistic, reduced χ², χ² p-value, and χ²-based
+AIC/BIC are computed as well; otherwise those fields are `NaN` and AIC/BIC fall
+back to a `logMSE`-based surrogate.
+ 
+Returns a [`FitStats`](@ref).
+"""
 function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
     @assert length(x) == length(y) == length(ypred)
 
@@ -2752,8 +2809,6 @@ pretty_table(
 )
 
 
-
-function make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD::FitStats, stats_QM::FitStats; σ = nothing)
 """
     make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD, stats_QM; σ = nothing)
 
@@ -2768,6 +2823,8 @@ Plots:
 
 Returns a tuple of plots: (p_data, p_residuals, p_hist, p_bars).
 """
+function make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD::FitStats, stats_QM::FitStats; σ = nothing)
+
     # --- residuals in log-space ---
     logy     = log.(y)
     logCQD   = log.(y_CQD)
