@@ -229,7 +229,7 @@ data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set;
 # ============================================================================
 # CQD TRAJECTORY INTEGRATION  (reference kᵢ)
 # ============================================================================
-ki_ref = 1.60e-6;
+ki_ref = 1.60e-7;
 
 # --- Magnetic moment-up branch ---
 @time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(ICOILS, data_UP, ki_ref, K39_params; y_length=5001,verbose=true);
