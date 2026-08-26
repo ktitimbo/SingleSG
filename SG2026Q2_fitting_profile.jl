@@ -123,7 +123,7 @@ println("""
 # ==============================================================================
 
 # Thermal source
-const T_CELSIUS   = 200
+const T_CELSIUS   = 205
 const T_K         = 273.15 + T_CELSIUS      # Furnace temperature      [K]
 # Apertures
 # Furnace aperture
@@ -170,20 +170,20 @@ println("""
 # Setting the variables for the module
 # ── Push geometry into TheoreticalSimulation module ───────────────────────────
 let ts = TheoreticalSimulation
-    ts.default_camera_pixel_size  = CAM_PIXELSIZE
-    ts.default_x_pixels           = NX_PIXELS
-    ts.default_z_pixels           = NZ_PIXELS
-    ts.default_x_furnace          = X_FURNACE
-    ts.default_z_furnace          = Z_FURNACE
-    ts.default_x_slit             = X_SLIT
-    ts.default_z_slit             = Z_SLIT
-    ts.default_y_FurnaceToSlit    = Y_FURNACETOSLIT
-    ts.default_y_SlitToSG         = Y_SLITTOSG
-    ts.default_y_SG               = y_SG
-    ts.default_y_SGToScreen       = Y_SGTOSCREEN
-    ts.default_R_tube             = R_TUBE
-    ts.default_c_aperture         = R_APERTURE
-    ts.default_y_SGToAperture     = Y_SGTOAPERTURE
+    ts.DEFAULT_camera_pixel_size  = CAM_PIXELSIZE
+    ts.DEFAULT_x_pixels           = NX_PIXELS
+    ts.DEFAULT_z_pixels           = NZ_PIXELS
+    ts.DEFAULT_x_furnace          = X_FURNACE
+    ts.DEFAULT_z_furnace          = Z_FURNACE
+    ts.DEFAULT_x_slit             = X_SLIT
+    ts.DEFAULT_z_slit             = Z_SLIT
+    ts.DEFAULT_y_FurnaceToSlit    = Y_FURNACETOSLIT
+    ts.DEFAULT_y_SlitToSG         = Y_SLITTOSG
+    ts.DEFAULT_y_SG               = y_SG
+    ts.DEFAULT_y_SGToScreen       = Y_SGTOSCREEN
+    ts.DEFAULT_R_tube             = R_TUBE
+    ts.DEFAULT_c_aperture         = R_APERTURE
+    ts.DEFAULT_y_SGToAperture     = Y_SGTOAPERTURE
 end
 ##################################################################################################
 
@@ -192,8 +192,11 @@ end
 # ==============================================================================
 
 # Experimental data selection
-const WANTED_ZBINNING = 1
-const WANTED_SMOOTH   = 0.001
+const WANTED_ZBINNING = 2
+const WANTED_SMOOTH   = 0.01
+
+const ZBINNING_LIST = [1, 2, 4]
+const SMOOTH_LIST   = [0.001, 0.005, 0.01, 0.02, 0.05]
 
 # Polynomial background degree
 const P_DEGREE   = 5
@@ -205,8 +208,8 @@ const λ0_EXP     = 0.0001
 const NRANGE_Z   = 10_001
 
 const DIR_LIST = [
-    "20260529",
-    "20260603"
+    "20260819",
+    "20260821"
 ]
 
 # ── PrettyTables header construction ──────────────────────────────────────────
@@ -219,6 +222,72 @@ const HDR_BOT = vcat(
     ["(exp−model)²", "A", "w [mm]"],
     ["c" * ProfileFitTools.sub(k) for k in 0:P_DEGREE],
 )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ── Results container ─────────────────────────────────────────────────────────
 # Key   → date string
@@ -750,6 +819,66 @@ for dir_chosen in DIR_LIST
     # END DIAGNOSTICS
     # ══════════════════════════════════════════════════════════════════════════
 end
+
+
+@info "Calculated $(length(results_dict)) results"
+rows = [
+    (; date, values...)
+    for (date, values) in results_dict
+]
+
+table_style = TextTableStyle(
+    title                   = crayon"fg:cyan bold",
+    first_line_column_label = crayon"fg:yellow bold",
+    column_label            = crayon"fg:yellow bold",
+)
+
+highlighters = [
+    TextHighlighter(
+        (data, i, j) -> j == 1,
+        crayon"fg:cyan bold",
+    ),
+
+    TextHighlighter(
+        (data, i, j) -> j == 4 && data[i].zmax_mm < 0,
+        crayon"fg:red",
+    ),
+]
+
+formatters = [
+    (v, i, j) -> begin
+        if j == 3
+            @sprintf("%.0f", v)
+        elseif j == 4
+            @sprintf("%.3f", v)
+        else
+            v
+        end
+    end,
+]
+
+pretty_table(
+    rows;
+    title = "Fitting Summary nz=$(WANTED_ZBINNING), λ₀=$(WANTED_SMOOTH)",
+
+    column_labels = [
+        "Date",
+        "Current (A)",
+        "Blur Width (μm)",
+        "zₘₐₓ (mm)",
+    ],
+
+    alignment = [:c, :c, :c, :c],
+    column_label_alignment = :c,
+    title_alignment = :c,
+
+    equal_data_column_widths = true,
+    minimum_data_column_widths = 17,
+
+    formatters = formatters,
+    style = table_style,
+    highlighters = highlighters,
+)
 
 
 jldopen(joinpath(OUTDIR,"blur_conv.jld2"), "w") do f
