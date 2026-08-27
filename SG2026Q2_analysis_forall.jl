@@ -47,11 +47,11 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directories =  ["20260529", "20260603"]
-data_directory      = data_directories[2] ;
+data_directories =  ["20260819", "20260821", "20260826"]
+data_directory      = data_directories[3] ;
 # Furnace 
-const TCelsius = 205
-const Temperature = 273.15 + TCelsius
+const TCELSIUS = 205
+const TKELVIN = 273.15 + TCELSIUS
 # Blurring (gaussian) width
 σw_um = 0.100
 
@@ -77,6 +77,7 @@ X_POSITION = pixel_positions(X_PIXELS, 1, EXP_PIXELSIZE_X);
 Z_POSITION = pixel_positions(Z_PIXELS, 1, EXP_PIXELSIZE_Z);
 println("""
 ***************************************************
+Temperature                 : $(TKELVIN) K  ($(TCELSIUS) °C)
 CAMERA FEATURES
     Number of pixels        : $(NX_PIXELS) × $(NZ_PIXELS)
     Pixel size              : $(1e6*CAM_PIXELSIZE) μm
@@ -90,10 +91,11 @@ IMAGES INFORMATION
     zlims                   : ($(round(minimum(1e6*Z_POSITION), digits=6)) μm, $(round(maximum(1e3*Z_POSITION), digits=4)) mm)
 ***************************************************
 """)
+
 # Setting the variables for the module
 MyExperimentalAnalysis.effective_cam_pixelsize_z = EXP_PIXELSIZE_Z;
-MyExperimentalAnalysis.default_x_pixels          = X_PIXELS;
-MyExperimentalAnalysis.default_z_pixels          = Z_PIXELS;
+MyExperimentalAnalysis.DEFAULT_x_pixels          = X_PIXELS;
+MyExperimentalAnalysis.DEFAULT_z_pixels          = Z_PIXELS;
 
 # Previous experiment data for comparison
 data_JSF = OrderedDict(
@@ -106,8 +108,8 @@ data_JSF = OrderedDict(
     [0.0179, 0.0233, 0.0409, 0.0536, 0.0883, 0.1095, 0.1713, 0.2487, 0.3697, 0.4765, 0.5786, 0.7757, 1.0655, 1.4630]) #QM
 );
 
-data_qm_f1_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP","QM_T$(TCelsius)_8M","qm_screen_profiles_f1_table.jld2")
-data_qm_f2_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP","QM_T$(TCelsius)_8M","qm_screen_profiles_f2_table.jld2")
+data_qm_f1_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP","QM_T$(TCELSIUS)_8M","qm_screen_profiles_f1_table.jld2")
+data_qm_f2_path = joinpath(BASE_PATH,"SIMULATIONS","2026Q2_SETUP","QM_T$(TCELSIUS)_8M","qm_screen_profiles_f2_table.jld2")
 
 # Importing data
 if isfile(OUTFILE_PROCESSED)
@@ -147,8 +149,8 @@ end
 
 jldopen(OUTFILE_PROCESSED, "r") do file
     if haskey(file["meta"], "TemperatureInCelsius")
-        @assert file["meta"]["TemperatureInCelsius"] == TCelsius "Experiment temperature doesn't match with the chosen for the simulation"
-        @info "Furnace temperature = $(TCelsius)°C"
+        @assert file["meta"]["TemperatureInCelsius"] == TCELSIUS "Experiment temperature doesn't match with the chosen for the simulation"
+        @info "Furnace temperature = $(TCELSIUS)°C"
     end
     if haskey(file["meta"], "SG1BfieldInTesla")
         currents = file["meta"]["SG1currentInA"]
@@ -304,11 +306,12 @@ scatter_attrs = (seriestype=:scatter, marker=(:circle,:white,4),
 base_plot_attrs = (size=(800,600), tickfontsize=11, guidefontsize=14, legendfontsize=10);
 log_axis_attrs = (;
     xaxis=log_xaxis, xticks=log_xticks, xlims=(1e-3,1.0))
-jldopen(joinpath(DATA_SUMMARY_PATH, data_directory * "_report_summary.jld2"), "w") do file
+
+jldopen(joinpath(DATA_SUMMARY_PATH, replace(data_directory * "_report_summary.jld2", "/" => "_")), "w") do file
     file["meta/Currents"]      = Iexp_coil
     file["meta/ErrorCurrents"] = ΔIexp_coil
     file["meta/n_Currents"]    = nI
-    file["meta/TemperatureK"]  = Temperature
+    file["meta/TemperatureK"]  = TKELVIN
     file["meta/nz"]            = nbins_list
     file["meta/λ0"]            = λ0_list
 
@@ -780,7 +783,7 @@ jldopen(joinpath(DATA_SUMMARY_PATH, data_directory * "_report_summary.jld2"), "w
             Currents (A)            : $(Iexp_coil)
             Currents Error (A)      : $(ΔIexp_coil)
             No. of currents         : $(nI)
-            Temperature (K)         : $(Temperature)
+            Temperature (K)         : $(TKELVIN)
 
         ANALYSIS PROPERTIES
             Binning                 : $(nz)
@@ -919,7 +922,7 @@ alert("EXPERIMENTAL ANALYSIS COMPLETED!")
 #     file[JLD2_MyTools.make_keypath_qm(2,0.100,0.01)]
 # end
 
-# data_QM_old = jldopen(joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","QM_T$(TCelsius)_8M","qm_screen_profiles_f1_table.jld2"), "r") do file
+# data_QM_old = jldopen(joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","QM_T$(TCELSIUS)_8M","qm_screen_profiles_f1_table.jld2"), "r") do file
 #     file[JLD2_MyTools.make_keypath_qm(2,0.100,0.01)]
 # end
 
