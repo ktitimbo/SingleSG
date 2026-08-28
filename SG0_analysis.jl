@@ -385,10 +385,15 @@ plot!(
 data_directories = [
         "20260318/Round1",
         "20260318/Round2",
-        # "20260318/Round3",
-        # "20260318/Round4",
+        # "20260318/Round3",#
+        # "20260318/Round4",#
         ];
 nd = length(data_directories);
+
+
+data_processed_1 = load(joinpath(BASE_PATH,"EXPERIMENTS",data_directories[1], "data_processed.jld2"))["data"];
+data_processed_2 = load(joinpath(BASE_PATH,"EXPERIMENTS",data_directories[2], "data_processed.jld2"))["data"];
+
 
 for data_directory in data_directories
     printstyled("\t" * data_directory * "\n"; color=:cyan, bold=true)
@@ -702,9 +707,9 @@ end
 
 scale_factor = 6.5e-3
 
-mark_symbol      = [:circle, :rect]
-colores          = (:darkgreen, :indigo)
-current_polarity = ("+", "–")
+mark_symbol      = [:circle, :rect, :diamond, :xcross]
+colores          = (:darkgreen, :indigo, :orange, :dodgerblue3)
+current_polarity = ("+", "–","+", "–")
 
 tol = 1e-9
 
@@ -806,18 +811,18 @@ display(fig1)
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 data_directories = [
-        "20260617/Round1",
-        "20260617/Round2",
-        "20260618/Round1",
-        "20260618/Round2",
-        "20260622/Round1",
-        "20260622/Round2",
-        "20260623/Round1",
-        "20260623/Round2",
-        "20260624/Round1",
-        "20260624/Round2",
-        "20260626/Round1",
-        "20260626/Round2",
+        # "20260617/Round1",
+        # "20260617/Round2",
+        # "20260618/Round1",
+        # "20260618/Round2",
+        # "20260622/Round1",
+        # "20260622/Round2",
+        # "20260623/Round1",
+        # "20260623/Round2",
+        # "20260624/Round1",
+        # "20260624/Round2",
+        # "20260626/Round1",
+        # "20260626/Round2",
         "20260629/Round1",
         "20260629/Round2",
         "20260701/Round1",
@@ -1678,7 +1683,6 @@ for (idx, color) in zip(sg0_indices, sg0_colors)
         )
     end
 end
-
 ymin, ymax = ylims(fig_linlin_2) ./ 10;
 plot!(fig_linlin_2,
     xlims = (-0.02, 4),
@@ -2967,7 +2971,6 @@ for (ridx, rcolor) in zip(ref_idx, ref_colors)
         line = (:solid, 1, rcolor),
     )
 end
-
 # ------------------------------------------------------------
 # SG0 curves
 # ------------------------------------------------------------
@@ -3126,7 +3129,6 @@ plot!(fig_linlin_1,
     xscale=:log10,
 );
 display(fig_linlin_1)
-
 
 
 
@@ -3329,7 +3331,7 @@ pairs = [
 ]
 
 # Map each index to its pair
-pair_of_idx = Dict(idx => pair for pair in pairs for idx in pair)
+pair_of_idx = OrderedDict(idx => pair for pair in pairs for idx in pair)
 
 plt = plot(
     xlabel = "SG0 current (A)",
