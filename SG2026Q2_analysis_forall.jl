@@ -47,7 +47,7 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directories =  ["20260819", "20260821", "20260826"]
+data_directories =  ["20260819", "20260821", "20260826", "20260827"]
 data_directory      = data_directories[3] ;
 # Furnace 
 const TCELSIUS = 205
@@ -290,7 +290,7 @@ sort_Iexp_perm = sortperm(Iexp_coil);
 
 
 # Binning for the analysis
-nbins_list  = (1, 2)
+nbins_list  = (1, 2, 4)
 λ0_list     = (0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.10)
 PARAM_GRID = [(nz, λ0) for λ0 in λ0_list, nz in nbins_list] |> vec
 const Cell = Union{Missing, String, Int, Float64}
