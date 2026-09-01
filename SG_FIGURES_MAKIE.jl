@@ -37,7 +37,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 cd(@__DIR__) ;
 const BASE_PATH = raw"F:\SternGerlachExperiments";
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
-const OUTDIR    = joinpath(@__DIR__, "data_studies", RUN_STAMP);
+const OUTDIR    = joinpath(@__DIR__, "data_studies", "FINALIMAGES"*RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 const TEMP_DIR = joinpath(@__DIR__,"artifacts", "JuliaTemp")
@@ -418,12 +418,12 @@ nI_idx = 19
 F1_mean = dropdims(
     mean(@view(exp_data[:F1ProcessedImages][:, :, :, nI_idx]), dims=3),
     dims=3,
-)
+);
 
 F2_mean = dropdims(
     mean(@view(exp_data[:F2ProcessedImages][:, :, :, nI_idx]), dims=3),
     dims=3,
-)
+);
 
 function plot_heatmap_with_profile(
         data;
@@ -659,9 +659,234 @@ extrema(filter(isfinite, F1_mean))
 
 ##################################################################################################
 ##################################################################################################
+# Coil currents
+Icoils = [0.00,
+            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
+            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
+            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
+            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
+            0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
+];
+nI = length(Icoils);
+
+ki_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 
+    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 
+    1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 
+    2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 
+    3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 
+    4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5.0, 
+    5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 6.0, 
+    6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9, 7.0, 
+    7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 8.0, 
+    8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 9.0, 
+    9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 10.0, 
+    100.0, 1000.0, 10000.0, 100000.0];
+ki_fit = ki_list[30]*1e-6
+@info "Induction term" ki=ki_selected
+
+cqd_ki_path = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_6M","up","cqd_6000000_ki034_up_screen.jld2");
+cqd_ki = load(cqd_ki_path,"screen")[:data]
+
+function standard_error(x)
+    return std(x; corrected=true) ./ sqrt.(length(x))
+end
+
+Ic = Icoils[2:end]
+
+number_precessions = round(1/(TWOπ*ki_fit))
+collapse_time = inv.(ki_fit * abs(γₑ) * TheoreticalSimulation.BvsI.(Ic))
+
+# ---------------------------------------------------------------- collapse time
+fig = Figure()
+ax = Axis(fig[1, 1],
+    xlabel = "Current (A)",
+    ylabel = "Collapse time (μs)",
+    xscale = log10,
+    yscale = log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1, 10, 100], [L"10^{0}", L"10^{1}", L"10^{2}"]),
+)
+lines!(ax, Ic, 1e6 .* collapse_time,
+    color = :blue, linewidth = 2, label = L"Collapse time $\tau_{c}$")
+xlims!(ax, 1e-3, 1)
+ylims!(ax, 1, 3500)
+axislegend(ax)
+display(fig)
+save(joinpath(OUTDIR, "collapse_time.png"), fig)
+
+# ---------------------------------------------------------------- time of flight
+travel_times = [mean(inv.(cqd_ki[ic][:, 5] / y_SG)) for ic = 2:47]
+tof = 1e6 .* travel_times
+err = 1e6 .* [standard_error(inv.(cqd_ki[ic][:, 5] / y_SG)) for ic = 2:47]
+
+fig = Figure()
+ax = Axis(fig[1, 1],
+    xlabel = "Current (A)",
+    ylabel = "Time of flight (μs)",
+    xscale = log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+)
+band!(ax, Ic, tof .- err, tof .+ err, color = (:dodgerblue3, 0.1))
+lines!(ax, Ic, tof,
+    color = :dodgerblue3, linewidth = 2, label = L"Time of flight $\Delta t_{\mathrm{SG}}$")
+scatter!(ax, Ic, tof,
+    color = :white, strokecolor = :dodgerblue3, strokewidth = 1, markersize = 6)
+xlims!(ax, 1e-3, 1)
+axislegend(ax, position = :lb)
+fig
+save(joinpath(OUTDIR, "time_flight.png"), fig)
+
+@info @sprintf("The mean time of flight is (%d ± %d) μs ",
+    mean(1e6*travel_times), std(1e6*travel_times))
+
+# ---------------------------------------------------------------- combined (display only)
+err2 = 1e6 .* [standard_error(inv.(cqd_ki[ic][:, 5] / 0.07)) for ic = 2:47]
+
+fig = Figure()
+ax = Axis(fig[1, 1],
+    xlabel = "Current (A)",
+    ylabel = "Time (μs)",
+    xscale = log10,
+    yscale = log10,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1, 10, 100], [L"10^{0}", L"10^{1}", L"10^{2}"]),
+)
+band!(ax, Ic, tof .- err2, tof .+ err2, color = (:dodgerblue3, 0.1))
+lines!(ax, Ic, tof,
+    color = :dodgerblue3, linewidth = 2, label = L"Time of flight $\Delta t_{\mathrm{SG}}$")
+lines!(ax, Ic, 1e6 .* collapse_time,
+    color = :darkgreen, linewidth = 2, label = L"Collapse time $\tau_{c}$")
+xlims!(ax, 1e-3, 1)
+ylims!(ax, 1, 4000)
+axislegend(ax, position = :lb)
+fig
+
+# ---------------------------------------------------------------- collapse cycles
+fig = Figure(size = (800, 600))
+ax = Axis(fig[1, 1],
+    xlabel = "Current (A)",
+    ylabel = "Number of collapse times",
+    xscale = log10,
+    yscale = log10,
+    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([0.1, 1, 10, 100], [L"10^{-1}", L"1", L"10", L"100"]),
+
+    # --- axis label font sizes ---
+    xlabelsize = 20,
+    ylabelsize = 20,
+
+    # --- tick label font sizes ---
+    xticklabelsize = 16,
+    yticklabelsize = 16,
+
+    # x/y gridlines as before …
+    xgridvisible = true, xminorticksvisible = true,
+    xminorgridvisible = true, xminorticks = IntervalsBetween(9),
+    ygridvisible = true, yminorticksvisible = true,
+    yminorgridvisible = true, yminorticks = IntervalsBetween(9),
+)
+hspan!(ax, 0.1, 1, color = (:black, 0.2))                       # behind the curve
+lines!(ax, Ic, travel_times ./ collapse_time,
+    color = :red, linewidth = 2, label = L"$\Delta t_{\mathrm{SG}} / \tau_{c}$")
+xlims!(ax, 1e-2, 1)
+ylims!(ax, 0.7, 40)
+axislegend(ax, position = :lt, labelsize = 16)
+fig
+save(joinpath(OUTDIR, "collapse_cycles.png"), fig)
+
+
+# Current (A) — log-spaced sample grid
+I_A = [0.0266, 0.0292, 0.0320, 0.0352, 0.0386, 0.0424, 0.0465, 0.0510,
+       0.0560, 0.0614, 0.0674, 0.0740, 0.0812, 0.0891, 0.0978, 0.1073,
+       0.1178, 0.1293, 0.1419, 0.1557, 0.1709, 0.1875, 0.2058, 0.2258,
+       0.2478, 0.2720, 0.2985, 0.3276, 0.3595, 0.3946, 0.4330, 0.4752,
+       0.5215, 0.5724, 0.6281, 0.6894, 0.7565, 0.8303, 0.9112, 1.0000]
+
+# Red curve — Rel.Error (ℰ_QM − ℰ_exp)/ℰ_exp
+rel_err_QM = [0.1457, 0.1717, 0.1935, 0.2054, 0.2115, 0.2112, 0.2066, 0.2000,
+              0.1921, 0.1804, 0.1696, 0.1587, 0.1500, 0.1430, 0.1370, 0.1304,
+              0.1196, 0.1045, 0.0913, 0.0826, 0.0777, 0.0699, 0.0609, 0.0511,
+              0.0413, 0.0326, 0.0294, 0.0294, 0.0326, 0.0370, 0.0370, 0.0320,
+              0.0239, 0.0130, 0.0033, -0.0022, 0.0005, 0.0065, 0.0043, -0.0087]
+
+# Blue curve — Rel.Error (ℰ_CQD − ℰ_exp)/ℰ_exp
+rel_err_CQD = [-0.0087, 0.0000, 0.0056, 0.0076, 0.0076, 0.0057, 0.0033, 0.0000,
+               -0.0022, -0.0043, -0.0065, -0.0087, -0.0065, -0.0043, 0.0000, 0.0022,
+                0.0022, -0.0032, -0.0076, -0.0087, -0.0065, -0.0065, -0.0087, -0.0130,
+               -0.0174, -0.0196, -0.0196, -0.0152, -0.0087, -0.0011, 0.0022, 0.0000,
+               -0.0062, -0.0130, -0.0207, -0.0239, -0.0196, -0.0109, -0.0109, -0.0217]
+
+N_collapses = travel_times ./ collapse_time
+
+# --- digitized error curves live on I_A; N_collapse lives on Ic ---
+# (I_A, rel_err_QM, rel_err_CQD  from the extraction; Ic, N_collapse  are yours)
+
+"""
+    interp_loglin(xq, x, y)
+
+Linear interpolation of `y(x)` evaluated at `xq`, done in log10(x) space
+(appropriate for a log-current axis). Returns NaN outside the range of `x`.
+"""
+function interp_loglin(xq, x, y)
+    p  = sortperm(x)
+    lx = log10.(x[p]); ys = y[p]
+    lq = log10.(xq)
+    out = similar(float.(xq))
+    for (k, q) in enumerate(lq)
+        if q < lx[1] || q > lx[end]
+            out[k] = NaN                       # no extrapolation
+        else
+            j = searchsortedlast(lx, q)
+            j = min(j, length(lx) - 1)
+            t = (q - lx[j]) / (lx[j+1] - lx[j])
+            out[k] = ys[j] + t * (ys[j+1] - ys[j])
+        end
+    end
+    return out
+end
+
+# --- put both errors on the Ic grid (same grid as N_collapse) ---
+errQM_on_Ic  = interp_loglin(Ic, I_A, rel_err_QM)
+errCQD_on_Ic = interp_loglin(Ic, I_A, rel_err_CQD)
+
+# --- keep only currents inside the digitized range (drop the NaNs) ---
+keep = .!isnan.(errQM_on_Ic)          # QM and CQD share the same I_A range
+dτ   = N_collapses[keep]
+eQM  = errQM_on_Ic[keep]
+eCQD = errCQD_on_Ic[keep]
+
+# order by N_collapse so the connecting line is monotone along x
+o    = sortperm(dτ)
+dτ, eQM, eCQD = dτ[o], eQM[o], eCQD[o]
+
+# ---------------------------------------------------------------- plot
+fig = Figure(size = (800, 600))
+ax = Axis(fig[1, 1],
+    xlabel = "Number of collapse cycles",
+    ylabel = "Relative error",
+    xlabelsize = 20, ylabelsize = 20,
+    xticklabelsize = 16, yticklabelsize = 16,
+)
+scatterlines!(ax, dτ, eQM,  color = :blue,  markersize = 8,
+    label = L"(\mathcal{E}_{QM}-\mathcal{E}_{exp})/\mathcal{E}_{exp}")
+scatterlines!(ax, dτ, eCQD, color = :red, markersize = 8,
+    label = L"(\mathcal{E}_{CQD}-\mathcal{E}_{exp})/\mathcal{E}_{exp}")
+hlines!(ax, 0, color = (:black, 0.4), linestyle = :dash)
+axislegend(ax, position = :rt, labelsize = 16)
+fig
+save(joinpath(OUTDIR, "relerr_vs_collapsecycles.png"), fig)
+
+
+
+
+##################################################################################################
+##################################################################################################
 ## Main plot
 
-BASE_PATH
+data_2025 = load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_xkl","data_averaged_2.jld2"),"data")
 
-load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_xkl","data_averaged_2.jld2"),"data")
+data_2025[:]
+
+
 load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_2025","data_averaged_2.jld2"),"data")
+
