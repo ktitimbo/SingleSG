@@ -868,7 +868,7 @@ ax = Axis(fig[1, 1],
     xticklabelsize = 16, yticklabelsize = 16,
 )
 scatterlines!(ax, dτ, eQM,  color = :blue,  markersize = 8,
-    label = L"(\mathcal{E}_{QM}-\mathcal{E}_{exp})/\mathcal{E}_{exp}")
+    label = L"(\mathcal{z}_{\mathrm{QM}}-\mathcal{z}_{\mathrm{exp}})/\mathcal{E}_{\mathrm{exp}}")
 scatterlines!(ax, dτ, eCQD, color = :red, markersize = 8,
     label = L"(\mathcal{E}_{CQD}-\mathcal{E}_{exp})/\mathcal{E}_{exp}")
 hlines!(ax, 0, color = (:black, 0.4), linestyle = :dash)
