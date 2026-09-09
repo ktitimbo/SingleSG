@@ -2285,6 +2285,27 @@ CSV.write(joinpath(OUTDIR, "data_sim.csv"),
 
 
 
+# =============================================================================
+# GOODNESS OF FIT — calibrated CQD vs calibrated QM on the scattered points
+#
+# Both models are compared with the *raw* scattered experiment `data_sc`
+# (spline at the grouped currents, propagated δz), each divided by its own
+# tail-fitted calibration factor:
+#     y_CQD = ki_itp(I, kᵢ_fit) / s_CQD      (k = 2 fitted parameters: kᵢ, s)
+#     y_QM  = zqm(I)            / s_QM       (k = 1 fitted parameter : s)
+# The scattered points are approximately independent, so — unlike the smoothed
+# continuous curve — the χ² statistic, its p-value and AIC/BIC are meaningful
+# here. All residual metrics are computed in natural-log space.
+# =============================================================================
+
+"""
+    FitStats
+
+Container for the log-space goodness-of-fit metrics returned by
+`goodness_of_fit`: `logMSE`, `logRMSE`, `R2_log`, `chi2_log`, `chi2_red`
+(reduced χ²), `p_chi2` (χ² tail p-value), `AIC`, `BIC` and `NMAD`
+(normalised median absolute deviation of the residuals).
+"""
 struct FitStats
     logMSE::Float64
     logRMSE::Float64
@@ -2298,47 +2319,48 @@ struct FitStats
 end
 
 
+"""
+    goodness_of_fit(x, y, ypred; σ=nothing, k=0)
+
+Evaluate how well model predictions `ypred` match observations `y` (over
+support `x`), working in **natural-log** space where the SG curves are roughly
+power-law. `k` is the number of fitted model parameters (used for the degrees
+of freedom and by AIC/BIC).
+
+Always returns `logMSE`, `logRMSE`, `R2_log` and the robust scatter `NMAD`.
+When per-point uncertainties `σ` are given they are propagated to log space
+(`σ_log ≈ σ/y`) and the χ² statistic, reduced χ² (`χ²/(N−k)`), χ² p-value and
+χ²-based AIC/BIC are computed; otherwise those are `NaN` and AIC/BIC fall back
+to a `logMSE`-based surrogate.
+
+Returns a `FitStats`.
+"""
 function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
     @assert length(x) == length(y) == length(ypred)
-
     N = length(y)
 
-    # --- residuals in log-space ---
+    # residuals in natural-log space (model − data, same sign as relerr/pull)
     logy    = log.(y)
     logpred = log.(ypred)
-    r       = logy .- logpred
+    r       = logpred .- logy
 
-    # --- core metrics in log-space ---
     logMSE  = mean(r .^ 2)
     logRMSE = sqrt(logMSE)
     R2_log  = 1 - sum(r .^ 2) / sum((logy .- mean(logy)) .^ 2)
+    NMAD    = 1.4826 * median(abs.(r))
 
-    # --- robust scatter (NMAD) ---
-    NMAD = 1.4826 * median(abs.(r))
-
-    # --- χ², p-value, AIC, BIC ---
     if isnothing(σ)
-        # No uncertainties: we cannot do a proper χ² test
-        chi2_log = NaN
-        chi2_red = NaN
-        p_chi2   = NaN
-        # Use logMSE as a surrogate for variance in "likelihood"
-        AIC = 2k + N * log(logMSE)
+        chi2_log = NaN; chi2_red = NaN; p_chi2 = NaN
+        AIC = 2k + N * log(logMSE)          # logMSE as variance surrogate
         BIC = k * log(N) + N * log(logMSE)
     else
         @assert length(σ) == N
-        # Propagate σ into log-space: σ_log ≈ σ / y
-        σlog    = σ ./ y
+        σlog     = σ ./ y                   # δ(ln y) ≈ σ/y
         chi2_log = sum((r ./ σlog) .^ 2)
-        dof      = max(N - k, 1)  # degrees of freedom
+        dof      = max(N - k, 1)
         chi2_red = chi2_log / dof
-
-        # p-value: P(χ² >= observed χ² | dof)
-        dist   = Chisq(dof)
-        p_chi2 = ccdf(dist, chi2_log)  # 1 - cdf(dist, chi2_log)
-
-        # AIC/BIC using χ² (Gaussian likelihood)
-        AIC = 2k + chi2_log
+        p_chi2   = ccdf(Chisq(dof), chi2_log)
+        AIC = 2k + chi2_log                 # Gaussian likelihood, up to a constant
         BIC = k * log(N) + chi2_log
     end
 
@@ -2346,192 +2368,183 @@ function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
 end
 
 
-x_exp = data[:,1]
-y_exp = data[:,3] ./ scaled_mag
-σ_exp = data[:,4] ./ scaled_mag
-y_CQD = ki_itp.(x_exp, Ref(fit_scaled.ki))
-y_QM  = zqm.(x_exp) 
+# --- inputs: raw scattered experiment, calibrated models ----------------------
+x_exp = data_sc[:, 1]
+y_exp = data_sc[:, 3]
+σ_exp = data_sc[:, 4]
+y_CQD = ki_itp.(x_exp, Ref(fit_cs.ki)) ./ fit_cs.scale
+y_QM  = zqm.(x_exp)                    ./ fit_qs.scale
 
-stats_CQD = goodness_of_fit(x_exp, y_exp, y_CQD; σ = σ_exp, k = 2)
-stats_QM  = goodness_of_fit(x_exp, y_exp, y_QM;  σ = σ_exp, k = 1)
 
-metrics = [
-    "logMSE",
-    "logRMSE",
-    "R2_log",
-    "chi2_log",
-    "chi2_red",
-    "p_chi2",
-    "AIC",
-    "BIC",
-    "NMAD",
-]
+stats_CQD = goodness_of_fit(x_exp, y_exp, y_CQD; σ = σ_exp, k = 2)   # kᵢ + s
+stats_QM  = goodness_of_fit(x_exp, y_exp, y_QM;  σ = σ_exp, k = 1)   # s only
+@info "Goodness of fit on $(length(x_exp)) scattered points" ΔAIC_CQD_minus_QM = stats_CQD.AIC - stats_QM.AIC ΔBIC_CQD_minus_QM = stats_CQD.BIC - stats_QM.BIC
 
-data = [
-    stats_CQD.logMSE   stats_QM.logMSE
-    stats_CQD.logRMSE  stats_QM.logRMSE
-    stats_CQD.R2_log   stats_QM.R2_log
-    stats_CQD.chi2_log stats_QM.chi2_log
-    stats_CQD.chi2_red stats_QM.chi2_red
-    stats_CQD.p_chi2   stats_QM.p_chi2
-    stats_CQD.AIC      stats_QM.AIC
-    stats_CQD.BIC      stats_QM.BIC
-    stats_CQD.NMAD     stats_QM.NMAD
-]
+
+# --- comparison table ---------------------------------------------------------
+metrics = ["logMSE", "logRMSE", "R2_log", "chi2_log", "chi2_red", "p_chi2", "AIC", "BIC", "NMAD"]
+gof_table = hcat([getfield(stats_CQD, Symbol(m)) for m in metrics],
+                 [getfield(stats_QM,  Symbol(m)) for m in metrics])
 
 lower_is_better  = Set(["logMSE", "logRMSE", "chi2_log", "chi2_red", "AIC", "BIC", "NMAD"])
 higher_is_better = Set(["R2_log", "p_chi2"])
 
+# highlight, per row, the better of the two models
 hl_best = TextHighlighter(
     (tbl, i, j) -> begin
-        # Only evaluate columns 1 (CQD) and 2 (QM)
-        if !(j == 1 || j == 2)
-            return false
-        end
-
-        metric = metrics[i]   # row label from your vector
-        v_CQD = tbl[i, 1]
-        v_QM  = tbl[i, 2]
-
-        # safety: both numeric
-        if !(isa(v_CQD, Number) && isa(v_QM, Number))
-            return false
-        end
-
+        (j == 1 || j == 2) || return false
+        v_CQD, v_QM = tbl[i, 1], tbl[i, 2]
+        (isa(v_CQD, Number) && isa(v_QM, Number)) || return false
+        metric = metrics[i]
         if metric in lower_is_better
-            best = min(v_CQD, v_QM)
-            return tbl[i, j] == best
-
+            return tbl[i, j] == min(v_CQD, v_QM)
         elseif metric in higher_is_better
-            best = max(v_CQD, v_QM)
-            return tbl[i, j] == best
+            return tbl[i, j] == max(v_CQD, v_QM)
         end
-
         return false
     end,
     crayon"fg:black bg:#fff7a1"
 );
 
-
 pretty_table(
-    data;
+    gof_table;
+    title         = "Goodness of fit — calibrated models vs raw scattered data (k: CQD = 2, QM = 1)",
     column_labels = ["CQD", "QM"],
     row_labels    = metrics,
     row_label_column_alignment = :l,
     highlighters  = [hl_best],
-    alignment     = [:c,:c],
+    alignment     = [:c, :c],
     style         = TextTableStyle(
                 first_line_column_label = crayon"yellow bold",
                 table_border  = crayon"blue bold",
                 column_label  = crayon"yellow bold",
+                title = crayon"bold red",
                 ),
     table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-    equal_data_column_widths= true,
+    equal_data_column_widths = true,
 )
 
+CSV.write(joinpath(OUTDIR, "goodness_of_fit.csv"),
+          DataFrame(metric = metrics, CQD = gof_table[:, 1], QM = gof_table[:, 2]))
 
 
+"""
+    make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD, stats_QM; σ=nothing)
+
+Diagnostic figure for the goodness of fit of the two *calibrated* models
+(CQD: `ki_itp/s_CQD`, QM: `zqm/s_QM`) against the raw scattered experiment.
+
+Panels
+1. data (with y-error bars if `σ` is given) vs both models, log–log;
+2. natural-log residuals `log(model) − log(exp)` vs current, annotated with
+   logRMSE and R²_log;
+3. pulls `(model − exp)/σ` vs current with ±1σ/±2σ bands, annotated with the
+   reduced χ² (only if `σ` is given; otherwise an empty placeholder);
+4. histogram of the log residuals, annotated with NMAD and logRMSE.
+
+Returns `(p_data, p_resid, p_pull, p_hist)`.
+"""
 function make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD::FitStats, stats_QM::FitStats; σ = nothing)
-"""
-    make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD, stats_QM; σ = nothing)
+    # residuals in natural-log space, sign convention model − data (as in goodness_of_fit)
+    r_CQD = log.(y_CQD) .- log.(y)
+    r_QM  = log.(y_QM)  .- log.(y)
 
-Create a set of diagnostic plots illustrating the goodness-of-fit metrics
-for two models (CQD and QM) against experimental data.
-
-Plots:
-1. Data vs models in log-log space.
-2. Log-space residuals vs x.
-3. Histogram of log-space residuals with NMAD and logRMSE annotated.
-4. Bar chart comparing key scalar metrics (logRMSE, R2_log, chi2_red, AIC, BIC, NMAD).
-
-Returns a tuple of plots: (p_data, p_residuals, p_hist, p_bars).
-"""
-    # --- residuals in log-space ---
-    logy     = log.(y)
-    logCQD   = log.(y_CQD)
-    logQM    = log.(y_QM)
-    r_CQD    = logCQD .- logy
-    r_QM     = logQM .- logy
-    yerr = σ
+    xt = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"])
 
     # ---------------------------------------------------
-    # 1) Data vs models in log-log
+    # 1) Data vs calibrated models (log–log)
     # ---------------------------------------------------
-    p_data = plot(
-        x, y;
-        yerror = yerr, 
+    p_data = plot(x, y;
+        yerror = σ,
         seriestype = :scatter,
-        marker=(:circle,:white,3,stroke(:black,0.8)),
-        xscale = :log10,
-        yscale = :log10,
+        marker = (:circle, :white, 3, stroke(:black, 0.8)),
+        xscale = :log10, yscale = :log10, xticks = xt,
         label = "Experiment",
         xlabel = "Coil Current (A)",
         ylabel = "Peak position (mm)",
-        title = "Data vs Models (log-log space)",
+        title = "Data vs calibrated models",
         legend = :bottomright,
     )
-    plot!(p_data, x, y_CQD; label="CQD model", line = (:solid,:red,1.5))
-    plot!(p_data, x, y_QM;  label="QM model",  line =(:dot,:blue,2))
+    plot!(p_data, x, y_CQD; label = "CQD", line = (:solid, :red, 1.5))
+    plot!(p_data, x, y_QM;  label = "QM",  line = (:dot,   :blue, 2))
 
     # ---------------------------------------------------
-    # 2) Log residuals vs x
+    # 2) Log residuals vs current
     # ---------------------------------------------------
-    p_resid = plot(
-        x, r_CQD;
+    p_resid = plot(x, r_CQD;
         seriestype = :scatter,
-        marker = (:circle,5,0.70,:salmon3, stroke(0.8,:red4)),
+        marker = (:circle, 5, 0.70, :salmon3, stroke(0.8, :red4)),
+        xscale = :log10, xticks = xt,
         xlabel = "Coil Current (A)",
-        ylabel = L"\mathrm{log}(y_{model}) - \mathrm{log}(y_{exp})",
-        title = "Log-space Residuals",
-        label = "CQD residuals",
-        xscale = :log10,
+        ylabel = L"\ln(y_{\mathrm{model}}) - \ln(y_{\mathrm{exp}})",
+        title = "Log-space residuals",
+        label = "CQD",
+        legend = :topright,
     )
-    scatter!(p_resid, x, r_QM; label="QM residuals",
-        marker = (:circle,5,0.70,:royalblue3, stroke(0.8,:blue4)),
-    )
-    hline!(p_resid, [0.0]; c=:black, ls=:dash, label="perfect fit")
-    # Annotate with global metrics
-    txt_CQD = @sprintf "CQD: logRMSE = %.3g, R2_log = %.4f" stats_CQD.logRMSE stats_CQD.R2_log
-    txt_QM  = @sprintf "QM:  logRMSE = %.3g, R2_log = %.4f" stats_QM.logRMSE  stats_QM.R2_log
-    x_annot = x[argmin(abs.(x .- median(x)))]  # roughly middle x
-    ymin, ymax = extrema(vcat(r_CQD, r_QM))
-    annotate!(p_resid, (x_annot, 0.8*ymax, Plots.text(txt_CQD, 8)))
-    annotate!(p_resid, (x_annot, 0.8*ymax - 0.1*(ymax-ymin), Plots.text(txt_QM, 8)))
+    scatter!(p_resid, x, r_QM; label = "QM",
+        marker = (:circle, 5, 0.70, :royalblue3, stroke(0.8, :blue4)))
+    hline!(p_resid, [0.0]; c = :black, ls = :dash, label = false)
+    txt_CQD = @sprintf "CQD: logRMSE = %.3g, R²_log = %.4f" stats_CQD.logRMSE stats_CQD.R2_log
+    txt_QM  = @sprintf "QM:  logRMSE = %.3g, R²_log = %.4f" stats_QM.logRMSE  stats_QM.R2_log
+    x_annot = x[argmin(abs.(x .- median(x)))]
+    rmin, rmax = extrema(vcat(r_CQD, r_QM))
+    annotate!(p_resid, (x_annot, rmin + 0.15(rmax - rmin), Plots.text(txt_CQD, 8)))
+    annotate!(p_resid, (x_annot, rmin + 0.05(rmax - rmin), Plots.text(txt_QM,  8)))
 
     # ---------------------------------------------------
-    # 3) Histogram of residuals with NMAD / logRMSE
+    # 3) Pulls vs current (needs σ)
     # ---------------------------------------------------
-    p_hist = histogram(
-        r_CQD;
-        normalize = true,
-        color=:red,
-        alpha = 0.4,
-        label = "CQD residuals",
-        xlabel = "log-space residual r",
-        ylabel = "Normalized count",
+    if σ === nothing
+        p_pull = plot(; title = "Pulls (no σ supplied)", framestyle = :none)
+    else
+        pu_CQD = pull(y_CQD, y, σ)
+        pu_QM  = pull(y_QM,  y, σ)
+        p_pull = plot(;
+            xscale = :log10, xticks = xt,
+            xlabel = "Coil Current (A)",
+            ylabel = L"(y_{\mathrm{model}} - y_{\mathrm{exp}})/\sigma_{\mathrm{exp}}",
+            title = "Normalised residuals (pulls)",
+            legend = :topright,
+        )
+        hspan!(p_pull, [-2, 2]; fillalpha = 0.08, color = :gray, linealpha = 0, label = L"\pm 2\sigma")
+        hspan!(p_pull, [-1, 1]; fillalpha = 0.15, color = :gray, linealpha = 0, label = L"\pm 1\sigma")
+        hline!(p_pull, [0.0]; c = :black, ls = :dash, label = false)
+        scatter!(p_pull, x, pu_CQD;
+            label = L"CQD: $\chi^{2}_{\mathrm{red}} = %$(round(stats_CQD.chi2_red, sigdigits=3))$",
+            marker = (:circle, 5, 0.70, :salmon3, stroke(0.8, :red4)))
+        scatter!(p_pull, x, pu_QM;
+            label = L"QM: $\chi^{2}_{\mathrm{red}} = %$(round(stats_QM.chi2_red, sigdigits=3))$",
+            marker = (:circle, 5, 0.70, :royalblue3, stroke(0.8, :blue4)))
+    end
+
+    # ---------------------------------------------------
+    # 4) Histogram of log residuals
+    # ---------------------------------------------------
+    p_hist = histogram(r_CQD;
+        normalize = true, color = :red, alpha = 0.4,
+        label = "CQD",
+        xlabel = "log-space residual",
+        ylabel = "Normalised count",
         title = "Distribution of log-space residuals",
+        legend = :topright,
     )
-    histogram!(p_hist, r_QM; 
-        normalize = true, 
-        color=:blue,
-        alpha = 0.4, 
-        label="QM residuals")
-    vline!(p_hist, [0.0]; c=:black, ls=:dash, lw=1, label="r = 0")
-    # annotate NMAD and logRMSE
+    histogram!(p_hist, r_QM; normalize = true, color = :blue, alpha = 0.4, label = "QM")
+    vline!(p_hist, [0.0]; c = :black, ls = :dash, lw = 1, label = false)
     txt2_CQD = @sprintf "CQD: NMAD = %.3g, logRMSE = %.3g" stats_CQD.NMAD stats_CQD.logRMSE
     txt2_QM  = @sprintf "QM:  NMAD = %.3g, logRMSE = %.3g" stats_QM.NMAD  stats_QM.logRMSE
-    x_hist_min, x_hist_max = extrema(vcat(r_CQD, r_QM))
-    y_hist_max = Plots.ylims(p_hist)[2]
-    annotate!(p_hist, (-0.6x_hist_min, 0.7y_hist_max, Plots.text(txt2_CQD, 8, :left)))
-    annotate!(p_hist, (-0.6x_hist_min, 0.6y_hist_max, Plots.text(txt2_QM, 8, :left)))
+    hx_lo, hx_hi = Plots.xlims(p_hist)
+    hy_hi        = Plots.ylims(p_hist)[2]
+    annotate!(p_hist, (hx_lo + 0.03(hx_hi - hx_lo), 0.90hy_hi, Plots.text(txt2_CQD, 8, :left)))
+    annotate!(p_hist, (hx_lo + 0.03(hx_hi - hx_lo), 0.82hy_hi, Plots.text(txt2_QM,  8, :left)))
 
-    return p_data, p_resid, p_hist
+    return p_data, p_resid, p_pull, p_hist
 end
 
-p1, p2, p3 = make_diagnostic_plots(x_exp, y_exp, y_CQD, y_QM, stats_CQD, stats_QM; σ=σ_exp)
-fig = plot(p1, p2, p3; 
-    layout = (2, 2), 
-    size = (1000, 1000),
-    left_margin=3mm,
+p1, p2, p3, p4 = make_diagnostic_plots(x_exp, y_exp, y_CQD, y_QM, stats_CQD, stats_QM; σ = σ_exp)
+fig = plot(p1, p2, p3, p4;
+    layout = (2, 2),
+    size = (1200, 1000),
+    left_margin = 4mm, bottom_margin = 3mm,
 )
-savefig(fig, joinpath(OUTDIR,"fig007.$(FIG_EXT)"))
+display(fig)
+savefig(fig, joinpath(OUTDIR, "fig007.$(FIG_EXT)"))
