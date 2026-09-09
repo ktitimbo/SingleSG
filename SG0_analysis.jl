@@ -1031,179 +1031,179 @@ for (dirname, dirs_in_group) in grouped
             )
 
 
-            # data_pos = data[data.I0 .> 0, :]
-            # # ── Colour palette (one colour per SG0 current step) ─────────────────────
-            # colors_sg0 = palette(:darkrainbow, size(data,1));
-            # sg1_label = "$(round(1000 * data.I1[end], digits=2))mA"   # reused in titles
+            data_pos = data[data.I0 .> 0, :]
+            # ── Colour palette (one colour per SG0 current step) ─────────────────────
+            colors_sg0 = palette(:darkrainbow, size(data,1));
+            sg1_label = "$(round(1000 * data.I1[end], digits=2))mA"   # reused in titles
 
-            # # ── Overlay of all SG0 currents: z-position vs current ───────────────────
-            # common_scatter_kw = (seriestype=:scatter, marker=(:circle, 2, :white))
+            # ── Overlay of all SG0 currents: z-position vs current ───────────────────
+            common_scatter_kw = (seriestype=:scatter, marker=(:circle, 2, :white))
 
-            # fig1 = plot(data.I0, data.zf1;
-            #     common_scatter_kw..., yerror=data.errzf1,
-            #     label=L"$F=1$", markerstrokecolor=:red);
-            # plot!(fig1, data.I0, data.zf2;
-            #     common_scatter_kw..., yerror=data.errzf2,
-            #     label=L"$F=2$", markerstrokecolor=:blue);
-            # plot!(fig1, data.I0, mean([data.zf1, data.zf2]);
-            #     label="Centre", marker=(:diamond, :white),
-            #     markerstrokecolor=:gray47, line=(:dash, 1, :gray47));
-            # plot!(fig1;
-            #     xlabel="SG0 Current (A)",
-            #     foreground_color_legend=nothing, background_color_legend=nothing,
-            #     yformatter=y -> @sprintf("%.3f", y));
+            fig1 = plot(data.I0, data.zf1;
+                common_scatter_kw..., yerror=data.errzf1,
+                label=L"$F=1$", markerstrokecolor=:red);
+            plot!(fig1, data.I0, data.zf2;
+                common_scatter_kw..., yerror=data.errzf2,
+                label=L"$F=2$", markerstrokecolor=:blue);
+            plot!(fig1, data.I0, mean([data.zf1, data.zf2]);
+                label="Centre", marker=(:diamond, :white),
+                markerstrokecolor=:gray47, line=(:dash, 1, :gray47));
+            plot!(fig1;
+                xlabel="SG0 Current (A)",
+                foreground_color_legend=nothing, background_color_legend=nothing,
+                yformatter=y -> @sprintf("%.3f", y));
 
-            # fig2 = plot(data_pos.I0, data_pos.zf1;
-            #     common_scatter_kw..., yerror=data_pos.errzf1,
-            #     label=L"$F=1$", markerstrokecolor=:red);
-            # plot!(fig2, data_pos.I0, data_pos.zf2;
-            #     common_scatter_kw..., yerror=data_pos.errzf2,
-            #     label=L"$F=2$", markerstrokecolor=:blue);
-            # plot!(fig2, data_pos.I0, mean([data_pos.zf1, data_pos.zf2]),
-            #     label="Centre", marker=(:diamond, :white),
-            #     markerstrokecolor=:gray47, line=(:dash, 1, :gray47));
-            # plot!(fig2;
-            #     xscale=:log10,
-            #     foreground_color_legend=nothing, background_color_legend=nothing,
-            #     xlabel="SG0 Current (A)",
-            #     yformatter=y -> @sprintf("%.3f", y));
+            fig2 = plot(data_pos.I0, data_pos.zf1;
+                common_scatter_kw..., yerror=data_pos.errzf1,
+                label=L"$F=1$", markerstrokecolor=:red);
+            plot!(fig2, data_pos.I0, data_pos.zf2;
+                common_scatter_kw..., yerror=data_pos.errzf2,
+                label=L"$F=2$", markerstrokecolor=:blue);
+            plot!(fig2, data_pos.I0, mean([data_pos.zf1, data_pos.zf2]),
+                label="Centre", marker=(:diamond, :white),
+                markerstrokecolor=:gray47, line=(:dash, 1, :gray47));
+            plot!(fig2;
+                xscale=:log10,
+                foreground_color_legend=nothing, background_color_legend=nothing,
+                xlabel="SG0 Current (A)",
+                yformatter=y -> @sprintf("%.3f", y));
 
-            # fig3 = plot(data.I0, data.split ./ 6.5e-3;
-            #     common_scatter_kw..., yerror=data.errsplit ./ 6.5e-3,
-            #     label=L"$\Delta z$", markerstrokecolor=:darkgreen);
-            # plot!(fig3;
-            #     foreground_color_legend=nothing, background_color_legend=nothing,
-            #     xlabel="SG0 Current (A)", ylabel="Separation (px)", yminorticks=false);
+            fig3 = plot(data.I0, data.split ./ 6.5e-3;
+                common_scatter_kw..., yerror=data.errsplit ./ 6.5e-3,
+                label=L"$\Delta z$", markerstrokecolor=:darkgreen);
+            plot!(fig3;
+                foreground_color_legend=nothing, background_color_legend=nothing,
+                xlabel="SG0 Current (A)", ylabel="Separation (px)", yminorticks=false);
 
-            # fig4 = plot(data_pos.I0, data_pos.split ./ 6.5e-3;
-            #     common_scatter_kw..., yerror=data_pos.errsplit ./ 6.5e-3,
-            #     label=L"$\Delta z$", markerstrokecolor=:darkgreen);
-            # plot!(fig4;
-            #     xscale=:log10,
-            #     foreground_color_legend=nothing, background_color_legend=nothing,
-            #     xlabel="SG0 Current (A)", ylabel="Separation (px)", yminorticks=false);
+            fig4 = plot(data_pos.I0, data_pos.split ./ 6.5e-3;
+                common_scatter_kw..., yerror=data_pos.errsplit ./ 6.5e-3,
+                label=L"$\Delta z$", markerstrokecolor=:darkgreen);
+            plot!(fig4;
+                xscale=:log10,
+                foreground_color_legend=nothing, background_color_legend=nothing,
+                xlabel="SG0 Current (A)", ylabel="Separation (px)", yminorticks=false);
 
-            # fig = plot(fig1, fig2, fig3, fig4;
-            #     suptitle     = "$(data_directory) | SG1: $sg1_label",
-            #     layout       = (2, 2),
-            #     size         = (1000, 600),
-            #     link         = :x,
-            #     left_margin  = 5mm,
-            #     bottom_margin= 3mm,
-            # )
-            # plot!(fig[1]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
-            # plot!(fig[2]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
-            # display(fig)
+            fig = plot(fig1, fig2, fig3, fig4;
+                suptitle     = "$(data_directory) | SG1: $sg1_label",
+                layout       = (2, 2),
+                size         = (1000, 600),
+                link         = :x,
+                left_margin  = 5mm,
+                bottom_margin= 3mm,
+            )
+            plot!(fig[1]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
+            plot!(fig[2]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
+            display(fig)
             
-            # # ── Extract image arrays once, outside all loops ─────────────────────────
-            # f1imgs = data_processed[:F1ProcessedImages];
-            # f2imgs = data_processed[:F2ProcessedImages];
-            # sg1_label    = "$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA";
-            # current_label(i) = L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$";
+            # ── Extract image arrays once, outside all loops ─────────────────────────
+            f1imgs = data_processed[:F1ProcessedImages];
+            f2imgs = data_processed[:F2ProcessedImages];
+            sg1_label    = "$(data_directory) | SG1: $(round(1000*data.I1[end], digits=2))mA";
+            current_label(i) = L"$%$(round(1000*SG0_current[i]; digits=3))\mathrm{mA}$";
 
-            # legend_kw = (
-            #     legend                  = :topleft,
-            #     legend_title            = "SG0",
-            #     background_color_legend = :white,
-            #     foreground_color_legend = nothing,
-            # );
+            legend_kw = (
+                legend                  = :topleft,
+                legend_title            = "SG0",
+                background_color_legend = :white,
+                foreground_color_legend = nothing,
+            );
 
-            # # ── Pre-compute cleaned images and profiles for all currents ──────────────
-            # # Store so each quantity is computed once and reused in both plot blocks
-            # f1_images   = Vector{Matrix{Float64}}(undef, length(SG0_current));
-            # f2_images   = Vector{Matrix{Float64}}(undef, length(SG0_current));
-            # f1_profiles = Vector{Vector{Float64}}(undef, length(SG0_current));
-            # f2_profiles = Vector{Vector{Float64}}(undef, length(SG0_current));
+            # ── Pre-compute cleaned images and profiles for all currents ──────────────
+            # Store so each quantity is computed once and reused in both plot blocks
+            f1_images   = Vector{Matrix{Float64}}(undef, length(SG0_current));
+            f2_images   = Vector{Matrix{Float64}}(undef, length(SG0_current));
+            f1_profiles = Vector{Vector{Float64}}(undef, length(SG0_current));
+            f2_profiles = Vector{Vector{Float64}}(undef, length(SG0_current));
 
 
-            # for i in eachindex(SG0_current)
-            #     # Average over frames (dim 3), then mask
-            #     f1img = dropdims(mean(f1imgs[:,:,:,i], dims=3), dims=3)
-            #     f1img = mapwindow(median, f1img, (3, 3))
-            #     # f1img .*= isfinite.(f1img) .& (f1img .>= -10) .& (f1img .<= 1000)
+            for i in eachindex(SG0_current)
+                # Average over frames (dim 3), then mask
+                f1img = dropdims(mean(f1imgs[:,:,:,i], dims=3), dims=3)
+                f1img = mapwindow(median, f1img, (3, 3))
+                # f1img .*= isfinite.(f1img) .& (f1img .>= -10) .& (f1img .<= 1000)
 
-            #     f2img = dropdims(mean(f2imgs[:,:,:,i], dims=3), dims=3)
-            #     # f2img .*= isfinite.(f2img) .& (f2img .>=  -5) .& (f2img .<= 500)
+                f2img = dropdims(mean(f2imgs[:,:,:,i], dims=3), dims=3)
+                # f2img .*= isfinite.(f2img) .& (f2img .>=  -5) .& (f2img .<= 500)
 
-            #     f1_images[i]   = f1img
-            #     f2_images[i]   = f2img
+                f1_images[i]   = f1img
+                f2_images[i]   = f2img
 
-            #     # Profile: average over x (dim 1) after frame-averaging and masking
-            #     f1_profiles[i] = vec(mean(f1img, dims=1))
-            #     f2_profiles[i] = vec(mean(f2img, dims=1))
-            # end
+                # Profile: average over x (dim 1) after frame-averaging and masking
+                f1_profiles[i] = vec(mean(f1img, dims=1))
+                f2_profiles[i] = vec(mean(f2img, dims=1))
+            end
 
-            # # ── Per-current panels: heatmap (left) + z-profile (right) ───────────────
-            # camera_z_mm = 1e3 .* pixel_positions(z_pixels, 1, exp_pixelsize_z) 
-            # for i in eachindex(SG0_current)
-            #     f1vmax = Statistics.quantile(vec(f1_images[i]), 0.999)
-            #     f2vmax = Statistics.quantile(vec(f2_images[i]), 0.999)
+            # ── Per-current panels: heatmap (left) + z-profile (right) ───────────────
+            camera_z_mm = 1e3 .* pixel_positions(z_pixels, 1, exp_pixelsize_z) 
+            for i in eachindex(SG0_current)
+                f1vmax = Statistics.quantile(vec(f1_images[i]), 0.999)
+                f2vmax = Statistics.quantile(vec(f2_images[i]), 0.999)
 
-            #     plt1 = heatmap(f1_images[i];
-            #         xlabel = L"$z\ \ (\mathrm{px})$",
-            #         ylabel = L"$x\ \ (\mathrm{px})$",
-            #         cbar   = true, clims = (0, f1vmax),
-            #     )
-            #     plt2 = plot(camera_z_mm, f1_profiles[i];
-            #         line = (:solid, 1, colors_sg0[i]), label = current_label(i),
-            #         xlabel = L"$z\ \ (\mathrm{px})$", legend_kw...,
-            #     )
-            #     vline!(plt2, [f1_max[i]], line = (:dot, 1, colors_sg0[i]), label = false)
-            #     plt3 = heatmap(f2_images[i];
-            #         xlabel = L"$z\ \ (\mathrm{px})$",
-            #         ylabel = L"$x\ \ (\mathrm{px})$",
-            #         cbar   = true, clims = (0, f2vmax),
-            #     )
-            #     plt4 = plot(camera_z_mm, f2_profiles[i];
-            #         line = (:solid, 1, colors_sg0[i]), label = current_label(i),
-            #         xlabel = L"$z\ \ (\mathrm{px})$", legend_kw...,
-            #     )
-            #     vline!(plt4, [f2_max[i]], line = (:dot, 1, colors_sg0[i]), label = false)
+                plt1 = heatmap(f1_images[i];
+                    xlabel = L"$z\ \ (\mathrm{px})$",
+                    ylabel = L"$x\ \ (\mathrm{px})$",
+                    cbar   = true, clims = (0, f1vmax),
+                )
+                plt2 = plot(camera_z_mm, f1_profiles[i];
+                    line = (:solid, 1, colors_sg0[i]), label = current_label(i),
+                    xlabel = L"$z\ \ (\mathrm{px})$", legend_kw...,
+                )
+                vline!(plt2, [f1_max[i]], line = (:dot, 1, colors_sg0[i]), label = false)
+                plt3 = heatmap(f2_images[i];
+                    xlabel = L"$z\ \ (\mathrm{px})$",
+                    ylabel = L"$x\ \ (\mathrm{px})$",
+                    cbar   = true, clims = (0, f2vmax),
+                )
+                plt4 = plot(camera_z_mm, f2_profiles[i];
+                    line = (:solid, 1, colors_sg0[i]), label = current_label(i),
+                    xlabel = L"$z\ \ (\mathrm{px})$", legend_kw...,
+                )
+                vline!(plt4, [f2_max[i]], line = (:dot, 1, colors_sg0[i]), label = false)
 
-            #     plt = plot(plt1, plt2, plt3, plt4;
-            #         suptitle      = "$(data_directory) | SG1: $(round(1000*data.I1[i], digits=2))mA",
-            #         layout        = (2, 2),
-            #         link          = :x,
-            #         size          = (800, 450),
-            #         left_margin   = 3mm,
-            #         bottom_margin = 2mm,
-            #     )
-            #     plot!(plt[1]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
-            #     plot!(plt[2]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
-            #     display(plt)
-            # end
+                plt = plot(plt1, plt2, plt3, plt4;
+                    suptitle      = "$(data_directory) | SG1: $(round(1000*data.I1[i], digits=2))mA",
+                    layout        = (2, 2),
+                    link          = :x,
+                    size          = (800, 450),
+                    left_margin   = 3mm,
+                    bottom_margin = 2mm,
+                )
+                plot!(plt[1]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
+                plot!(plt[2]; xlabel="", xformatter=_->"", bottom_margin=-5mm)
+                display(plt)
+            end
 
-            # # ── Overlay: all currents on one z-profile plot per state ─────────────────
-            # overlay_kw = (
-            #     legend                  = :topleft,
-            #     legend_font             = 8,
-            #     foreground_color_legend = nothing,
-            #     legend_columns          = 2,
-            #     xlabel                  = L"$z \ \ (\mathrm{px})$",
-            # );
+            # ── Overlay: all currents on one z-profile plot per state ─────────────────
+            overlay_kw = (
+                legend                  = :topleft,
+                legend_font             = 8,
+                foreground_color_legend = nothing,
+                legend_columns          = 2,
+                xlabel                  = L"$z \ \ (\mathrm{px})$",
+            );
 
-            # plt_f1 = plot(; overlay_kw...);
-            # plt_f2 = plot(; overlay_kw...);
+            plt_f1 = plot(; overlay_kw...);
+            plt_f2 = plot(; overlay_kw...);
 
-            # for i in eachindex(SG0_current)
-            #     plot!(plt_f1, f1_profiles[i]; line=(:solid, 1, colors_sg0[i]), label=current_label(i))
-            #     plot!(plt_f2, f2_profiles[i]; line=(:solid, 1, colors_sg0[i]), label=current_label(i))
-            # end
+            for i in eachindex(SG0_current)
+                plot!(plt_f1, f1_profiles[i]; line=(:solid, 1, colors_sg0[i]), label=current_label(i))
+                plot!(plt_f2, f2_profiles[i]; line=(:solid, 1, colors_sg0[i]), label=current_label(i))
+            end
             
-            # plot!(plt_f1; legend_title=L"$F=1$");
-            # plot!(plt_f2; legend_title=L"$F=2$");
+            plot!(plt_f1; legend_title=L"$F=1$");
+            plot!(plt_f2; legend_title=L"$F=2$");
 
-            # fig = plot(plt_f1, plt_f2;
-            #     suptitle      = sg1_label,
-            #     layout        = (2, 1),
-            #     size          = (900, 850),
-            #     left_margin   = 3mm,
-            #     bottom_margin = 2mm,
-            # )
-            # plot!(fig[1]; xlabel="", xformatter=_->"", bottom_margin=-6mm)
-            # display(fig)
+            fig = plot(plt_f1, plt_f2;
+                suptitle      = sg1_label,
+                layout        = (2, 1),
+                size          = (900, 850),
+                left_margin   = 3mm,
+                bottom_margin = 2mm,
+            )
+            plot!(fig[1]; xlabel="", xformatter=_->"", bottom_margin=-6mm)
+            display(fig)
 
-            # GC.gc()
+            GC.gc()
         end
     end
 end
@@ -3347,7 +3347,7 @@ plt = plot(
     guidefontsize = 32,
     tickfontsize = 30,
     left_margin = 12mm,
-    bottom_margin =12mm,
+    bottom_margin =15mm,
 );
 hline!([0.0], line=(:dot,1,:black), label=false);
 for (idx, color, marker_symbol, config_label, tol) in plot_list
@@ -3386,7 +3386,7 @@ display(plt)
 
 fig_linlin_1 = plot(
     xlabel = "SG0 Current (A)",
-    ylabel = L"$\Delta z = z_{F=1} - z_{F=2} \quad (\mathrm{px})$",
+    ylabel = L"$\Delta z = |z_{F=1} - z_{F=2}| \quad (\mathrm{px})$",
 );
 ref_idxs = (3, 4)
 plot_list = [
@@ -3482,7 +3482,7 @@ plt = plot(
     xlabel = "SG0 current (A)",
     # ylabel = "Spin-resolved beam separation (pixels)",
     ylabel = "Relative beam separation (pixels)",
-    yticks = -5:1:4,
+    yticks = -5:1:54,
     yminorticks=2,
     legend = :bottomleft,
     background_color_legend = nothing,
