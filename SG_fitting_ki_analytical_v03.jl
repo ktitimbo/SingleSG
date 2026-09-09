@@ -2541,6 +2541,55 @@ data_scaled[:, 4] ./= scaled_mag
 
 data_scaled
 
+
+
+fig=plot(    
+    # title = L"Peak position ($F=1$)",
+)
+plot!(fig,
+    data_scaled[:,1],data_scaled[:,3],
+    xerr = data_scaled[:,2],
+    yerr = data_scaled[:,4],
+    label="Experiment",
+    seriestype=:scatter,
+    marker = (:circle,4,:white,stroke(0.5,:black) )
+    # line=(:dash,:darkgreen,3),
+    # fillcolor = :darkgreen,
+    # fillalpha = 0.35,
+)
+plot!(fig,I_scan, zqm.(I_scan),
+    label="Existing models",
+    line=(:dash,:blue,1.75)
+)
+plot!(fig,
+    I_scan, 1.025*ki_itp.(I_scan, Ref(fit_scaled.ki)),
+    # label=L"Coquantum dynamics: $k_{i}= \left( %$(round(fit_scaled.ki, sigdigits=2)) \pm %$(round(fit_scaled.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
+    label="Coquantum dynamics",
+    line=(:solid,:red,2),
+    # marker=(:xcross, :blue, 0.2),
+    markerstrokewidth=1
+)
+plot!(fig,
+    xlabel = "SG current (A)",
+    ylabel = L"$F=1$ peak position (mm)",
+    xaxis=:log10,
+    yaxis=:log10,
+    labelfontsize=18,
+    tickfontsize=16,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    # xlims=(0.010,1.05),
+    size=(1400,800),
+    # legendtitle=L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
+    legendfontsize=16,
+    left_margin=8mm,
+    bottom_margin=8mm,
+)
+display(fig)
+savefig(fig,joinpath(OUTDIR,"single_SG_comparison.png"))
+savefig(fig,joinpath(OUTDIR,"single_SG_comparison.svg"))
+
+
 fig=plot(    
     # title = L"Peak position ($F=1$)",
 )
