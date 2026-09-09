@@ -290,7 +290,7 @@ sort_Iexp_perm = sortperm(Iexp_coil);
 
 
 # Binning for the analysis
-nbins_list  = (1, 2, 4, 8)
+nbins_list  = (1, 2, 4)
 λ0_list     = (0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.10)
 PARAM_GRID = [(nz, λ0) for λ0 in λ0_list, nz in nbins_list] |> vec
 const Cell = Union{Missing, String, Int, Float64}
