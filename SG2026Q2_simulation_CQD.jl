@@ -6,7 +6,7 @@
 #
 #   Author : Kelvin Titimbo
 #   Affiliation : California Institute of Technology
-#   Date : August 2025
+#   Date : August 2026
 # ============================================================================
 
 #  Plotting Setup
@@ -48,7 +48,7 @@ LinearAlgebra.BLAS.set_num_threads(1)
 cd(@__DIR__) ;
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const BASE_PATH = raw"F:\SternGerlachExperiments";
-const OUTDIR    = joinpath(@__DIR__, "simulation_data", "CQD2025_" * RUN_STAMP);
+const OUTDIR    = joinpath(@__DIR__, "simulation_data", "CQD2026_" * RUN_STAMP);
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 # Redirect Julia's temp files to a project-local folder (avoids /tmp clutter)
@@ -125,7 +125,7 @@ SIMULATION INFORMATION
 ***************************************************
 """)
 # Furnace
-const TCelsius = 200
+const TCelsius = 205
 const T_K = 273.15 + TCelsius ; # Furnace temperature (K)
 # Furnace aperture
 const X_FURNACE = 2.0e-3 ;
@@ -160,20 +160,20 @@ SETUP FEATURES
 ***************************************************
 """)
 # Setting the variables for the module
-TheoreticalSimulation.default_camera_pixel_size = CAM_PIXELSIZE;
-TheoreticalSimulation.default_x_pixels          = NX_PIXELS;
-TheoreticalSimulation.default_z_pixels          = NZ_PIXELS;
-TheoreticalSimulation.default_x_furnace         = X_FURNACE;
-TheoreticalSimulation.default_z_furnace         = Z_FURNACE;
-TheoreticalSimulation.default_x_slit            = X_SLIT;
-TheoreticalSimulation.default_z_slit            = Z_SLIT;
-TheoreticalSimulation.default_y_FurnaceToSlit   = y_FurnaceToSlit;
-TheoreticalSimulation.default_y_SlitToSG        = y_SlitToSG;
-TheoreticalSimulation.default_y_SG              = y_SG;
-TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
-TheoreticalSimulation.default_R_tube            = R_tube;
-TheoreticalSimulation.default_c_aperture        = R_aper;
-TheoreticalSimulation.default_y_SGToAperture    = y_SGToAperture;
+TheoreticalSimulation.DEFAULT_camera_pixel_size = CAM_PIXELSIZE;
+TheoreticalSimulation.DEFAULT_x_pixels          = NX_PIXELS;
+TheoreticalSimulation.DEFAULT_z_pixels          = NZ_PIXELS;
+TheoreticalSimulation.DEFAULT_x_furnace         = X_FURNACE;
+TheoreticalSimulation.DEFAULT_z_furnace         = Z_FURNACE;
+TheoreticalSimulation.DEFAULT_x_slit            = X_SLIT;
+TheoreticalSimulation.DEFAULT_z_slit            = Z_SLIT;
+TheoreticalSimulation.DEFAULT_y_FurnaceToSlit   = y_FurnaceToSlit;
+TheoreticalSimulation.DEFAULT_y_SlitToSG        = y_SlitToSG;
+TheoreticalSimulation.DEFAULT_y_SG              = y_SG;
+TheoreticalSimulation.DEFAULT_y_SGToScreen      = y_SGToScreen;
+TheoreticalSimulation.DEFAULT_R_tube            = R_tube;
+TheoreticalSimulation.DEFAULT_c_aperture        = R_aper;
+TheoreticalSimulation.DEFAULT_y_SGToAperture    = y_SGToAperture;
 ##################################################################################################
 JLD2_MyTools.save_script_copy(OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP)
 ##################################################################################################
@@ -194,7 +194,7 @@ nI = length(ICOILS);
 @info "No of currents sampled : $(nI)"
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 2_000 ; 
+const Nss = 8_000_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2
@@ -211,9 +211,9 @@ jldsave( joinpath(OUTDIR,"cross_slit_particles_$(Nss).jld2"), data = crossing_sl
 
 # Diagnostic plots (saved only when SAVE_FIG = true)
 if SAVE_FIG
-    plot_μeff(K39_params,"mm_effective")
-    plot_SG_geometry("SG_geometry")
-    plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf")
+    TheoreticalSimulation.plot_μeff(K39_params,"mm_effective")
+    TheoreticalSimulation.plot_SG_geometry("SG_geometry")
+    TheoreticalSimulation.plot_velocity_stats(crossing_slit, "Initial data" , "velocity_pdf")
     # plot_velocity_stats(pairs_UP, "data μ–up" , "velocity_pdf_up")
     # plot_velocity_stats(pairs_DOWN, "data μ–down" , "velocity_pdf_down")
 end
@@ -229,7 +229,7 @@ data_UP, data_DOWN = generate_CQDinitial_conditions(Nss, crossing_slit, rng_set;
 # ============================================================================
 # CQD TRAJECTORY INTEGRATION  (reference kᵢ)
 # ============================================================================
-ki_ref = 1.60e-6;
+ki_ref = 2.00e-6;
 # --- Magnetic moment-up branch ---
 @time CQD_up_particles_flag         = TheoreticalSimulation.CQD_flag_travelling_particles(ICOILS, data_UP, ki_ref, K39_params; y_length=5001,verbose=true);
 @time CQD_up_particles_trajectories = TheoreticalSimulation.CQD_build_travelling_particles(ICOILS, ki_ref, data_UP, CQD_up_particles_flag, K39_params);     # [x0 y0 z0 vx0 vy0 vz0 θe θn x z vz]
@@ -287,28 +287,28 @@ anim = @animate for j in eachindex(ICOILS)
         legendtitlefontsize=8,
         yformatter = val -> string(round(val * 1e4, digits = 2)),
         xlabel=L"$z$ (mm)",
-        ylabel="Intensity (au)",)
+        ylabel="Intensity (au)",);
     plot!(mm_up[j][:z_profile][:,1],mm_up[j][:z_profile][:,3],
         label=L"$\vec{\mu}\upuparrows \hat{z}$",
         line=(:solid,:orangered2,1),
         marker=(:circle,:white,2),
         markerstrokecolor=:orangered2,
-        markerstrokewidth=1)
+        markerstrokewidth=1);
     vline!([mm_up[j][:z_max_smooth_spline_mm]], 
         line=(:orangered2,0.5), 
-        label=L"$z_{\mathrm{max}}=%$(round(mm_up[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+        label=L"$z_{\mathrm{max}}=%$(round(mm_up[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$");
     plot!(mm_dw[j][:z_profile][:,1],mm_dw[j][:z_profile][:,3],
         label=L"$\vec{\mu}\updownarrows \hat{z}$",
         line=(:solid,:dodgerblue3,1),
         marker=(:circle,:white,2),
         markerstrokecolor=:dodgerblue3,
-        markerstrokewidth=1)
+        markerstrokewidth=1);
     vline!([mm_dw[j][:z_max_smooth_spline_mm]],
         line=(:dodgerblue3,0.5), 
-        label=L"$z_{\mathrm{max}}=%$(round(mm_dw[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$")
+        label=L"$z_{\mathrm{max}}=%$(round(mm_dw[j][:z_max_smooth_spline_mm],sigdigits=3)) \mathrm{mm}$");
     plot!(        
         background_color_legend = nothing,
-        foreground_color_legend = nothing,)
+        foreground_color_legend = nothing,);
     display(fig)
 end
 gif_path = joinpath(OUTDIR, "CQD_profiles.gif");
@@ -352,12 +352,12 @@ anim = @animate for j in iter
     n = Int(floor(size(data_set, 1)/10))
  
     # Pre-allocate position arrays at each stage (units: mm, mm, mm, mm, mm, mm / μm respectively)
-    xs_furn  = Vector{Float64}(undef, n); zs_furn  = Vector{Float64}(undef, n)
-    xs_slit  = Vector{Float64}(undef, n); zs_slit  = Vector{Float64}(undef, n)
-    xs_sgin  = Vector{Float64}(undef, n); zs_sgin  = Vector{Float64}(undef, n)
-    xs_sgout = Vector{Float64}(undef, n); zs_sgout = Vector{Float64}(undef, n)
-    xs_aper  = Vector{Float64}(undef, n); zs_aper  = Vector{Float64}(undef, n)
-    xs_scr   = Vector{Float64}(undef, n); zs_scr   = Vector{Float64}(undef, n)
+    xs_furn  = Vector{Float64}(undef, n); zs_furn  = Vector{Float64}(undef, n);
+    xs_slit  = Vector{Float64}(undef, n); zs_slit  = Vector{Float64}(undef, n);
+    xs_sgin  = Vector{Float64}(undef, n); zs_sgin  = Vector{Float64}(undef, n);
+    xs_sgout = Vector{Float64}(undef, n); zs_sgout = Vector{Float64}(undef, n);
+    xs_aper  = Vector{Float64}(undef, n); zs_aper  = Vector{Float64}(undef, n);
+    xs_scr   = Vector{Float64}(undef, n); zs_scr   = Vector{Float64}(undef, n);
  
     # Single pass over all particles: propagate to each stage
     @inbounds for i in 1:n
@@ -412,49 +412,49 @@ anim = @animate for j in iter
     pA = histogram2d(xs_furn, zs_furn;
         bins=bins_furn, show_empty_bins=true, color=:plasma, normalize=:pdf,
         xlabel=L"$x\,(\mathrm{mm})$", ylabel=L"$z\,(\mathrm{\mu m})$",
-        xticks=-1.0:0.25:1.0, yticks=-50:25:50)
-    annotate_panel!(pA, -0.75, 35, 0.15, 7, "Furnace")
+        xticks=-1.0:0.25:1.0, yticks=-50:25:50);
+    annotate_panel!(pA, -0.75, 35, 0.15, 7, "Furnace");
  
     # ---- Panel B : Slit ----
     pB = histogram2d(xs_slit, zs_slit;
         bins=bins_slit, show_empty_bins=true, color=:plasma, normalize=:pdf,
         xlabel=L"$x\,(\mathrm{mm})$", ylabel=L"$z\,(\mathrm{\mu m})$",
         xticks=-4.0:0.5:4.0, yticks=-200:50:200,
-        xlims=(-4,4), ylims=(-200,200))
-    annotate_panel!(pB, -3.5, 150, 0.4, 20, "Slit")
+        xlims=(-4,4), ylims=(-200,200));
+    annotate_panel!(pB, -3.5, 150, 0.4, 20, "Slit");
  
     # ---- Panel C : SG entrance ----
     pC = histogram2d(xs_sgin, zs_sgin;
         bins=bins_sgin, show_empty_bins=true, color=:plasma, normalize=:pdf,
         xlabel=L"$x\,(\mathrm{mm})$", ylabel=L"$z\,(\mathrm{\mu m})$",
         xticks=-4.0:0.5:4.0, yticks=-1000:100:1000,
-        xlims=(-4,4), ylims=(-250,250))
-    annotate_panel!(pC, -3.0, 180, 0.8, 30, "SG entrance")
+        xlims=(-4,4), ylims=(-250,250));
+    annotate_panel!(pC, -3.0, 180, 0.8, 30, "SG entrance");
  
     # ---- Panel D : SG exit  (with pole-tip edge overlay) ----
     pD = histogram2d(xs_sgout, zs_sgout;
         bins=bins_sgout, show_empty_bins=true, color=:plasma, normalize=:pdf,
         xlabel=L"$x\,(\mathrm{mm})$", ylabel=L"$z\,(\mathrm{\mu m})$",
         xticks=-4.0:0.5:4.0, yticks=-1000:200:1000,
-        xlims=(-4,4), ylims=(-300,1000))
+        xlims=(-4,4), ylims=(-300,1000));
     plot!(pD, x_magnet_mm, z_edge_μm, line=(:dash, :black, 2), label=false)
-    annotate_panel!(pD, -3.0, 700, 0.6, 160, "SG exit")
+    annotate_panel!(pD, -3.0, 700, 0.6, 160, "SG exit");
  
     # ---- Panel E : Circular aperture ----
     pE = histogram2d(xs_aper, zs_aper;
         bins=bins_aper, show_empty_bins=true, color=:plasma, normalize=:pdf,
         xlabel=L"$x\,(\mathrm{mm})$", ylabel=L"$z\,(\mathrm{\mu m})$",
         xticks=-4.0:0.5:4.0, yticks=-1000:500:3000,
-        xlims=(-4,4), ylims=(-300,3000))
+        xlims=(-4,4), ylims=(-300,3000));
     plot!(pE, x_circ_mm, z_circ_μm; linestyle=:dash, lw=2, color=:gray, legend=false)
-    annotate_panel!(pE, -3.0, 2400, 0.7, 270, "⊚ Aperture")
+    annotate_panel!(pE, -3.0, 2400, 0.7, 270, "⊚ Aperture");
  
     # ---- Panel F : Detection screen  (z in mm) ----
     pF = histogram2d(xs_scr, zs_scr;
         bins=bins_scr, show_empty_bins=true, color=:plasma, normalize=:pdf,
         xlabel=L"$x\,(\mathrm{mm})$", ylabel=L"$z\,(\mathrm{mm})$",
-        ylims=(-1, 17.5))
-    annotate_panel!(pF, -4.0, 14, 0.9, 0.9, "Screen")
+        ylims=(-1, 17.5));
+    annotate_panel!(pF, -4.0, 14, 0.9, 0.9, "Screen");
  
     # Compose 6-panel layout
     fig = plot(pA, pB, pC, pD, pE, pF;
@@ -463,7 +463,7 @@ anim = @animate for j in iter
         size         = (750, 800),
         right_margin = 2mm,
         bottom_margin = -2mm,
-    )
+    );
     # Remove redundant x-axis labels on all but the bottom panel
     for k in 1:5
         plot!(fig[k], xlabel="", bottom_margin=-3mm)
@@ -481,14 +481,14 @@ anim = nothing
 # kᵢ PARAMETER SWEEP
 # ============================================================================
 # Alternative: multi-decade logarithmic grid (uncomment to use)
-# kis = round.([
-#     [exp10(p) * x for p in -8:-8 for x in 1.0:1:9]; 
-#     [exp10(p) * x for p in -7:-7 for x in 1.0:1:9]; 
-#     [exp10(p) * x for p in -6:-6 for x in 1.0:0.1:9.9]; 
-#     [exp10(p) * x for p in -5:-5 for x in 1.0:1:9]; 
-#     exp10.(-4:0)
-# ];sigdigits=4)
-kis = unique(round.(vcat([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:5.0],0.001);sigdigits=4))
+kis = round.([
+    [exp10(p) * x for p in -8:-8 for x in 1.0:1:9]; 
+    [exp10(p) * x for p in -7:-7 for x in 1.0:1:9]; 
+    [exp10(p) * x for p in -6:-6 for x in 1.0:1:9]; 
+    [exp10(p) * x for p in -5:-5 for x in 1.0:1:9]; 
+    exp10.(-4:0)
+];sigdigits=4)
+# kis = unique(round.(vcat([x * exp10(p) for p in -6:-6 for x in 0.5:0.5:5.0],0.001);sigdigits=4))
 @info "Number of ki sampled = $(length(kis))"
 
 # Visual check: plot the sampled kᵢ values on a log scale
@@ -607,7 +607,7 @@ plot!(fig_sweep,
     legend_columns=3,
     background_color_legend=nothing,
     foreground_color_legend=nothing
-)
+);
 display(fig_sweep)
 savefig(fig_sweep, joinpath(OUTDIR,"cqd_$(Nss)_kis_comparison.$(FIG_EXT)"))
 
@@ -743,8 +743,8 @@ files_dw = discover_files(INDIR_DW, "dw")
 w_idx  = max(6,  ndigits(length(induction_coeff_label)))
 w_ki   = max(15, maximum(length(@sprintf("%.4g", k)) for k in induction_coeff_label))
 w_n    = max(10, ndigits(Ns))
-w_up   = max(7,  maximum(length.(files_up)))
-w_dw   = max(7,  maximum(length.(files_dw)))
+w_up   = max(10,  maximum(length.(files_up)))
+w_dw   = max(10,  maximum(length.(files_dw)))
 w_tot  = 2 + w_idx + 2 + w_ki + 2 + w_n + 2 + w_up + 2 + w_dw + 2
  
 header = @sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s",
@@ -818,7 +818,7 @@ function process_branch(branch::Symbol, indir, outjld, files, kis, params)
         # --- Load file and echo stored metadata for visual verification ---
         data_sim = load(simpath, "screen")
  
-        println("─"^60)
+        println("="^60)
         @info "[$branch] File $j/$nfiles | T: $(get(data_sim,:T,"—")) / $(T_K) K  |  N: $(get(data_sim,:N,"—")) / $(Ns)  |  kᵢ: $(get(data_sim,:ki,"—")) / $(kis[j])" fname
         println("─"^60)
  
