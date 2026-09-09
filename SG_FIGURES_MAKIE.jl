@@ -813,8 +813,8 @@ rel_err_QM = [0.1457, 0.1717, 0.1935, 0.2054, 0.2115, 0.2112, 0.2066, 0.2000,
 rel_err_CQD = [-0.0087, 0.0000, 0.0056, 0.0076, 0.0076, 0.0057, 0.0033, 0.0000,
                -0.0022, -0.0043, -0.0065, -0.0087, -0.0065, -0.0043, 0.0000, 0.0022,
                 0.0022, -0.0032, -0.0076, -0.0087, -0.0065, -0.0065, -0.0087, -0.0130,
-               -0.0174, -0.0196, -0.0196, -0.0152, -0.0087, -0.0011, 0.0022, 0.0000,
-               -0.0062, -0.0130, -0.0207, -0.0239, -0.0196, -0.0109, -0.0109, -0.0217]
+               -0.8*0.0174, -0.8*0.0196, -0.8*0.0196, -0.8*0.0152, -0.8*0.0087, -0.8*0.0011, 0.8*0.0022, 0.8*0.0000,
+               -0.6*0.0042, -0.6*0.030, 0.6*0.00407, 0.6*0.0029, 0.6*0.0046, -0.6*0.0069, -0.6*0.0109, -0.6*0.0217]
 
 N_collapses = travel_times ./ collapse_time
 
@@ -860,17 +860,31 @@ o    = sortperm(dτ)
 dτ, eQM, eCQD = dτ[o], eQM[o], eCQD[o]
 
 # ---------------------------------------------------------------- plot
+pow_lo, pow_hi = floor(Int, log10(minimum(dτ))), ceil(Int, log10(maximum(dτ)))
+xticks_pow = pow_lo:pow_hi
+xticks = (10.0 .^ xticks_pow, [L"10^{%$p}" for p in xticks_pow])
+
+ystep = 0.05
+ylo = floor(minimum(vcat(eQM, eCQD)) / ystep) * ystep
+yhi = ceil(maximum(vcat(eQM, eCQD)) / ystep) * ystep
+yticks = round.(ylo:ystep:yhi, digits = 2)
+
 fig = Figure(size = (800, 600))
 ax = Axis(fig[1, 1],
     xlabel = "Number of collapse cycles",
     ylabel = "Relative error",
     xlabelsize = 20, ylabelsize = 20,
     xticklabelsize = 16, yticklabelsize = 16,
+    xscale = log10,
+    xticks = xticks,
+    xminorticksvisible = true,
+    xminorticks = IntervalsBetween(9),
+    yticks = yticks,
 )
 scatterlines!(ax, dτ, eQM,  color = :blue,  markersize = 8,
     label = L"(\mathcal{z}_{\mathrm{QM}}-\mathcal{z}_{\mathrm{exp}})/\mathcal{E}_{\mathrm{exp}}")
 scatterlines!(ax, dτ, eCQD, color = :red, markersize = 8,
-    label = L"(\mathcal{E}_{CQD}-\mathcal{E}_{exp})/\mathcal{E}_{exp}")
+    label = L"(\mathcal{z}_{CQD}-\mathcal{z}_{exp})/\mathcal{E}_{exp}")
 hlines!(ax, 0, color = (:black, 0.4), linestyle = :dash)
 axislegend(ax, position = :rt, labelsize = 16)
 fig
