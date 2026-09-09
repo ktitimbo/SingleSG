@@ -233,7 +233,7 @@ info.nz
 info.σw
 info.λ0
 """
-function list_keys_jld_cqd(path::AbstractString)
+function list_keys_jld_cqd(path::AbstractString; verbose::Bool=true)
 
     keylist  = Tuple{Symbol,Float64,Int,Float64,Float64}[]
     ki_set = Set{Float64}()
@@ -256,21 +256,23 @@ function list_keys_jld_cqd(path::AbstractString)
             end
         end
 
-        println("\n================ META ================")
-        if isempty(meta)
-            println("(meta group exists but contains no datasets)")
-        else
-            for k in collect(keys(meta))
-                v = meta[k]
-                if v isa AbstractVector && length(v) > 20
-                    println(k, " = ", v[1:6], " … ", v[end-5:end],
-                            "  (len=", length(v), ")")
-                else
-                    println(k, " = ", v)
+        if verbose
+            println("\n================ META ================")
+            if isempty(meta)
+                println("(meta group exists but contains no datasets)")
+            else
+                for k in collect(keys(meta))
+                    v = meta[k]
+                    if v isa AbstractVector && length(v) > 20
+                        println(k, " = ", v[1:6], " … ", v[end-5:end],
+                                "  (len=", length(v), ")")
+                    else
+                        println(k, " = ", v)
+                    end
                 end
             end
+            println("======================================\n")
         end
-        println("======================================\n")
 
         # -------------------------
         # Walk branch hierarchy
