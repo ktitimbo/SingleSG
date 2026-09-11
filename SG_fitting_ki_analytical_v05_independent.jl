@@ -136,7 +136,6 @@ include("./Modules/DataReading.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
 include("./Modules/JLD2_MyTools.jl");
 
-
 ##################################################################################################
 JLD2_MyTools.save_script_copy(OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP)
 ##################################################################################################
@@ -151,11 +150,13 @@ const σW_FIXED  = 0.200     # (mm) Gaussian smoothing width of the profiles
 const λ0_FIXED  = 0.01      # raw smoothing parameter
 const λ0_SPLINE = 0.001     # spline smoothing parameter (bookkeeping only)
 # Experimental data
-const I_THRESHOLD  = 0.020  # (A) lowest current kept for all fits on the combined curve
-const δI_FRAC = 0.001  # δI placeholder for the δI curve  (fraction of I)
+const I_THRESHOLD  = 0.025  # (A) lowest current kept for all fits on the combined curve
+const δI_FRAC = 0.001       # δI placeholder for the δI curve
 # Calibration tail
 const TAIL_SCALE_MODE = :log     # :linear | :log | :legacy — same for CQD and QM
 const I_PLATEAU       = 0.60     # (A) plateau = tails confined to I_min ≥ I_PLATEAU
+
+
 
 # =============================================================================
 # 0a) Small numerical helpers
@@ -1072,7 +1073,6 @@ function plot_cqd_vs_qm(ZCQD, ZQM, Icurrent, ki_list;
 end
  
 
-
 # =============================================================================
 # 0c) Goodness-of-fit tools (used on the scattered points, section 7)
 # =============================================================================
@@ -1282,15 +1282,33 @@ colour/bold when interpolated into `@info`, `@warn`, `println`, …
 # Examples
 ```julia
 @info "kᵢ range: " * cstr("(1.0 – 4.1)×10⁻⁶", :yellow, :bold)
-@info "Selected configuration" nz = cstr(NZ_FIXED, :cyan)
+@info cstr("Selected configuration: nz = ", :cyan) * cstr(NZ_FIXED, :yellow, :bold)
 ```
 """
 cstr(s, styles::Symbol...) = join(_ANSI[k] for k in styles) * string(s) * "\e[0m"
 
+"""
+    section(label, title)
+
+Print a coloured banner marking the start of a script section, with the
+elapsed time since `T_START`, so the REPL output can be navigated when the
+script is run top-to-bottom. `label` is the section number ("4"), `title` its
+name (the same text as the comment banner above the call).
+"""
+function section(label, title)
+    elapsed = Dates.canonicalize(round(Dates.now() - T_START, Dates.Second))
+    line = "═"^96
+    println("\n", cstr(line, :blue, :bold))
+    println(cstr("  $(label))  $(title)", :blue, :bold),
+            cstr("   [t = $(elapsed)]", :blue))
+    println(cstr(line, :blue, :bold))
+end
+
 ##################################################################################################
 #  1) SIMULATION GRIDS
+section("1", "SIMULATION GRIDS — QM table, CQD table, analysis configuration")
 ##################################################################################################
- 
+
 # -----------------------------------------------------------------------------
 # Simulated coil currents (A) — common to the QM and CQD tables; non-uniform.
 # -----------------------------------------------------------------------------
@@ -1332,12 +1350,12 @@ cqd_meta = OrderedDict{Symbol,Any}(
     :λs => haskey(cqd_info.meta, "meta/λ0_spline") ?
            round.(cqd_info.meta["meta/λ0_spline"], digits=3) : nothing,
 );
-n_ki = length(cqd_meta[:ki])
+n_ki = length(cqd_meta[:ki]);
 
 # kᵢ grid indices used for the 2D interpolant / Brent bracket
 const KI_START, KI_STOP = 1, 41
 
-ki_lo, ki_hi = cqd_meta[:ki][KI_START], cqd_meta[:ki][KI_STOP]
+ki_lo, ki_hi = cqd_meta[:ki][KI_START], cqd_meta[:ki][KI_STOP];
 @info cstr("kᵢ search bracket for the fit (2D interpolant range): ", :cyan) *
       cstr("$(ki_lo)×10⁻⁶", :yellow, :bold) * cstr(" ≤ kᵢ ≤ ", :yellow) * cstr("$(ki_hi)×10⁻⁶", :yellow, :bold) *
       cstr("   (grid indices $(KI_START):$(KI_STOP), $(KI_STOP - KI_START + 1) of $(n_ki) kᵢ values)", :cyan)
@@ -1391,13 +1409,17 @@ end
 #   • continuous curve  `data`             (built in section 4, I ≥ I_THRESHOLD)
 #   • scattered table   `data_exp_scattered` at the grouped currents, with
 #     δz_total² = (dz/dI · δI)² + δz²  propagated from the placeholder δI.
+section("2", "EXPERIMENTAL DATA — combined curve and scattered table")
+##################################################################################################
+
+
 experiment_path = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", "smoothing_binning_2025",
                         "data_averaged_2.jld2")
 exp_avg = load(experiment_path)["data"];
 @info "Experimental data loaded" n_smooth = length(exp_avg[:i_smooth]) n_grouped = size(exp_avg[:Ic_grouped], 1)
  
 # rows of the smooth grid that coincide with the grouped currents
-mask = [any(abs(a - b) ≤ 1e-12 for a in exp_avg[:Ic_grouped][:, 1]) for b in exp_avg[:i_smooth]]
+mask = [any(abs(a - b) ≤ 1e-12 for a in exp_avg[:Ic_grouped][:, 1]) for b in exp_avg[:i_smooth]];
  
 # weighted interpolating spline of the smoothed curve (for the slope dz/dI)
 data_experiment = Spline1D(exp_avg[:i_smooth], exp_avg[:z_smooth];
@@ -1425,8 +1447,9 @@ pretty_table(data_exp_scattered;
 
 ##################################################################################################
 #  3) SANITY FIGURES AND THE (I, kᵢ) INTERPOLANT
+ section("3", "SANITY FIGURES AND THE (I, kᵢ) INTERPOLANT — fig001–fig003")
 ##################################################################################################
- 
+
 # -----------------------------------------------------------------------------
 # fig001 — CQD family (one curve per kᵢ), QM curve and combined experiment
 # -----------------------------------------------------------------------------
@@ -1514,14 +1537,16 @@ savefig(fit_figs, joinpath(OUTDIR, "fig003.$(FIG_EXT)"))
 
 ##################################################################################################
 #  4) CONTINUOUS CURVE — fit subset, tail-convergence study
+section("4", "CONTINUOUS CURVE — fit subset, tail-convergence study (fig008)")
+
 ##################################################################################################
- 
+
 # -----------------------------------------------------------------------------
 # Continuous data matrix [I, δI, z, δz] above I_THRESHOLD, and the dense
 # current scan used to draw model curves.
 # -----------------------------------------------------------------------------
 i_start = searchsortedfirst(exp_avg[:i_smooth], I_THRESHOLD);
-I_scan  = logspace10(I_THRESHOLD, 1.00; n = 501);
+I_scan  = logspace10(I_THRESHOLD, 1.00; n = 801);
 data    = hcat(exp_avg[:i_smooth], δI_FRAC .* exp_avg[:i_smooth],
                exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :];
 N_data  = size(data, 1);
@@ -1681,9 +1706,18 @@ savefig(fig, joinpath(OUTDIR, "fig008_tail_convergence.$(FIG_EXT)"))
 
 ##################################################################################################
 #  5) FINAL FITS WITH UNCERTAINTIES (tail = last N_TAIL points)
+section("5", "FINAL FITS WITH UNCERTAINTIES — tail = last N_TAIL points")
+
 ##################################################################################################
-@printf "Calibration tail: last %d points, %.3f A – %.3f A\n" N_TAIL first(last(data[:, 1], N_TAIL)) last(last(data[:, 1], N_TAIL))
- 
+I_tail_start = data[end - N_TAIL + 1, 1]     # first current inside the calibration tail
+@info cstr("Calibration tail for the final fits: last ", :cyan) * cstr(N_TAIL, :yellow, :bold) *
+      cstr(" points, ", :cyan) *
+      cstr(@sprintf("%.3f", I_tail_start), :yellow, :bold) * cstr(" A ≤ I ≤ ", :cyan) *
+      cstr(@sprintf("%.3f", data[end, 1]), :yellow, :bold) * cstr(" A", :cyan) *
+      cstr("   (scale_mode = $(TAIL_SCALE_MODE); plateau cut I_min ≥ $(I_PLATEAU) A ", :cyan) *
+      cstr(I_tail_start ≥ I_PLATEAU ? "✓ inside plateau" : "✗ OUTSIDE plateau", I_tail_start ≥ I_PLATEAU ? :green : :red, :bold) *
+      cstr(")", :cyan)
+
 fit_cs = fit_cqd_ki_scale_with_error(ki_itp, data, data_fitting;
              n_tail = N_TAIL, bounds = ki_bounds, scale_mode = TAIL_SCALE_MODE, use_Zse = false);
 @info "CQD: kᵢ + scale (with errors)" ki = (fit_cs.ki, fit_cs.ki_err) ci_profile = fit_cs.ci_profile #=
@@ -1705,6 +1739,7 @@ log_ticks   = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"1
 
 ##################################################################################################
 #  6) DIAGNOSTICS ON THE CONTINUOUS CURVE
+section("6", "DIAGNOSTICS ON THE CONTINUOUS CURVE — fig004, fig005, fig006")
 ##################################################################################################
  
 # -----------------------------------------------------------------------------
@@ -1824,6 +1859,7 @@ savefig(fig, joinpath(OUTDIR, "fig006.$(FIG_EXT)"))
 
 ##################################################################################################
 #  7) SCATTERED POINTS — publication figures and goodness of fit
+section("7", "SCATTERED POINTS — publication figures, goodness of fit (fig007)")
 ##################################################################################################
 # Raw scattered experimental points (spline at the grouped currents, propagated
 # δz) vs the two calibrated models. The points are approximately independent,
@@ -1847,6 +1883,12 @@ G_scan = gradvsI.(I_scan);
 # calibrated models evaluated at the scattered currents (for the GOF block)
 m_qm_sc  = zqm.(I_sc)                    ./ fit_qs.scale;
 m_cqd_sc = ki_itp.(I_sc, Ref(fit_cs.ki)) ./ fit_cs.scale;
+
+# residual views on the scattered points (same definitions as section 6)
+re_qm_sc   = relerr(m_qm_sc,  z_sc);          # (model − exp)/exp, dimensionless
+re_cqd_sc  = relerr(m_cqd_sc, z_sc);
+pull_qm_sc = pull(m_qm_sc,  z_sc, δz_sc);     # (model − exp)/δz
+pull_cqd_sc = pull(m_cqd_sc, z_sc, δz_sc);
 
 # -----------------------------------------------------------------------------
 # single_SG_comparison — vs coil current
@@ -1903,7 +1945,7 @@ CSV.write(joinpath(OUTDIR, "data_sim.csv"), df_sim)
 # -----------------------------------------------------------------------------
 stats_CQD = goodness_of_fit(I_sc, z_sc, m_cqd_sc; σ = δz_sc, k = 2)   # kᵢ + s
 stats_QM  = goodness_of_fit(I_sc, z_sc, m_qm_sc;  σ = δz_sc, k = 1)   # s only
-@info "Goodness of fit on $(length(x_exp)) scattered points" ΔAIC_CQD_minus_QM = stats_CQD.AIC - stats_QM.AIC ΔBIC_CQD_minus_QM = stats_CQD.BIC - stats_QM.BIC
+@info "Goodness of fit on $(length(z_sc)) scattered points" ΔAIC_CQD_minus_QM = stats_CQD.AIC - stats_QM.AIC ΔBIC_CQD_minus_QM = stats_CQD.BIC - stats_QM.BIC
  
 metrics   = ["logMSE", "logRMSE", "R2_log", "chi2_log", "chi2_red", "p_chi2", "AIC", "BIC", "NMAD"]
 gof_table = hcat([getfield(stats_CQD, Symbol(m)) for m in metrics],
@@ -1951,6 +1993,7 @@ savefig(fig, joinpath(OUTDIR, "fig007.$(FIG_EXT)"))
 #  Final numbers in one place: value ± statistical error (t-interval half-width
 #  from the `_with_error` fitters) ± tail-choice systematic (plateau spread of
 #  the convergence scan). Text in green, values in bold magenta.
+section("S", "SUMMARY — results and run archive")
 ##################################################################################################
 res(v, d = 4) = cstr(fmt(v, d), :magenta, :bold)
 pm(v, e_stat, e_sys; d = 4) = res(v, d) * cstr(" ± ", :green) * res(e_stat, 2) *
@@ -1976,30 +2019,29 @@ row(name, val) = "\n  " * cstr(rpad(name, 12), :green) * val      # "  name…�
 # -----------------------------------------------------------------------------
 # Single-file archive of the run (JLD2)
 #
-# One self-describing file with everything needed to redraw the figures or
-# re-quote the numbers without re-running the fits:
-#   settings/…   analysis configuration and fit choices
-#   fits/cqd, fits/qm   the `_with_error` results (Optim objects stripped)
-#   plateau/…    tail-choice systematics
-#   tables/…     the CSV contents as column vectors (version-independent)
-# Tables are stored as Dict{String,Vector}, not DataFrames, so the file does
-# not depend on the DataFrames version; rebuild with `DataFrame(d)`.
+# One self-describing file with everything needed to re-quote the numbers or
+# redraw the publication figures without re-running the fits. Only plain
+# scalars, strings and Float64 vectors are stored (no DataFrames, no Optim
+# objects), so the file is readable from any Julia version or from Python/h5py.
+#
+#   meta/                 provenance: script, run stamp, host, Julia version,
+#                         experimental input file
+#   settings/             analysis configuration (nz, σw, λ0, …) and fit
+#                         choices (I threshold, δI fraction, kᵢ-loss mode,
+#                         calibration tail, plateau cut)
+#   fit/cqd/, fit/qm/     kᵢ (SI units) and calibration factors s with
+#                         statistical (t-interval) and systematic (tail-choice)
+#                         errors
+#   experiment/           scattered points: I, G(I), z_F1 and uncertainties,
+#                         plus both calibrated models at the same currents
+#   model/                calibrated model curves on the dense current scan
+#   statistical_analysis/ relative errors and pulls on the scattered points
+#   gof/                  goodness-of-fit table (same rows as goodness_of_fit.csv)
+#
+# Within a group every vector has the length of its Current_A, so each group
+# rebuilds as one table: e.g. DataFrame(f["experiment"]) after `f = load(path)`.
+section("A", "RUN ARCHIVE — single JLD2 file: settings, fits, data, models, GOF")
 # -----------------------------------------------------------------------------
-"""
-    _plain(nt::NamedTuple)
-
-Copy of a fit result with non-serialisable / version-bound fields removed
-(`result` = raw Optim object), so it can be stored in JLD2 safely.
-"""
-_plain(nt::NamedTuple) = NamedTuple{filter(k -> k != :result, keys(nt))}(nt)
-
-"""
-    _columns(df::DataFrame)
-
-`Dict{String,Vector}` of the columns of `df` (JLD2-friendly, DataFrames-agnostic).
-"""
-_columns(df::DataFrame) = Dict(String(n) => collect(df[!, n]) for n in names(df))
-
 archive_path = joinpath(OUTDIR, "SG_ki_scale_results.jld2")
 jldopen(archive_path, "w") do f
     # --- provenance ---
@@ -2018,7 +2060,8 @@ jldopen(archive_path, "w") do f
     f["settings/I_threshold_A"] = I_THRESHOLD
     f["settings/dI_frac"]       = δI_FRAC
     f["settings/n_tail"]        = N_TAIL
-    f["settings/ki_mode"]       = FIT_KI_MODE
+    f["settings/ki_mode"]       = String(FIT_KI_MODE)
+    f["settings/I_plateau_A"]   = I_PLATEAU
 
     # --- fit results (physical units: kᵢ in SI, i.e. micro-units × 1e-6) ---
     f["fit/cqd/ki"]            = fit_cs.ki      * 1e-6
@@ -2048,1250 +2091,23 @@ jldopen(archive_path, "w") do f
     f["model/CQD_up_mm"]   = m_cqd_scan
     f["model/QM_zF1_mm"]   = m_qm_scan
 
-    # --- tables (same content as the CSVs) ---
-    f["tables/model_residuals_scaled"] = Dict(
-        "Ic" => I_d, "z_exp" => z_d, "dz_exp" => σ_d, "z_QM" => m_qm_d, "z_CQD" => m_cqd_d,
-        "relQM" => re_qm ./ 100, "relCQD" => re_cqd ./ 100, "pullQM" => pull_qm, "pullCQD" => pull_cqd)
-    f["tables/data_exp"] = Dict(
-        "Ic" => data_sc[:, 1], "sIc" => data_sc[:, 2], "G" => G_sc, "sG" => δG_sc,
-        "zmax" => data_sc[:, 3], "szmax" => data_sc[:, 4])
-    f["tables/data_sim"] = Dict("Ic" => I_scan, "G" => G_scan, "QM" => m_qm_scan, "CQD" => m_cqd_scan)
-    f["tables/goodness_of_fit"] = Dict("metric" => metrics, "CQD" => gof_table[:, 1], "QM" => gof_table[:, 2])
-    f["tables/goodness_of_fit/stats_cqd"] = stats_CQD    # FitStats structs as well
-    f["tables/goodness_of_fit/stats_qm"]  = stats_QM
+    # --- residual views on the scattered points (inputs of fig007) ---
+    f["statistical_analysis/Current_A"]   = I_sc
+    f["statistical_analysis/relErr_CQD"]  = re_cqd_sc         # already dimensionless
+    f["statistical_analysis/relErr_QM"]   = re_qm_sc
+    f["statistical_analysis/pull_CQD"]    = pull_cqd_sc
+    f["statistical_analysis/pull_QM"]     = pull_qm_sc
+
+    # --- goodness of fit on the scattered points (k: CQD = 2, QM = 1) ---
+    f["gof/metric"]    = metrics
+    f["gof/CQD"]       = gof_table[:, 1]
+    f["gof/QM"]        = gof_table[:, 2]
 end
 @info cstr("Run archived to ", :green) * cstr(archive_path, :magenta)
 
 
-CSV.write(joinpath(OUTDIR, "data_sim.csv"),
-    DataFrame(Ic = I_scan, G = G_scan, QM = m_qm_scan, CQD = m_cqd_scan))
 
 
 
 
 
-
-
-
-
-
-# # =============================================================================
-# # Simulated coil currents (in Amperes)
-# #
-# # These are the discrete current values at which both QM and CQD simulations
-# # were performed. The spacing is non-uniform.
-# # =============================================================================
-# Icoils = [0.00,
-#         0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
-#         0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
-#         0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
-#         0.100,0.150,0.200,0.250,0.300,0.350,0.400,0.450,0.500,0.550,
-#         0.600,0.650,0.700,0.750,0.800,0.850,0.900,0.950,1.00
-# ];
-# nI = length(Icoils); # Number of simulated current points
-
-
-# # =============================================================================
-# # Quantum-mechanical (QM) simulation data
-# #
-# # The QM data is stored as a dictionary indexed by tuples:
-# #     (nz_bins, gaussian_width_mm, λ0_raw)
-# #
-# # Each entry contains the corresponding screen-profile analysis results
-# # for all currents in `Icoils`.
-# # =============================================================================
-# table_qm_path = joinpath(BASE_PATH,"SIMULATIONS",
-#     "2025_SETUP",
-#     "QM_T205_8M",
-#     "qm_screen_profiles_f1_table.jld2");
-# JLD2_MyTools.summarize_meta_qm_jld2(table_qm_path)
-# qm_meta = JLD2_MyTools.list_keys_jld_qm(table_qm_path);
-# @show length(qm_meta.keys);
-# @show qm_meta.nz;
-# @show qm_meta.σw;
-# @show qm_meta.λ0;
-
-# # =============================================================================
-# # CoQuantum Dynamics (CQD) simulation data
-# #
-# # The CQD results are stored in a JLD2 file indexed by parameter-dependent
-# # key paths. A dedicated "meta" group records all available values of:
-# #
-# #   - ki  : induction coefficients (dimensionless, scaled later as ×10⁻⁶)
-# #   - nz  : number of bins in z
-# #   - gw  : Gaussian smoothing width (mm)
-# #   - λ0  : raw spline smoothing parameter
-# #   - λs  : spline smoothing parameter used internally
-# # =============================================================================
-# table_cqd_path = joinpath(BASE_PATH,"SIMULATIONS",
-#     "2025_SETUP",
-#     "CQD_T205_7M",
-#     # "up",
-#     "cqd_7M_up_profiles.jld2");
-# # Walk the CQD file once: `cqd_info.ki/.nz/.σw/.λ0` are the parameter values
-# # actually present in the group hierarchy (sorted), `.keys` every available
-# # (branch, ki, nz, σw, λ0) tuple, and `.meta` the writer-declared meta/ group.
-# cqd_info = JLD2_MyTools.list_keys_jld_cqd(table_cqd_path)
-# cqd_meta = OrderedDict{Symbol,Any}(
-#     :ki => round.(cqd_info.ki, digits=3),   # micro-units ("e-6" suffix already stripped)
-#     :nz => cqd_info.nz,
-#     :σw => round.(cqd_info.σw, digits=3),
-#     :λ0 => round.(cqd_info.λ0, digits=3),
-#     :λs => round.(cqd_info.meta["meta/λ0_spline"], digits=3),   # spline smoothing (meta only)
-# );
-
-
-# # =============================================================================
-# # Experimental data (combined / averaged)
-# #
-# # This dataset contains a smoothed experimental peak position z(I) and its
-# # uncertainty. We build:
-# #   1) A weighted cubic spline z_spline(I) fitted to the smoothed data
-# #   2) A set of "grouped" current points xq with uncertainties δxq
-# #   3) Propagated z-uncertainty at xq:
-# #        δz_total^2 = ( (dz/dI)*δI )^2  +  (δz_interp)^2
-# #
-# # where:
-# #   - dz/dI is the spline derivative evaluated at xq
-# #   - δz_interp is the interpolated z-uncertainty at xq
-# # =============================================================================
-# exp_avg = load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_2025","data_averaged_2.jld2"))["data"];
-# # Minimum coil current (A) retained for ALL fits on the combined curve
-# # (PART 1 and PART 3). Low currents are noisier and log-space fitting is
-# # sensitive to near-zero / unstable values.
-# i_threshold = 0.020 ; 
-# # Select only those entries of the *smooth grid* i_smooth that coincide with the
-# # grouped-current locations stored in Ic_grouped[:,1]. This mask is used to
-# # downselect i_smooth/z_smooth/δi_smooth/δz_smooth to the “grouped” x locations.
-# mask = [any(abs(a - b) ≤ 1e-12 for a in exp_avg[:Ic_grouped][:,1]) for b in exp_avg[:i_smooth]];
-# @info "Experimental data loaded";
-# # 1) Build a weighted cubic spline z(Ic) from the smoothed experimental curve.
-# #    - Weights w = 1/δz^2 emphasize points with smaller position uncertainty.
-# #    - s = 0.0 requests an (essentially) interpolating spline (no smoothing penalty).
-# #    - bc="extrapolate" allows evaluation/derivatives outside the data range.
-# data_experiment = Spline1D(
-#     exp_avg[:i_smooth],
-#     exp_avg[:z_smooth],
-#     k=3,
-#     bc="extrapolate",
-#     s=0.0,
-#     w = 1 ./ exp_avg[:δz_smooth].^2
-# );
-# # 2) Extract the subset of x points (currents) on which we want to report a table.
-# #    Here we keep only the i_smooth entries that match the grouped-current grid,
-# #    together with their associated current uncertainties δI.
-# Ichosen  = exp_avg[:i_smooth][mask];
-# δIchosen = 0.02*exp_avg[:i_smooth][mask];
-# # 3) Compute the local slope dz/dI at those chosen currents using the spline derivative.
-# #    This slope is used to propagate current uncertainty δI into an additional
-# #    vertical (position) uncertainty via (dz/dI)*δI.
-# dz = derivative(data_experiment, Ichosen; nu=1);
-# # 4) Take the position uncertainties δz at the same chosen currents.
-# #    (Because z_smooth and δz_smooth are already aligned with i_smooth, we just mask.)
-# δz = exp_avg[:δz_smooth][mask];  # σ_z at Ichosen
-# # 5) Combine uncertainties in quadrature:
-# #       δz_total = sqrt( (dz/dI * δI)^2 + (δz_meas)^2 )
-# #    First term: vertical uncertainty induced by uncertainty in Ic.
-# #    Second term: intrinsic/measurement position uncertainty at that Ic.
-# δz_total = sqrt.( (dz .* δIchosen).^2 .+ δz.^2 );
-# # 6) Assemble a “scattered” table at Ichosen:
-# #    columns = [Ic, δIc, z(Ic) from the smoothed curve, δz_total]
-# data_exp_scattered = hcat(Ichosen,δIchosen,exp_avg[:z_smooth][mask],δz_total);
-# # 7) Pretty-print the table (formatting only)
-# pretty_table(data_exp_scattered;
-#         alignment     = :c,
-#         title         = @sprintf("EXPERIMENTAL DATA (scattered)"),
-#         column_labels = ["Ic (A)","δIc (A)", "z (mm)", "δz (mm)"],
-#         formatters    = ([fmt__printf("%1.3f", [1]),fmt__printf("%1.4f", [2]),fmt__printf("%1.3f", 3:4)]),
-#         style         = TextTableStyle(
-#                         first_line_column_label = crayon"yellow bold",
-#                         table_border  = crayon"blue bold",
-#                         column_label  = crayon"yellow bold",
-#                         title = crayon"bold red"
-#                         ),
-#         table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-#         equal_data_column_widths= true,)
-# # =============================================================================
-
-# # =============================================================================
-# # General analysis parameters
-# #
-# # The QM and CQD datasets may not share the exact same grid of analysis parameters.
-# # Here we compute the *intersection* (common values) for:
-# #   - nz : number of z-bins used in profile extraction
-# #   - gw : Gaussian smoothing width (mm)
-# #   - λ0 : raw smoothing parameter
-# #
-# # We then pick a single analysis configuration (nx_bins, nz_bins, gw, λ0, λs)
-# # and assert that it exists in BOTH QM and CQD metadata.
-# # =============================================================================
-
-# # ---- common parameter sets across QM and CQD ----
-# meta_nz = Int.(intersect(qm_meta.nz,cqd_meta[:nz]));
-# meta_σw = intersect(qm_meta.σw,cqd_meta[:σw]);
-# meta_λ0 = intersect(qm_meta.λ0,cqd_meta[:λ0]);
-# @info "Common parameter grid" meta_nz=meta_nz meta_σw=meta_σw meta_λ0=meta_λ0
-# # number of CQD induction coefficients available
-# n_ki    = length(cqd_meta[:ki]);
-
-# # ---- chosen working point for this run ----
-# nx_fixed , nz_fixed = 128 , 2;
-# σw_fixed  = 0.250;
-# λ0_fixed  = 0.01;
-# λ0_spline = 0.001;
-# @info "Selected parameters" nx_bins=nx_fixed nz_bins=nz_fixed gw=σw_fixed λ0_raw=λ0_fixed λ0_spline=λ0_spline
-
-# # -----------------------------------------------------------------------------
-# # Sanity checks:
-# # Ensure the chosen parameters exist in the *common* QM ∩ CQD sets.
-# # -----------------------------------------------------------------------------
-# @assert nz_fixed in meta_nz "nz_fixed = $nz_fixed not in common nz set: $meta_nz"
-# @assert σw_fixed in meta_σw "σw_fixed = $σw_fixed not in common gw set: $meta_σw"
-# @assert λ0_fixed in meta_λ0 "λ0_fixed = $λ0_fixed not in common λ0 set: $meta_λ0"
-
-# # =============================================================================
-# # Quantum-mechanical (QM) reference curve z_max(I)
-# #
-# # For the selected analysis parameters (nz_bins, gaussian_width_mm, λ0_raw),
-# # extract the QM-predicted maximum deflection z_max as a function of coil
-# # current I, and construct a smooth interpolant z_qm(I).
-# # =============================================================================
-# data_qm = jldopen(table_qm_path, "r") do file
-#     file[JLD2_MyTools.make_keypath_qm(nz_fixed, σw_fixed, λ0_fixed)]
-# end;
-
-# # data_qm = table_qm[(nz_bins,gaussian_width_mm,λ0_raw)];
-# Ic_QM   = [data_qm[i][:Icoil] for i in eachindex(data_qm)];
-# zmax_QM = [data_qm[i][:z_max_smooth_spline_mm] for i in eachindex(data_qm)];
-# zqm = Spline1D(Ic_QM,zmax_QM,k=3);
-
-# # =============================================================================
-# # Build CQD matrix z_max(I, kᵢ)
-# #
-# # Goal:
-# #   Construct a matrix `z_up_ki` of size (nI × n_ki), where:
-# #     - rows correspond to coil currents Icoils (index 1:nI)
-# #     - columns correspond to the induction coefficient values cqd_meta[:ki]
-# #
-# # Each entry is the CQD-predicted peak position:
-# #     z_up_ki[j, i] = z_max_smooth_spline_mm at current index j and ki index i
-# # =============================================================================
-# z_up_ki = Matrix{Float64}(undef, nI, n_ki);
-# for (i,ki) in enumerate(cqd_meta[:ki])
-#     # Progress print (ki is stored in "micro-units"; display it as ×10⁻⁶)
-#     println("\t($(@sprintf("%03d", i))/$(n_ki)) Running ki=$(@sprintf("%2.1e",1e-6*ki))")
-#     # Load the CQD profile data for this ki and analysis configuration.
-#     # The keypath encodes the branch (:up), ki, nz_bins, gaussian_width_mm, λ0_raw.
-#     data_up = jldopen(table_cqd_path, "r") do file
-#         # file[keypath(:up,ki,nz_bins,gaussian_width_mm,λ0_raw)]
-#         file[JLD2_MyTools.make_keypath_cqd(:up,ki,nz_fixed,σw_fixed,λ0_fixed)]
-#     end
-#     # Extract z_max (in mm) for each simulated current index l = 1:nI
-#     # and store as the i-th column of z_up_ki.
-#     z_up_ki[:,i] = [data_up[l][:z_max_smooth_spline_mm] for l in 1:nI]
-
-# end
-
-
-# # =============================================================================
-# # Visual sanity checks BEFORE building the (I, kᵢ) interpolation surface
-# #
-# # Goal:
-# #   Confirm that:
-# #   1) CQD z_max(I) curves vary smoothly with current and with kᵢ
-# #   2) CQD family brackets the experimental curve in the region of interest
-# #   3) QM reference curve is in the expected range (for comparison / scaling)
-# #
-# # Plot 1: z_max vs I (log-log), overlaying:
-# #   - CQD curves for each kᵢ (colored lines)
-# #   - QM curve (dash-dot black)
-# #   - Combined experimental spline with uncertainty ribbon (gold)
-# #
-# # Plot 2: helper figure comparing CQD z_max(kᵢ) slices against QM at selected currents
-# # =============================================================================
-# color_list = palette(:darkrainbow, n_ki);
-# fig = plot(xlabel="Current (A)",
-#     ylabel=L"$z_{\mathrm{max}}$ (mm)",
-# );
-# for (i,ki) in enumerate(cqd_meta[:ki])
-#     # Keep only points valid for log-log plotting
-#     mask_cqd = log_mask(Icoils, z_up_ki[:, i]);
-#     plot!(fig,Icoils[mask_cqd], z_up_ki[mask_cqd,i],
-#         label = L"$k_{i}=%$(round(ki, sigdigits=2))\times 10^{-6}$",
-#         line=(:solid,color_list[i]),
-#     )
-# end
-# mask_qm = log_mask(Icoils, zmax_QM);
-# plot!(Icoils[mask_qm],zmax_QM[mask_qm],
-#     label="QM",
-#     line=(:dashdot,:black,2),);
-# plot!(fig, exp_avg[:i_smooth][1:end], exp_avg[:z_smooth][1:end],
-#     ribbon=exp_avg[:δz_smooth][1:end],
-#     color=:gold,
-#     label="Combined experiments",
-#     line=(:solid,:gold,3),
-#     fillalpha=0.3,);
-# plot!(fig, 
-#     size=(1350,850),
-#     xaxis=:log10, 
-#     yaxis=:log10,
-#     xticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-#         [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     yticks = ([1e-3, 1e-2, 1e-1, 1.0], 
-#         [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     legend=:outerright,
-#     # legend_title = L"$n_{z} = %$(nz_bins)$ | $\sigma_{\mathrm{conv}}=%$(1e3*gaussian_width_mm)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_raw)$",
-#     legendtitlefontsize = 8,
-#     legend_columns = 2,
-#     legendfontsize=7,
-#     left_margin=6mm,
-#     bottom_margin=5mm,
-#     foreground_color_legend=nothing)
-# annotate!(fig, 1e-2,1, 
-#     text(L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(Int(1e3*σw_fixed))\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$",:black,12));
-# display(fig)
-# savefig(fig, joinpath(OUTDIR,"fig001.$(FIG_EXT)"))
-
-# fig = plot_cqd_vs_qm(z_up_ki, zmax_QM, Icoils, cqd_meta[:ki]);
-# display(fig)
-# savefig(fig, joinpath(OUTDIR,"fig002.$(FIG_EXT)"))
-
-# # =============================================================================
-
-# # =============================================================================
-# # Interpolated kᵢ surface: z_max = f(I, kᵢ)
-# #
-# # We have CQD predictions on a discrete grid:
-# #   - I ∈ Icoils              (length nI)
-# #   - kᵢ ∈ cqd_meta[:ki]      (length n_ki)
-# # with z_up_ki[j, i] = z_max(Icoils[j], ki[i])  (units: mm)
-# #
-# # Here we build a smooth 2D interpolant:
-# #   ki_itp(I, kᵢ) -> z_max (mm)
-# #
-# # Important note on axis ordering:
-# #   Dierckx.Spline2D(x, y, z) expects z values on the x–y grid.
-# #   With z_up_ki sized (length(Icoils), length(ki_list)), the natural call is:
-# #       Spline2D(Icoils, ki_list, z_up_ki)
-# # which matches your storage convention z_up_ki[:, i] for fixed ki.
-# # =============================================================================
-
-# # Select a subset of kᵢ values for interpolation (e.g., exclude tails if needed)
-# # ki_start , ki_stop = 1 , 109 ;
-# ki_start , ki_stop = 1 , 41 ;
-# println("Interpolation in the induction term goes from ",
-#     (cqd_meta[:ki][ki_start]),
-#     "×10⁻⁶ to ",
-#     (round(cqd_meta[:ki][ki_stop]*1e-6, sigdigits=2)))
-# # Build 2D cubic spline interpolant: z_max(I, kᵢ)
-# # s=0 => exact interpolation (no smoothing)
-# ki_itp = Spline2D(Icoils, cqd_meta[:ki][ki_start:ki_stop], z_up_ki[:,ki_start:ki_stop]; kx=3, ky=3, s=0.00);
-
-# # -----------------------------------------------------------------------------
-# # Create a dense grid for visualization:
-# #   - currents from 10 mA to 1 A
-# #   - ki from chosen min to max
-# # -----------------------------------------------------------------------------
-# i_surface = range(10e-3,1.0; length = 101);
-# ki_surface = range(cqd_meta[:ki][ki_start],cqd_meta[:ki][ki_stop]; length = 101);
-# # Evaluate surface on a grid.
-# Z = [ki_itp(x, y) for y in ki_surface, x in i_surface] ;
-
-# # -----------------------------------------------------------------------------
-# # 3D surface plot (log10 axes for I and z)
-# # -----------------------------------------------------------------------------
-# fit_surface = surface(log10.(i_surface), ki_surface, log10.(abs.(Z));
-#     title = "Fitting surface",
-#     xlabel = L"I_{c}",
-#     ylabel = L"$k_{i}\times 10^{-6}$",
-#     zlabel = L"$z\ (\mathrm{mm})$",
-#     legend = false,
-#     color = :viridis,
-#     xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
-#     camera = (20, 25),     # (azimuth, elevation)
-#     xlims = log10.((8e-4,2.05)),
-#     zlims = log10.((2e-4,10.0)),
-#     gridalpha = 0.3,
-# )
-
-# # -----------------------------------------------------------------------------
-# # Contour plot uses log10(z) as the displayed quantity.
-# # We clamp |Z| away from zero to avoid log10(0) and produce stable color limits.
-# # -----------------------------------------------------------------------------
-# Zp   = max.(abs.(Z), 1e-12);
-# logZ = log10.(Zp);
-# # Choose "decade" ticks for the colorbar based on min/max of logZ
-# lo , hi  = floor(minimum(logZ)) , ceil(maximum(logZ)); 
-# decades = collect(lo:1:hi) ; # [-4,-3,-2,-1,0] 
-# labels = [L"10^{%$k}" for k in decades];
-# fit_contour = contourf(i_surface, ki_surface, logZ; 
-#     levels=101,
-#     title="Fitting contour",
-#     xlabel=L"$I_{c}$ (A)", 
-#     ylabel=L"$k_{i}\times 10^{-6}$", 
-#     color=:viridis, 
-#     linewidth=0.2,
-#     linestyle=:dash,
-#     xaxis=:log10,
-#     xlims = (9e-3,1.05),
-#     xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     clims = (lo, hi),   # optional explicit range
-#     colorbar_ticks = (decades, labels),      # show ticks as 10^k
-#     colorbar_title = L"$ z \ \mathrm{(mm)}$",   # what the values mean
-# );
-
-# # Combined display: surface on top, contour below
-# fit_figs = plot(fit_surface, fit_contour,
-#     layout=@layout([a ; b]),
-#     size = (1800,750),
-#     bottom_margin = 8mm,
-#     top_margin = 3mm,
-# );
-# display(fit_figs)
-# savefig(fit_figs, joinpath(OUTDIR,"fig003.$(FIG_EXT)"))
-
-
-
-# ##################################################################################################
-# ##################################################################################################
-# ##################################################################################################
-# ##################################################################################################
-# ##################################################################################################
-# # --- Analysis : Combined experimental data ---
-# #
-# # This section:
-# #   1) selects a current range from the combined experimental dataset
-# #   2) optionally restricts the fit to low+high current windows (use_range)
-# #   3) computes a global scaling factor vs QM (to match magnification / amplitude)
-# #   4) fits kᵢ using the interpolated CQD surface, for:
-# #        - original experimental data
-# #        - scaled experimental data
-# ##################################################################################################
-# # -----------------------------------------------------------------------------
-# # 1) Select experimental data above a current threshold
-# #
-# # Rationale:
-# #   Low currents can be noisier, and log-space fitting becomes sensitive to any
-# #   near-zero / unstable values. We therefore start from a minimum current.
-# # -----------------------------------------------------------------------------
-# i_start = searchsortedfirst(exp_avg[:i_smooth], i_threshold) ;
-# # Currents used for scan/plotting of fitted curves (log-spaced)
-# I_scan = logspace10(i_threshold, 1.00; n = 501);
-
-# # Build the N×4 array [I, δI, z, δz] and keep only I ≥ i_threshold.
-# # NOTE: δI is a β %-of-I placeholder (the measured :δi_smooth is not used).
-# data = hcat(exp_avg[:i_smooth],0.001*exp_avg[:i_smooth], exp_avg[:z_smooth], exp_avg[:δz_smooth])[i_start:end, :];
-# pretty_table(data;
-#         alignment     = :c,
-#         title         = @sprintf("EXPERIMENTAL DATA (continuous)"),
-#         column_labels = ["Ic (A)","δIc (A)", "z (mm)", "δz (mm)"],
-#         formatters    = ([fmt__printf("%1.4f", [1]),fmt__printf("%1.4f", [2]),fmt__printf("%1.4f", [3]),fmt__printf("%1.3f", [4])]),
-#         style         = TextTableStyle(
-#                         first_line_column_label = crayon"yellow bold",
-#                         table_border  = crayon"blue bold",
-#                         column_label  = crayon"yellow bold",
-#                         title = crayon"bold red"
-#                         ),
-#         table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-#         equal_data_column_widths= true,)
-# # -----------------------------------------------------------------------------
-# # 2) Choose which rows to use for the kᵢ fit
-# #
-# # Available modes:
-# #   - fit_ki_mode = :full
-# #       Use the full post-threshold current range.
-# #
-# #   - fit_ki_mode = :low
-# #       Use only the low-current window (small-deflection regime).
-# #
-# #   - fit_ki_mode = :high
-# #       Use only the high-current window (asymptotic / large-deflection regime).
-# #
-# #   - fit_ki_mode = :low_high
-# #       Use both low- and high-current windows, excluding the mid-current region.
-# #
-# # This flexibility allows the fit to emphasize different physical regimes,
-# # depending on whether sensitivity to low-current behavior, high-current
-# # behavior, or both is desired.
-# # -----------------------------------------------------------------------------
-# fit_ki_mode = :full   # ← change to :low, :high, or :low_high
-# n_front  = 30
-# n_back   = 200
-
-# low_range  = 1:n_front ;
-# high_range = (size(data, 1) - n_back + 1):size(data, 1);
-
-# @assert last(low_range) ≤ size(data,1)
-# @assert first(high_range) ≥ 1
-
-# # Select rows according to the chosen fitting mode
-# fit_ki_idx = begin
-#     if fit_ki_mode === :full
-#         Colon()
-#     elseif fit_ki_mode === :low
-#         low_range
-#     elseif fit_ki_mode === :high
-#         high_range
-#     elseif fit_ki_mode === :low_high
-#         vcat(low_range, high_range)
-#     else
-#         error("Unknown fit_ki_mode = $fit_ki_mode")
-#     end
-# end
-
-# # Informative logging
-# if fit_ki_mode === :full
-#     println("Using FULL data range for kᵢ fitting")
-# elseif fit_ki_mode === :low
-#     println("Using LOW-current range for kᵢ fitting: ",
-#             extrema(data[low_range, 1]), " A")
-# elseif fit_ki_mode === :high
-#     println("Using HIGH-current range for kᵢ fitting: ",
-#             extrema(data[high_range, 1]), " A")
-# elseif fit_ki_mode === :low_high
-#     println("Using LOW + HIGH current ranges for kᵢ fitting: ",
-#             extrema(data[low_range, 1]), " A & ",
-#             extrema(data[high_range, 1]), " A")
-# end
-
-# # -----------------------------------------------------------------------------
-# # 3) Compute a global scaling factor for the experimental z-values 
-# #   with respect to QM
-# #
-# # Motivation:
-# #   Experimental z may differ from simulated z by an overall scale factor
-# #   (e.g., magnification calibration). We estimate a single multiplicative
-# #   factor using only the highest-current tail, where SNR is typically best.
-# #
-# # Scaling convention used:
-# #   scaled_mag = (yexp⋅yexp) / (yexp⋅ythe)
-# # so that (yexp / scaled_mag) best matches ythe in a least-squares sense.
-# # -----------------------------------------------------------------------------
-
-# # =============================================================================
-# # TAIL-CONVERGENCE STUDY — calibration factor s (and kᵢ for CQD) vs tail length
-# #
-# # For each tail length n_tail (the last n_tail rows of `data`) we fit
-# #   • CQD : (kᵢ, s) jointly with `fit_cqd_ki_scale`   (kᵢ loss on data[fit_ki_idx,:])
-# #   • QM  :  s only  with `fit_qm_scale`
-# # and record the results vs I_min, the lowest current inside the tail.
-# # The spread of each quantity over the "plateau" (tails reaching below
-# # I_plateau) is quoted as a tail-choice systematic σ_sys.
-# # =============================================================================
-# n_tail_max      = 1000              # longest tail (points) considered
-# ntail_list      = 1:50:n_tail_max # tail lengths scanned
-# I_plateau       = 0.60              # (A) plateau = tails whose I_min ≤ I_plateau
-# tail_scale_mode = :log              # :linear | :log — SAME convention for CQD and QM
-
-# @printf "Tail-convergence scan: %d ≤ n_tail ≤ %d points, i.e. tails starting between %.3f A and %.3f A (end = %.3f A)\n" first(ntail_list) last(ntail_list) data[end-last(ntail_list)+1, 1] data[end-first(ntail_list)+1, 1] data[end, 1]
-
-# # --- scan (both models in one pass) ------------------------------------------
-# scan_cqd = DataFrame(n_tail = Int[], I_min = Float64[], ki = Float64[],
-#                      scale = Float64[], tail_rmse = Float64[], r2 = Float64[])
-# scan_qm  = DataFrame(n_tail = Int[], I_min = Float64[],
-#                      scale = Float64[], tail_rmse = Float64[], r2 = Float64[])
-# for nt in ntail_list
-#     fc = fit_cqd_ki_scale(data, data[fit_ki_idx, :], cqd_meta[:ki], (ki_start, ki_stop);
-#                           n_tail = nt, scale_mode = tail_scale_mode)
-#     fq = fit_qm_scale(data, zqm; n_tail = nt, scale_mode = tail_scale_mode)
-#     push!(scan_cqd, (nt, fc.tail_range[1], fc.ki, fc.scale, fc.tail_rmse, fc.r2_coeff))
-#     push!(scan_qm,  (nt, fq.tail_range[1],        fq.scale, fq.tail_rmse, fq.r2_coeff))
-# end
-
-# # --- plateau statistics: mean ± std over tails with I_min ≤ I_plateau --------
-# plateau_cqd = scan_cqd[scan_cqd.I_min .>= I_plateau, :]
-# plateau_qm  = scan_qm[ scan_qm.I_min  .>= I_plateau, :]
-# @assert nrow(plateau_cqd) ≥ 3 "Fewer than 3 scan points reach I_min ≤ $I_plateau A; lower I_plateau or raise n_tail_max"
-
-# ki_ref,  ki_sys  = median(plateau_cqd.ki),    std(plateau_cqd.ki)
-# s_cqd,   s_cqd_σ = mean(plateau_cqd.scale), std(plateau_cqd.scale)
-# s_qm,    s_qm_σ  = mean(plateau_qm.scale),  std(plateau_qm.scale)
-# r2_cqd,  r2_qm   = median(plateau_cqd.r2),    median(plateau_qm.r2)
-
-
-# @info "Tail-choice systematics (plateau: I_min ≥ $(I_plateau) A, n = $(nrow(plateau_cqd)), scale_mode = $(tail_scale_mode))" #=
-#     =# ki_CQD = (ki_ref, ki_sys) s_CQD = (s_cqd, s_cqd_σ) s_QM = (s_qm, s_qm_σ) #=
-#     =# R2_CQD = r2_cqd R2_QM = r2_qm ki_scale_cov = cov(plateau_cqd.ki, plateau_cqd.scale)
-
-
-# # --- figure: kᵢ (CQD) | s (CQD & QM) | R² (CQD & QM), shared x ---------------
-# xlab = L"Lowest current in the calibration tail $I_{\min}$ (A)";
-# fmt(v, d) = round(v, sigdigits = d)
-
-# p_ki = plot(scan_cqd.I_min, scan_cqd.ki;
-#     marker = (:circle, 3, :white, stroke(0.8, :blue)), line = (:solid, :blue, 1.5),
-#     ylabel = L"$k_{i}\ \left(\times 10^{-6}\right)$",
-#     label  = L"CQD: $k_{i} \pm \sigma_{\mathrm{sys}} = %$(fmt(ki_ref,4)) \pm %$(fmt(ki_sys,1))$",
-#     legend = :bottomleft)
-# hspan!(p_ki, [ki_ref - ki_sys, ki_ref + ki_sys]; fillalpha = 0.15, color = :blue, linealpha = 0, label = false)
-# hline!(p_ki, [ki_ref]; line = (:dash, :blue, 1), label = false)
-
-# p_s = plot(scan_cqd.I_min, scan_cqd.scale;
-#     marker = (:circle, 3, :white, stroke(0.8, :red)), line = (:solid, :red, 1.5),
-#     ylabel = L"scale $s$",
-#     label  = L"CQD: $\bar{s} \pm \sigma_{\mathrm{sys}} = %$(fmt(s_cqd,4)) \pm %$(fmt(s_cqd_σ,1))$",
-#     legend = :left)
-# hspan!(p_s, [s_cqd - s_cqd_σ, s_cqd + s_cqd_σ]; fillalpha = 0.15, color = :red, linealpha = 0, label = false)
-# hline!(p_s, [s_cqd]; line = (:dash, :red, 1), label = false)
-# plot!(p_s, scan_qm.I_min, scan_qm.scale;
-#     marker = (:diamond, 3, :white, stroke(0.8, :purple)), line = (:dashdot, :purple, 1.5),
-#     label  = L"QM: $\bar{s} \pm \sigma_{\mathrm{sys}} = %$(fmt(s_qm,4)) \pm %$(fmt(s_qm_σ,1))$")
-# hspan!(p_s, [s_qm - s_qm_σ, s_qm + s_qm_σ]; fillalpha = 0.15, color = :purple, linealpha = 0, label = false)
-# hline!(p_s, [s_qm]; line = (:dash, :purple, 1), label = false)
-
-# p_r2 = plot(scan_cqd.I_min, scan_cqd.r2;
-#     marker = (:circle, 3, :white, stroke(0.8, :red)), line = (:solid, :red, 1.5),
-#     ylabel = L"$R^{2}$ (full data, scaled)", xlabel = xlab,
-#     label  = L"CQD: $\langle R^{2}\rangle = %$(fmt(r2_cqd,5))$",
-#     legend = :bottomright)
-# plot!(p_r2, scan_qm.I_min, scan_qm.r2;
-#     marker = (:diamond, 3, :white, stroke(0.8, :purple)), line = (:dashdot, :purple, 1.5),
-#     label  = L"QM: $\langle R^{2}\rangle = %$(fmt(r2_qm,5))$",
-#     legend=:bottomleft)
-
-# fig = plot(p_ki, p_s, p_r2;
-#     layout = (3, 1), link = :x,
-#     size = (900, 950), left_margin = 5mm, bottom_margin = 3mm,
-#     legendfontsize = 9,
-#     plot_title = L"Convergence of $k_{i}$ and $s$ vs calibration-tail length ($%$(tail_scale_mode)$ scale)",
-# )
-# display(fig)
-# savefig(fig, joinpath(OUTDIR, "fig008_tail_convergence.$(FIG_EXT)"))
-
-
-
-# n_tail = 400  # number of tail points used for scaling
-# @printf "For the scaling of the experimental data, we use the current range = %.3f A – %.3f A \n" first(last(data[:, 1], n_tail)) last(last(data[:, 1], n_tail))
-
-# fit_cs = fit_cqd_ki_scale_with_error(ki_itp, data, data[fit_ki_idx, :];
-#              n_tail = n_tail, bounds = (cqd_meta[:ki][ki_start], cqd_meta[:ki][ki_stop]), scale_mode = tail_scale_mode, use_Zse=false);
-# @info "CQD kᵢ + scale (with errors)" ki=(fit_cs.ki, fit_cs.ki_err) scale=(fit_cs.scale, fit_cs.scale_err) corr=fit_cs.corr_ki_scale n_overlap=fit_cs.n_overlap
-
-# fit_qs = fit_qm_scale_with_error(zqm, data; n_tail = n_tail, scale_mode = tail_scale_mode);
-# @info "QM scale (with error)" scale=(fit_qs.scale, fit_qs.scale_err)
-
-
-# # =============================================================================
-# # Plot: QM reference + experimental data (original & scaled) + best-fit CQD curves
-# #
-# # Overlays:
-# #   1) QM reference curve zqm(I)
-# #   2) Combined experimental data (subsampled for readability)
-# #   3) Scaled experimental curve with uncertainty ribbon
-# #   4) CQD best-fit curve using kᵢ from original data fit
-# #   5) CQD best-fit curve using kᵢ from scaled data fit
-# #
-# # Notes:
-# #   - We set log-log axes at the end.
-# #   - Any nonpositive (I or z) values must be excluded for log plots.
-# # =============================================================================
-# # -----------------------------------------------------------------------------
-# # 1) QM reference curve
-# # -----------------------------------------------------------------------------
-# z_qm = zqm.(I_scan) / fit_qs.scale;
-# m_qm = log_mask(I_scan, z_qm);
-# fig = plot(
-#     I_scan[m_qm], z_qm[m_qm];
-#     label = "Quantum mechanics",
-#     line  = (:solid, :red, 1.75),
-# )
-# # -----------------------------------------------------------------------------
-# # 2) Combined experimental data (subsampled points for clarity)
-# # -----------------------------------------------------------------------------
-# I_exp  = data[1:2:end, 1];
-# z_exp  = data[1:2:end, 3];
-# dz_exp = data[1:2:end, 4];
-# m_exp  = log_mask(I_exp, z_exp) .& isfinite.(dz_exp) .& (dz_exp .>= 0);
-# plot!(
-#     fig,
-#     I_exp[m_exp], z_exp[m_exp];
-#     ribbon=dz_exp[m_exp],
-#     color = :gray35,
-#     marker = (:circle, :gray35, 1),
-#     markerstrokecolor = :gray35,
-#     markerstrokewidth = 1,
-#     label = "Combined data",
-# )
-# # -----------------------------------------------------------------------------
-# # 4) Best-fit CQD curve (fit to original experimental data)
-# # -----------------------------------------------------------------------------
-# z_fit_orig = ki_itp.(I_scan, Ref(fit_cs.ki)) ./ fit_cs.scale;
-# m_orig = log_mask(I_scan, z_fit_orig);
-# plot!(
-#     fig,
-#     I_scan[m_orig], z_fit_orig[m_orig];
-#     label = L"CQDl : $k_{i}= \left( %$(round(fit_cs.ki, sigdigits=3)) \pm %$(round(fit_cs.ki_err, sigdigits=1)) \right) \times 10^{-6} $",
-#     line  = (:solid, :blue, 2),
-#     marker = (:xcross, :blue, 0.2),
-#     markerstrokewidth = 1,
-# )
-# # -----------------------------------------------------------------------------
-# # Global plot formatting (apply once, then display once)
-# # -----------------------------------------------------------------------------
-# plot!(
-#     fig;
-#     title = "Scaled using only QM",
-#     xlabel = "Current (A)",
-#     ylabel = L"$z_{\mathrm{max}}$ (mm)",
-#     xaxis  = :log10,
-#     yaxis  = :log10,
-#     labelfontsize = 14,
-#     tickfontsize  = 12,
-#     xticks = ([1e-3, 1e-2, 1e-1, 1.0],
-#               [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     yticks = ([1e-3, 1e-2, 1e-1, 1.0],
-#               [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     xlims = (0.010, 1.05),
-#     size  = (900, 800),
-#     legendtitle = L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(1e3*σw_fixed)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$",
-#     legendfontsize = 12,
-#     left_margin = 3mm,
-# )
-# display(fig)
-# savefig(fig, joinpath(OUTDIR,"fig004.$(FIG_EXT)"))
-
-# # =============================================================================
-# # POST-FIT DIAGNOSTICS — QM vs CQD against the raw experimental curve
-# #
-# # Convention: the *models* are scaled, the data are untouched.
-# #   m_QM (I) = zqm(I)              / fit_qs.scale        (QM  : scale only)
-# #   m_CQD(I) = ki_itp(I, kᵢ_fit)   / fit_cs.scale        (CQD : kᵢ + scale)
-# # Both scales were fixed on the same high-current tail (`n_tail`,
-# # `tail_scale_mode`), so the two models are compared on equal footing.
-# #
-# # Two complementary views of the discrepancy (model − exp):
-# #   1) Relative error  (model − exp)/exp        → SIZE of the discrepancy (%)
-# #   2) Pull            (model − exp)/σ_exp      → SIGNIFICANCE, in units of the
-# #      experimental uncertainty (column 4 of `data`). For a correct model with
-# #      correct errors: mean ≈ 0, std ≈ 1, ≈68 % within ±1σ, no trend vs I.
-# #      NOTE: `data` is the smoothed combined curve, so neighbouring points are
-# #      correlated; the pull *pattern* is meaningful, the absolute χ²_red is
-# #      only indicative (see the scattered-point GOF table for a proper χ²).
-# #
-# # Outputs: log-space metric table + log-error scatter (`compare_datasets`),
-# #          fig005 (relative error over pulls, shared current axis),
-# #          model_residuals_scaled.csv with both views for both models.
-# # =============================================================================
-# I_d, z_d, σ_d = data[:, 1], data[:, 3], data[:, 4]
-# m_qm  = zqm.(I_d)                    ./ fit_qs.scale
-# m_cqd = ki_itp.(I_d, Ref(fit_cs.ki)) ./ fit_cs.scale
-
-# lbl_qm  = L"QM ($s = %$(round(fit_qs.scale, sigdigits=4))$)"
-# lbl_cqd = L"CQD ($k_{i}=%$(round(fit_cs.ki, sigdigits=4)) \times10^{-6}$, $s = %$(round(fit_cs.scale, sigdigits=4))$)"
-# cfg_legend = L"$n_{z} = %$(nz_fixed)$ | $\sigma_{\mathrm{conv}}=%$(1e3*σw_fixed)\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_fixed)$"
-
-# # shared axis style for both panels
-# axis_kw = (
-#     xaxis = :log10,
-#     xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     xlims = (0.020, 1.05),
-#     labelfontsize = 14, tickfontsize = 12,
-#     legend = :outerright, legendfontsize = 11, legendtitle = cfg_legend,
-#     left_margin = 3mm, bottom_margin = 3mm,
-# )
-
-# # -----------------------------------------------------------------------------
-# # 1) Log-space metric table (CQD vs QM) + log-error scatter
-# # -----------------------------------------------------------------------------
-# println("Model comparison — log-space metrics (scaled models vs raw data)")
-# compare_datasets(I_d, z_d, m_cqd, m_qm; plot_errors = true);
-
-# # -----------------------------------------------------------------------------
-# # 2) Relative error (%) — size of the discrepancy
-# # -----------------------------------------------------------------------------
-# re_qm  = 100 .* relerr(m_qm,  z_d)
-# re_cqd = 100 .* relerr(m_cqd, z_d)
-
-# fig_rel = plot(; title = "Relative error of the scaled models", titlefontsize = 14,
-#     xlabel = "Current (A)", ylabel = L"(\mathrm{model}-\mathrm{exp})/\mathrm{exp}\ (\%)",
-#     axis_kw...)
-# hline!(fig_rel, [0.0]; line = (:dash, :black, 1), label = false)
-# plot!(fig_rel, I_d, re_qm;  label = lbl_qm,  line = (:solid, :red,  2))
-# plot!(fig_rel, I_d, re_cqd; label = lbl_cqd, line = (:solid, :blue, 2))
-
-# # -----------------------------------------------------------------------------
-# # 3) Pulls — significance of the discrepancy
-# # -----------------------------------------------------------------------------
-# pull_qm  = pull(m_qm,  z_d, σ_d)
-# pull_cqd = pull(m_cqd, z_d, σ_d)
-
-# pull_summary(p) = (mean = mean(p), std = std(p), chi2_red = mean(abs2, p),
-#                    frac_within_1σ = mean(abs.(p) .<= 1), frac_within_2σ = mean(abs.(p) .<= 2))
-# @info "Pulls — QM  (scaled)" pull_summary(pull_qm)...
-# @info "Pulls — CQD (scaled)" pull_summary(pull_cqd)...
-
-# fig_pull = plot(; title = "Normalised residuals (pulls)", titlefontsize = 14,
-#     xlabel = "Current (A)", ylabel = L"(\mathrm{model}-\mathrm{exp})/\sigma_{\mathrm{exp}}",
-#     axis_kw...)
-# hspan!(fig_pull, [-2, 2]; fillalpha = 0.08, color = :gray, linealpha = 0, label = L"\pm 2\sigma")
-# hspan!(fig_pull, [-1, 1]; fillalpha = 0.15, color = :gray, linealpha = 0, label = L"\pm 1\sigma")
-# hline!(fig_pull, [0.0]; line = (:dash, :black, 1), label = false)
-# plot!(fig_pull, I_d, pull_qm;
-#     label = L"QM ($\chi^{2}_{\mathrm{red}} = %$(round(mean(abs2, pull_qm), sigdigits=3))$)",
-#     line = (:solid, :red, 2))
-# plot!(fig_pull, I_d, pull_cqd;
-#     label = L"CQD ($\chi^{2}_{\mathrm{red}} = %$(round(mean(abs2, pull_cqd), sigdigits=3))$)",
-#     line = (:solid, :blue, 2))
-
-# # -----------------------------------------------------------------------------
-# # 4) Combined figure (relative error on top, pulls below) + CSV export
-# # -----------------------------------------------------------------------------
-# fig = plot(fig_rel, fig_pull;
-#     layout = (2, 1), 
-#     xlims = (0.010, 1.05),
-#     link = :x,
-#     size = (1100, 750),
-# )
-# display(fig)
-# savefig(fig, joinpath(OUTDIR, "fig005.$(FIG_EXT)"))
-
-# df_resid = DataFrame(
-#     Ic       = I_d,
-#     z_exp    = z_d,
-#     dz_exp   = σ_d,
-#     z_QM     = m_qm,
-#     z_CQD    = m_cqd,
-#     relQM    = re_qm  ./ 100,   # dimensionless
-#     relCQD   = re_cqd ./ 100,
-#     pullQM   = pull_qm,
-#     pullCQD  = pull_cqd,
-# )
-# CSV.write(joinpath(OUTDIR, "model_residuals_scaled.csv"), df_resid)
-
-
-
-# # -----------------------------------------------------------------------------
-# # 5) Plot: raw experiment + scaled QM + scaled CQD best fit
-# #    Convention: models are divided by their fitted calibration factor s,
-# #    the experimental curve is untouched.
-# # -----------------------------------------------------------------------------
-# fig = plot(
-#     title = L"Peak position ($F=1$)",)
-# # Raw experimental curve with uncertainty ribbon
-# plot!(fig,
-#     data[:,1], data[:,3],
-#     ribbon = data[:,4],
-#     label = "Experimental data",
-#     line = (:dash, :darkgreen, 3),
-#     fillcolor = :darkgreen,
-#     fillalpha = 0.35,
-# )
-# # QM reference curve, scaled by s_QM
-# plot!(fig, I_scan, zqm.(I_scan) ./ fit_qs.scale,
-#     label = L"Quantum mechanics: $s = %$(round(fit_qs.scale, sigdigits=4)) \pm %$(round(fit_qs.scale_err, sigdigits=1))$",
-#     line = (:solid, :red, 1.75),
-# )
-# # CQD best fit, scaled by s_CQD
-# plot!(fig,
-#     I_scan, ki_itp.(I_scan, Ref(fit_cs.ki)) ./ fit_cs.scale,
-#     label = L"CoQuantum dynamics: $k_{i} = \left( %$(round(fit_cs.ki, sigdigits=4)) \pm %$(round(fit_cs.ki_err, sigdigits=1)) \right) \times 10^{-6}$, $s = %$(round(fit_cs.scale, sigdigits=4)) \pm %$(round(fit_cs.scale_err, sigdigits=1))$",
-#     line = (:dot, :blue, 2),
-#     markerstrokewidth = 1,
-# )
-# # Global formatting
-# plot!(fig,
-#     xlabel = "Coil Current (A)",
-#     ylabel = L"$z_{\mathrm{max}}$ (mm)",
-#     xaxis = :log10,
-#     yaxis = :log10,
-#     labelfontsize = 14,
-#     tickfontsize = 12,
-#     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     size = (900, 800),
-#     legend = :topleft,
-#     legendtitle = L"tail: $I \geq %$(round(fit_cs.tail_range[1], digits=3))$ A ($n = %$(n_tail)$, %$(tail_scale_mode))",
-#     legendtitlefontsize = 10,
-#     legendfontsize = 11,
-#     left_margin = 3mm,
-# )
-# display(fig)
-# savefig(fig, joinpath(OUTDIR, "fig006.$(FIG_EXT)"))
-
-
-# # =============================================================================
-# # SCATTERED DATA — publication figure
-# # Raw scattered experimental points (spline at the grouped currents, with
-# # propagated δz) vs the two calibrated models:
-# #   QM  : zqm(I)            / s_QM    (fit_qs)
-# #   CQD : ki_itp(I, kᵢ_fit) / s_CQD   (fit_cs)
-# # The data are NOT rescaled; each model carries its own tail-fitted factor.
-# #   (1) x-axis = current      → single_SG_comparison.(png|svg)
-# #   (2) x-axis = gradient     → single_SG_comparison_vsg.(png|svg)
-# # =============================================================================
-
-# # -------------------------------------------------------------------------
-# # 1) Scattered experimental points above the current threshold
-# #    (kept in its own variable: `data` is the continuous curve used elsewhere)
-# # -------------------------------------------------------------------------
-# i_sc    = searchsortedfirst(data_exp_scattered[:, 1], i_threshold)
-# data_sc = data_exp_scattered[i_sc:end, :]          # columns: I, δI, z, δz
-
-# # -------------------------------------------------------------------------
-# # 2) Calibrated model curves on the dense current scan
-# # -------------------------------------------------------------------------
-# z_qm_scan  = zqm.(I_scan)                    ./ fit_qs.scale
-# z_cqd_scan = ki_itp.(I_scan, Ref(fit_cs.ki)) ./ fit_cs.scale
-
-# # -------------------------------------------------------------------------
-# # 3) Figure (1): vs coil current
-# # -------------------------------------------------------------------------
-# fig = plot()
-# plot!(fig,
-#     data_sc[:, 1], data_sc[:, 3],
-#     xerr = data_sc[:, 2],
-#     yerr = data_sc[:, 4],
-#     label = "Experimental data",
-#     seriestype = :scatter,
-#     marker = (:circle, 4, :white, stroke(0.5, :black)),
-# )
-# plot!(fig, I_scan, z_qm_scan,
-#     label = "Existing models",
-#     line = (:dash, :blue, 1.75),
-# )
-# plot!(fig, I_scan, z_cqd_scan,
-#     label = L"Coquantum dynamics: $k_{i} \approx %$(round(fit_cs.ki, sigdigits=2)) \times 10^{-6}$",
-#     line = (:solid, :red, 2),
-#     markerstrokewidth = 1,
-# )
-# plot!(fig,
-#     xlabel = "Coil Current (A)",
-#     ylabel = L"$F=1$ peak position (mm)",
-#     xaxis = :log10,
-#     yaxis = :log10,
-#     labelfontsize = 16,
-#     tickfontsize = 14,
-#     xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     size = (900, 800),
-#     legendfontsize = 12,
-#     left_margin = 3mm,
-# )
-# display(fig)
-# savefig(fig, joinpath(OUTDIR, "single_SG_comparison.png"))
-# savefig(fig, joinpath(OUTDIR, "single_SG_comparison.svg"))
-
-
-# # -------------------------------------------------------------------------
-# # 4) Figure (2): vs magnetic-field gradient
-# #    Same data and calibrated curves, x-axis mapped through G(I).
-# # -------------------------------------------------------------------------
-# gradvsI(x) = TheoreticalSimulation.GvsI(x)
-
-# # Propagate δI into the gradient axis: δG ≈ |G(I+δI) − G(I−δI)| / 2
-# # (applying G directly to δI is only correct if G is linear through the origin)
-# G_sc   = gradvsI.(data_sc[:, 1])
-# δG_sc  = abs.(gradvsI.(data_sc[:, 1] .+ data_sc[:, 2]) .- gradvsI.(data_sc[:, 1] .- data_sc[:, 2])) ./ 2
-# G_scan = gradvsI.(I_scan)
-
-# fig = plot()
-# plot!(fig,
-#     G_sc, data_sc[:, 3],
-#     xerr = δG_sc,
-#     yerr = data_sc[:, 4],
-#     label = "Experimental data",
-#     seriestype = :scatter,
-#     marker = (:circle, 4, :white, stroke(0.5, :black)),
-# )
-# plot!(fig, G_scan, z_qm_scan,
-#     label = "Existing models",
-#     line = (:dash, :blue, 1.75),
-# )
-# plot!(fig, G_scan, z_cqd_scan,
-#     label = L"Coquantum dynamics: $k_{i} \approx %$(round(fit_cs.ki, sigdigits=2)) \times 10^{-6}$",
-#     line = (:solid, :red, 2),
-#     markerstrokewidth = 1,
-# )
-# plot!(fig,
-#     xlabel = "Magnetic field gradient (T/m)",
-#     ylabel = L"$F=1$ peak position (mm)",
-#     xaxis = :log10,
-#     yaxis = :log10,
-#     labelfontsize = 16,
-#     tickfontsize = 14,
-#     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#     xlims = (5, 400),
-#     size = (900, 800),
-#     legend = :topleft,
-#     legendfontsize = 12,
-#     left_margin = 3mm,
-# )
-# display(fig)
-# savefig(fig, joinpath(OUTDIR, "single_SG_comparison_vsg.png"))
-# savefig(fig, joinpath(OUTDIR, "single_SG_comparison_vsg.svg"))
-
-# # -------------------------------------------------------------------------
-# # 5) Export what is plotted (raw experiment, calibrated models, both axes)
-# # -------------------------------------------------------------------------
-# CSV.write(joinpath(OUTDIR, "data_exp.csv"),
-#     DataFrame(Ic = data_sc[:, 1], sIc = data_sc[:, 2], G = G_sc, sG = δG_sc,
-#               zmax = data_sc[:, 3], szmax = data_sc[:, 4]))
-# CSV.write(joinpath(OUTDIR, "data_sim.csv"),
-#     DataFrame(Ic = I_scan, G = G_scan, QM = z_qm_scan, CQD = z_cqd_scan))
-
-
-
-# # =============================================================================
-# # GOODNESS OF FIT — calibrated CQD vs calibrated QM on the scattered points
-# #
-# # Both models are compared with the *raw* scattered experiment `data_sc`
-# # (spline at the grouped currents, propagated δz), each divided by its own
-# # tail-fitted calibration factor:
-# #     y_CQD = ki_itp(I, kᵢ_fit) / s_CQD      (k = 2 fitted parameters: kᵢ, s)
-# #     y_QM  = zqm(I)            / s_QM       (k = 1 fitted parameter : s)
-# # The scattered points are approximately independent, so — unlike the smoothed
-# # continuous curve — the χ² statistic, its p-value and AIC/BIC are meaningful
-# # here. All residual metrics are computed in natural-log space.
-# # =============================================================================
-
-# """
-#     FitStats
-
-# Container for the log-space goodness-of-fit metrics returned by
-# `goodness_of_fit`: `logMSE`, `logRMSE`, `R2_log`, `chi2_log`, `chi2_red`
-# (reduced χ²), `p_chi2` (χ² tail p-value), `AIC`, `BIC` and `NMAD`
-# (normalised median absolute deviation of the residuals).
-# """
-# struct FitStats
-#     logMSE::Float64
-#     logRMSE::Float64
-#     R2_log::Float64
-#     chi2_log::Float64
-#     chi2_red::Float64
-#     p_chi2::Float64
-#     AIC::Float64
-#     BIC::Float64
-#     NMAD::Float64
-# end
-
-
-# """
-#     goodness_of_fit(x, y, ypred; σ=nothing, k=0)
-
-# Evaluate how well model predictions `ypred` match observations `y` (over
-# support `x`), working in **natural-log** space where the SG curves are roughly
-# power-law. `k` is the number of fitted model parameters (used for the degrees
-# of freedom and by AIC/BIC).
-
-# Always returns `logMSE`, `logRMSE`, `R2_log` and the robust scatter `NMAD`.
-# When per-point uncertainties `σ` are given they are propagated to log space
-# (`σ_log ≈ σ/y`) and the χ² statistic, reduced χ² (`χ²/(N−k)`), χ² p-value and
-# χ²-based AIC/BIC are computed; otherwise those are `NaN` and AIC/BIC fall back
-# to a `logMSE`-based surrogate.
-
-# Returns a `FitStats`.
-# """
-# function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
-#     @assert length(x) == length(y) == length(ypred)
-#     N = length(y)
-
-#     # residuals in natural-log space (model − data, same sign as relerr/pull)
-#     logy    = log.(y)
-#     logpred = log.(ypred)
-#     r       = logpred .- logy
-
-#     logMSE  = mean(r .^ 2)
-#     logRMSE = sqrt(logMSE)
-#     R2_log  = 1 - sum(r .^ 2) / sum((logy .- mean(logy)) .^ 2)
-#     NMAD    = 1.4826 * median(abs.(r))
-
-#     if isnothing(σ)
-#         chi2_log = NaN; chi2_red = NaN; p_chi2 = NaN
-#         AIC = 2k + N * log(logMSE)          # logMSE as variance surrogate
-#         BIC = k * log(N) + N * log(logMSE)
-#     else
-#         @assert length(σ) == N
-#         σlog     = σ ./ y                   # δ(ln y) ≈ σ/y
-#         chi2_log = sum((r ./ σlog) .^ 2)
-#         dof      = max(N - k, 1)
-#         chi2_red = chi2_log / dof
-#         p_chi2   = ccdf(Chisq(dof), chi2_log)
-#         AIC = 2k + chi2_log                 # Gaussian likelihood, up to a constant
-#         BIC = k * log(N) + chi2_log
-#     end
-
-#     return FitStats(logMSE, logRMSE, R2_log, chi2_log, chi2_red, p_chi2, AIC, BIC, NMAD)
-# end
-
-
-# # --- inputs: raw scattered experiment, calibrated models ----------------------
-# x_exp = data_sc[:, 1]
-# y_exp = data_sc[:, 3]
-# σ_exp = data_sc[:, 4]
-# y_CQD = ki_itp.(x_exp, Ref(fit_cs.ki)) ./ fit_cs.scale
-# y_QM  = zqm.(x_exp)                    ./ fit_qs.scale
-
-
-# stats_CQD = goodness_of_fit(x_exp, y_exp, y_CQD; σ = σ_exp, k = 2)   # kᵢ + s
-# stats_QM  = goodness_of_fit(x_exp, y_exp, y_QM;  σ = σ_exp, k = 1)   # s only
-# @info "Goodness of fit on $(length(x_exp)) scattered points" ΔAIC_CQD_minus_QM = stats_CQD.AIC - stats_QM.AIC ΔBIC_CQD_minus_QM = stats_CQD.BIC - stats_QM.BIC
-
-
-# # --- comparison table ---------------------------------------------------------
-# metrics = ["logMSE", "logRMSE", "R2_log", "chi2_log", "chi2_red", "p_chi2", "AIC", "BIC", "NMAD"]
-# gof_table = hcat([getfield(stats_CQD, Symbol(m)) for m in metrics],
-#                  [getfield(stats_QM,  Symbol(m)) for m in metrics])
-
-# lower_is_better  = Set(["logMSE", "logRMSE", "chi2_log", "chi2_red", "AIC", "BIC", "NMAD"])
-# higher_is_better = Set(["R2_log", "p_chi2"])
-
-# # highlight, per row, the better of the two models
-# hl_best = TextHighlighter(
-#     (tbl, i, j) -> begin
-#         (j == 1 || j == 2) || return false
-#         v_CQD, v_QM = tbl[i, 1], tbl[i, 2]
-#         (isa(v_CQD, Number) && isa(v_QM, Number)) || return false
-#         metric = metrics[i]
-#         if metric in lower_is_better
-#             return tbl[i, j] == min(v_CQD, v_QM)
-#         elseif metric in higher_is_better
-#             return tbl[i, j] == max(v_CQD, v_QM)
-#         end
-#         return false
-#     end,
-#     crayon"fg:black bg:#fff7a1"
-# );
-
-# pretty_table(
-#     gof_table;
-#     title         = "Goodness of fit — calibrated models vs raw scattered data (k: CQD = 2, QM = 1)",
-#     column_labels = ["CQD", "QM"],
-#     row_labels    = metrics,
-#     row_label_column_alignment = :l,
-#     highlighters  = [hl_best],
-#     alignment     = [:c, :c],
-#     style         = TextTableStyle(
-#                 first_line_column_label = crayon"yellow bold",
-#                 table_border  = crayon"blue bold",
-#                 column_label  = crayon"yellow bold",
-#                 title = crayon"bold red",
-#                 ),
-#     table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-#     equal_data_column_widths = true,
-# )
-
-# CSV.write(joinpath(OUTDIR, "goodness_of_fit.csv"),
-#           DataFrame(metric = metrics, CQD = gof_table[:, 1], QM = gof_table[:, 2]))
-
-
-# """
-#     make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD, stats_QM; σ=nothing)
-
-# Diagnostic figure for the goodness of fit of the two *calibrated* models
-# (CQD: `ki_itp/s_CQD`, QM: `zqm/s_QM`) against the raw scattered experiment.
-
-# Panels
-# 1. data (with y-error bars if `σ` is given) vs both models, log–log;
-# 2. natural-log residuals `log(model) − log(exp)` vs current, annotated with
-#    logRMSE and R²_log;
-# 3. pulls `(model − exp)/σ` vs current with ±1σ/±2σ bands, annotated with the
-#    reduced χ² (only if `σ` is given; otherwise an empty placeholder);
-# 4. histogram of the log residuals, annotated with NMAD and logRMSE.
-
-# Returns `(p_data, p_resid, p_pull, p_hist)`.
-# """
-# function make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD::FitStats, stats_QM::FitStats; σ = nothing)
-#     # residuals in natural-log space, sign convention model − data (as in goodness_of_fit)
-#     r_CQD = log.(y_CQD) .- log.(y)
-#     r_QM  = log.(y_QM)  .- log.(y)
-
-#     xt = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"])
-
-#     # ---------------------------------------------------
-#     # 1) Data vs calibrated models (log–log)
-#     # ---------------------------------------------------
-#     p_data = plot(x, y;
-#         yerror = σ,
-#         seriestype = :scatter,
-#         marker = (:circle, :white, 3, stroke(:black, 0.8)),
-#         xscale = :log10, yscale = :log10, xticks = xt,
-#         label = "Experiment",
-#         xlabel = "Coil Current (A)",
-#         ylabel = "Peak position (mm)",
-#         title = "Data vs calibrated models",
-#         legend = :bottomright,
-#     )
-#     plot!(p_data, x, y_CQD; label = "CQD", line = (:solid, :red, 1.5))
-#     plot!(p_data, x, y_QM;  label = "QM",  line = (:dot,   :blue, 2))
-
-#     # ---------------------------------------------------
-#     # 2) Log residuals vs current
-#     # ---------------------------------------------------
-#     p_resid = plot(x, r_CQD;
-#         seriestype = :scatter,
-#         marker = (:circle, 5, 0.70, :salmon3, stroke(0.8, :red4)),
-#         xscale = :log10, xticks = xt,
-#         xlabel = "Coil Current (A)",
-#         ylabel = L"\ln(y_{\mathrm{model}}) - \ln(y_{\mathrm{exp}})",
-#         title = "Log-space residuals",
-#         label = "CQD",
-#         legend = :topright,
-#     )
-#     scatter!(p_resid, x, r_QM; label = "QM",
-#         marker = (:circle, 5, 0.70, :royalblue3, stroke(0.8, :blue4)))
-#     hline!(p_resid, [0.0]; c = :black, ls = :dash, label = false)
-#     txt_CQD = @sprintf "CQD: logRMSE = %.3g, R²_log = %.4f" stats_CQD.logRMSE stats_CQD.R2_log
-#     txt_QM  = @sprintf "QM:  logRMSE = %.3g, R²_log = %.4f" stats_QM.logRMSE  stats_QM.R2_log
-#     x_annot = x[argmin(abs.(x .- median(x)))]
-#     rmin, rmax = extrema(vcat(r_CQD, r_QM))
-#     annotate!(p_resid, (x_annot, rmin + 0.15(rmax - rmin), Plots.text(txt_CQD, 8)))
-#     annotate!(p_resid, (x_annot, rmin + 0.05(rmax - rmin), Plots.text(txt_QM,  8)))
-
-#     # ---------------------------------------------------
-#     # 3) Pulls vs current (needs σ)
-#     # ---------------------------------------------------
-#     if σ === nothing
-#         p_pull = plot(; title = "Pulls (no σ supplied)", framestyle = :none)
-#     else
-#         pu_CQD = pull(y_CQD, y, σ)
-#         pu_QM  = pull(y_QM,  y, σ)
-#         p_pull = plot(;
-#             xscale = :log10, xticks = xt,
-#             xlabel = "Coil Current (A)",
-#             ylabel = L"(y_{\mathrm{model}} - y_{\mathrm{exp}})/\sigma_{\mathrm{exp}}",
-#             title = "Normalised residuals (pulls)",
-#             legend = :topright,
-#         )
-#         hspan!(p_pull, [-2, 2]; fillalpha = 0.08, color = :gray, linealpha = 0, label = L"\pm 2\sigma")
-#         hspan!(p_pull, [-1, 1]; fillalpha = 0.15, color = :gray, linealpha = 0, label = L"\pm 1\sigma")
-#         hline!(p_pull, [0.0]; c = :black, ls = :dash, label = false)
-#         scatter!(p_pull, x, pu_CQD;
-#             label = L"CQD: $\chi^{2}_{\mathrm{red}} = %$(round(stats_CQD.chi2_red, sigdigits=3))$",
-#             marker = (:circle, 5, 0.70, :salmon3, stroke(0.8, :red4)))
-#         scatter!(p_pull, x, pu_QM;
-#             label = L"QM: $\chi^{2}_{\mathrm{red}} = %$(round(stats_QM.chi2_red, sigdigits=3))$",
-#             marker = (:circle, 5, 0.70, :royalblue3, stroke(0.8, :blue4)))
-#     end
-
-#     # ---------------------------------------------------
-#     # 4) Histogram of log residuals
-#     # ---------------------------------------------------
-#     p_hist = histogram(r_CQD;
-#         normalize = true, color = :red, alpha = 0.4,
-#         label = "CQD",
-#         xlabel = "log-space residual",
-#         ylabel = "Normalised count",
-#         title = "Distribution of log-space residuals",
-#         legend = :topright,
-#     )
-#     histogram!(p_hist, r_QM; normalize = true, color = :blue, alpha = 0.4, label = "QM")
-#     vline!(p_hist, [0.0]; c = :black, ls = :dash, lw = 1, label = false)
-#     txt2_CQD = @sprintf "CQD: NMAD = %.3g, logRMSE = %.3g" stats_CQD.NMAD stats_CQD.logRMSE
-#     txt2_QM  = @sprintf "QM:  NMAD = %.3g, logRMSE = %.3g" stats_QM.NMAD  stats_QM.logRMSE
-#     hx_lo, hx_hi = Plots.xlims(p_hist)
-#     hy_hi        = Plots.ylims(p_hist)[2]
-#     annotate!(p_hist, (hx_lo + 0.03(hx_hi - hx_lo), 0.90hy_hi, Plots.text(txt2_CQD, 8, :left)))
-#     annotate!(p_hist, (hx_lo + 0.03(hx_hi - hx_lo), 0.82hy_hi, Plots.text(txt2_QM,  8, :left)))
-
-#     return p_data, p_resid, p_pull, p_hist
-# end
-
-# p1, p2, p3, p4 = make_diagnostic_plots(x_exp, y_exp, y_CQD, y_QM, stats_CQD, stats_QM; σ = σ_exp)
-# fig = plot(p1, p2, p3, p4;
-#     layout = (2, 2),
-#     size = (1200, 1000),
-#     left_margin = 4mm, bottom_margin = 3mm,
-# )
-# display(fig)
-# savefig(fig, joinpath(OUTDIR, "fig007.$(FIG_EXT)"))
