@@ -2020,24 +2020,25 @@ jldopen(archive_path, "w") do f
     f["settings/n_tail"]        = N_TAIL
     f["settings/ki_mode"]       = FIT_KI_MODE
 
-    # --- fitting results (NamedTuples without the Optim object) ---
-    f["fit/cqd/ki"]         = fit_cs.ki*1e-6
-    f["fit/cqd/ki_ErrStat"] = fit_cs.ki_err*1e-6
-    f["fit/cqd/ki_ErrSys"]  = ki_sys*1e-6
-    f["fit/cqd/scale"]      = fit_cs.scale
+    # --- fit results (physical units: kᵢ in SI, i.e. micro-units × 1e-6) ---
+    f["fit/cqd/ki"]            = fit_cs.ki      * 1e-6
+    f["fit/cqd/ki_ErrStat"]    = fit_cs.ki_err  * 1e-6
+    f["fit/cqd/ki_ErrSys"]     = ki_sys         * 1e-6
+    f["fit/cqd/scale"]         = fit_cs.scale
     f["fit/cqd/scale_ErrStat"] = fit_cs.scale_err
     f["fit/cqd/scale_ErrSys"]  = s_cqd_σ
-    f["fit/qm/scale"]           = fit_qs.scale
-    f["fit/qm/scale_ErrStat"] = fit_qs.scale_err
-    f["fit/qm/scale_ErrSys"]  = s_qm_σ
+    f["fit/qm/scale"]          = fit_qs.scale
+    f["fit/qm/scale_ErrStat"]  = fit_qs.scale_err
+    f["fit/qm/scale_ErrSys"]   = s_qm_σ
 
-    # --- experiment: scattered points (I ≥ I_THRESHOLD), both x-axes ---
+    # --- experiment, scattered points (I ≥ I_THRESHOLD), both x-axes ---
     f["experiment/Current_A"]      = I_sc
     f["experiment/CurrentErr_A"]   = δI_sc
     f["experiment/Gradient_Tm"]    = G_sc
     f["experiment/GradientErr_Tm"] = δG_sc
     f["experiment/zF1_mm"]         = z_sc
     f["experiment/zF1Err_mm"]      = δz_sc
+    # calibrated models at the same currents (inputs of the GOF table)
     f["experiment/CQD_up_mm"]      = m_cqd_sc
     f["experiment/QM_zF1_mm"]      = m_qm_sc
 
