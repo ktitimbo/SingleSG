@@ -1304,6 +1304,58 @@ function section(label, title)
     println(cstr(line, :blue, :bold))
 end
 
+"""
+    list_jld2_entries(path; io = stdout, show_type = true)
+
+Print the full tree of groups and datasets stored in the JLD2 file `path`
+(names only, no values) as a quick reference of *what* is in the archive and
+*where* to find it. Groups are printed in bold blue, datasets in green; with
+`show_type = true` each dataset is annotated with its element type and, for
+arrays, its size (e.g. `Vector{Float64} (47)`), so the layout can be checked
+without loading anything into the workspace.
+
+Works on any JLD2 file, not only the run archive, e.g.
+
+    list_jld2_entries(archive_path)
+    list_jld2_entries(raw"F:\\...\\SG_ki_scale_results.jld2"; show_type = false)
+
+Returns the vector of full dataset paths (e.g. `"fit/cqd/ki"`), which can be
+used directly as keys: `jldopen(path) do f; f["fit/cqd/ki"]; end`.
+"""
+function list_jld2_entries(path::AbstractString; io::IO = stdout, show_type::Bool = true)
+    paths = String[]
+
+    # recursive walk: `g` is the file or a group, `prefix` its full path
+    function _walk(g, prefix, depth)
+        for k in keys(g)            # insertion (write) order, as stored by JLD2
+            full = isempty(prefix) ? k : prefix * "/" * k
+            v    = g[k]
+            pad  = "  "^depth
+            if v isa JLD2.Group
+                println(io, pad, cstr(k * "/", :blue, :bold))
+                _walk(v, full, depth + 1)
+            else
+                push!(paths, full)
+                info = ""
+                if show_type
+                    info = v isa AbstractArray ?
+                           "  " * cstr("$(typeof(v)) ($(join(size(v), "×")))", :white) :
+                           "  " * cstr(string(typeof(v)), :white)
+                end
+                println(io, pad, cstr(k, :green), info)
+            end
+        end
+    end
+
+    println(io, cstr("Contents of ", :bold), cstr(path, :magenta))
+    jldopen(path, "r") do f
+        _walk(f, "", 1)
+    end
+    println(io, cstr("  $(length(paths)) datasets", :white))
+    return paths
+end
+
+
 ##################################################################################################
 #  1) SIMULATION GRIDS
 section("1", "SIMULATION GRIDS — QM table, CQD table, analysis configuration")
@@ -2105,7 +2157,7 @@ jldopen(archive_path, "w") do f
 end
 @info cstr("Run archived to ", :green) * cstr(archive_path, :magenta)
 
-
+archive_keys = list_jld2_entries(archive_path)     # names-only reference of the archive layout
 
 
 
