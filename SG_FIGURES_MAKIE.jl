@@ -106,7 +106,7 @@ LinearAlgebra.BLAS.set_num_threads(4)
 cd(@__DIR__)
 const BASE_PATH = raw"F:\SternGerlachExperiments"
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss")   # REVIEW: const + timestamp → not re-includable
-const OUTDIR    = joinpath(@__DIR__, "data_studies", "FINALIMAGES_" * RUN_STAMP)
+const OUTDIR    = joinpath(@__DIR__, "data_studies", "FINAL_IMAGES_" * RUN_STAMP)
 isdir(OUTDIR) || mkpath(OUTDIR)
 @info "Created output directory" OUTDIR
 
@@ -394,33 +394,37 @@ end
 
 ##################################################################################################
 ## §3  EXPERIMENTAL PATTERN: F=1 / F=2 IMAGES WITH PROFILES
-##      →  SG_img_f1, SG_img_f2  (image + profile on the left + colorbar)
-##      →  SG_img_profile_f1, SG_img_profile_f2  (image + profile on top)
+##      →  SG_img_f1, SG_img_f2                  (image vertical, profile on the left + colorbar)
+##      →  SG_img_profile_f1, SG_img_profile_f2  (image horizontal, profile on top)
 ##################################################################################################
-# Processing binning of the stored images. The camera frames were binned 4× along x during
-# processing; the plots below use unbinned camera-pixel coordinates so both panel styles show the
-# image as recorded, and ticks / aspect ratio are honest rather than relabelled.
-const IMG_BIN_X = 4
-const IMG_BIN_Z = 1
-
-"""
-    unbinned_pixel_centers(n, bin) -> Vector{Float64}
+# The processed images are stored binned 4× along x (the non-dispersive direction); z (the
+# Stern–Gerlach dispersive direction) is unbinned. Rather than rescale the data, the tick labels
+# of the binned axis are multiplied by the binning factor (`y_scale`), so both panel styles are
+# read in unbinned camera pixels while the arrays stay exactly as they come out of the pipeline.
+#
+# Array orientation differs between the two panel functions and is the caller's responsibility:
+#   plot_heatmap_with_profile(img)    expects (x × z)  — image drawn with z vertical
+#   plot_image_with_z_profile(img')   expects (z × x)  — image drawn with z horizontal
+# In both cases the profile shown is the mean over x, i.e. the intensity distribution along z,
+# which is the quantity the splitting is measured from.
  
-Camera-pixel coordinate of the centre of each of `n` binned pixels, where every binned pixel
-covers `bin` camera pixels. Binned pixel `i` spans camera pixels `bin*(i-1)+1 … bin*i`.
-"""
-unbinned_pixel_centers(n, bin) = bin .* ((1:n) .- 0.5) .+ 0.5
-
 """
     load_experiment(filepath) -> data
  
-Load the processed JLD2 experiment file and print the coil-current / field table.
+Load the processed Stern–Gerlach dataset from a JLD2 file and print the coil-current / field
+table for the run.
+ 
+The returned dictionary carries at least `:Currents`, `:CurrentsError`, `:BzTesla` (one entry per
+coil-current setting) and the image stacks `:F1ProcessedImages`, `:F2ProcessedImages`, each of
+shape (x × z × repetition × current). The three current/field columns are checked for equal
+length so a truncated or mis-saved file is caught here rather than at plotting time.
 """
 function load_experiment(filepath::AbstractString)
     data = load(filepath, "data")
     currents     = vec(data[:Currents])
     currents_err = vec(data[:CurrentsError])
     bz_mT        = 1e3 .* vec(data[:BzTesla])
+
     lengths = length.((currents, currents_err, bz_mT))
     all(==(lengths[1]), lengths) || throw(DimensionMismatch("Columns have different lengths: $lengths"))
  
@@ -436,7 +440,9 @@ function load_experiment(filepath::AbstractString)
             table_border = crayon"blue bold",
             title        = crayon"bold red"),
         equal_data_column_widths = true,
-        show_row_number_column = true, row_number_column_label = "No.", row_number_column_alignment = :c,
+        show_row_number_column = true, 
+        row_number_column_label = "No.", 
+        row_number_column_alignment = :c,
     )
     return data
 end
@@ -444,252 +450,80 @@ end
 """
     mean_image(stack, idx) -> Matrix
  
-Mean over the repetition axis (dim 3) of the (x × z × rep × current) image stack at current
-index `idx`. NaN-safe: pixels that are NaN in some repetitions are averaged over the others.
+Mean over the repetition axis (dim 3) of the (x × z × rep × current) image `stack` at
+current index `idx`, returning the (x × z) mean frame.
+ 
+NaN-safe: pixels masked out in some repetitions are averaged over the remaining ones, so a
+single bad frame does not blank a pixel in the result. The `@view` avoids copying the slice.
 """
 mean_image(stack, idx) = dropdims(nanmean(@view(stack[:, :, :, idx]); dims = 3); dims = 3)
 
-
-
 """
-    plot_heatmap_with_profile(img; kwargs...) -> Figure
+    plot_heatmap_with_profile(data; kwargs...) -> Figure
  
-Heatmap of an (x × z) image in unbinned camera-pixel coordinates, with the x-averaged intensity
-profile along z drawn on the LEFT (intensity axis reversed so it grows toward the image) and a
-colorbar on the right. The colour map spans the raw data range; `yreversed = true` puts z = 0 at
-the top, matching the camera frame orientation.
+Vertical rendering of an (x × z) mean image: heatmap in the centre with z increasing downwards
+(camera orientation), the x-averaged intensity profile along z on the left, and a colorbar on
+the right. The three panels share the z axis, so a feature in the profile lines up with the
+corresponding band in the image.
+ 
+The profile's intensity axis is reversed (`xreversed = true`) so the curve grows toward the
+image, and the heatmap's own z decorations are hidden because the profile axis already carries
+that scale.
+ 
+# Keyword arguments
+- `colormap`, `colorrange`: colour mapping; the default range spans the finite data, i.e. the
+  raw intensity scale (not normalised), which is what the colorbar then reports.
+- `figsize`: figure size in points.
+- `cb_label`, `profile_label`: colorbar and profile-axis labels.
+- `aspect`: width:height of the heatmap panel; 0.5 makes the image twice as tall as wide.
+  Also used as the column-width constraint, so the cell is exactly as wide as the axis needs.
 """
-function plot_heatmap_with_profile(img;
-        colormap      = :viridis,
-        colorrange    = extrema(filter(isfinite, img)),
-        figsize       = (600, 550),            # REVIEW: was `size`, which shadows Base.size inside the function
-        cb_label      = L"Mean intensity ($\mathrm{a.u.}$)",
-        profile_label = L"Intensity ($\mathrm{a.u.}$)",
-        profile_width = 0.25,                  # fraction of the layout width given to the profile
-        yreversed     = true,
-)
-    x = unbinned_pixel_centers(size(img, 1), IMG_BIN_X)
-    z = unbinned_pixel_centers(size(img, 2), IMG_BIN_Z)
-    xlims, zlims = extrema(x), extrema(z)
-    profile_z = vec(nanmean(img; dims = 1))    # mean over x → profile along z (splitting direction)
- 
-    fig    = Figure(; size = figsize, backgroundcolor = :white)
-    layout = GridLayout(fig[1, 1])
- 
-    ax_profile = Axis(layout[1, 1];
-        xlabel = profile_label, ylabel = L"$z$ (pixels)",
-        xreversed = true, yreversed,
-        limits = (nothing, zlims),
-        xautolimitmargin = (0, 0), yautolimitmargin = (0, 0),
-        yticksmirrored = true,
-        xtickformat = latex_int, ytickformat = latex_int,
-    )
-    ax_img = Axis(layout[1, 2];
-        xlabel = L"$x$ (pixels)",
-        aspect = DataAspect(),                 # true image shape in camera pixels
-        yreversed,
-        limits = (xlims, zlims),
-        xautolimitmargin = (0, 0), yautolimitmargin = (0, 0),
-        yticksmirrored = true,
-        xtickformat = latex_int,
-    )
- 
-    hm = heatmap!(ax_img, x, z, img; colormap, colorrange)
-    lines!(ax_profile, profile_z, z; color = :darkorange, linewidth = 2)
-    linkyaxes!(ax_profile, ax_img)
-    hideydecorations!(ax_img; ticks = false, grid = false, minorgrid = false, minorticks = false)
- 
-    Colorbar(layout[1, 3], hm; label = cb_label, vertical = true, flipaxis = true)
- 
-    colsize!(layout, 1, Relative(profile_width))
-    colgap!(layout, 1, 8)
-    colgap!(layout, 2, 2)
-    Makie.trim!(layout)
-    return fig
-end
-
-"""
-    plot_image_with_z_profile(img; kwargs...) -> Figure
- 
-Heatmap of an (x × z) image in unbinned camera-pixel coordinates, drawn with z horizontal, and the
-x-averaged intensity profile along z above it. Values below zero are clipped and the image is
-normalised to its maximum for the colour map; the profile is drawn from the raw data.
-"""
-function plot_image_with_z_profile(img;
-        colormap      = :viridis,
-        figsize       = (600, 400),
-        profile_label = L"Intensity ($\mathrm{a.u.}$)",
-        profile_height = 0.35,                 # fraction of the layout height given to the profile
-        z_tick_step   = 400,
-        yreversed     = false,                 # REVIEW (F): choose one orientation for both panel styles
-)
-    x = unbinned_pixel_centers(size(img, 1), IMG_BIN_X)
-    z = unbinned_pixel_centers(size(img, 2), IMG_BIN_Z)
-    xlims, zlims = extrema(x), extrema(z)
- 
-    img_norm  = max.(img, 0) ./ maximum(filter(isfinite, max.(img, 0)))
-    profile_z = vec(nanmean(img; dims = 1))    # mean over x → profile along z (splitting direction)
- 
-    # Upper profile limit rounded up to the leading decade: 750 → 800, 32 → 40
-    p_max   = max(maximum(filter(isfinite, profile_z)), 1.0)
-    decade  = exp10(floor(log10(p_max)))
-    p_upper = ceil(p_max / decade) * decade
- 
-    fig    = Figure(; size = figsize, backgroundcolor = :white)
-    layout = GridLayout(fig[1, 1])
-    zticks = range(0, zlims[2]; step = z_tick_step)
- 
-    ax_top = Axis(layout[1, 1];
-        ylabel = profile_label,
-        limits = (zlims, (0, p_upper)),
-        xautolimitmargin = (0, 0), yautolimitmargin = (0, 0),
-        xtickalign = 0.5, xticks = zticks, ytickformat = latex_int,
-    )
-    ax_img = Axis(layout[2, 1];
-        xlabel = L"$z$ (pixels)", ylabel = L"$x$ (pixels)",
-        aspect = DataAspect(),                 # true image shape in camera pixels
-        yreversed,
-        limits = (zlims, xlims),
-        xautolimitmargin = (0, 0), yautolimitmargin = (0, 0),
-        xtickalign = 0.5, xticks = zticks,
-        xtickformat = latex_int, ytickformat = latex_int,
-    )
- 
-    hm = heatmap!(ax_img, z, x, permutedims(img_norm); colormap, colorrange = (0, 1))
-    lines!(ax_top, z, profile_z; color = :red, linewidth = 2)
-    linkxaxes!(ax_top, ax_img)
-    hidexdecorations!(ax_top; ticks = false, grid = false, minorgrid = false, minorticks = false)
- 
-    rowsize!(layout, 1, Relative(profile_height))
-    rowgap!(layout, 1, 12)
-    Makie.trim!(layout)
-    return fig
-end
-
-
-exp_data = load_experiment(joinpath(BASE_PATH, "EXPERIMENTS", "20260220", "data_processed.jld2"))
- 
-let
-    nI_idx = 19
-    I_sel  = exp_data[:Currents][nI_idx]
-    @info "Experimental pattern" nI_idx I0_A = I_sel Bz_mT = 1e3 * exp_data[:BzTesla][nI_idx]
- 
-    F1_mean = mean_image(exp_data[:F1ProcessedImages], nI_idx)
-    F2_mean = mean_image(exp_data[:F2ProcessedImages], nI_idx)
-    @info "Image ranges" F1 = extrema(filter(isfinite, F1_mean)) F2 = extrema(filter(isfinite, F2_mean))
- 
-    for (img, tag) in ((F1_mean, "f1"), (F2_mean, "f2"))
-        fig = plot_heatmap_with_profile(img)
-        display(fig)
-        savefig(fig, "SG_img_$tag")
- 
-        fig = plot_image_with_z_profile(img)
-        display(fig)
-        savefig(fig, "SG_img_profile_$tag")
-    end
-end
- 
-
-##################################################################################################
-##################################################################################################
-## Experimental pattern
-
-experiment_path = joinpath(BASE_PATH,"EXPERIMENTS","20260220","data_processed.jld2");
-
-function print_experiment_table(filepath::AbstractString)
-    data = load(filepath, "data");
-
-    currents      = vec(data[:Currents])
-    currents_err  = vec(data[:CurrentsError])
-    bz_tesla      = 1000* vec(data[:BzTesla]) # mT
-
-    lengths = length.((currents, currents_err, bz_tesla))
-    all(==(lengths[1]), lengths) ||
-        throw(DimensionMismatch("Columns have different lengths: $lengths"))
-
-    table = hcat(currents, currents_err, bz_tesla);
-
-    pretty_table(
-        table;
-        title         = joinpath(splitpath(filepath)[end-1:end]...),
-        formatters    = [fmt__printf("%8.4f", [1]), fmt__printf("%8.4f", [2]), fmt__printf("%8.4f", [3])],
-        alignment     = :c,
-        column_labels  = [
-            ["I0 Current", "I0 CurrentError", "Bz field"], 
-            ["[A]", "[A]", "[mT]"]
-        ],
-        table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-        style = TextTableStyle(
-                    first_line_column_label = crayon"yellow bold",
-                    column_label  = crayon"yellow",
-                    table_border  = crayon"blue bold",
-                    title = crayon"bold red"
-                    ),
-        equal_data_column_widths = true,
-        show_row_number_column = true,
-        row_number_column_label = "No.",
-        row_number_column_alignment = :c,
-    )
-    return data
-end
-
-exp_data = print_experiment_table(experiment_path);
-
-nI_idx = 19
-
-F1_mean = dropdims(
-    mean(@view(exp_data[:F1ProcessedImages][:, :, :, nI_idx]), dims=3),
-    dims=3,
-);
-
-F2_mean = dropdims(
-    mean(@view(exp_data[:F2ProcessedImages][:, :, :, nI_idx]), dims=3),
-    dims=3,
-);
-
 function plot_heatmap_with_profile(
         data;
         colormap    = :viridis,
         colorrange  = extrema(filter(isfinite, data)),
-        size        = (600, 550),
+        figsize     = (600, 550),
         cb_label    = "Mean intensity",
         profile_label = "Intensity (arb. units)",
         aspect      = 0.5,   # width:height ratio, e.g. 0.5 → twice as tall as wide
 )
-    fig = Figure(; size=size, backgroundcolor=:white)
-
+    fig = Figure(; size=figsize, backgroundcolor=:white)
+ 
     layout = GridLayout(fig[1, 1])
-
+ 
+    # data is (x × z): dim 1 → x (transverse), dim 2 → z (dispersive)
     x = axes(data, 1)
     y = axes(data, 2)
     xlims = (minimum(x), maximum(x))
     ylims = (minimum(y), maximum(y))
-
-    mean_over_x = vec(mean(data, dims=1))   # profile vs y, shown on the left
-
+ 
+    mean_over_x = vec(nanmean(data, dims=1))   # profile vs y, shown on the left
+ 
+    # ── Left panel: intensity profile along z ────────────────────────────────
     ax_right = Axis(
         layout[1, 1];
         ylabel = "z (pixels)",
         xlabel = profile_label,
-        yreversed = true,
-        xreversed=true,
-        limits = (nothing, ylims),
-        xautolimitmargin = (0, 0),
+        yreversed = true,      # z = 0 at the top, matching the camera frame
+        xreversed=true,        # intensity grows toward the heatmap
+        limits = (nothing, ylims),   # z limits fixed; intensity range left automatic
+        xautolimitmargin = (0, 0),   # no padding, so the profile touches the panel edges
         yautolimitmargin = (0, 0),
         yticksmirrored = true,
     )
-
+ 
+    # ── Centre panel: the mean image ─────────────────────────────────────────
     ax_heatmap = Axis(
         layout[1, 2];
         xlabel = "x (pixels)",
         aspect = AxisAspect(aspect),
-        yreversed = true,
+        yreversed = true,      # same z direction as the profile axis
         limits = (xlims, ylims),
         xautolimitmargin = (0, 0),
         yautolimitmargin = (0, 0),
         yticksmirrored = true,
     )
-
+ 
     hm = heatmap!(
         ax_heatmap,
         x,
@@ -698,7 +532,7 @@ function plot_heatmap_with_profile(
         colormap=colormap,
         colorrange=colorrange,
     )
-
+ 
     lines!(
         ax_right,
         mean_over_x,
@@ -706,61 +540,71 @@ function plot_heatmap_with_profile(
         color=:darkorange,
         linewidth=2,
     )
-
+ 
+    # Shared z axis: panning/limits stay consistent between profile and image
     linkyaxes!(ax_right, ax_heatmap)
-
+ 
     # heatmap is now in the middle: hide its z-axis label/ticklabels,
     # since ax_right (on the left) already carries the z-axis labels
     hideydecorations!(
         ax_heatmap;
         label = true,
         ticklabels = true,
-        ticks = false,
+        ticks = false,       # keep the tick marks as a visual scale
         grid = false,
         minorgrid = false,
         minorticks = false,
     )
-
+ 
     # Tie column 2's width to row 1's height via the aspect ratio, so the
     # cell is exactly as wide as the axis needs — no leftover whitespace.
     colsize!(layout, 1, Relative(0.25))
     colsize!(layout, 2, Aspect(1, aspect))
-
+ 
     Colorbar(
         layout[1, 3],
         hm;
         label = cb_label,
         vertical = true,
-        flipaxis = true,
+        flipaxis = true,     # ticks and label on the right-hand side of the bar
     )
-
-    colgap!(layout, 1, 8)
-    colgap!(layout, 2, 2)
-
+ 
+    colgap!(layout, 1, 8)    # profile ↔ heatmap
+    colgap!(layout, 2, 2)    # heatmap ↔ colorbar
+ 
+    # Drop the unused layout space left by trimmed decorations
     Makie.trim!(layout)
-
+ 
     return fig
 end
 
-# ── Generate F1 and F2 independently ──────────────────────────────────────
-fig_F1 = plot_heatmap_with_profile(
-    F1_mean;
-    colorrange = extrema(filter(isfinite, F1_mean)),
-)
-
-fig_F2 = plot_heatmap_with_profile(
-    F2_mean;
-    colorrange = extrema(filter(isfinite, F2_mean)),
-)
-
-F1_mean_norm = (x -> max(x, 0)).(F1_mean) ./ maximum(max.(F1_mean, 0))
-F2_mean_norm = (x -> max(x, 0)).(F2_mean) ./ maximum(max.(F2_mean, 0))
-
-function plot_heatmap_with_top_profile(
-        data;
+"""
+    plot_image_with_z_profile(data; kwargs...) -> Figure
+ 
+Horizontal rendering of a (z × x) mean image — pass the transpose of the (x × z) frame — with
+the x-averaged intensity profile along z drawn directly above it, sharing the z axis.
+ 
+Intended as the compact, full-width panel for the manuscript: z runs left to right along the
+long side, so the split components are separated horizontally and the profile above reads as
+their line shape. The image is clipped at zero and normalised to its maximum, so the colour
+scale is 0–1 in arbitrary units (no colorbar is drawn); the profile is computed from the raw
+data and keeps its own intensity scale.
+ 
+# Keyword arguments
+- `colormap`: colour map applied to the normalised image.
+- `figsize`: figure size in points.
+- `save_name`: base filename, used by the caller when saving.
+- `profile_label`: y-axis label of the profile panel.
+- `aspect`: width:height of the heatmap panel (4.75 ≈ the frame's z:x ratio once the 4× x
+  binning is accounted for). Also sets the image row height via `Aspect(1, 1/aspect)`.
+- `label_size`, `ticklabel_size`: font sizes for this panel.
+- `y_scale`: x-axis binning factor of the stored images; tick labels on the binned axis are
+  multiplied by it so they read as unbinned camera pixels. Pass `nothing` to label raw indices.
+- `x_tick_step`: spacing of the shared z ticks, in stored pixels. Pass `nothing` for automatic.
+"""
+function plot_image_with_z_profile(data;
         colormap      = :viridis,
-        size          = (600, 400),
-        save_name     = "SG_img_profile",
+        figsize       = (600, 400),
         profile_label = L"Intensity ($\mathrm{a.u.}$)",
         aspect        = 4.75,
         label_size      = 18,
@@ -768,45 +612,53 @@ function plot_heatmap_with_top_profile(
         y_scale         = 4, # binning
         x_tick_step     = 400,
 )
-    fig = Figure(; size=size, backgroundcolor=:white)
-
+    fig = Figure(; size=figsize, backgroundcolor=:white)
+ 
     layout = GridLayout(fig[1, 1])
-
+ 
+    # data is (z × x) here — the caller passes the transposed frame — so dim 1 (named `x`
+    # below, the plot's horizontal axis) is z, and dim 2 (`y`) is the binned x direction.
     x = axes(data, 1)
-    y = axes(data, 2) 
+    y = axes(data, 2)
     xlims = (minimum(x), maximum(x))
     ylims = (minimum(y), maximum(y))
-
-    data_norm = (x -> max(x, 0)).(data) ./ maximum(max.(data, 0))
-
-    mean_over_y = vec(mean(data, dims=2))   # transverse profile vs x, shown on top
-
+ 
+    # Clip negatives (background subtraction can undershoot) and normalise to peak → colour scale 0–1
+    data_norm = (x -> max(x, 0)).(data) ./ maximum(filter(isfinite, max.(data, 0)))
+ 
+    mean_over_y = vec(nanmean(data, dims=2))   # transverse profile vs x, shown on top
+ 
+    # Tick label helpers: integers typeset by MathTeXEngine so they match the LaTeX axis labels
     _latexfmt(vs) = [L"%$(Int(round(Int, v)))" for v in vs]
+    # …and the same, rescaled by the binning factor, for the binned axis
     _yfmt   = isnothing(y_scale) ? _latexfmt :
                   (vs -> [L"%$(Int(round(Int, y_scale * v)))" for v in vs])
     _xticks = isnothing(x_tick_step) ? Makie.automatic :
                   range(0, xlims[2]; step=x_tick_step)
-
+ 
     # Upper y-limit: ceil to the next multiple of the leading decade
     # e.g. 750 → 800 (decade=100),  32 → 40 (decade=10)
+    # Keeps the top tick round and the profile from touching the panel edge.
     _y_max  = max(maximum(filter(isfinite, mean_over_y)), 1.0)
     _decade = 10.0^floor(log10(_y_max))
     y_upper = ceil(_y_max / _decade) * _decade
-
+ 
+    # ── Top panel: intensity profile along z ─────────────────────────────────
     ax_top = Axis(
         layout[1, 1];
         ylabel         = profile_label,
         ylabelsize     = label_size,
         yticklabelsize = ticklabel_size,
-        limits         = (xlims, (0, y_upper)),
+        limits         = (xlims, (0, y_upper)),   # baseline pinned at zero
         xautolimitmargin = (0, 0),
         yautolimitmargin = (0, 0),
         xticksvisible  = true,
-        xtickalign     = 0.5,
-        xticks         = _xticks,
+        xtickalign     = 0.5,      # ticks centred on the spine, pointing both ways
+        xticks         = _xticks,  # same z ticks as the image below
         ytickformat    = _latexfmt,
     )
-
+ 
+    # ── Bottom panel: the mean image ─────────────────────────────────────────
     ax_heatmap = Axis(
         layout[2, 1];
         xlabel         = L"$z$ (pixels)",
@@ -823,9 +675,9 @@ function plot_heatmap_with_top_profile(
         xtickalign     = 0.5,
         xticks         = _xticks,
         xtickformat    = _latexfmt,
-        ytickformat    = _yfmt,
+        ytickformat    = _yfmt,    # ×y_scale → unbinned camera pixels
     )
-
+ 
     colorrange    = extrema(filter(isfinite, data_norm))
     hm = heatmap!(
         ax_heatmap,
@@ -835,7 +687,7 @@ function plot_heatmap_with_top_profile(
         colormap=colormap,
         colorrange=colorrange,
     )
-
+ 
     lines!(
         ax_top,
         x,
@@ -843,11 +695,12 @@ function plot_heatmap_with_top_profile(
         color=:red,
         linewidth=2,
     )
-
+ 
+    # Shared z axis: profile and image columns stay registered
     linkxaxes!(ax_top, ax_heatmap)
-
-    # profile is above the heatmap: hide its x tick labels; ticks
-    # themselves are already off via xticksvisible=false above
+ 
+    # profile sits above the heatmap: hide its x label and tick labels, which the
+    # heatmap axis below already carries; the tick marks themselves stay visible
     hidexdecorations!(
         ax_top;
         label      = true,
@@ -857,38 +710,50 @@ function plot_heatmap_with_top_profile(
         minorgrid  = false,
         minorticks = false,
     )
-
-    rowsize!(layout, 1, Relative(0.35))
-    rowsize!(layout, 2, Aspect(1, 1/aspect))
-
+ 
+    rowsize!(layout, 1, Relative(0.35))        # profile height, fraction of the figure
+    rowsize!(layout, 2, Aspect(1, 1/aspect))   # image row keeps the panel's z:x shape
+ 
     rowgap!(layout, 1, 12)
-
-    save(joinpath(OUTDIR, "$(save_name).png"), fig; px_per_unit = 3)
-    save(joinpath(OUTDIR, "$(save_name).pdf"), fig; px_per_unit = 3)
-
-    return display(fig)
+ 
+    return fig
 end
 
 
-# fig_F1_transverse = plot_heatmap_with_top_profile(F1_mean)
-
-fig_F1_transverse = plot_heatmap_with_top_profile(F1_mean'; save_name="SG_img_profile_f1")
-fig_F2_transverse = plot_heatmap_with_top_profile(F2_mean'; save_name="SG_img_profile_f2")
-
-extrema(filter(isfinite, F1_mean))
-
+exp_data = load_experiment(joinpath(BASE_PATH, "EXPERIMENTS", "20260220", "data_processed.jld2"))
+ 
+let
+    nI_idx = 16
+    I_sel  = exp_data[:Currents][nI_idx]
+    @info "Experimental pattern" nI_idx I0_A = I_sel Bz_mT = 1e3 * exp_data[:BzTesla][nI_idx]
+ 
+    F1_mean = mean_image(exp_data[:F1ProcessedImages], nI_idx)
+    F2_mean = mean_image(exp_data[:F2ProcessedImages], nI_idx)
+    @info "Image ranges" F1 = extrema(filter(isfinite, F1_mean)) F2 = extrema(filter(isfinite, F2_mean))
+ 
+    for (img, tag) in ((F1_mean, "f1"), (F2_mean, "f2"))
+        fig = plot_heatmap_with_profile(img)
+        display(fig)
+        savefig(fig, "SG_img_$tag")
+ 
+        fig = plot_image_with_z_profile(img')
+        display(fig)
+        savefig(fig, "SG_img_profile_$tag")
+    end
+end
+ 
 
 ##################################################################################################
+## §4  COIL CURRENTS AND CQD INDUCTION-TERM RUN (shared by §5 and §6)
 ##################################################################################################
-# Coil currents
 Icoils = [0.00,
-            0.001,0.002,0.003,0.004,0.005,0.006,0.007,0.008,0.009,
-            0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050,
-            0.055,0.060,0.065,0.070,0.075,0.080,0.085,0.090,0.095,
-            0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,
-            0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95,1.00
-];
-nI = length(Icoils);
+          0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009,
+          0.010, 0.015, 0.020, 0.025, 0.030, 0.035, 0.040, 0.045, 0.050,
+          0.055, 0.060, 0.065, 0.070, 0.075, 0.080, 0.085, 0.090, 0.095,
+          0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55,
+          0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]
+nI = length(Icoils)
+Ic = Icoils[2:end]                 # non-zero currents (log axes)
 
 ki_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 
     0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 
@@ -907,118 +772,95 @@ ki_list = [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9,
             3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 
             4.0, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 
             5.0] # 7M
-ki_fit = ki_list[11]*1e-6
-@info "Induction term" ki=ki_selected
 
-cqd_ki_path = joinpath(BASE_PATH,"SIMULATIONS","2025_SETUP","CQD_T205_7M","up","cqd_7000000_ki011_up_screen.jld2");
-cqd_ki = load(cqd_ki_path,"screen")[:data]
+KI_IDX  = 11                       # → ki = 2.0e-6 ; file suffix "ki011"
+ki_fit  = ki_list[KI_IDX] * 1e-6
+@info "Induction term" ki = ki_fit  # FIX: was `ki_selected`, undefined
+        
+cqd_ki_path = joinpath(BASE_PATH, "SIMULATIONS", "2025_SETUP", "CQD_T205_7M", "up",
+                       "cqd_7000000_ki$(lpad(KI_IDX, 3, '0'))_up_screen.jld2");
+cqd_ki = load(cqd_ki_path,"screen")[:data];
 
-function standard_error(x)
-    return std(x; corrected=true) ./ sqrt.(length(x))
+standard_error(x) = std(x; corrected = true) / sqrt(length(x))
+
+
+##################################################################################################
+## §5  COLLAPSE TIME vs TIME OF FLIGHT  →  collapse_time, time_flight, collapse_cycles
+##################################################################################################
+cqd_times = let
+    # τ_c = 1 / (k_i |γ_e| B_z(I)) ; Δt_SG = L_SG / v_y, column 5 of the screen array
+    # REVIEW: confirm column 5 is v_y (m/s) in the screen-array layout.
+    V_COL = 5;
+    collapse_time = inv.(ki_fit * abs(γₑ) * TheoreticalSimulation.BvsI.(Ic));
+    tof_samples   = [y_SG ./ cqd_ki[ic][:, V_COL] for ic in 2:nI];      # FIX: was 2:47
+    travel_times  = mean.(tof_samples);
+    travel_err    = standard_error.(tof_samples);
+    n_collapses   = travel_times ./ collapse_time;
+ 
+    @info @sprintf("Mean time of flight in the SG region: (%d ± %d) μs", 1e6 * mean(travel_times), 1e6 * std(travel_times))
+ 
+    log_ticks_I = latex_log_ticks(-3:0)
+ 
+    # ── collapse time ───────────────────────────────────────────────────────────────────────
+    fig = Figure()
+    ax  = Axis(fig[1, 1]; xlabel = "Current (A)", ylabel = "Collapse time (μs)",
+        xscale = log10, yscale = log10, xticks = log_ticks_I, yticks = latex_log_ticks(0:2))
+    lines!(ax, Ic, 1e6 .* collapse_time; color = :blue, linewidth = 2, label = L"Collapse time $\tau_{c}$")
+    limits!(ax, 1e-3, 1, 1, 3500)
+    axislegend(ax)
+    display(fig)
+    savefig(fig, "collapse_time")
+ 
+    # ── time of flight ──────────────────────────────────────────────────────────────────────
+    tof, err = 1e6 .* travel_times, 1e6 .* travel_err
+    fig = Figure()
+    ax  = Axis(fig[1, 1]; xlabel = "Current (A)", ylabel = "Time of flight (μs)",
+        xscale = log10, xticks = log_ticks_I)
+    band!(ax, Ic, tof .- err, tof .+ err; color = (:dodgerblue3, 0.1))
+    lines!(ax, Ic, tof; color = :dodgerblue3, linewidth = 2, label = L"Time of flight $\Delta t_{\mathrm{SG}}$")
+    scatter!(ax, Ic, tof; color = :white, strokecolor = :dodgerblue3, strokewidth = 1, markersize = 6)
+    xlims!(ax, 1e-3, 1)
+    axislegend(ax; position = :lb)
+    display(fig)
+    savefig(fig, "time_flight")
+ 
+    # ── both on one axis (display only) ─────────────────────────────────────────────────────
+    fig = Figure()
+    ax  = Axis(fig[1, 1]; xlabel = "Current (A)", ylabel = "Time (μs)",
+        xscale = log10, yscale = log10, xticks = log_ticks_I, yticks = latex_log_ticks(0:2))
+    band!(ax, Ic, tof .- err, tof .+ err; color = (:dodgerblue3, 0.1))
+    lines!(ax, Ic, tof; color = :dodgerblue3, linewidth = 2, label = L"Time of flight $\Delta t_{\mathrm{SG}}$")
+    lines!(ax, Ic, 1e6 .* collapse_time; color = :darkgreen, linewidth = 2, label = L"Collapse time $\tau_{c}$")
+    limits!(ax, 1e-3, 1, 1, 4000)
+    axislegend(ax; position = :lb)
+    display(fig)
+ 
+    # ── number of collapse cycles Δt_SG / τ_c ───────────────────────────────────────────────
+    fig = Figure(size = (800, 600))
+    ax  = Axis(fig[1, 1]; xlabel = "Current (A)", ylabel = "Interaction time / collapse time",
+        xscale = log10, yscale = log10,
+        xticks = latex_log_ticks(-2:0), yticks = latex_log_ticks(-1:2),   # REVIEW: was mixed L"1", L"10", L"100"
+        xgridvisible = true, xminorgridvisible = true, xminorticksvisible = true, xminorticks = IntervalsBetween(9),
+        ygridvisible = true, yminorgridvisible = true, yminorticksvisible = true, yminorticks = IntervalsBetween(9),
+    )
+    hspan!(ax, 0.1, 1; color = (:black, 0.2))          # fewer than one collapse per transit
+    lines!(ax, Ic, n_collapses; color = :red, linewidth = 2, label = L"$\Delta t_{\mathrm{SG}} / \tau_{c}$")
+    limits!(ax, 1e-2, 1, 0.7, 40)
+    axislegend(ax; position = :lt)
+    display(fig)
+    savefig(fig, "collapse_cycles")
+ 
+    (; collapse_time, travel_times, n_collapses)
 end
 
-Ic = Icoils[2:end]
 
-number_precessions = round(1/(TWOπ*ki_fit))
-collapse_time = inv.(ki_fit * abs(γₑ) * TheoreticalSimulation.BvsI.(Ic))
 
-# ---------------------------------------------------------------- collapse time
-fig = Figure()
-ax = Axis(fig[1, 1],
-    xlabel = "Current (A)",
-    ylabel = "Collapse time (μs)",
-    xscale = log10,
-    yscale = log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1, 10, 100], [L"10^{0}", L"10^{1}", L"10^{2}"]),
-)
-lines!(ax, Ic, 1e6 .* collapse_time,
-    color = :blue, linewidth = 2, label = L"Collapse time $\tau_{c}$")
-xlims!(ax, 1e-3, 1)
-ylims!(ax, 1, 3500)
-axislegend(ax)
-display(fig)
-save(joinpath(OUTDIR, "collapse_time.png"), fig)
+##################################################################################################
+## §6  RELATIVE ERROR vs NUMBER OF COLLAPSE CYCLES  →  relerr_vs_collapsecycles
+##################################################################################################
 
-# ---------------------------------------------------------------- time of flight
-travel_times = [mean(inv.(cqd_ki[ic][:, 5] / y_SG)) for ic = 2:47]
-tof = 1e6 .* travel_times
-err = 1e6 .* [standard_error(inv.(cqd_ki[ic][:, 5] / y_SG)) for ic = 2:47]
 
-fig = Figure()
-ax = Axis(fig[1, 1],
-    xlabel = "Current (A)",
-    ylabel = "Time of flight (μs)",
-    xscale = log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-)
-band!(ax, Ic, tof .- err, tof .+ err, color = (:dodgerblue3, 0.1))
-lines!(ax, Ic, tof,
-    color = :dodgerblue3, linewidth = 2, label = L"Time of flight $\Delta t_{\mathrm{SG}}$")
-scatter!(ax, Ic, tof,
-    color = :white, strokecolor = :dodgerblue3, strokewidth = 1, markersize = 6)
-xlims!(ax, 1e-3, 1)
-axislegend(ax, position = :lb)
-fig
-save(joinpath(OUTDIR, "time_flight.png"), fig)
 
-@info @sprintf("The mean time of flight is (%d ± %d) μs ",
-    mean(1e6*travel_times), std(1e6*travel_times))
-
-# ---------------------------------------------------------------- combined (display only)
-err2 = 1e6 .* [standard_error(inv.(cqd_ki[ic][:, 5] / 0.07)) for ic = 2:47]
-
-fig = Figure()
-ax = Axis(fig[1, 1],
-    xlabel = "Current (A)",
-    ylabel = "Time (μs)",
-    xscale = log10,
-    yscale = log10,
-    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([1, 10, 100], [L"10^{0}", L"10^{1}", L"10^{2}"]),
-)
-band!(ax, Ic, tof .- err2, tof .+ err2, color = (:dodgerblue3, 0.1))
-lines!(ax, Ic, tof,
-    color = :dodgerblue3, linewidth = 2, label = L"Time of flight $\Delta t_{\mathrm{SG}}$")
-lines!(ax, Ic, 1e6 .* collapse_time,
-    color = :darkgreen, linewidth = 2, label = L"Collapse time $\tau_{c}$")
-xlims!(ax, 1e-3, 1)
-ylims!(ax, 1, 4000)
-axislegend(ax, position = :lb)
-fig
-
-# ---------------------------------------------------------------- collapse cycles
-fig = Figure(size = (800, 600))
-ax = Axis(fig[1, 1],
-    xlabel = "Current (A)",
-    ylabel = "Number of collapse times",
-    xscale = log10,
-    yscale = log10,
-    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    yticks = ([0.1, 1, 10, 100], [L"10^{-1}", L"1", L"10", L"100"]),
-
-    # --- axis label font sizes ---
-    xlabelsize = 20,
-    ylabelsize = 20,
-
-    # --- tick label font sizes ---
-    xticklabelsize = 16,
-    yticklabelsize = 16,
-
-    # x/y gridlines as before …
-    xgridvisible = true, xminorticksvisible = true,
-    xminorgridvisible = true, xminorticks = IntervalsBetween(9),
-    ygridvisible = true, yminorticksvisible = true,
-    yminorgridvisible = true, yminorticks = IntervalsBetween(9),
-)
-hspan!(ax, 0.1, 1, color = (:black, 0.2))                       # behind the curve
-lines!(ax, Ic, travel_times ./ collapse_time,
-    color = :red, linewidth = 2, label = L"$\Delta t_{\mathrm{SG}} / \tau_{c}$")
-xlims!(ax, 1e-2, 1)
-ylims!(ax, 0.7, 40)
-axislegend(ax, position = :lt, labelsize = 16)
-fig
-save(joinpath(OUTDIR, "collapse_cycles.png"), fig)
 
 
 
