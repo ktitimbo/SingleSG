@@ -113,18 +113,18 @@ SETUP FEATURES
 ***************************************************
 """)
 # Setting the variables for the module
-TheoreticalSimulation.default_camera_pixel_size = cam_pixelsize;
-TheoreticalSimulation.default_x_pixels          = nx_pixels;
-TheoreticalSimulation.default_z_pixels          = nz_pixels;
-TheoreticalSimulation.default_x_furnace         = x_furnace;
-TheoreticalSimulation.default_z_furnace         = z_furnace;
-TheoreticalSimulation.default_x_slit            = x_slit;
-TheoreticalSimulation.default_z_slit            = z_slit;
-TheoreticalSimulation.default_y_FurnaceToSlit   = y_FurnaceToSlit;
-TheoreticalSimulation.default_y_SlitToSG        = y_SlitToSG;
-TheoreticalSimulation.default_y_SG              = y_SG;
-TheoreticalSimulation.default_y_SGToScreen      = y_SGToScreen;
-TheoreticalSimulation.default_R_tube            = R_tube;
+TheoreticalSimulation.DEFAULT_camera_pixel_size = cam_pixelsize;
+TheoreticalSimulation.DEFAULT_x_pixels          = nx_pixels;
+TheoreticalSimulation.DEFAULT_z_pixels          = nz_pixels;
+TheoreticalSimulation.DEFAULT_x_furnace         = x_furnace;
+TheoreticalSimulation.DEFAULT_z_furnace         = z_furnace;
+TheoreticalSimulation.DEFAULT_x_slit            = x_slit;
+TheoreticalSimulation.DEFAULT_z_slit            = z_slit;
+TheoreticalSimulation.DEFAULT_y_FurnaceToSlit   = y_FurnaceToSlit;
+TheoreticalSimulation.DEFAULT_y_SlitToSG        = y_SlitToSG;
+TheoreticalSimulation.DEFAULT_y_SG              = y_SG;
+TheoreticalSimulation.DEFAULT_y_SGToScreen      = y_SGToScreen;
+TheoreticalSimulation.DEFAULT_R_tube            = R_tube;
 
 # Select experimental data
 dict = OrderedDict{String, Tuple{
