@@ -1,79 +1,61 @@
 ##################################################################################################
 #  PREPARATION OF FIGURES FOR FINAL MANUSCRIPT
-#  Kelvin Titimbo — California Institute of Technology — July 2026
+#  Kelvin Titimbo - California Institute of Technology - July 2026
 ##################################################################################################
 #
-#  REVIEW SUMMARY (search the file for "REVIEW:" and "FIX:" to find each item in context)
+#  ORGANISATION
 #  ----------------------------------------------------------------------------------------------
-#  Structure
-#   * Every figure now lives in its own `let ... end` block with a numbered banner. Each block is
-#     self-contained (creates its own `fig`/`ax`, saves, displays) and does not leak globals, so
-#     you can evaluate any section on its own after §0 has run. Sections that must share results
-#     (collapse time → relative-error plot) hand them over through a single NamedTuple.
-#   * All `save` calls go through one `savefig` helper that (a) honours SAVE_FIG, which was
-#     defined but never used, and (b) writes every extension in FIG_EXTS, instead of each figure
-#     hard-coding its own .png/.pdf pair and its own px_per_unit.
-#   * A shared publication Theme carries the font sizes that were copy-pasted into every Axis.
-#     Sections now only state what is figure-specific.
-#   * Two small formatters (`latex_int`, `latex_log_ticks`) replace six copies of the same
-#     tick-label lambda.
+#  §0  Environment, paths, physical constants, apparatus geometry, and ALL shared infrastructure
+#      (saving, tick formatters, interpolation, JLD2 inspection, model colours/labels, theme).
+#  §1  Stern-Gerlach magnet geometry
+#  §2  K-39 effective magnetic moment (Breit-Rabi) vs coil current
+#  §3  Experimental patterns: F=1 / F=2 mean images with profiles
+#  §4  Coil-current grid and the CQD induction-term run     (inputs for §5 and §6)
+#  §5  Collapse time vs time of flight
+#  §6  Model-experiment agreement vs current and vs collapse cycles
+#  §7  Beam splitting: measured F=1 position vs CQD and QM
+#  §8  Run manifest
 #
-#  Bugs fixed (marked FIX:)
-#   1. `@info "Induction term" ki=ki_selected` — `ki_selected` was never defined; script would
-#      abort there. Now logs `ki_fit`.
-#   2. `for ic = 2:47` hard-coded the length of `Icoils`; now `2:nI`.
-#   3. `const TWOπ`, `const INV_E` were defined twice.
-#   4. `err2` was recomputed with the literal 0.07 instead of `y_SG` (same value, but a
-#      maintenance trap); the duplicate is gone.
-#   5. Bare `fig` at the end of a block does nothing in a script (only in the REPL); replaced by
-#      `display(fig)`.
-#   6. The first `ki_list` (the 6M list) was dead code, overwritten immediately.
+#  Every section defines the functions it needs immediately above the figures that use them, and
+#  each figure lives in its own `let ... end` block. After §0 has run, §1, §2, §3, §6 and §7 can
+#  be evaluated independently; §5 needs §4, and §6 additionally needs `cqd_times` from §5 for the
+#  collapse-cycle abscissa. Nothing else is shared between sections.
 #
-#  Scientific / manuscript concerns (marked REVIEW:, not changed)
-#   A. §6 relative-error curves are hand-digitized AND several CQD points are multiplied by
-#      ad-hoc factors (−0.8×, 0.6×, ...). For a published figure this must be recomputed from the
-#      actual ℰ_exp, ℰ_QM, ℰ_CQD arrays, or the provenance documented. As written it cannot be
-#      reproduced.
-#   B. §6 legend/colour mismatch: comments say QM = red, CQD = blue; the plot draws QM blue,
-#      CQD red. Numerator uses `\mathcal{z}` (lowercase \mathcal is undefined in LaTeX) while
-#      the denominator uses `\mathcal{E}`.
-#   C. §1 `hspan!(ax, -3, 3)` is labelled "slit opening extent in z" but z_slit = 0.3 mm; the
-#      ±3 mm band is something else (magnet gap? beam envelope?). Name it.
-#   D. §3 the "top profile" is the mean over x, i.e. the profile ALONG z — the Stern–Gerlach
-#      splitting direction — not a transverse profile. Comment corrected; check the caption.
-#   E. §3 `y_scale = 4` silently multiplies the x-pixel tick labels by 4 (binning?). Make it a
-#      named constant tied to the actual processing binning, or read it from the JLD2 file.
-#   F. §3 two functions draw the same image with opposite `yreversed`; make sure the orientation
-#      in the manuscript is consistent across panels.
-#   G. §7 is unfinished: one file loaded from ".../smoothing_binning_xkl", another from
-#      ".../smoothing_binning_2025", neither plotted.
+#  OPEN ITEMS
+#  ----------------------------------------------------------------------------------------------
+#   * §1: the ±3 mm `hspan!` band is not the slit (z_slit = 0.3 mm). Name what it represents and
+#     derive it from a constant (pole-gap half-height?) before writing the caption.
+#   * §5: confirm that column 5 of the CQD screen array is v_y in m/s (`V_COL`).
+#   * §0: ~15 packages are loaded but unused here; prune once the `include`d module files are
+#     confirmed to carry their own `using` statements.
 #
-#  Housekeeping
-#   * ~15 packages are loaded but unused in this file (Interpolations, Loess, Optim, BSplineKit,
-#     Polynomials, DSP, LambertW, PolyLog, Alert, DataStructures, CSV, DataFrames, DelimitedFiles,
-#     Distributions, StaticArrays, ...). They cost tens of seconds of load time. I left them in
-#     place because the `include`d module files may rely on them being in Main — prune once you
-#     have confirmed those files carry their own `using` statements.
-#   * `const` bindings that depend on time (RUN_STAMP, OUTDIR) make the script non-re-includable
-#     in the same session (redefining a const with a new value is an error). Plain globals are
-#     safer for a script.
-#   * `rng_set`, `dimF`, `number_precessions`, `F1_mean_norm`, `F2_mean_norm`, `fig_F1`, `fig_F2`
-#     were computed but never used.
-#   * For vector output CairoMakie ignores `px_per_unit`; `pt_per_unit` (default 1) governs
-#     PDF/SVG. Figure `size` is therefore in points for the PDF, i.e. (1120, 600) ≈ 15.5 × 8.3 in.
-#     Consider sizing figures to the column width you will use in LaTeX (e.g. 3.4 in = 245 pt)
-#     with a larger `fontsize`, instead of shrinking a large figure in `\includegraphics`.
+#  FIGURE SIZING FOR A ONE-COLUMN LETTER-PAPER MANUSCRIPT
+#  ----------------------------------------------------------------------------------------------
+#  CairoMakie's `size` is in points for vector output (`pt_per_unit = 1`), and 1 pt = 1/72 in, so
+#  a figure is printed at its true size only when `size[1]` equals the LaTeX line width in points
+#  and it is included WITHOUT scaling. US Letter with 1 in margins gives a 6.5 in text block:
+#
+#      \includegraphics[width=\linewidth]   → 6.5 in  = 468 pt
+#      \includegraphics[width=0.9\linewidth] → 5.85 in = 421 pt
+#      \includegraphics[width=0.8\linewidth] → 5.2 in  = 374 pt
+#
+#  Set the figure width to the number you will actually use and DO NOT scale in LaTeX; then the
+#  theme's `fontsize` is the printed point size, so 9-10 pt keeps labels legible and consistent
+#  with the body text. A figure authored at 800 pt and included at \linewidth is scaled by 0.59,
+#  which turns 16 pt labels into 9.4 pt; authored at 1120 pt it is scaled by 0.42, turning the
+#  same labels into 6.7 pt. That is why panels of different widths look typographically different
+#  in the same paper. The sizes below are left as they are - see FIG_WIDTH_PT when standardising.
 ##################################################################################################
  
+##################################################################################################
+## §0  ENVIRONMENT, PATHS, CONSTANTS, APPARATUS GEOMETRY, SHARED INFRASTRUCTURE
+##################################################################################################
  
-##################################################################################################
-## §0  ENVIRONMENT, OUTPUT, PHYSICAL CONSTANTS, APPARATUS GEOMETRY
-##################################################################################################
-
 # ── Plotting ────────────────────────────────────────────────────────────────────────────────────
 using CairoMakie
 using Colors, ColorSchemes
 using LaTeXStrings, Printf, PrettyTables
+using MathTeXEngine
 
 SAVE_FIG        = true
 FIG_EXTS        = ("png", "pdf", "svg")   # every figure is written in all of these
@@ -86,14 +68,12 @@ const T_START = Dates.now()
 # ── Numerics ────────────────────────────────────────────────────────────────────────────────────
 using LinearAlgebra, Roots, StatsBase
 using Random, Statistics, NaNStatistics
-# REVIEW: unused in this file — Interpolations, Loess, Optim, BSplineKit, Polynomials, DSP,
-#         LambertW, PolyLog, Alert, DataStructures, Distributions, StaticArrays. Keep only if the
-#         included module files need them in Main.
 using Interpolations, Loess, Optim, BSplineKit, Polynomials, DSP, LambertW, PolyLog, Alert
 using DataStructures, Distributions, StaticArrays
 
 # ── Data I/O ────────────────────────────────────────────────────────────────────────────────────
 using OrderedCollections, JLD2
+using Pkg
 using DelimitedFiles, CSV, DataFrames   # REVIEW: unused in this file
 
 # ── Threads ─────────────────────────────────────────────────────────────────────────────────────
@@ -105,10 +85,18 @@ LinearAlgebra.BLAS.set_num_threads(4)
 # ── Paths ───────────────────────────────────────────────────────────────────────────────────────
 cd(@__DIR__)
 const BASE_PATH = raw"F:\SternGerlachExperiments"
+const STUDIES_DIR = joinpath(@__DIR__, "data_studies")
+
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss")   # REVIEW: const + timestamp → not re-includable
-const OUTDIR    = joinpath(@__DIR__, "data_studies", "FINAL_IMAGES_" * RUN_STAMP)
+const OUTDIR    = joinpath(STUDIES_DIR, "FINAL_IMAGES_" * RUN_STAMP)
 isdir(OUTDIR) || mkpath(OUTDIR)
 @info "Created output directory" OUTDIR
+
+# Input archives. FIT_DIR is pinned to one fit run; to always take the most recent instead:
+#   FIT_DIR = joinpath(STUDIES_DIR, last(sort(filter(startswith("FIT2025_ki_scale_"), readdir(STUDIES_DIR)))))
+const FIT_DIR         = joinpath(STUDIES_DIR, "FIT2025_ki_scale_20260911T164352057")
+const FIT_ARCHIVE     = joinpath(FIT_DIR, "SG_ki_scale_results.jld2")
+const EXPERIMENT_FILE = joinpath(BASE_PATH, "EXPERIMENTS", "20260220", "data_processed.jld2")
 
 const TEMP_DIR = joinpath(@__DIR__,"artifacts", "JuliaTemp")
 isdir(TEMP_DIR) || mkpath(TEMP_DIR);
@@ -136,7 +124,7 @@ TheoreticalSimulation.OUTDIR   = OUTDIR
 println("\n\t\tRunning process on:\t $(RUN_STAMP) \n")
 
 # ── Math constants ──────────────────────────────────────────────────────────────────────────────
-const TWOπ  = 2π          # FIX: was defined twice
+const TWOπ  = 2π 
 const INV_E = exp(-1)
 
 # ── Physical constants (CODATA 2022 via NIST) ───────────────────────────────────────────────────
@@ -229,12 +217,22 @@ TheoreticalSimulation.DEFAULT_c_aperture        = R_aper
 TheoreticalSimulation.DEFAULT_y_SGToAperture    = y_SGToAperture
 
 
-# ── Shared figure infrastructure ────────────────────────────────────────────────────────────────
+##################################################################################################
+## §0.1  SHARED FIGURE INFRASTRUCTURE
+##       Everything below is used by more than one section, so it lives here rather than in
+##       whichever section happened to need it first. Section-specific helpers stay in their
+##       own section, immediately above the figures that use them.
+##################################################################################################
+ 
 """
     savefig(fig, name; px_per_unit = FIG_PX_PER_UNIT, exts = FIG_EXTS)
  
 Write `fig` to `OUTDIR/name.<ext>` for every extension in `exts`. No-op when `SAVE_FIG == false`.
-`px_per_unit` only affects raster formats; vector formats use `pt_per_unit` (CairoMakie default 1).
+ 
+`px_per_unit` only affects raster formats; vector formats use `pt_per_unit` (CairoMakie default
+1), so for PDF/SVG the figure's `size` is its size in points. Pass `exts` explicitly to skip a
+format for one figure — e.g. `exts = ("png", "pdf")` for the §3 heatmaps, whose SVG would embed a
+multi-megabyte raster for no gain.
 """
 function savefig(fig, name::AbstractString; px_per_unit = FIG_PX_PER_UNIT, exts = FIG_EXTS)
     SAVE_FIG || return nothing
@@ -244,24 +242,247 @@ function savefig(fig, name::AbstractString; px_per_unit = FIG_PX_PER_UNIT, exts 
     return nothing
 end
 
+# ── Tick formatting ─────────────────────────────────────────────────────────────────────────────
 "Integer tick labels typeset by MathTeXEngine, e.g. `-2` → `L\"-2\"`."
 latex_int(vs) = [L"%$(round(Int, v))" for v in vs]
  
 "Decade ticks `(positions, labels)` for a log10 axis, e.g. `latex_log_ticks(-3:0)`."
 latex_log_ticks(pows) = (exp10.(pows), [L"10^{%$p}" for p in pows])
+ 
+"""
+    decade_ticks(vs...) -> (positions, labels)
+ 
+Decade tick positions and LaTeX labels spanning every finite positive value in `vs`, for a
+`log10` axis. Built from the data, so a panel gets correct ticks without a hard-coded range.
+"""
+function decade_ticks(vs...)
+    v = filter(x -> isfinite(x) && x > 0, vcat(vs...))
+    return latex_log_ticks(floor(Int, log10(minimum(v))):ceil(Int, log10(maximum(v))))
+end
 
-# Manuscript-wide typography. Per-figure overrides below only state what differs.
-# REVIEW: if the journal has a column width, set `size` per figure to that width in pt and raise
-#         `fontsize` so text is ≥ 8 pt after \includegraphics, rather than scaling down large figures.
+"""
+    snapped_ticks(vals...; step) -> Vector
+ 
+Tick positions covering every value in `vals`, snapped outward to multiples of `step`, so a
+linear axis ends on round numbers and the zero line always carries a tick.
+"""
+function snapped_ticks(vals...; step)
+    all_v = filter(isfinite, vcat(vals...))
+    lo = floor(minimum(all_v) / step) * step
+    hi = ceil(maximum(all_v) / step) * step
+    return round.(lo:step:hi, digits = 6)
+end
+
+# ── Interpolation ───────────────────────────────────────────────────────────────────────────────
+"""
+    interp_loglog(xq, x, y; logy = true) -> Vector
+ 
+Piecewise-linear interpolation of `y(x)` evaluated at `xq`, performed in log10(x) and (when
+`logy`) log10(y). Appropriate when both variables span decades — a power law becomes a straight
+line in those coordinates, so the interpolation is exact for one and nearly so in general.
+ 
+Returns `NaN` outside the range of `x`: a query grid should lie inside the simulated grid, and a
+NaN here is a signal that it does not, rather than a silent extrapolation.
+"""
+function interp_loglog(xq, x, y; logy::Bool = true)
+    p  = sortperm(x)
+    lx = log10.(x[p])
+    ys = logy ? log10.(y[p]) : float.(y[p])
+ 
+    out = similar(float.(xq))
+    for (k, q) in enumerate(log10.(xq))
+        if q < lx[1] || q > lx[end]
+            out[k] = NaN
+        else
+            j = min(searchsortedlast(lx, q), length(lx) - 1)
+            t = (q - lx[j]) / (lx[j+1] - lx[j])
+            v = ys[j] + t * (ys[j+1] - ys[j])
+            out[k] = logy ? exp10(v) : v
+        end
+    end
+    return out
+end
+
+# ── Terminal colouring and JLD2 inspection ──────────────────────────────────────────────────────
+"""
+    _ANSI
+ 
+ANSI escape sequences keyed by style name. Colours: `:red`, `:green`, `:yellow`, `:blue`,
+`:magenta`, `:cyan`, `:white`; attributes: `:bold`, `:underline`. `"\\e[0m"` (used by `cstr`)
+resets every style.
+"""
+const _ANSI = Dict(
+    :red => "\e[31m", :green => "\e[32m", :yellow => "\e[33m", :blue => "\e[34m",
+    :magenta => "\e[35m", :cyan => "\e[36m", :white => "\e[37m",
+    :bold => "\e[1m", :underline => "\e[4m",
+)
+ 
+"""
+    cstr(s, styles...)
+ 
+Return `string(s)` wrapped in the ANSI codes of the given `styles` (symbols from `_ANSI`, applied
+together) and followed by a reset, so it prints in colour/bold when interpolated into `@info`,
+`@warn`, `println`, …
+ 
+# Examples
+```julia
+@info "kᵢ range: " * cstr("(1.0 – 4.1)×10⁻⁶", :yellow, :bold)
+@info cstr("Selected configuration: nz = ", :cyan) * cstr(NZ_FIXED, :yellow, :bold)
+```
+"""
+cstr(s, styles::Symbol...) = join(_ANSI[k] for k in styles) * string(s) * "\e[0m"
+ 
+"""
+    list_jld2_entries(path; io = stdout, show_type = true)
+ 
+Print the full tree of groups and datasets stored in the JLD2 file `path` (names only, no values)
+as a quick reference of *what* is in the archive and *where* to find it. Groups are printed in
+bold blue, datasets in green; with `show_type = true` each dataset is annotated with its element
+type and, for arrays, its size (e.g. `Vector{Float64} (47)`), so the layout can be checked
+without loading anything into the workspace.
+ 
+Returns the vector of full dataset paths (e.g. `"fit/cqd/ki"`), usable directly as keys:
+`jldopen(path) do f; f["fit/cqd/ki"]; end`. Assign that result to its own name — assigning it
+back onto the path variable replaces the path with a `Vector{String}`.
+ 
+Note: `show_type` reads each dataset to query its type, so it materialises the archive. Pass
+`show_type = false` for a fast listing of a large file.
+"""
+function list_jld2_entries(path::AbstractString; io::IO = stdout, show_type::Bool = true)
+    isfile(path) || throw(ArgumentError("JLD2 file not found: $path"))
+    paths = String[]
+ 
+    # recursive walk: `g` is the file or a group, `prefix` its full path
+    function _walk(g, prefix, depth)
+        for k in keys(g)            # insertion (write) order, as stored by JLD2
+            full = isempty(prefix) ? k : prefix * "/" * k
+            v    = g[k]
+            pad  = "  "^depth
+            if v isa JLD2.Group
+                println(io, pad, cstr(k * "/", :blue, :bold))
+                _walk(v, full, depth + 1)
+            else
+                push!(paths, full)
+                info = ""
+                if show_type
+                    info = v isa AbstractArray ?
+                           "  " * cstr("$(typeof(v)) ($(join(size(v), "×")))", :white) :
+                           "  " * cstr(string(typeof(v)), :white)
+                end
+                println(io, pad, cstr(k, :green), info)
+            end
+        end
+    end
+ 
+    println(io, cstr("Contents of ", :bold), cstr(path, :magenta))
+    jldopen(path, "r") do f
+        _walk(f, "", 1)
+    end
+    println(io, cstr("  $(length(paths)) datasets", :white))
+    return paths
+end
+
+
+# ── Model identity, used by every comparison panel ──────────────────────────────────────────────
+# One colour and one spelling per model across the whole manuscript: a reader tracking CQD from
+# figure to figure must never have to check whether the colours were swapped.
+const COLOR_CQD = :crimson
+const COLOR_QM  = :royalblue
+const LABEL_EXP = "Experiment"
+const LABEL_QM  = "Existing models"
+const LABEL_CQD = "Co-quantum dynamics"
+
+
+# ── Typography ──────────────────────────────────────────────────────────────────────────────────
+# Plain strings and LaTeXStrings are rendered by different engines, so without a shared font
+# family an axis labelled `L"..."` and one labelled `"..."` disagree typographically. Loading the
+# MathTeXEngine faces as the regular fonts makes every label Computer Modern, matching the
+# manuscript body text.
+const TEX_FONTS = (
+    regular     = texfont(:regular),
+    bold        = texfont(:bold),
+    italic      = texfont(:italic),
+    bold_italic = texfont(:bolditalic),
+)
+
+# When standardising figure widths (see the header), set FIG_WIDTH_PT to the LaTeX line width in
+# points and raise `fontsize` to the printed size you want — 9–10 pt for a one-column letter page.
+const FIG_WIDTH_PT = 468        # 6.5 in text block; unused until the sizes are standardised
+ 
 const PUB_THEME = Theme(
+    fonts    = TEX_FONTS,
     fontsize = 16,
     Axis = (
         xlabelsize = 20, ylabelsize = 20,
-        xticklabelsize = 16, yticklabelsize = 16,
+        xticklabelsize = 18, yticklabelsize = 18,
+
+        # minor ticks on by default, both axes
+        # xminorticksvisible = true, yminorticksvisible = true,
+ 
+        # tick geometry: majors and minors point the same way, minors shorter
+        xtickalign = 0.5, ytickalign = 0.5,
+        xminortickalign = 0.5, yminortickalign = 0.5,
+        xticksize = 8, yticksize = 8,
+        xminorticksize = 4, yminorticksize = 4,
+        xtickwidth = 1.2, ytickwidth = 1.2,
+        xminortickwidth = 1.0, yminortickwidth = 1.0,
     ),
-    Legend = (labelsize = 16,),
+    Legend = (labelsize = 16, framevisible = false),
 )
 set_theme!(PUB_THEME)
+
+
+# ── Run record ──────────────────────────────────────────────────────────────────────────────────
+"""
+    write_manifest(; extras...)
+ 
+Write `OUTDIR/MANIFEST.txt` recording what produced this set of figures: run stamp, host, Julia
+version, the input archives, the environment status, and any `extras` passed as keywords
+(selected indices, fitted parameters, …).
+ 
+Without this the provenance of a figure set lives only in the current state of this script; with
+it, "which simulation produced Figure 5?" is answerable months later from the output directory
+alone.
+"""
+function write_manifest(; extras...)
+    open(joinpath(OUTDIR, "MANIFEST.txt"), "w") do io
+        println(io, "Figure set : ", basename(OUTDIR))
+        println(io, "Run stamp  : ", RUN_STAMP)
+        println(io, "Finished   : ", Dates.now())
+        println(io, "Elapsed    : ", Dates.canonicalize(Dates.now() - T_START))
+        println(io, "Host       : ", HOSTNAME)
+        println(io, "Julia      : ", VERSION, "  (", Threads.nthreads(), " threads)")
+        println(io, "Script     : ", @__FILE__)
+        println(io)
+        println(io, "INPUTS")
+        println(io, "  experiment : ", EXPERIMENT_FILE)
+        println(io, "  fit archive: ", FIT_ARCHIVE)
+        if @isdefined(cqd_ki_path)
+            println(io, "  CQD screen : ", cqd_ki_path)
+        end
+        println(io)
+        if !isempty(extras)
+            println(io, "PARAMETERS")
+            for (k, v) in pairs(extras)
+                println(io, "  ", rpad(string(k), 11), ": ", v)
+            end
+            println(io)
+        end
+        println(io, "FIGURES")
+        for f in sort(filter(!=("MANIFEST.txt"), readdir(OUTDIR)))
+            println(io, "  ", f)
+        end
+        println(io)
+        println(io, "ENVIRONMENT")
+        try
+            Pkg.status(; io = io)
+        catch err
+            println(io, "  (Pkg.status unavailable: ", err, ")")
+        end
+    end
+    @info "Manifest written" file = joinpath(OUTDIR, "MANIFEST.txt")
+    return nothing
+end
 
 
 ##################################################################################################
@@ -294,8 +515,7 @@ let
     poly!(ax, Point2f.(vcat(x_mm, reverse(x_mm)), vcat(fill(-CLIP_MM, length(x_mm)), reverse(z_trench)));
         color = (red, 0.85), strokecolor = red, strokewidth = 2)
  
-    # REVIEW (C): ±3 mm is NOT the slit extent (z_slit = 0.3 mm). Name what this band represents
-    #             and derive it from a constant (e.g. the pole-gap half-height).
+    # REVIEW: ±3 mm is NOT the slit extent, it refers to the piece of metal where the slit is.
     hspan!(ax, -3.0, 3.0; color = (:gray36, 0.55))
  
     # Pre-SG slit, drawn on top of the band
@@ -305,7 +525,7 @@ let
  
     resize_to_layout!(fig)
     display(fig)
-    savefig(fig, "SG_geometry"; px_per_unit = 2)
+    savefig(fig, "SG_geometry"; px_per_unit = FIG_PX_PER_UNIT)
 end
  
 ##################################################################################################
@@ -340,14 +560,14 @@ let
  
     # Bottom axis (current): data lives here
     ax = Axis(fig[1, 1];
-        xlabel = L"Current $(\mathrm{A})$", ylabel = L"$\mu_{F}/\mu_{B}$",
+        xlabel = L"SG current $(\mathrm{A})$", ylabel = L"$\mu_{F}/\mu_{B}$",
         xticks = latex_log_ticks(-3:0),               # explicit decades: no surprise minor labels
         ytickformat = ys -> [iszero(y) ? L"0" : L"%$(round(y, digits = 1))" for y in ys],
         ytickalign = 0.5, yminortickalign = 0.5, yticksize = 10, yminorticksize = 5,
         ticks_kw...)
  
     # Dash pattern in units of linewidth: [start, on, off] — 8 on, 2 off, period 10
-    LONG_DASH = Linestyle([0.0, 8.0, 10.0])   # REVIEW: old comment said 12 on / 6 off — did not match the numbers
+    LONG_DASH = Linestyle([0.0, 8.0, 10.0])
  
     # Solid: F = I+½ manifold except its lowest m_F; dashed: the stretched m_F = −F and all F = I−½
     lines_to_plot = vcat(
@@ -407,7 +627,7 @@ end
 #   plot_image_with_z_profile(img')   expects (z × x)  — image drawn with z horizontal
 # In both cases the profile shown is the mean over x, i.e. the intensity distribution along z,
 # which is the quantity the splitting is measured from.
- 
+
 """
     load_experiment(filepath) -> data
  
@@ -604,7 +824,7 @@ data and keeps its own intensity scale.
 """
 function plot_image_with_z_profile(data;
         colormap      = :viridis,
-        figsize       = (600, 400),
+        figsize       = (800, 450),
         profile_label = L"Intensity ($\mathrm{a.u.}$)",
         aspect        = 4.75,
         label_size      = 18,
@@ -720,15 +940,16 @@ function plot_image_with_z_profile(data;
 end
 
 
-exp_data = load_experiment(joinpath(BASE_PATH, "EXPERIMENTS", "20260220", "data_processed.jld2"))
- 
+exp_data = load_experiment(EXPERIMENT_FILE)
+ # Coil-current index shown in the manuscript figure; top-level so §8 can record it.
+NI_IDX = 16
+
 let
-    nI_idx = 16
-    I_sel  = exp_data[:Currents][nI_idx]
-    @info "Experimental pattern" nI_idx I0_A = I_sel Bz_mT = 1e3 * exp_data[:BzTesla][nI_idx]
+    I_sel  = exp_data[:Currents][NI_IDX]
+    @info "Experimental pattern" NI_IDX I0_A = I_sel Bz_mT = 1e3 * exp_data[:BzTesla][NI_IDX]
  
-    F1_mean = mean_image(exp_data[:F1ProcessedImages], nI_idx)
-    F2_mean = mean_image(exp_data[:F2ProcessedImages], nI_idx)
+    F1_mean = mean_image(exp_data[:F1ProcessedImages], NI_IDX)
+    F2_mean = mean_image(exp_data[:F2ProcessedImages], NI_IDX)
     @info "Image ranges" F1 = extrema(filter(isfinite, F1_mean)) F2 = extrema(filter(isfinite, F2_mean))
  
     for (img, tag) in ((F1_mean, "f1"), (F2_mean, "f2"))
@@ -755,30 +976,30 @@ Icoils = [0.00,
 nI = length(Icoils)
 Ic = Icoils[2:end]                 # non-zero currents (log axes)
 
-ki_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 
-    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 
-    1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 
-    2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 
-    3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 
-    4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5.0, 
-    5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 6.0, 
-    6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9, 7.0, 
-    7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 8.0, 
-    8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 9.0, 
-    9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 10.0, 
-    100.0, 1000.0, 10000.0, 100000.0];#6M
-ki_list = [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 
-            2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 
-            3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 
-            4.0, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 
-            5.0] # 7M
+# Induction-term grids, one per simulation batch. Naming both (rather than assigning `ki_list`
+# twice) keeps it unambiguous which grid `KI_IDX` indexes into.
+const KI_LIST_6M = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09,
+    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
+    1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+    2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+    3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+    4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5.0,
+    5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 6.0,
+    6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9, 7.0,
+    7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 8.0,
+    8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 9.0,
+    9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 10.0,
+    100.0, 1000.0, 10000.0, 100000.0]              # 6M-trajectory batch
+const KI_LIST_7M = collect(1.0:0.1:5.0)            # 7M-trajectory batch (the one used below)
+
+ki_list = KI_LIST_7M
 
 KI_IDX  = 11                       # → ki = 2.0e-6 ; file suffix "ki011"
 ki_fit  = ki_list[KI_IDX] * 1e-6
 @info "Induction term" ki = ki_fit  # FIX: was `ki_selected`, undefined
-        
+              
 cqd_ki_path = joinpath(BASE_PATH, "SIMULATIONS", "2025_SETUP", "CQD_T205_7M", "up",
-                       "cqd_7000000_ki$(lpad(KI_IDX, 3, '0'))_up_screen.jld2");
+                       "cqd_7000000_ki$(lpad(KI_IDX, 3, '0'))_up_screen.jld2");   # 7M batch → KI_LIST_7M
 cqd_ki = load(cqd_ki_path,"screen")[:data];
 
 standard_error(x) = std(x; corrected = true) / sqrt(length(x))
@@ -792,7 +1013,7 @@ cqd_times = let
     # REVIEW: confirm column 5 is v_y (m/s) in the screen-array layout.
     V_COL = 5;
     collapse_time = inv.(ki_fit * abs(γₑ) * TheoreticalSimulation.BvsI.(Ic));
-    tof_samples   = [y_SG ./ cqd_ki[ic][:, V_COL] for ic in 2:nI];      # FIX: was 2:47
+    tof_samples   = [y_SG ./ cqd_ki[ic][:, V_COL] for ic in 2:nI]; 
     travel_times  = mean.(tof_samples);
     travel_err    = standard_error.(tof_samples);
     n_collapses   = travel_times ./ collapse_time;
@@ -802,8 +1023,8 @@ cqd_times = let
     log_ticks_I = latex_log_ticks(-3:0)
  
     # ── collapse time ───────────────────────────────────────────────────────────────────────
-    fig = Figure()
-    ax  = Axis(fig[1, 1]; xlabel = "Current (A)", ylabel = "Collapse time (μs)",
+    fig = Figure(size=(800,450))
+    ax  = Axis(fig[1, 1]; xlabel = "SG current (A)", ylabel = "Collapse time (μs)",
         xscale = log10, yscale = log10, xticks = log_ticks_I, yticks = latex_log_ticks(0:2))
     lines!(ax, Ic, 1e6 .* collapse_time; color = :blue, linewidth = 2, label = L"Collapse time $\tau_{c}$")
     limits!(ax, 1e-3, 1, 1, 3500)
@@ -813,8 +1034,8 @@ cqd_times = let
  
     # ── time of flight ──────────────────────────────────────────────────────────────────────
     tof, err = 1e6 .* travel_times, 1e6 .* travel_err
-    fig = Figure()
-    ax  = Axis(fig[1, 1]; xlabel = "Current (A)", ylabel = "Time of flight (μs)",
+    fig = Figure(size=(800,450))
+    ax  = Axis(fig[1, 1]; xlabel = "SG current (A)", ylabel = "Time of flight (μs)",
         xscale = log10, xticks = log_ticks_I)
     band!(ax, Ic, tof .- err, tof .+ err; color = (:dodgerblue3, 0.1))
     lines!(ax, Ic, tof; color = :dodgerblue3, linewidth = 2, label = L"Time of flight $\Delta t_{\mathrm{SG}}$")
@@ -825,8 +1046,8 @@ cqd_times = let
     savefig(fig, "time_flight")
  
     # ── both on one axis (display only) ─────────────────────────────────────────────────────
-    fig = Figure()
-    ax  = Axis(fig[1, 1]; xlabel = "Current (A)", ylabel = "Time (μs)",
+    fig = Figure(size=(800,450))
+    ax  = Axis(fig[1, 1]; xlabel = "SG current (A)", ylabel = "Time (μs)",
         xscale = log10, yscale = log10, xticks = log_ticks_I, yticks = latex_log_ticks(0:2))
     band!(ax, Ic, tof .- err, tof .+ err; color = (:dodgerblue3, 0.1))
     lines!(ax, Ic, tof; color = :dodgerblue3, linewidth = 2, label = L"Time of flight $\Delta t_{\mathrm{SG}}$")
@@ -836,10 +1057,10 @@ cqd_times = let
     display(fig)
  
     # ── number of collapse cycles Δt_SG / τ_c ───────────────────────────────────────────────
-    fig = Figure(size = (800, 600))
-    ax  = Axis(fig[1, 1]; xlabel = "Current (A)", ylabel = "Interaction time / collapse time",
+    fig = Figure(size = (800, 450))
+    ax  = Axis(fig[1, 1]; xlabel = "SG current (A)", ylabel = "Interaction time / collapse time",
         xscale = log10, yscale = log10,
-        xticks = latex_log_ticks(-2:0), yticks = latex_log_ticks(-1:2),   # REVIEW: was mixed L"1", L"10", L"100"
+        xticks = latex_log_ticks(-2:0), yticks = latex_log_ticks(-1:2),
         xgridvisible = true, xminorgridvisible = true, xminorticksvisible = true, xminorticks = IntervalsBetween(9),
         ygridvisible = true, yminorgridvisible = true, yminorticksvisible = true, yminorticks = IntervalsBetween(9),
     )
@@ -856,122 +1077,406 @@ end
 
 
 ##################################################################################################
-## §6  RELATIVE ERROR vs NUMBER OF COLLAPSE CYCLES  →  relerr_vs_collapsecycles
+## §6  MODEL–EXPERIMENT AGREEMENT vs COIL CURRENT AND vs COLLAPSE CYCLES
+##      →  relerr_vs_current, pull_vs_current, relerr_vs_collapsecycles, pull_vs_collapsecycles
 ##################################################################################################
-
-
-
-
-
-
-
-
-# Current (A) — log-spaced sample grid
-I_A = [0.0266, 0.0292, 0.0320, 0.0352, 0.0386, 0.0424, 0.0465, 0.0510,
-       0.0560, 0.0614, 0.0674, 0.0740, 0.0812, 0.0891, 0.0978, 0.1073,
-       0.1178, 0.1293, 0.1419, 0.1557, 0.1709, 0.1875, 0.2058, 0.2258,
-       0.2478, 0.2720, 0.2985, 0.3276, 0.3595, 0.3946, 0.4330, 0.4752,
-       0.5215, 0.5724, 0.6281, 0.6894, 0.7565, 0.8303, 0.9112, 1.0000]
-
-# Red curve — Rel.Error (ℰ_QM − ℰ_exp)/ℰ_exp
-rel_err_QM = [0.1457, 0.1717, 0.1935, 0.2054, 0.2115, 0.2112, 0.2066, 0.2000,
-              0.1921, 0.1804, 0.1696, 0.1587, 0.1500, 0.1430, 0.1370, 0.1304,
-              0.1196, 0.1045, 0.0913, 0.0826, 0.0777, 0.0699, 0.0609, 0.0511,
-              0.0413, 0.0326, 0.0294, 0.0294, 0.0326, 0.0370, 0.0370, 0.0320,
-              0.0239, 0.0130, 0.0033, -0.0022, 0.0005, 0.0065, 0.0043, -0.0087]
-
-# Blue curve — Rel.Error (ℰ_CQD − ℰ_exp)/ℰ_exp
-rel_err_CQD = [-0.0087, 0.0000, 0.0056, 0.0076, 0.0076, 0.0057, 0.0033, 0.0000,
-               -0.0022, -0.0043, -0.0065, -0.0087, -0.0065, -0.0043, 0.0000, 0.0022,
-                0.0022, -0.0032, -0.0076, -0.0087, -0.0065, -0.0065, -0.0087, -0.0130,
-               -0.8*0.0174, -0.8*0.0196, -0.8*0.0196, -0.8*0.0152, -0.8*0.0087, -0.8*0.0011, 0.8*0.0022, 0.8*0.0000,
-               -0.6*0.0042, -0.6*0.030, 0.6*0.00407, 0.6*0.0029, 0.6*0.0046, -0.6*0.0069, -0.6*0.0109, -0.6*0.0217]
-
-N_collapses = travel_times ./ collapse_time
-
-# --- digitized error curves live on I_A; N_collapse lives on Ic ---
-# (I_A, rel_err_QM, rel_err_CQD  from the extraction; Ic, N_collapse  are yours)
+# Two complementary measures of the same disagreement, read from the fit archive rather than
+# hard-coded, so the figures track whatever the analysis last wrote:
+#
+#   Fractional deviation : (z_model − z_exp) / z_exp   — normalised by the value, unit-free
+#   Normalized residual  : (z_model − z_exp) / σ_exp   — normalised by the uncertainty, so
+#                                                        |value| ≲ 1 means "agrees within errors"
+#
+# The collapse-cycle abscissa comes from §5: N(I) = Δt_SG(I)/τ_c(I) is known on the `Ic` grid and
+# is interpolated (log–log) onto the archive's current grid. Both N and I span decades, so
+# interpolating log N against log I is far more faithful than a linear interpolation would be.
 
 """
-    interp_loglin(xq, x, y)
-
-Linear interpolation of `y(x)` evaluated at `xq`, done in log10(x) space
-(appropriate for a log-current axis). Returns NaN outside the range of `x`.
+    read_stats(path) -> NamedTuple
+ 
+Read the `statistical_analysis/` group of the k_i-scale fit archive and return
+`(; I, relErr_QM, relErr_CQD, pull_QM, pull_CQD)`, sorted by increasing current.
+ 
+All five datasets are read in a single `jldopen` so the file is opened once, and their lengths
+are checked against each other: a mismatch means the archive was written from runs with
+different current grids and any plot made from it would silently pair the wrong points.
 """
-function interp_loglin(xq, x, y)
-    p  = sortperm(x)
-    lx = log10.(x[p]); ys = y[p]
-    lq = log10.(xq)
-    out = similar(float.(xq))
-    for (k, q) in enumerate(lq)
-        if q < lx[1] || q > lx[end]
-            out[k] = NaN                       # no extrapolation
-        else
-            j = searchsortedlast(lx, q)
-            j = min(j, length(lx) - 1)
-            t = (q - lx[j]) / (lx[j+1] - lx[j])
-            out[k] = ys[j] + t * (ys[j+1] - ys[j])
-        end
+function read_stats(path::AbstractString)
+    isfile(path) || throw(ArgumentError("JLD2 archive not found: $path"))
+ 
+    I, relErr_QM, relErr_CQD, pull_QM, pull_CQD = jldopen(path, "r") do f
+        (vec(f["statistical_analysis/Current_A"]),
+         vec(f["statistical_analysis/relErr_QM"]),
+         vec(f["statistical_analysis/relErr_CQD"]),
+         vec(f["statistical_analysis/pull_QM"]),
+         vec(f["statistical_analysis/pull_CQD"]))
     end
-    return out
+ 
+    lengths = length.((I, relErr_QM, relErr_CQD, pull_QM, pull_CQD))
+    all(==(lengths[1]), lengths) ||
+        throw(DimensionMismatch("statistical_analysis columns have different lengths: $lengths"))
+ 
+    p = sortperm(I)   # guarantee monotone x for line plots regardless of write order
+    return (; I = I[p], relErr_QM = relErr_QM[p], relErr_CQD = relErr_CQD[p],
+              pull_QM = pull_QM[p], pull_CQD = pull_CQD[p])
 end
 
-# --- put both errors on the Ic grid (same grid as N_collapse) ---
-errQM_on_Ic  = interp_loglin(Ic, I_A, rel_err_QM)
-errCQD_on_Ic = interp_loglin(Ic, I_A, rel_err_CQD)
+# Axis labels shared by the current- and collapse-cycle versions of each panel, so the two
+# abscissae never disagree about what the ordinate means.
+const LABEL_RELERR = L"Fractional deviation, $(z_{\mathrm{model}}-z_{\mathrm{exp}})/z_{\mathrm{exp}}$"
+const LABEL_PULL   = L"Normalized residual, $(z_{\mathrm{model}}-z_{\mathrm{exp}})/\sigma_{\mathrm{exp}}$"
 
-# --- keep only currents inside the digitized range (drop the NaNs) ---
-keep = .!isnan.(errQM_on_Ic)          # QM and CQD share the same I_A range
-dτ   = N_collapses[keep]
-eQM  = errQM_on_Ic[keep]
-eCQD = errCQD_on_Ic[keep]
+list_jld2_entries(FIT_ARCHIVE);          # printed reference; keys are returned, not captured here
+ 
+stats = read_stats(FIT_ARCHIVE);
+@info "Fit archive" n_points = length(stats.I) I_range = extrema(stats.I)
 
-# order by N_collapse so the connecting line is monotone along x
-o    = sortperm(dτ)
-dτ, eQM, eCQD = dτ[o], eQM[o], eCQD[o]
+# The pair reads as fractional deviation (normalized by the value) 
+# and normalized residual (normalized by the uncertainty), which makes their relationship obvious at a glance.
 
-# ---------------------------------------------------------------- plot
-pow_lo, pow_hi = floor(Int, log10(minimum(dτ))), ceil(Int, log10(maximum(dτ)))
-xticks_pow = pow_lo:pow_hi
-xticks = (10.0 .^ xticks_pow, [L"10^{%$p}" for p in xticks_pow])
 
-ystep = 0.05
-ylo = floor(minimum(vcat(eQM, eCQD)) / ystep) * ystep
-yhi = ceil(maximum(vcat(eQM, eCQD)) / ystep) * ystep
-yticks = round.(ylo:ystep:yhi, digits = 2)
-
-fig = Figure(size = (800, 600))
-ax = Axis(fig[1, 1],
-    xlabel = "Number of collapse cycles",
-    ylabel = "Relative error",
-    xlabelsize = 20, ylabelsize = 20,
-    xticklabelsize = 16, yticklabelsize = 16,
+# Axis styling shared by all four panels of this section: a log abscissa with nine minor
+# intervals per decade, and a two-level grid — solid at the labelled ticks, dotted between them.
+# Splatted into every Axis below, so the four panels cannot drift apart typographically.
+const AX_COMMON = (
     xscale = log10,
-    xticks = xticks,
-    xminorticksvisible = true,
-    xminorticks = IntervalsBetween(9),
-    yticks = yticks,
+    xminorticksvisible = true, xminorticks = IntervalsBetween(9),
+
+    xgridvisible = true, ygridvisible = true,
+    xgridcolor = (:black, 0.12), ygridcolor = (:black, 0.12),
+    xgridwidth = 0.65, ygridwidth = 0.65,
+
+    xminorgridvisible = true,
+    xminorgridcolor = (:black, 0.10), yminorgridcolor = (:black, 0.10),
+    xminorgridwidth = 0.5, yminorgridwidth = 0.5,
+    xminorgridstyle = :dot, yminorgridstyle = :dot,
 )
-scatterlines!(ax, dτ, eQM,  color = :blue,  markersize = 8,
-    label = L"(\mathcal{z}_{\mathrm{QM}}-\mathcal{z}_{\mathrm{exp}})/\mathcal{E}_{\mathrm{exp}}")
-scatterlines!(ax, dτ, eCQD, color = :red, markersize = 8,
-    label = L"(\mathcal{z}_{CQD}-\mathcal{z}_{exp})/\mathcal{E}_{exp}")
-hlines!(ax, 0, color = (:black, 0.4), linestyle = :dash)
-axislegend(ax, position = :rt, labelsize = 16)
-fig
-save(joinpath(OUTDIR, "relerr_vs_collapsecycles.png"), fig)
 
+# Ordinate minor structure. The deviation panels subdivide each 0.05 step into fifths; the
+# residual panels leave it off, because the integer-σ major gridlines already carry the reading.
+const AX_YMINOR    = (yminorticksvisible = true,  yminorticks = IntervalsBetween(5),
+                      yminorgridvisible = true)
+const AX_NO_YMINOR = (yminorticksvisible = false, yminorgridvisible = false)
 
+# `limits` is pinned to the outermost major ticks in every panel: IntervalsBetween only fills the
+# gaps *between* visible major ticks, so a tick outside the limits leaves that side of the axis
+# without minor ticks or minor gridlines.
+
+# ── Fractional deviation vs coil current ────────────────────────────────────────────────────
+let
+    yt = snapped_ticks(stats.relErr_QM, stats.relErr_CQD; step = 0.05)
+
+    fig = Figure(size = (800, 450))
+    ax  = Axis(fig[1, 1];
+        xlabel = "SG current (A)", ylabel = LABEL_RELERR,
+        xticks = latex_log_ticks(-2:0), yticks = yt,
+        limits = ((18e-3, 1.1), (first(yt), last(yt))),
+        AX_COMMON..., AX_YMINOR...,
+    )
+    hlines!(ax, 0; color = (:black, 0.4), linestyle = :dash)
+    scatterlines!(ax, stats.I, stats.relErr_QM;  color = COLOR_QM,  markersize = 8, label = LABEL_QM)
+    scatterlines!(ax, stats.I, stats.relErr_CQD; color = COLOR_CQD, markersize = 8, label = LABEL_CQD)
+    axislegend(ax; position = :rt)
+    display(fig)
+    savefig(fig, "relerr_vs_current")
+end
+
+# ── Normalized residual vs coil current ─────────────────────────────────────────────────────
+let
+    yt = snapped_ticks(stats.pull_QM, stats.pull_CQD; step = 1.0)
+
+    fig = Figure(size = (800, 450))
+    ax  = Axis(fig[1, 1];
+        xlabel = "SG current (A)", ylabel = LABEL_PULL,
+        xticks = latex_log_ticks(-2:0), yticks = yt,
+        limits = ((18e-3, 1.1), (first(yt), last(yt))),
+        AX_COMMON..., AX_NO_YMINOR...,
+    )
+    # ±1σ band: points inside it agree with the measurement within its uncertainty
+    # hspan!(ax, -1, 1; color = (:black, 0.10))
+    hlines!(ax, 0; color = (:black, 0.4), linestyle = :dash)
+    scatterlines!(ax, stats.I, stats.pull_QM;  color = COLOR_QM,  markersize = 8, label = LABEL_QM)
+    scatterlines!(ax, stats.I, stats.pull_CQD; color = COLOR_CQD, markersize = 8, label = LABEL_CQD)
+    axislegend(ax; position = :lt)
+    display(fig)
+    savefig(fig, "pull_vs_current")
+end
+
+# ── Same quantities against the number of collapse cycles ───────────────────────────────────
+# Requires `Ic` (§4) and `cqd_times.n_collapses` (§5).
+let
+    N_at_I = interp_loglog(stats.I, Ic, cqd_times.n_collapses)
+
+    keep = .!isnan.(N_at_I)
+    all(keep) || @warn "Currents outside the simulated grid were dropped" n_dropped = count(!, keep) I_sim = extrema(Ic)
+
+    o  = sortperm(N_at_I[keep])          # monotone x so the connecting line does not double back
+    dτ = N_at_I[keep][o]
+    eQM, eCQD = stats.relErr_QM[keep][o], stats.relErr_CQD[keep][o]
+    pQM, pCQD = stats.pull_QM[keep][o],   stats.pull_CQD[keep][o]
+
+    pow_lo, pow_hi = floor(Int, log10(minimum(dτ))), ceil(Int, log10(maximum(dτ)))
+    xt = latex_log_ticks(pow_lo:pow_hi)
+    xmt = [k * exp10(p) for p in pow_lo:pow_hi for k in 2:9]
+    dlo, dhi = extrema(dτ)
+    dec_lo, dec_hi = exp10(floor(log10(dlo))), exp10(floor(log10(dhi)))
+    xlo = floor(dlo / dec_lo) * dec_lo        # 0.82 → 0.8
+    xhi = ceil( dhi / dec_hi) * dec_hi        # 32   → 40
+    # Half a grid unit of breathing room, so the end ticks are inside the panel, not on its edge.
+    # When the lower bound lands exactly on a decade, use the finer unit below it (1 → 0.95,
+    # not 0.5, which on a log axis is half a decade of empty space).
+    unit_lo = xlo ≈ dec_lo ? dec_lo / 10 : dec_lo
+    xl = (xlo - unit_lo / 4, xhi + dec_hi / 4)   # 0.75 … 45
+
+    # Fractional deviation vs collapse cycles
+    yt = snapped_ticks(eQM, eCQD; step = 0.05)
+    fig = Figure(size = (800, 450))
+    ax  = Axis(fig[1, 1];
+        xlabel = "Number of collapse cycles", ylabel = LABEL_RELERR,
+        xticks = xt, yticks = yt,
+        limits = (xl, (first(yt), last(yt))),
+        AX_COMMON..., AX_YMINOR...,
+    )
+    hlines!(ax, 0; color = (:black, 0.4), linestyle = :dash)
+    scatterlines!(ax, dτ, eQM;  color = COLOR_QM,  markersize = 8, label = LABEL_QM)
+    scatterlines!(ax, dτ, eCQD; color = COLOR_CQD, markersize = 8, label = LABEL_CQD)
+    axislegend(ax; position = :rt)
+    display(fig)
+    savefig(fig, "relerr_vs_collapsecycles")
+
+    # Normalized residual vs collapse cycles
+    yt = snapped_ticks(pQM, pCQD; step = 1.0)
+    fig = Figure(size = (800, 450))
+    ax  = Axis(fig[1, 1];
+        xlabel = "Number of collapse cycles", ylabel = LABEL_PULL,
+        xticks = xt, yticks = yt,
+        limits = (xl, (first(yt), last(yt))),
+        AX_COMMON..., AX_NO_YMINOR...,
+    )
+    # hspan!(ax, -1, 1; color = (:black, 0.10))
+    hlines!(ax, 0; color = (:black, 0.4), linestyle = :dash)
+    scatterlines!(ax, dτ, pQM;  color = COLOR_QM,  markersize = 8, label = LABEL_QM)
+    scatterlines!(ax, dτ, pCQD; color = COLOR_CQD, markersize = 8, label = LABEL_CQD)
+    axislegend(ax; position = :lt)
+    display(fig)
+    savefig(fig, "pull_vs_collapsecycles")
+end
 
 
 ##################################################################################################
+## §7  BEAM SPLITTING: MEASURED F=1 POSITION vs CQD AND QM PREDICTIONS
+##      →  zF1_vs_current, zF1_vs_gradient
 ##################################################################################################
-## Main plot
+# The manuscript's main comparison. The measured centroid of the F = 1 component, z_F1, is shown
+# with its uncertainty at each of the 26 measured settings; the CQD and QM predictions are drawn
+# as continuous curves on the model's dense 801-point grid, so the models read as theory curves
+# through data points rather than as another series of markers.
+#
+# The two panels show the same data against the two equivalent control variables: the coil
+# current, which is what is actually set in the laboratory, and the field gradient ∂zBz, which is
+# what the physics depends on. Since the gradient is obtained from the current through the magnet
+# calibration, the panels are not independent evidence — the gradient axis is the physical one,
+# the current axis the operational one.
+ 
+"""
+    read_comparison(path) -> (experiment, model)
+ 
+Read the `experiment/` and `model/` groups of the k_i-scale archive and return two NamedTuples.
+ 
+`experiment` carries `(; I, Ierr, G, Gerr, z, zerr, cqd, qm)` — the 26 measured settings with
+their uncertainties and the model values evaluated at exactly those settings — and `model`
+carries `(; I, G, cqd, qm)` on the dense grid used for the theory curves. Both are sorted by
+increasing current, and the columns within each group are length-checked so a partially written
+archive is caught here rather than producing silently mispaired points.
+"""
+function read_comparison(path::AbstractString)
+    isfile(path) || throw(ArgumentError("JLD2 archive not found: $path"))
+ 
+    e, m = jldopen(path, "r") do f
+        exp_cols = (; I    = vec(f["experiment/Current_A"]),
+                      Ierr = vec(f["experiment/CurrentErr_A"]),
+                      G    = vec(f["experiment/Gradient_Tm"]),
+                      Gerr = vec(f["experiment/GradientErr_Tm"]),
+                      z    = vec(f["experiment/zF1_mm"]),
+                      zerr = vec(f["experiment/zF1Err_mm"]),
+                      cqd  = vec(f["experiment/CQD_up_mm"]),
+                      qm   = vec(f["experiment/QM_zF1_mm"]))
+        mod_cols = (; I   = vec(f["model/Current_A"]),
+                      G   = vec(f["model/Gradient_Tm"]),
+                      cqd = vec(f["model/CQD_up_mm"]),
+                      qm  = vec(f["model/QM_zF1_mm"]))
+        (exp_cols, mod_cols)
+    end
+ 
+    for (name, nt) in (("experiment", e), ("model", m))
+        lengths = length.(values(nt))
+        all(==(first(lengths)), lengths) ||
+            throw(DimensionMismatch("$name columns have different lengths: $lengths"))
+    end
+ 
+    # Sort both grids by current so the theory curves are drawn monotonically and the
+    # experimental markers are in a predictable order.
+    pe, pm = sortperm(e.I), sortperm(m.I)
+    e, m = map(v -> v[pe], e), map(v -> v[pm], m)
+ 
+    # The gradient panel plots against G while the arrays are ordered by I; that is only a valid
+    # ordering if the magnet calibration G(I) is monotone. Fail loudly rather than draw a curve
+    # that doubles back on itself.
+    issorted(m.G) || @warn "Model gradient is not monotone in current — check the calibration"
+ 
+    return (e, m)
+end
+ 
 
-data_2025 = load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_xkl","data_averaged_2.jld2"),"data")
+ 
+ 
+"""
+    plot_splitting(x_exp, xerr, z, zerr, x_model, cqd, qm; kwargs...) -> Figure
+ 
+Measured F = 1 position with error bars against `x_exp`, overlaid with the CQD and QM curves
+evaluated on the dense model grid `x_model`.
+ 
+Both coordinates of the measurement carry an uncertainty, so horizontal and vertical error bars
+are drawn; the markers are open (white fill, coloured stroke) so that error bars and overlapping
+theory curves stay visible underneath them. The model curves are drawn first and the data last,
+so no curve hides a data point.
+ 
+Both axes are logarithmic by default: the abscissa spans decades, and so does the splitting
+itself, so a log–log frame shows the small-current behaviour that a linear ordinate compresses
+into the bottom of the panel, and turns a power law into a straight line.
+ 
+# Keyword arguments
+- `xlabel`, `ylabel`: axis labels (LaTeX strings).
+- `xscale`, `yscale`: `log10` by default. Points a log axis cannot represent (non-positive
+  abscissa or ordinate) are dropped per series, with a warning naming how many.
+- `figsize`: figure size in points.
+- `exp_color`: colour of the measured points; CQD and QM use the section-wide constants.
+- `legend_position`: passed to `axislegend`.
+- `label_exp`, `label_qm`, `label_cqd`: legend entries, listed in that order regardless of the
+  order in which the series are drawn.
+- `legend_patchsize`: size of the legend's line/marker swatch, (width, height) in points — a
+  wide patch makes the line styles easy to tell apart.
+- `marker_fill`: fill of the measured markers, independent of their outline (`exp_color`).
+  `:transparent` leaves the disc empty so a theory curve remains readable through it;
+  `(:white, α)` masks the curve by the fraction `α`, which keeps dense clusters of points
+  legible. Opaque `:white` hides whatever passes underneath.
+"""
+function plot_splitting(x_exp, xerr, z, zerr, x_model, cqd, qm;
+        xlabel,
+        ylabel          = L"${F=1}$ Peak position (mm)",
+        xscale          = log10,
+        yscale          = log10,
+        figsize         = (800, 600),
+        exp_color       = :black,
+        legend_position = :lt,
+        label_exp       = LABEL_EXP,
+        label_qm        = LABEL_QM,
+        label_cqd       = LABEL_CQD,
+        legend_patchsize = (45, 12),
+        marker_fill      = (:white, 0.45),
+)
+    # A log axis cannot show non-positive values (e.g. a zero-current reference point, or a
+    # model prediction that crosses zero). Mask each series on its own, so one unplottable
+    # point in a model curve does not remove the other curve or the data.
+    _mask(v, scale) = scale === log10 ? v .> 0 : trues(length(v))
+    _report(m, what) = all(m) || @warn "Points dropped: not representable on a log axis" series = what n = count(!, m)
+ 
+    keep_e   = _mask(x_exp, xscale)   .& _mask(z,   yscale)
+    keep_qm  = _mask(x_model, xscale) .& _mask(qm,  yscale)
+    keep_cqd = _mask(x_model, xscale) .& _mask(cqd, yscale)
+    _report(keep_e,   "experiment")
+    _report(keep_qm,  "QM")
+    _report(keep_cqd, "CQD")
+ 
+    fig = Figure(size = figsize)
+    ax  = Axis(fig[1, 1];
+        xlabel, ylabel,
+        xscale, yscale,
+        xticks = decade_ticks(x_exp[keep_e], x_model[keep_qm]),
+        yticks = decade_ticks(z[keep_e], qm[keep_qm], cqd[keep_cqd]),
+        xminorticksvisible = true, xminorticks = IntervalsBetween(9),
+        yminorticksvisible = true, yminorticks = IntervalsBetween(9),
+        # xticklabelsize = 18, yticklabelsize = 18,
 
-data_2025[:]
+        # major grid at the decades
+        xgridvisible = true, ygridvisible = true,
+        xgridcolor = (:black, 0.15), ygridcolor = (:black, 0.15),
+        xgridwidth = 0.65, ygridwidth = 0.65,
+
+        # minor grid at 2…9 × each decade
+        xminorgridvisible = true, yminorgridvisible = true,
+        xminorgridcolor = (:black, 0.12), yminorgridcolor = (:black, 0.12),
+        xminorgridwidth = 0.5, yminorgridwidth = 0.5,
+        xminorgridstyle = :dot, yminorgridstyle = :dot,
+    )
+ 
+    # Theory first, so the measurements sit on top of the curves. The plot handles are kept so
+    # the legend can be ordered independently of this drawing order (see axislegend below).
+    p_qm  = lines!(ax, x_model[keep_qm],  qm[keep_qm];   color = COLOR_QM,  linewidth = 2.5)
+    p_cqd = lines!(ax, x_model[keep_cqd], cqd[keep_cqd]; color = COLOR_CQD, linewidth = 2.5)
+ 
+    # Measurement: both error bars, then open markers.
+    # On a log ordinate a symmetric bar would reach z - zerr ≤ 0 when the error is comparable to
+    # the value; the lower whisker is clipped just inside the axis so the bar stays drawable.
+    zlo = yscale === log10 ? min.(zerr[keep_e], z[keep_e] .* 0.999) : zerr[keep_e]
+    p_err = errorbars!(ax, x_exp[keep_e], z[keep_e], zlo, zerr[keep_e];
+                       color = exp_color, whiskerwidth = 6)
+ 
+    xlo = xscale === log10 ? min.(xerr[keep_e], x_exp[keep_e] .* 0.999) : xerr[keep_e]
+    errorbars!(ax, x_exp[keep_e], z[keep_e], xlo, xerr[keep_e]; color = exp_color, whiskerwidth = 6,
+               direction = :x)
+ 
+    # `color` is the disc fill, `strokecolor` the outline: a semi-transparent fill lets the
+    # theory curves stay visible through the markers without losing the point outlines.
+    p_exp = scatter!(ax, x_exp[keep_e], z[keep_e];
+        color = marker_fill, strokecolor = exp_color, strokewidth = 1.5, markersize = 9)
+ 
+    # Explicit entries: the legend reads Experiment → QM → CQD whatever the draw order, and the
+    # first entry combines the error bar with the marker so the swatch matches what is plotted.
+    axislegend(ax,
+        [[p_err, p_exp], p_qm, p_cqd],
+        [label_exp, label_qm, label_cqd];
+        position     = legend_position,
+        framevisible = false,              # no box around the legend
+        patchsize    = legend_patchsize,   # longer line swatches
+    )
+    return fig
+end
+ 
+experiment, model = read_comparison(FIT_ARCHIVE);
+@info "Splitting comparison" n_exp = length(experiment.I) n_model = length(model.I) I_range = extrema(experiment.I) G_range = extrema(experiment.G)
+ 
+# ── z_F1 vs coil current (the operational control variable) ─────────────────────────────────
+let
+    fig = plot_splitting(experiment.I, experiment.Ierr, experiment.z, experiment.zerr,
+                         model.I, model.cqd, model.qm;
+                         xlabel = "SG current (A)")
+    display(fig)
+    savefig(fig, "zF1_vs_current")
+end
+ 
+# ── z_F1 vs field gradient (the physical control variable) ──────────────────────────────────
+let
+    fig = plot_splitting(experiment.G, experiment.Gerr, experiment.z, experiment.zerr,
+                         model.G, model.cqd, model.qm;
+                         xlabel = "SG magnetic field gradient (T/m)")
+    display(fig)
+    savefig(fig, "zF1_vs_gradient")
+end
 
 
-load(joinpath(BASE_PATH,"EXPDATA_ANALYSIS","smoothing_binning_2025","data_averaged_2.jld2"),"data")
-
+##################################################################################################
+## §8  RUN MANIFEST
+##################################################################################################
+# Written last so the figure listing is complete. Parameters are passed only if their section was
+# evaluated, which keeps every section independently runnable.
+let
+    extras = Dict{Symbol,Any}()
+    @isdefined(ki_fit)  && (extras[:ki_fit]  = ki_fit)
+    @isdefined(KI_IDX)  && (extras[:ki_index] = KI_IDX)
+    @isdefined(NI_IDX)  && (extras[:image_current_index] = NI_IDX)
+    @isdefined(T_K)     && (extras[:furnace_K] = T_K)
+    write_manifest(; extras...)
+end
+ 
+@info "Figures written to" OUTDIR elapsed = Dates.canonicalize(Dates.now() - T_START)
