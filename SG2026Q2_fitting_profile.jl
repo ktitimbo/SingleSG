@@ -2,8 +2,52 @@
 # Stern–Gerlach Experiment — Experimental Profile Fitting
 # Author  : Kelvin Titimbo — Caltech
 # Date    : June 2026
-# Purpose : Fit the experimental atomic beam profile at zero (or minimum) coil
-#           current, using a theoretical PDF plus a polynomial background.
+#
+# ------------------------------------------------------------------------------
+# PIPELINE OVERVIEW
+# ------------------------------------------------------------------------------
+# This script characterizes the *zero-current* (undeflected) atomic beam
+# profile recorded on the camera, and uses it to separate three physically
+# distinct contributions to the observed lineshape:
+#
+#   1. FIT        Fit the raw zero-current profile as
+#                       G_exp(z) = A · F_theory(z; w)  +  P_n(z)
+#                  where F_theory is the theoretical Stern–Gerlach probability
+#                  density (from atomic structure + beam geometry, computed in
+#                  TheoreticalSimulation.getProbDist_v3) and P_n(z) is an
+#                  n-degree polynomial that absorbs slowly-varying background
+#                  (stray light, detector offset, etc.). A and w are shared
+#                  ("global") across... (currently a single, zero-current
+#                  dataset per directory; see note near `chosen_currents_idx`).
+#
+#   2. CLEAN       Subtract the fitted polynomial baseline and normalize by A
+#                  to obtain a background-free, unit-area experimental PDF.
+#
+#   3. DECONVOLVE  The theoretical PDF F(z) already encodes the beam/aperture
+#                  geometry and atomic physics, but the *measured* profile is
+#                  additionally blurred by effects not in that model (residual
+#                  optics, scattering, finite pixel PSF, etc.). Modeling the
+#                  measurement as a convolution
+#                       G_clean(z) = (F ⊗ H)(z)
+#                  a regularized deconvolution recovers the unknown blur
+#                  kernel H(z) directly from data (ProfileFitTools.deconv_kernel).
+#
+#   4. PARAMETRIZE H(z) is then fit to standard peak shapes (Gaussian,
+#                  Lorentzian, pseudo-Voigt) so that "extra blur width" becomes
+#                  a single reportable number (e.g. the Gaussian σ in µm),
+#                  and the best shape is chosen via AIC.
+#
+#   5. VALIDATE    Reconvolving F ⊗ H_fit and comparing against the original
+#                  experimental profile (pointwise residuals + CDF comparison)
+#                  checks that the decomposition is self-consistent and that
+#                  no centering/normalization artifact was introduced.
+#
+# The whole procedure (steps 1–5) is repeated for every combination of
+# z-binning and spline-smoothing parameter in the sweep grid at the bottom
+# of the script, and for every experiment directory in DIR_LIST, so that the
+# sensitivity of the extracted width to preprocessing choices can be judged
+# by eye before committing to one (WANTED_ZBINNING, WANTED_SMOOTH) pair for
+# the files that actually get written to disk.
 # ==============================================================================
 
 # ── Plotting ──────────────────────────────────────────────────────────────────
@@ -27,7 +71,7 @@ using LaTeXStrings, Printf, PrettyTables
 # ── Timing & logging ──────────────────────────────────────────────────────────
 using Dates
 const T_START   = Dates.now()
-const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss")
+const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss")   # unique tag for this run's output folder/files
 # ── Numerics ──────────────────────────────────────────────────────────────────
 using LinearAlgebra, DataStructures
 using LsqFit, DSP, FFTW
@@ -38,15 +82,15 @@ using Alert
 using OrderedCollections, JLD2
 # ── Threading ─────────────────────────────────────────────────────────────────
 using Base.Threads
-LinearAlgebra.BLAS.set_num_threads(4)
+LinearAlgebra.BLAS.set_num_threads(min(4, Sys.CPU_THREADS))
 @info "BLAS threads"  count = BLAS.get_num_threads()
 @info "Julia threads" count = Threads.nthreads()
 # ── Working directory & output ────────────────────────────────────────────────
 cd(@__DIR__)
 const HOSTNAME    = gethostname()
 const PROGRAM_FILE = @__FILE__
-const BASE_PATH = raw"F:\SternGerlachExperiments"
-const OUTDIR    = joinpath(@__DIR__, "data_studies", "CONV_" * RUN_STAMP)
+const BASE_PATH = raw"F:\SternGerlachExperiments"   # NOTE: machine-specific absolute path; not portable across users/hosts
+const OUTDIR    = joinpath(@__DIR__, "data_studies", "CONV2026_" * RUN_STAMP)
 isdir(OUTDIR) || mkpath(OUTDIR)
 @info "Output directory" path = OUTDIR
 @info "Hostname"         host = HOSTNAME
@@ -169,6 +213,17 @@ println("""
 
 # Setting the variables for the module
 # ── Push geometry into TheoreticalSimulation module ───────────────────────────
+# NOTE ON DESIGN: TheoreticalSimulation exposes its geometry as mutable module
+# globals (`DEFAULT_*`) rather than accepting a config struct/argument. This
+# `let` block is how this script injects the beamline geometry defined above
+# into that module before any of its functions (GvsI, getProbDist_v3, ...)
+# are called below. Two consequences worth knowing:
+#   - Call order matters: nothing in TheoreticalSimulation may run correctly
+#     before this block executes.
+#   - This is inherently single-configuration / not thread-safe: running two
+#     different geometries concurrently in the same process is not supported
+#     by this pattern (would need a config struct threaded through calls
+#     instead of module-level mutation).
 let ts = TheoreticalSimulation
     ts.DEFAULT_camera_pixel_size  = CAM_PIXELSIZE
     ts.DEFAULT_x_pixels           = NX_PIXELS
@@ -197,21 +252,28 @@ const WANTED_SMOOTH   = 0.01
 
 # Parameter combinations to inspect. All combinations are evaluated and shown,
 # but files are written only for WANTED_ZBINNING and WANTED_SMOOTH.
-const ZBINNING_LIST = [1, 2]
-const SMOOTH_LIST   = [0.001, 0.005, 0.01, 0.02, 0.05]
+const ZBINNING_LIST = [2]#[1, 2]
+const SMOOTH_LIST   = [0.01]#[0.001, 0.005, 0.01, 0.02, 0.05]
 
 # Polynomial background degree
 const P_DEGREE   = 3
 const NCOLS_BG   = P_DEGREE + 1   # number of polynomial coefficients
 
 const NORM_MODE  = :none
-const λ0_EXP     = 0.0001
+const λ0_EXP     = 0.0001   # spline smoothing penalty used when interpolating the raw experimental
+                             # profile onto the theory grid (distinct from WANTED_SMOOTH, which
+                             # controls upstream smoothing already baked into the loaded JLD2 data)
 
-const NRANGE_Z   = 10_001
+const NRANGE_Z   = 10_001   # number of points on the symmetric theory z-grid (odd, so z=0 is included exactly)
 
 const DIR_LIST = [
     "20260819",
-    "20260821"
+    "20260821",
+    "20260826",
+    "20260827",
+    "20260831",
+    "20260902",
+    "20260903"
 ]
 
 # ── PrettyTables header construction ──────────────────────────────────────────
@@ -230,10 +292,47 @@ const HDR_BOT = vcat(
 # DATA LOADING & PROFILE FITTING LOOP
 # ==============================================================================
 
-function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_results::Bool=false)
+"""
+    run_analysis(wanted_zbinning, wanted_smooth; save_results=false) -> results_dict
+
+Run the full 5-stage pipeline (fit → clean → deconvolve → parametrize →
+validate; see the module-level overview at the top of this file) for every
+experiment directory in `DIR_LIST`, using the pre-processed (binned,
+spline-smoothed) F1/F2 profiles identified by `wanted_zbinning` and
+`wanted_smooth` in each directory's summary JLD2 file.
+
+Only the *zero-current* profile is used (see `chosen_currents_idx` below) —
+this function characterizes instrumental blur, not the field-dependent
+splitting itself.
+
+Arguments
+- `wanted_zbinning::Integer` : z-axis binning factor used when the summary
+  JLD2 was produced upstream (selects which precomputed dataset to load).
+- `wanted_smooth::Real`      : spline smoothing parameter used upstream,
+  same role as above.
+- `save_results::Bool`       : if true, persist fit results, the blur/width
+  summary table, and a text report to `OUTDIR`. Intended to be true only for
+  the single (WANTED_ZBINNING, WANTED_SMOOTH) production pair; other sweep
+  points are computed for visual/diagnostic comparison only and are not saved.
+
+Returns
+- `OrderedDict{Any, NamedTuple}` keyed by directory name, each value holding
+  `(current_A, blurrGwidth_um, zmax_mm)` — the fitted Gaussian blur width and
+  the peak location of the forward (theory ⊗ blur) model, per dataset.
+
+Side effects
+- Displays (does not save) many diagnostic plots per dataset via `display(...)`.
+- Emits `@info` logs and prints PrettyTables summaries to stdout.
+- When `save_results=true`, writes two JLD2 files and one text report to `OUTDIR`.
+"""
+wanted_zbinning = WANTED_ZBINNING
+wanted_smooth = WANTED_SMOOTH
+save_results = false
+# function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_results::Bool=false)
     @info "Parameter-sweep run" zbinning=wanted_zbinning smoothing=wanted_smooth save_results
 
     # Fresh containers are essential: each parameter pair is an independent run.
+    # Value tuple layout per directory: (I0, [A_fit, w_fit], poly_bg_coeffs, [z | exp | model] matrix)
     results = OrderedDict{String, Tuple{
         Float64,
         Vector{Float64},
@@ -244,7 +343,8 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
 
     run_started = Dates.now()
 
-    for wanted_data_dir in DIR_LIST
+    # for wanted_data_dir in DIR_LIST
+        wanted_data_dir = DIR_LIST[1]
         # ── Load summary JLD2 ─────────────────────────────────────────────────────
         exp_result_path = joinpath(
             BASE_PATH, "EXPDATA_ANALYSIS", "summary",
@@ -297,8 +397,14 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
             )
         end;
 
-
+        # Locate the (near-)zero-current row: nearest |Ic| to 0, accepted only
+        # if within 0.5 mA. NOTE: if no current in this dataset is that close
+        # to zero, `idx` is `nothing` and the next block will fail on indexing
+        # with a generic MethodError rather than a message naming the dataset —
+        # worth an explicit `idx === nothing && error("no zero-current row in $wanted_data_dir")`
+        # if this is ever run against new/less-curated data directories.
         idx = findmin(abs.(exp_result.Ic .- 0.0)) |> ((d, m),) -> d ≤ 0.0005 ? m : nothing
+        idx === nothing && error("no zero-current row in $wanted_data_dir")
        
         fig_F1 = plot(exp_result.z, exp_result.F1[idx, :];
             label             = "Experimental data",
@@ -340,13 +446,19 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
         Ic_sampled = abs.(exp_result.Ic)
         nI         = length(Ic_sampled)
 
+        # Only the lowest/zero-current profile is fit here — this function
+        # characterizes instrumental blur at zero field, not the field-dependent
+        # splitting. `chosen_currents_idx` (and the `rl`/loop-over-`rl` machinery
+        # below) is written generically as if multiple currents could be
+        # selected at once, but currently always resolves to a single index;
+        # keep that in mind if extending this to fit several currents together.
         chosen_currents_idx = [argmin(Ic_sampled)]  # lowest/zero current only
         @info "\e[1;94mTarget current\e[0m  idx=\e[96m$(only(chosen_currents_idx))\e[0m  I₀=\e[93m$(@sprintf("%.4f", only(Ic_sampled[chosen_currents_idx]))) A\e[0m"
 
         # ── z-grids ───────────────────────────────────────────────────────────────
         z_exp    = exp_result.z;
         range_z  = floor(minimum([maximum(z_exp), abs(minimum(z_exp))]), digits=1)
-        z_theory = collect(range(-range_z, range_z; length=NRANGE_Z))
+        z_theory = collect(range(-range_z, range_z; length=NRANGE_Z))   # symmetric, odd-length grid so z=0 falls exactly on a node
 
         @assert isapprox(mean(z_theory), 0.0; atol = 10eps(float(range_z))) "mean(z_theory) = $(mean(z_theory)); expected ≈ 0 within atol=$(10eps(float(range_z)))"
         @assert isapprox(std(z_theory), ProfileFitTools.std_sample(range_z, NRANGE_Z); atol = eps(float(range_z))) "std(z_theory) inconsistent with symmetric range"
@@ -380,7 +492,10 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
 
             
 
-            # Theoretical profile: sum over mF sublevels of F=1 manifold
+            # Theoretical profile: sum over mF sublevels of F=1 manifold.
+            # Each sublevel has its own effective magnetic moment μF (field-
+            # dependent, via Breit–Rabi through μF_effective), so the total
+            # F=1 line shape is the incoherent sum of per-sublevel PDFs.
             𝒢       = TheoreticalSimulation.GvsI(I0)
             μ_eff   = [TheoreticalSimulation.μF_effective(I0, v[1], v[2], K39_params)
                        for v in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
@@ -395,6 +510,9 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
 
         # ── Joint fit: global A & w, per-profile polynomial background ────────────
         # Model: G(z) = A · F_theory(z; w) + P_n(z)
+        # w_mode/A_mode = :global means a single amplitude & width are shared
+        # across all profiles in `exp_list` (currently just one, since rl==1);
+        # this becomes meaningful once/if multiple currents are fit jointly.
         fit_data, fit_params, δparams, modelfun, model_on_z, meta, extras =
             ProfileFitTools.fit_pdf_joint(
                 z_list, exp_list, pdf_th_list;
@@ -495,6 +613,10 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
         data_exp_normalized  = data_exp_no_baseline ./ data[2][1]   # divide by A_fit
 
         # ── Geometric beam PDFs ───────────────────────────────────────────────────
+        # These are the purely geometric (ray-optics) projections of the furnace
+        # and slit apertures onto the screen, ignoring velocity/angle spread —
+        # a sanity-check baseline against the full physical model (pdf_theory
+        # below), not used directly in the fit.
         ΔL    = Y_FURNACETOSLIT + Y_SLITTOSG + y_SG + Y_SGTOSCREEN
         δslit = Y_FURNACETOSLIT
         z_m   = 1e-3 .* z_range   # [m]
@@ -597,12 +719,19 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
         F  = copy(pdf_theory);               F  ./= sum(F)  * Δz
 
 
-        # It’s doing a regularized deconvolution to infer an unknown kernel H with constraints:
-        # nonneg=true → physically meaningful (no negative probability)
-        # normalize=true → PDF-like kernel
-        # λ smoothness via curvature penalty ||D²H||²
-        # sym_weight encourages symmetry of H around 0 (softly)
-        # So H_est is your inferred “instrument + unmodelled physics” blur.
+        # Regularized deconvolution recovers the unknown kernel H subject to
+        # physical constraints:
+        #   nonneg=true    → H must be physically meaningful (no negative probability)
+        #   normalize=true → H is renormalized to a proper PDF (∫H dz = 1)
+        #   λ               → weight of the smoothness penalty ‖D²H‖² (curvature),
+        #                      suppresses high-frequency noise amplification that
+        #                      naive/unregularized deconvolution is prone to
+        #   stepsize        → gradient-descent step size for the iterative solver
+        #   sym_weight      → soft penalty encouraging H to be symmetric about z=0
+        #                      (an instrumental blur kernel is not expected to have
+        #                      a preferred direction)
+        #   maxiter         → iteration budget; verbose_every controls log cadence
+        # H_est is the inferred "instrument + unmodelled physics" blur kernel.
         H_est = ProfileFitTools.deconv_kernel(G, F, z_m;
             λ           = 1e-2,
             stepsize    = 1e-2,
@@ -625,6 +754,11 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
         display(fig_deconv)
 
         # ── Reconvolution validation: G ≈ F ⊗ H ──────────────────────────────────
+        # Sanity check: convolving the theoretical profile with the *estimated*
+        # kernel should reproduce the cleaned experimental profile G. Large
+        # discrepancies here would indicate the deconvolution regularization
+        # (λ, sym_weight) needs retuning, or that the forward model itself is
+        # missing physics.
         signal_predicted = ProfileFitTools.conv_centered(F, H_est, Δz)
 
         fig_reconv = plot(xlabel = L"$z$ (mm)", title = "Reconvolution check")
@@ -642,6 +776,9 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
         display(fig_reconv)
 
         # ── Parametric fits to blur kernel H ──────────────────────────────────────
+        # Reduce the (nonparametric) estimated kernel H_est to a single reportable
+        # width by fitting standard peak shapes; AIC (penalizing parameter count k)
+        # is used below to judge which shape best explains H_est without overfitting.
         fit_G  = ProfileFitTools.fit_gaussian(z_m, H_est);   p_G  = coef(fit_G)
         fit_L  = ProfileFitTools.fit_lorentzian(z_m, H_est); p_L  = coef(fit_L)
         fit_PV = ProfileFitTools.fit_pvoigt(z_m, H_est);     p_PV = coef(fit_PV)
@@ -668,6 +805,10 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
         display(fig_blur)
 
         # ── Forward model with Gaussian blur ──────────────────────────────────────
+        # Take the Gaussian fit to H (regardless of whether it "won" on AIC —
+        # chosen here as the conventional/reportable width measure) and fold it
+        # back into the theory curve, for a final visual check against the raw
+        # (normalized-only, not baseline-model-dependent) experimental data.
         HH = ProfileFitTools.conv_centered(pdf_theory, yhat_G, Δz)
 
         fig_forward = plot(xlabel = L"$z$ (mm)", xlims = (-3, 3),
@@ -885,6 +1026,14 @@ end # function run_analysis
 # ==============================================================================
 # PARAMETER-SWEEP DRIVER
 # ==============================================================================
+# Runs `run_analysis` over every (zbinning, smoothing) combination in
+# ZBINNING_LIST × SMOOTH_LIST so the sensitivity of the fitted blur width to
+# upstream preprocessing choices can be inspected visually/in logs before
+# trusting one combination. Only the run matching (WANTED_ZBINNING,
+# WANTED_SMOOTH) has `save_results=true` and therefore writes JLD2/report
+# files to OUTDIR — every other combination is computed and displayed but
+# not persisted, by design (keeps OUTDIR limited to the chosen production
+# parameters rather than every point in the sweep grid).
 
 inspection_results = OrderedDict{Tuple{Int, Float64}, OrderedDict{Any, NamedTuple}}()
 
