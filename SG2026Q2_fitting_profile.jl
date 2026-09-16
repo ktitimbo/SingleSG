@@ -325,10 +325,7 @@ Side effects
 - Emits `@info` logs and prints PrettyTables summaries to stdout.
 - When `save_results=true`, writes two JLD2 files and one text report to `OUTDIR`.
 """
-wanted_zbinning = WANTED_ZBINNING
-wanted_smooth = WANTED_SMOOTH
-save_results = false
-# function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_results::Bool=false)
+function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_results::Bool=false)
     @info "Parameter-sweep run" zbinning=wanted_zbinning smoothing=wanted_smooth save_results
 
     # Fresh containers are essential: each parameter pair is an independent run.
@@ -343,8 +340,7 @@ save_results = false
 
     run_started = Dates.now()
 
-    # for wanted_data_dir in DIR_LIST
-        wanted_data_dir = DIR_LIST[1]
+    for wanted_data_dir in DIR_LIST
         # ── Load summary JLD2 ─────────────────────────────────────────────────────
         exp_result_path = joinpath(
             BASE_PATH, "EXPDATA_ANALYSIS", "summary",
@@ -1023,6 +1019,833 @@ save_results = false
 end # function run_analysis
 
 
+"""
+    run_analysis_per_repetition(wanted_zbinning, wanted_smooth; save_results=false) -> results_dict
+
+Repeatability-aware counterpart to `run_analysis`. For every directory in
+`DIR_LIST`, finds ALL rows whose current sits within tolerance of that
+directory's lowest/zero current (not just the single closest one), fits each
+repeat's amplitude and width independently, and reports the blur-kernel width
+as a mean ± standard deviation ± standard error across repeats.
+
+Arguments
+- `wanted_zbinning::Integer` : z-axis binning factor used when the summary
+  JLD2 was produced upstream (selects which precomputed dataset to load).
+- `wanted_smooth::Real`      : spline smoothing parameter used upstream, same
+  role as above.
+- `save_results::Bool`       : if true, persist `results` and `results_dict`
+  (and a text report) to `OUTDIR`. Intended to be true only for the single
+  production (zbinning, smoothing) pair; other sweep points are for
+  visual/diagnostic comparison only.
+
+Returns
+- `OrderedDict{Any, NamedTuple}` keyed by directory name. Each value is
+  `(current_A, blurrGwidth_um, blurrGwidth_um_std, blurrGwidth_um_sem,
+  zmax_mm, n_repeats)`:
+  - `current_A`          — mean of the selected repeats' currents [A]
+  - `blurrGwidth_um`      — mean Gaussian blur width across repeats [μm]
+  - `blurrGwidth_um_std`  — repeat-to-repeat spread (population std) [μm];
+                            what a single new measurement's scatter looks like
+  - `blurrGwidth_um_sem`  — `std / sqrt(n_repeats)` [μm]; the uncertainty ON
+                            the mean itself — this is what "mean ± error"
+                            conventionally refers to. `NaN` when
+                            `n_repeats == 1` (undefined with a single sample).
+  - `zmax_mm`             — mean forward-model peak position across repeats [mm]
+  - `n_repeats`           — how many repeats were averaged for this directory
+
+Side effects
+- Displays (does not save) diagnostic plots per repeat via `display(...)`.
+- Emits `@info` logs (including a per-directory repeatability summary) and
+  prints PrettyTables summaries to stdout.
+- When `save_results=true`, writes two JLD2 files and one text report to
+  `OUTDIR`:
+  `baseline_results_P$(P_DEGREE).jld2` (per-repeat detail, `results`) and
+  `blur_conv_$(P_DEGREE).jld2` (per-directory summary, `results_dict`).
+"""
+function run_analysis_per_repetition(wanted_zbinning::Integer, wanted_smooth::Real; save_results::Bool=false)
+    @info "Parameter-sweep run" zbinning=wanted_zbinning smoothing=wanted_smooth save_results
+
+    # Fresh containers are essential: each parameter pair is an independent run.
+    # Value tuple layout per directory (all repeats kept, not just one):
+    #   (currents[rl], hcat(A,w)[rl×2], background_coeffs[rl×NCOLS_BG],
+    #    [z | exp_1 | model_1 | exp_2 | model_2 | ...][NRANGE_Z × (1+2rl)])
+    results = OrderedDict{String, Tuple{
+        Vector{Float64},
+        Matrix{Float64},
+        Matrix{Float64},
+        Matrix{Float64},
+    }}()
+    results_dict = OrderedDict{Any, NamedTuple}()
+
+    run_started = Dates.now()
+
+    # Single tolerance shared by both the quick-look F1/F2 diagnostic plot and
+    # the repeat-selection step below, so they always agree on what counts as
+    # "the lowest/zero current" for a given directory.
+    ZERO_CURRENT_TOL = 0.0003   # 0.3 mA
+
+
+    for wanted_data_dir in DIR_LIST
+        # ── Load summary JLD2 ─────────────────────────────────────────────────────
+        exp_result_path = joinpath(
+            BASE_PATH, "EXPDATA_ANALYSIS", "summary",
+            wanted_data_dir, wanted_data_dir * "_report_summary.jld2",
+        )
+
+        exp_result = jldopen(exp_result_path, "r") do file
+            
+            data = file[JLD2_MyTools.make_keypath_exp(wanted_data_dir, wanted_zbinning, wanted_smooth)];
+
+            @info """Imported experimental data:
+              directory     : $(wanted_data_dir)
+              analysis      : $(data[:RUNSTAMP])
+              nz            : $(wanted_zbinning)
+              λ₀            : $(wanted_smooth)
+              """
+
+            Ic = data[:Currents];
+            Δz =  (data[:mean_F2_peak_pos_raw] .- data[:mean_F1_peak_pos_raw]);
+
+            pretty_table(
+                hcat(Ic, Δz)[1:20, :];
+                column_labels   = ["Ic [A]", "Δz [mm]"],
+                title           = "PEAK SEPARATION DIAGNOSTICS",
+                formatters      = [fmt__printf("%+.4f",[1]), fmt__printf("%+.3f",[2])],
+                alignment       = :c,
+                table_format    = TextTableFormat(borders = text_table_borders__unicode_rounded),
+                style           = TextTableStyle(
+                                    title                   = crayon"red bold",
+                                    first_line_column_label = crayon"yellow bold",
+                                    column_label            = crayon"yellow",
+                                    table_border            = crayon"blue bold"),
+                equal_data_column_widths = true,
+            )
+
+            # Centre coordinates on the midpoint of the two F-peak positions
+            C00 = 0.5 * (data[:mean_F1_peak_pos_raw][1] + data[:mean_F2_peak_pos_raw][1])
+
+            F1_profile = data[:F1_profile_spline]; F1_profile[:, 1] .-= C00
+            F2_profile = data[:F2_profile_spline]; F2_profile[:, 1] .-= C00
+
+            return (
+                Ic         = Ic,
+                z          = collect(data[:z_mm]) .- C00,
+                Δz         = Δz,
+                F1         = data[:F1_profile],        # raw
+                F2         = data[:F2_profile],        # raw
+                F1_profile = F1_profile,               # spline-smoothed
+                F2_profile = F2_profile,               # spline-smoothed
+            )
+        end;
+
+
+        # ── Current selection: every repeat at the lowest/zero current ─────────────
+        # Repeatability check: a dataset can contain several rows at
+        # (approximately) the same lowest/zero current, and the repeat count
+        # varies by dataset. Select ALL of them (not just the single
+        # closest-to-zero row) so each repeat can be fit independently below
+        # and summarized as mean ± std ± sem. Computed early (before the
+        # quick-look plot below) so that plot can overlay every repeat.
+        Ic_sampled = abs.(exp_result.Ic)
+
+        I0_min = minimum(Ic_sampled)
+        chosen_currents_idx = findall(I -> I - I0_min ≤ ZERO_CURRENT_TOL, Ic_sampled)
+        rl   = length(chosen_currents_idx)   # I0_min itself always satisfies the ≤ tolerance, so rl ≥ 1 always
+        cols = palette(:darkrainbow, rl)
+        @info "\e[1;94mRepeats at lowest current\e[0m  n=\e[96m$(rl)\e[0m  I₀≈\e[93m$(@sprintf("%.4f", I0_min)) A\e[0m  idx=$(chosen_currents_idx)"
+
+        # Quick-look diagnostic: overlay EVERY selected repeat's raw vs.
+        # spline-smoothed profile on the same axes, so repeat-to-repeat
+        # agreement (or drift) is visible by eye before any fitting happens
+        # below. Each repeat gets its own color (`cols[j]`) AND its own
+        # marker shape (cycling through MARKER_SHAPES), so overlapping
+        # repeats stay distinguishable even where curves nearly coincide.
+        # Markers are drawn hollow (white fill, colored outline) rather than
+        # filled, and the marker outline is drawn more transparent than the
+        # spline line of the same color, so the two don't visually compete.
+        MARKER_SHAPES = (:circle, :rect, :diamond, :utriangle, :star5, :hexagon, :cross, :dtriangle)
+
+        fig_F1 = plot(xlabel = L"$z \quad (\mathrm{mm})$", legend = :topleft, 
+            legend_title = L"$F=1$  (%$wanted_data_dir, %$rl repeats)",
+            foreground_color_legend = nothing)
+        fig_F2 = plot(xlabel = L"$z \quad (\mathrm{mm})$", legend = :topleft, 
+            legend_title = L"$F=2$  (%$wanted_data_dir, %$rl repeats)",
+            foreground_color_legend = nothing)
+
+        for (j, i_idx) in enumerate(chosen_currents_idx)
+            lbl   = "$(round(1000*exp_result.Ic[i_idx]; digits=3)) mA"
+            shape = MARKER_SHAPES[mod1(j, length(MARKER_SHAPES))]   # cycles if rl > length(MARKER_SHAPES)
+
+            plot!(fig_F1, exp_result.z, exp_result.F1[i_idx, :];
+                label             = "Experiment ($lbl)",
+                seriestype        = :scatter,
+                markershape       = shape,
+                markersize        = 3,
+                markercolor       = :white,       # hollow marker
+                markerstrokecolor = cols[j],
+                markerstrokealpha = 0.6,           # dimmer than the spline line below
+                markerstrokewidth = 1.0,
+            )
+            plot!(fig_F1, exp_result.z, exp_result.F1_profile[:, 1 + i_idx];
+                label     = "spline",
+                linestyle = :solid,
+                linewidth = 1.5,
+                linecolor = cols[j],
+                linealpha = 0.9,
+            )
+
+            plot!(fig_F2, exp_result.z, exp_result.F2[i_idx, :];
+                label             = "Experiment ($lbl)",
+                seriestype        = :scatter,
+                markershape       = shape,
+                markersize        = 3,
+                markercolor       = :white,
+                markerstrokecolor = cols[j],
+                markerstrokealpha = 0.6,
+                markerstrokewidth = 1.0,
+            )
+            plot!(fig_F2, exp_result.z, exp_result.F2_profile[:, 1 + i_idx];
+                label     = "spline",
+                linestyle = :solid,
+                linewidth = 0.7,
+                linecolor = cols[j],
+                linealpha = 0.9,
+            )
+        end
+
+        fig_F1F2 = plot(fig_F1, fig_F2;
+            layout = (2, 1),
+            size   = (800, 600),
+        )
+        display(fig_F1F2)
+
+
+        # ── z-grids ───────────────────────────────────────────────────────────────
+        z_exp    = exp_result.z;
+        range_z  = floor(minimum([maximum(z_exp), abs(minimum(z_exp))]), digits=1)
+        z_theory = collect(range(-range_z, range_z; length=NRANGE_Z))   # symmetric, odd-length grid so z=0 falls exactly on a node
+
+        @assert isapprox(mean(z_theory), 0.0; atol = 10eps(float(range_z))) "mean(z_theory) = $(mean(z_theory)); expected ≈ 0 within atol=$(10eps(float(range_z)))"
+        @assert isapprox(std(z_theory), ProfileFitTools.std_sample(range_z, NRANGE_Z); atol = eps(float(range_z))) "std(z_theory) inconsistent with symmetric range"
+
+        # ── Pre-allocate fit containers (one slot per repeat) ───────────────────────
+        exp_list    = Vector{Vector{Float64}}(undef, rl)   # splined experiment on z_theory
+        pdf_th_list = Vector{Vector{Float64}}(undef, rl)   # theoretical PDF on z_theory
+        z_list      = fill(z_theory, rl)                   # shared grid (read-only)
+
+        # Orthonormal polynomial basis (computed once for this grid; shared
+        # across repeats since they all live on the same z_theory grid)
+        μ_poly, σ_poly, _t, Q, R = ProfileFitTools.orthonormal_basis_on(z_theory; n=P_DEGREE)
+        μ_list = fill(μ_poly, rl)
+        σ_list = fill(σ_poly, rl)
+        Q_list = fill(Q, rl)
+        R_list = fill(R, rl)
+
+        # ── Build experimental & theoretical PDFs ─────────────────────────────────
+        for (j, i_idx) in enumerate(chosen_currents_idx)
+            I0 = Ic_sampled[i_idx]
+
+            # Experimental profile: spline-interpolate onto z_theory
+            # amp_exp     = @view exp_result.F1_profile[:, 1+i_idx]   # smoothed profile
+            amp_exp     = @view exp_result.F1[i_idx,:]              # raw profile
+            spl_exp     = BSplineKit.fit(BSplineOrder(4), z_exp, amp_exp, λ0_EXP;
+                              weights = TheoreticalSimulation.compute_weights(z_exp, λ0_EXP))
+            pdf_exp     = spl_exp.(z_theory)
+            exp_list[j] = ProfileFitTools.normalize_vec(pdf_exp; by = NORM_MODE)
+
+            # Theoretical profile: sum over mF sublevels of F=1 manifold.
+            # Each sublevel has its own effective magnetic moment μF (field-
+            # dependent, via Breit–Rabi through μF_effective), so the total
+            # F=1 line shape is the incoherent sum of per-sublevel PDFs.
+            𝒢       = TheoreticalSimulation.GvsI(I0)
+            μ_eff   = [TheoreticalSimulation.μF_effective(I0, p[1], p[2], K39_params)
+                       for p in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
+            pdf_th  = mapreduce(
+                μF -> TheoreticalSimulation.getProbDist_v3(
+                          μF, 𝒢, 1e-3 .* z_theory, K39_params, effusion_params; pdf=:finite),
+                +, μ_eff,
+            )
+            pdf_th_list[j] = ProfileFitTools.normalize_vec(pdf_th; by = NORM_MODE)
+        end
+
+        # ── Independent per-repetition fit (repeatability check) ───────────────────
+        # w_mode/A_mode = :per_profile fits EACH repeat's width and amplitude
+        # independently (background is per-profile too, via the default d_mode)
+        # inside a single nonlinear solve — mathematically equivalent to fitting
+        # each repeat separately (no parameters are shared across profiles, so
+        # the problem is block-diagonal), just solved in one call. fit_params.w
+        # / fit_params.A come back as length-rl vectors, one entry per repeat.
+        # Model: G(z) = A · F_theory(z; w) + P_n(z)
+        fit_data, fit_params, δparams, modelfun, model_on_z, meta, extras =
+            ProfileFitTools.fit_pdf_joint(
+                z_list, exp_list, pdf_th_list;
+                n = P_DEGREE,
+                Q_list, R_list, μ_list, σ_list,
+                w_mode = :per_profile,
+                A_mode = :per_profile,
+                # d_mode = :per_profile,
+                w0     = 0.050,
+                A0     = 15.0,
+            )
+
+
+        # Extract polynomial background coefficients (standard basis)
+        c_poly_coeffs = [
+            let fit_poly = ProfileFitTools.bg_function(z_theory, fit_params.c[i])
+                [fit_poly[dg] for dg in 0:P_DEGREE]
+            end
+            for i in 1:rl
+        ]
+
+        A_fit = fit_params.A   # length-rl vector: one amplitude per repeat
+        w_fit = fit_params.w   # length-rl vector: one width per repeat
+
+        # Coefficient of determination R²
+        ss_res = [sum((exp_list[i] .- model_on_z[i]) .^ 2) for i in 1:rl ]
+        ss_tot = [sum((exp_list[i] .- mean(exp_list[i])) .^ 2) for i in 1:rl ]
+        R²     = [1 .- ss_res[i] ./ ss_tot[i] for i in 1:rl]
+
+        fitting_params = hcat(R², A_fit, w_fit, reduce(hcat, c_poly_coeffs)')   # rl × (3+NCOLS_BG), one row per repeat
+
+        pretty_table(
+            fitting_params;
+            column_label_alignment   = :c,
+            column_labels            = [HDR_TOP, HDR_BOT],
+            row_labels               = round.(1000 * Ic_sampled[chosen_currents_idx]; sigdigits=4),
+            formatters               = [
+                fmt__printf("%2.4f",  [1]),
+                fmt__printf("%4.6f",  2:3),
+                fmt__printf("%4.6e",  4:(3 + NCOLS_BG)),
+            ],
+            alignment                = :c,
+            equal_data_column_widths = true,
+            stubhead_label           = "I₀ [mA]",
+            row_label_column_alignment = :c,
+            title                    = "FITTING ANALYSIS — RAW PROFILE : $wanted_data_dir",
+            table_format             = TextTableFormat(borders = text_table_borders__unicode_rounded),
+            style                    = TextTableStyle(
+                first_line_merged_column_label = crayon"light_red bold",
+                first_line_column_label        = crayon"yellow bold",
+                column_label                   = crayon"yellow",
+                table_border                   = crayon"blue bold",
+                title                          = crayon"red bold",
+            ),
+        )
+
+        @info "\e[1;91mDirectory $(wanted_data_dir)\e[0m  →  \e[1;92mw_fit\e[0m = \e[1;93m$(round(1000*mean(w_fit); sigdigits=5)) ± $(round(1000*std(w_fit); sigdigits=3)) μm \e[0m (n=\e[1;96m$(rl)\e[0m repeats)"
+        
+
+        # ── Store ALL repeats for downstream analysis ───────────────────────────────
+        # Columns 2, 4, 6, ... of the 4th element are exp_1, exp_2, exp_3, ...
+        # (i.e. exp_j sits at column 2j); columns 3, 5, 7, ... are the matching
+        # model_1, model_2, ... curves. The deconvolution loop below only reads
+        # the exp_j columns (it recomputes pdf_theory itself per repeat).
+        results[wanted_data_dir] = (
+            Ic_sampled[chosen_currents_idx],
+            hcat(A_fit, w_fit),
+            reduce(hcat, c_poly_coeffs)',   # rl × NCOLS_BG: row j = repeat j's background coeffs
+            hcat(z_theory, [x for i in 1:rl for x in (exp_list[i], model_on_z[i])]...),
+        )
+    end # for wanted_data_dir in DIR_LIST
+
+    # ── Persist fitting results ───────────────────────────────────────────────────
+    if save_results
+        jldopen(joinpath(OUTDIR, "baseline_results_P$(P_DEGREE)_per_repetition.jld2"), "w") do f
+            f["fit_results"]       = results
+            f["meta/date"]         = RUN_STAMP
+            f["meta/Pdegree"]      = P_DEGREE
+            f["meta/zbinning"]     = wanted_zbinning
+            f["meta/smoothing"]    = wanted_smooth
+        end
+    end
+
+
+    # ==============================================================================
+    # DECONVOLUTION & BLUR KERNEL ANALYSIS LOOP (per repeat, then aggregated)
+    #
+    # For each dataset, for EACH repeat j = 1:rl_dim:
+    #   (1) subtract that repeat's own polynomial baseline
+    #   (2) build that repeat's theoretical PDF on the screen
+    #   (3) infer that repeat's blur kernel H by regularised deconvolution: G = F ⊗ H
+    #   (4) fit parametric shapes to H (Gaussian / Lorentzian / Pseudo-Voigt)
+    #   (5) propagate the best-fit Gaussian blur back into the forward model
+    # Once every repeat in a directory has been processed, its blur widths are
+    # reduced to mean ± std ± sem and stored as ONE `results_dict[dir]` entry —
+    # this final reduction is the actual repeatability result.
+    # ==============================================================================
+
+    for dir_chosen in DIR_LIST
+        @info "Processing dataset: $dir_chosen"
+
+        data = results[dir_chosen]
+        rl_dim = length(data[1])
+        z_range = data[4][:, 1]   # z grid [mm], shared across all repeats in this directory
+
+        # Per-repeat accumulators — filled inside the `for j` loop below and
+        # reduced to mean/std/sem right after it closes.
+        blur_width_reps = Vector{Float64}(undef, rl_dim)
+        zmax_reps       = Vector{Float64}(undef, rl_dim)
+
+        # ── Geometric beam PDFs ───────────────────────────────────────────────────
+        # These are the purely geometric (ray-optics) projections of the furnace
+        # and slit apertures onto the screen, ignoring velocity/angle spread — a
+        # sanity-check baseline against the full physical model (pdf_theory
+        # below). They don't depend on the repeat index, so computed once here.
+        ΔL    = Y_FURNACETOSLIT + Y_SLITTOSG + y_SG + Y_SGTOSCREEN
+        δslit = Y_FURNACETOSLIT
+        z_m   = 1e-3 .* z_range   # [m]
+        Δz    = mean(diff(z_m))
+
+        pdf_oven = ProfileFitTools.unitbox_scaled(z_m, Z_FURNACE * (ΔL - δslit) / δslit; soft=true, ϵ=0.007)
+        pdf_slit = ProfileFitTools.unitbox_scaled(z_m, Z_SLIT    *  ΔL          / δslit; soft=true, ϵ=0.007)
+        pdf_conv = ProfileFitTools.conv_centered(pdf_oven, pdf_slit, Δz)   # "furnace ⊗ slit" baseline kernel
+        pdf_conv ./= sum(pdf_conv) * Δz
+
+        fig_geom = plot(z_range, pdf_oven;
+            label  = "Furnace aperture",
+            line   = (:solid, 2, :orangered2),
+            xlabel = L"$z$ (mm)",
+            xlims  = (-1.5, 1.5),
+            title  = "Geometric beam kernels",
+        )
+        plot!(fig_geom, z_range, pdf_slit;
+            label = "Pre-SG slit",
+            line  = (:dash, 2, :darkgreen),
+        )
+        display(fig_geom)
+
+        for j in 1:rl_dim
+            p_baseline = Polynomial(data[3][j,:])   # background polynomial P_n(z)
+
+            data_exp             = data[4][:, 2j]   # splined experiment on z_range
+            base_line            = p_baseline.(z_range)
+            data_exp_no_baseline = data_exp .- base_line
+            data_exp_normalized  = data_exp_no_baseline ./ data[2][j,1]   # divide by A_fit
+
+            # ── Theoretical SG profile ────────────────────────────────────────────────
+            𝒢     = TheoreticalSimulation.GvsI(data[1][j])
+            μ_eff = [TheoreticalSimulation.μF_effective(data[1][j], p[1], p[2], K39_params)
+                    for p in TheoreticalSimulation.fmf_levels(K39_params; Fsel=1)]
+            pdf_theory = mapreduce(
+                μF -> TheoreticalSimulation.getProbDist_v3(
+                        μF, 𝒢, z_m, K39_params, effusion_params; pdf=:finite),
+                +, μ_eff,
+            )
+            pdf_theory ./= sum(pdf_theory) * Δz
+
+            # compares physics PDF vs geometric kernel
+            fig_theory = plot(z_range, pdf_theory;
+                label  = "SG profile (screen), repeat $j",
+                line   = (:black, 1.5),
+                xlims  = (-2, 2),
+                title  = "Theory vs. geometric kernel — $dir_chosen (repeat $j/$rl_dim)",
+            )
+            plot!(fig_theory, z_range, pdf_conv;
+                label = "Furnace ⊗ Slit",
+                line  = (:dash, 1.2, :orangered),
+            )
+            display(fig_theory)
+
+            # ── Experimental profile: raw, baseline, subtracted ───────────────────────
+            fig_exp = plot(z_range[1:8:end], data_exp[1:8:end];
+                seriestype       = :scatter,
+                marker           = (:circle, 2, :white),
+                markerstrokecolor = :black,
+                label            = "Experimental data ($dir_chosen, repeat $j)",
+                xlabel           = L"$z$ (mm)",
+                ylabel           = "Intensity (a.u.)",
+                title            = "Experiment & baseline",
+            )
+            plot!(fig_exp, z_range, base_line;
+                label = L"Baseline $P_{%$(P_DEGREE)}(z)$",
+                line  = (:dash, 2, :red),
+            )
+            plot!(fig_exp, z_range[1:8:end], data_exp_no_baseline[1:8:end];
+                seriestype        = :scatter,
+                marker            = (:circle, 2, :white),
+                markerstrokecolor = :gray25,
+                label             = "Raw − Baseline",
+            )
+            display(fig_exp)
+
+            # ── Normalised comparison: experiment vs. theory ──────────────────────────
+            fig_norm = plot(z_range[1:8:end], data_exp_normalized[1:8:end];
+                seriestype        = :scatter,
+                marker            = (:circle, 2, :white),
+                markerstrokecolor = :black,
+                label             = "Experiment ($dir_chosen, repeat $j), normalised",
+                xlabel            = L"$z$ (mm)",
+                ylabel            = "Intensity (a.u.)",
+                title             = "Normalised experiment vs. theory",
+            )
+            plot!(fig_norm, z_range, pdf_theory ./ maximum(pdf_theory);
+                label  = "Theoretical model",
+                line   = (:dash, 1.5, :orangered),
+                legend = :outerbottom,
+            )
+            display(fig_norm)
+
+            # ── Regularised deconvolution: G = F ⊗ H ─────────────────────────────────
+            # Forward model :  G(z) = A · F(z) + P_n(z)
+            #   G(z)  — raw experimental profile
+            #   F(z)  — theoretical SG profile (normalised PDF)
+            #   P_n(z)— polynomial baseline
+            #
+            # Cleaned profile:  𝒢(z) = (G(z) − P_n(z)) / A  ≥ 0,  ∫𝒢 dz = 1
+            #
+            # Blur model:  𝒢(z) = F(z) ⊗ H(z)
+            #   H(z)  — unknown blur kernel, inferred by constrained deconvolution
+            G  = max.(data_exp_normalized, 0.0); G  ./= sum(G)  * Δz
+            F  = copy(pdf_theory);               F  ./= sum(F)  * Δz
+
+
+            # Regularized deconvolution recovers the unknown kernel H subject to
+            # physical constraints:
+            #   nonneg=true    → H must be physically meaningful (no negative probability)
+            #   normalize=true → H is renormalized to a proper PDF (∫H dz = 1)
+            #   λ               → weight of the smoothness penalty ‖D²H‖² (curvature),
+            #                      suppresses high-frequency noise amplification that
+            #                      naive/unregularized deconvolution is prone to
+            #   stepsize        → gradient-descent step size for the iterative solver
+            #   sym_weight      → soft penalty encouraging H to be symmetric about z=0
+            #                      (an instrumental blur kernel is not expected to have
+            #                      a preferred direction)
+            #   maxiter         → iteration budget; verbose_every controls log cadence
+            # H_est is the inferred "instrument + unmodelled physics" blur kernel.
+            H_est = ProfileFitTools.deconv_kernel(G, F, z_m;
+                λ           = 1e-2,
+                stepsize    = 1e-2,
+                nonneg      = true,
+                normalize   = true,
+                maxiter     = 50_000,
+                verbose_every = 5_000,
+                sym_weight  = 1e-6,
+            )
+
+            fig_deconv = plot(xlabel = L"$z$ (mm)", title = "Deconvolution result — repeat $j/$rl_dim")
+            plot!(fig_deconv, z_range, G;
+                seriestype        = :scatter,
+                marker            = (:circle, 2, :white),
+                markerstrokecolor = :black,
+                label             = "Experiment ($dir_chosen)",
+            )
+            plot!(fig_deconv, z_range, F; label = "Theory",        line = (:solid, 2, :blue))
+            plot!(fig_deconv, z_range, H_est; label = "Blur kernel H", line = (:solid, 2, :forestgreen))
+            display(fig_deconv)
+
+            # ── Reconvolution validation: G ≈ F ⊗ H ──────────────────────────────────
+            # Sanity check: convolving the theoretical profile with the *estimated*
+            # kernel should reproduce the cleaned experimental profile G. Large
+            # discrepancies here would indicate the deconvolution regularization
+            # (λ, sym_weight) needs retuning, or that the forward model itself is
+            # missing physics.
+            signal_predicted = ProfileFitTools.conv_centered(F, H_est, Δz)
+
+            fig_reconv = plot(xlabel = L"$z$ (mm)", title = "Reconvolution check — repeat $j/$rl_dim")
+            plot!(fig_reconv, z_range, G;
+                seriestype        = :scatter,
+                marker            = (:circle, 3, :white),
+                markerstrokewidth = 0.2,
+                markerstrokecolor = :black,
+                label             = "Experiment ($dir_chosen)",
+            )
+            plot!(fig_reconv, z_range, signal_predicted;
+                label = "F ⊗ H",
+                line  = (:solid, 1.3, :red),
+            )
+            display(fig_reconv)
+
+            # ── Parametric fits to blur kernel H ──────────────────────────────────────
+            # Reduce the (nonparametric) estimated kernel H_est to a single reportable
+            # width by fitting standard peak shapes; AIC (penalizing parameter count k)
+            # is used below to judge which shape best explains H_est without overfitting.
+            fit_G  = ProfileFitTools.fit_gaussian(z_m, H_est);   p_G  = coef(fit_G)
+            fit_L  = ProfileFitTools.fit_lorentzian(z_m, H_est); p_L  = coef(fit_L)
+            fit_PV = ProfileFitTools.fit_pvoigt(z_m, H_est);     p_PV = coef(fit_PV)
+
+            yhat_G  = ProfileFitTools.gauss(z_m, p_G)
+            yhat_L  = ProfileFitTools.lorentz(z_m, p_L)
+            yhat_PV = ProfileFitTools.pvoigt(z_m, p_PV)
+
+            for (name, yhat, k) in (
+                    ("Gaussian",      yhat_G,  4),
+                    ("Lorentzian",    yhat_L,  4),
+                    ("Pseudo-Voigt",  yhat_PV, 6),
+                )
+                @info "$name fit  RSS=$(ProfileFitTools.rss(H_est, yhat))  AIC=$(ProfileFitTools.aic(H_est, yhat, k))"
+            end
+
+            σ_G_μm = round(1e6 * p_G[3]; sigdigits=6)
+
+            fig_blur = plot(xlabel = L"$z$ (mm)", xlims = (-2.5, 2.5), title = "Blur kernel — parametric fits")
+            plot!(fig_blur, z_range, H_est;  label = "H_est ($dir_chosen)",        line = (:solid, 1.8, :forestgreen))
+            plot!(fig_blur, z_range, yhat_G;  label = L"Gaussian ($\sigma_w = %$(σ_G_μm)$ μm)", line = (:dash, 1.5, :purple))
+            plot!(fig_blur, z_range, yhat_L;  label = "Lorentzian",                line = (:dash, 1.5, :pink))
+            plot!(fig_blur, z_range, yhat_PV; label = "Pseudo-Voigt",              line = (:dash, 1.5, :dodgerblue3))
+            display(fig_blur)
+
+            # ── Forward model with Gaussian blur ──────────────────────────────────────
+            # Take the Gaussian fit to H (regardless of whether it "won" on AIC —
+            # chosen here as the conventional/reportable width measure) and fold it
+            # back into the theory curve, for a final visual check against the raw
+            # (normalized-only, not baseline-model-dependent) experimental data.
+            HH = ProfileFitTools.conv_centered(pdf_theory, yhat_G, Δz)
+
+            fig_forward = plot(xlabel = L"$z$ (mm)", xlims = (-3, 3),
+                title = "Forward model: Theory ⊗ Gauss blur — repeat $j/$rl_dim")
+            plot!(fig_forward, z_range, G ./ maximum(G);
+                seriestype        = :scatter,
+                marker            = (:circle, 3, :white),
+                markerstrokewidth = 0.2,
+                markerstrokecolor = :black,
+                label             = "Experiment ($dir_chosen)",
+            )
+            plot!(fig_forward, z_range, HH ./ maximum(HH);
+                label = L"F $\otimes$ Gauss($%$(round(1e6*p_G[3]; digits=2))$ μm)",
+                line  = (:solid, 2, :red),
+            )
+            display(fig_forward)
+
+            # ── Record this repeat's blur width & peak position ───────────────────────
+            # NOT written straight into results_dict here: with `rl_dim` repeats
+            # per directory, writing results_dict[dir_chosen] on every iteration
+            # would silently overwrite all but the last repeat. Instead, stash into
+            # the accumulators declared before this loop and reduce them once,
+            # right after the loop closes (see "Aggregate" block below).
+            blur_width_reps[j] = 1e6 * p_G[3]
+            zmax_reps[j]       = TheoreticalSimulation.max_of_bspline_positions(z_range, HH; λ0=λ0_EXP)[1][1]
+
+
+            # ══════════════════════════════════════════════════════════════════════════
+            # DIAGNOSTICS — Convolution/deconvolution pipeline quality checks
+            #
+            #  G      : cleaned experimental PDF
+            #  F      : theoretical PDF
+            #  H_est  : estimated blur kernel
+            #  LL     : reconstructed profile = F ⊗ H_est  (should ≈ G)
+            # ══════════════════════════════════════════════════════════════════════════
+            @info "Running pipeline diagnostics for $dir_chosen"
+
+            # (1) Re-normalise all three as PDFs on the same grid
+            Gpdf = copy(G);     ProfileFitTools.normalize_pdf!(Gpdf, Δz; nonneg=true)
+            Fpdf = copy(F);     ProfileFitTools.normalize_pdf!(Fpdf, Δz; nonneg=true)
+            Hpdf = copy(H_est); ProfileFitTools.normalize_pdf!(Hpdf, Δz; nonneg=true)
+
+            @info "PDF norms" ∫G=round(sum(Gpdf)*Δz; digits=3) ∫F=round(sum(Fpdf)*Δz; digits=3) ∫H=round(sum(Hpdf)*Δz; digits=3)
+
+            # (2) Forward reconstruction
+            LL = ProfileFitTools.conv_centered(Fpdf, Hpdf, Δz)
+            ProfileFitTools.normalize_pdf!(LL, Δz; nonneg=true)
+
+            # (3) Pointwise residual  (oscillations → regularisation issues;
+            #                          antisymmetric pattern → centering shift)
+            res = LL .- Gpdf
+
+            fig_res = plot(z_range, res;       label = "Residual",   line = (:blue,  2), xlabel = L"$z$ (mm)")
+            fig_abs = plot(z_range, abs.(res); label = "|Residual|", line = (:black, 2), xlabel = L"$z$ (mm)")
+            display(plot(fig_res, fig_abs; layout=(1,2), title="Residual reconstruction — repeat $j/$rl_dim"))
+
+            # (4) CDF comparison  (shifts appear as an S-shaped ΔCDF)
+            cdf_G  = cumsum(Gpdf) * Δz;  cdf_G  ./= cdf_G[end]
+            cdf_LL = cumsum(LL)   * Δz;  cdf_LL ./= cdf_LL[end]
+
+            fig_cdf = plot(z_range, cdf_G;
+                label  = "CDF — Experiment ($dir_chosen)",
+                line   = (:black, 2),
+                xlabel = L"$z$ (mm)",
+                ylabel = "Cumulative integral",
+                title  = "CDF comparison (centering diagnostic) — repeat $j/$rl_dim",
+            )
+            plot!(fig_cdf, z_range, cdf_LL;
+                label = "CDF — Model",
+                line  = (:red, 2, :dash),
+            )
+            display(fig_cdf)
+
+            fig_dcdf = plot(z_range, cdf_LL .- cdf_G;
+                label  = "ΔCDF",
+                line   = (:purple, 2),
+                xlabel = L"$z$ (mm)",
+                ylabel = "CDF(Model) − CDF(Experiment)",
+                title  = "ΔCDF  (sensitive to small shifts) — repeat $j/$rl_dim",
+            )
+            display(fig_dcdf)
+
+            # (5) Numeric summary
+            rss_val = sum(abs2, res)
+            l1_val  = sum(abs,  res) * Δz
+            μ_G_cm  = sum(z_m .* Gpdf) * Δz
+            μ_LL    = sum(z_m .* LL)   * Δz
+            @info "Reconstruction quality (repeat $j)" RSS=rss_val L1=l1_val Δμ=(μ_LL - μ_G_cm)
+
+            diag = ProfileFitTools.sg_width_diagnostic(z_m, Gpdf, LL, Δz)
+            @info "SG width diagnostic (repeat $j)" Δμ=diag.Δμ Δσ²=diag.Δσ² σ_G=diag.σG σ_F=diag.σF
+
+            # ══════════════════════════════════════════════════════════════════════════
+            # END DIAGNOSTICS
+            # ══════════════════════════════════════════════════════════════════════════
+        end # for j in 1:rl_dim
+
+        # ── Aggregate blur width across repeats: mean ± error ───────────────────────
+        # std = repeat-to-repeat spread (what a single new measurement would look
+        #       like) — meaningful even for n_repeats == 1's neighbours in a plot,
+        #       but NaN-free only for n_repeats > 1.
+        # sem = std / sqrt(n_repeats) = uncertainty ON the mean itself (shrinks as
+        #       more repeats are averaged in) — this is what "mean ± error"
+        #       conventionally means, and the number to quote as the repeatability
+        #       result for this directory.
+        blur_mean = mean(blur_width_reps)
+        blur_std  = std(blur_width_reps)
+        blur_sem  = rl_dim > 1 ? blur_std / sqrt(rl_dim) : NaN
+
+        @info "\e[1;91mDirectory $(dir_chosen)\e[0m  →  \e[1;92mblur width\e[0m = \e[1;93m$(round(blur_mean; sigdigits=5)) ± $(round(blur_std; sigdigits=3)) μm\e[0m  (SEM \e[1;93m$(round(blur_sem; sigdigits=3)) μm\e[0m, n=\e[1;96m$(rl_dim)\e[0m repeats)"
+
+        results_dict[dir_chosen] = (
+            current_A          = mean(data[1]),
+            blurrGwidth_um     = blur_mean,
+            blurrGwidth_um_std = blur_std,
+            blurrGwidth_um_sem = blur_sem,
+            zmax_mm            = mean(zmax_reps),
+            n_repeats          = rl_dim,
+        )
+    end # for dir_chosen in DIR_LIST
+
+    @info "Calculated $(length(results_dict)) results"
+    rows = [
+        (; date, values...)
+        for (date, values) in results_dict
+    ]
+
+    table_style = TextTableStyle(
+        title                   = crayon"fg:cyan bold",
+        first_line_column_label = crayon"fg:yellow bold",
+        column_label            = crayon"fg:yellow bold",
+    )
+
+    highlighters = [
+        TextHighlighter(
+            (data, i, j) -> j == 1,
+            crayon"fg:cyan bold",
+        ),
+
+        TextHighlighter(
+            (data, i, j) -> j == 4 && data[i].zmax_mm < 0,
+            crayon"fg:red",
+        ),
+    ]
+
+    formatters = [
+        (v, i, j) -> begin
+            if j == 3
+                @sprintf("%.0f", v)
+            elseif j == 4
+                @sprintf("%.3f", v)
+            else
+                v
+            end
+        end,
+    ]
+
+    formatters = [
+        (v, i, j) -> begin
+            if j == 3
+                @sprintf("%.1f", v)      # blur width mean (μm)
+            elseif j == 4 || j == 5
+                @sprintf("%.2f", v)      # blur width std / sem (μm)
+            elseif j == 6
+                @sprintf("%.3f", v)      # zmax (mm)
+            else
+                v
+            end
+        end,
+    ]
+
+    pretty_table(
+        rows;
+        title = "Fitting Summary (per-repetition) nz=$(wanted_zbinning), λ₀=$(wanted_smooth)",
+
+        column_labels = [
+            "Date",
+            "Current (A)",
+            "Blur Width mean (μm)",
+            "Blur Width std (μm)",
+            "Blur Width SEM (μm)",
+            "zₘₐₓ (mm)",
+            "n repeats",
+        ],
+
+        alignment = fill(:c, 7),
+        column_label_alignment = :c,
+        title_alignment = :c,
+
+        equal_data_column_widths = true,
+        minimum_data_column_widths = 17,
+
+        formatters = formatters,
+        style = table_style,
+        highlighters = highlighters,
+    )
+
+
+    if save_results
+        jldopen(joinpath(OUTDIR, "blur_conv_$(P_DEGREE)_per_repetition.jld2"), "w") do f
+            f["convolution"]       = results_dict
+            f["meta/zbinning"]     = wanted_zbinning
+            f["meta/smoothing"]    = wanted_smooth
+        end
+    end
+
+
+    T_END = Dates.now()
+    T_RUN = Dates.canonicalize(T_END - run_started)
+
+    report = """
+    ***************************************************
+    EXPERIMENT
+        Single Stern–Gerlach Experiment (per-repetition analysis)
+        Output directory            : $(OUTDIR)
+        Run label                   : $(RUN_STAMP)
+        
+
+    EXPERIMENT ANALYSIS PROPERTIES    
+        Analysis Binning            : $(wanted_zbinning)
+        Analysis spline smoothing   : $(wanted_smooth)
+        Analysis directories        : $(DIR_LIST)
+
+    CAMERA FEATURES
+        Number of pixels            : $(NX_PIXELS) × $(NZ_PIXELS)
+        Pixel size                  : $(1e6*CAM_PIXELSIZE) μm
+
+    FITTING INFORMATION
+        Normalization mode          : $(NORM_MODE)
+        No z-divisions              : $(NRANGE_Z)
+        Polynomial degree           : $(P_DEGREE)
+        Zero-current tolerance      : $(1000*ZERO_CURRENT_TOL) mA
+
+    CODE
+        Code name                   : $(PROGRAM_FILE),
+        Start date                  : $(T_START)
+        End data                    : $(T_END)
+        Run time                    : $(T_RUN)
+        Hostname                    : $(HOSTNAME)
+
+    ***************************************************
+    """
+
+    # Print to terminal
+    println(report)
+
+    # Save the report only for the selected production parameters.
+    if save_results
+        open(joinpath(OUTDIR, "convolution_report_$(P_DEGREE)_per_repetition.txt"), "w") do io
+            write(io, report)
+        end
+    end
+
+    return results_dict
+end # function run_analysis_per_repetition
+
+
 # ==============================================================================
 # PARAMETER-SWEEP DRIVER
 # ==============================================================================
@@ -1052,18 +1875,33 @@ end # parameter sweep
 @info "Parameter sweep complete" combinations=length(inspection_results) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
 
 
+# ==============================================================================
+# PARAMETER-SWEEP DRIVER (per repetition)
+# ==============================================================================
+# Runs `run_analysis_per_repetition` over every (zbinning, smoothing) combination in
+# ZBINNING_LIST × SMOOTH_LIST so the sensitivity of the fitted blur width to
+# upstream preprocessing choices can be inspected visually/in logs before
+# trusting one combination. Only the run matching (WANTED_ZBINNING,
+# WANTED_SMOOTH) has `save_results=true` and therefore writes JLD2/report
+# files to OUTDIR — every other combination is computed and displayed but
+# not persisted, by design (keeps OUTDIR limited to the chosen production
+# parameters rather than every point in the sweep grid).
 
+inspection_results_per_repetition = OrderedDict{Tuple{Int, Float64}, OrderedDict{Any, NamedTuple}}()
 
+for (zbinning, smoothing) in Iterators.product(ZBINNING_LIST, SMOOTH_LIST)
+    save_this_run =
+        zbinning == WANTED_ZBINNING &&
+        smoothing == WANTED_SMOOTH
 
+    inspection_results_per_repetition[(zbinning, smoothing)] = run_analysis_per_repetition(
+        zbinning,
+        smoothing;
+        save_results = save_this_run,
+    )
+end # parameter sweep
 
-
-
-
-
-
-
-
-
+@info "Parameter sweep complete" combinations=length(inspection_results) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
 
 
 
