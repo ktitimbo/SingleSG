@@ -252,8 +252,8 @@ const WANTED_SMOOTH   = 0.01
 
 # Parameter combinations to inspect. All combinations are evaluated and shown,
 # but files are written only for WANTED_ZBINNING and WANTED_SMOOTH.
-const ZBINNING_LIST = [2]#[1, 2]
-const SMOOTH_LIST   = [0.01]#[0.001, 0.005, 0.01, 0.02, 0.05]
+const ZBINNING_LIST = [1, 2]
+const SMOOTH_LIST   = [0.001, 0.005, 0.01, 0.02, 0.05]
 
 # Polynomial background degree
 const P_DEGREE   = 3
