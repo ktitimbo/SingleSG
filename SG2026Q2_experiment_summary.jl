@@ -1412,8 +1412,7 @@ fig_Bfield = plot(
         gridalpha = 0.25,
         gridstyle = :dot,
         minorgridalpha = 0.05,
-        tickfontsize
-        =11,
+        tickfontsize=11,
         guidefontsize=14,
     );
 plot!(fig_Bfield,
@@ -1443,12 +1442,14 @@ for (idx,data_directory) in enumerate(DIR_LIST)
         markerstrokewidth = 1.5,)
 end
 plot!(fig_Bfield,
+    tickfontsize=10,
     size=(600,400),
     legend_columns =2,
     legendfontsize =8,
     foreground_color_legend= nothing,)
 display(fig_Bfield)
 plot!(fig_Bfield,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     yticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     xlims = (5e-3,1.1),
     xscale=:log10,
@@ -1458,6 +1459,56 @@ plot!(fig_Bfield,
 display(fig_Bfield)
 
 
+# Gradient from manual
+𝒶 = 2.5e-3
+G_parameter = 0.9428
+Grad = 0.9428/𝒶 * scan.B1
+
+fig_Gfield = plot(
+        title = "Stern–Gerlach gradient field",
+        titlefontsize = 12,
+        xlabel="SG current (A)",
+        ylabel="Magnetic field gradient (T/m)",
+        legend = :bottomright,
+        xgrid=false,
+        gridalpha = 0.25,
+        gridstyle = :dot,
+        minorgridalpha = 0.05,
+        tickfontsize =11,
+        guidefontsize=14,
+    );
+plot!(fig_Gfield,
+    scan.I, TheoreticalSimulation.GvsI.(scan.I),
+    label="SG manual",
+    line=(:dash, 1, :black))
+plot!(fig_Gfield,
+    scan.I,Grad, 
+    label=L"SG experiment $\partial_{z} B = 0.37712 B$",
+    line=(:dot, 1.5, :blue))
+plot!(fig_Gfield,
+    tickfontsize=10,
+    size=(600,400),
+    legend_columns =1,
+    legendfontsize =8,
+    foreground_color_legend= nothing,)
+display(fig_Gfield)
+plot!(fig_Gfield,
+    xticks = ([1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    yticks = ([1e-3, 1e-2, 1e-1, 1.0, 10, 100], [ L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}", L"10^{2}"]),
+    xlims = (8e-3,1.1),
+    xscale=:log10,
+    ylims=(1,400.0),
+    yscale=:log10,
+)
+display(fig_Gfield)
+
+open(joinpath(OUTDIR, "SG_BvsI_calibration.csv"), "w") do io
+    writedlm(io, [0.0 0.0; scan.I scan.B1], ',')
+end
+
+open(joinpath(OUTDIR, "SG_GvsI_calibration.csv"), "w") do io
+    writedlm(io, [0.0 0.0; scan.I Grad], ',')
+end
 
 
 
