@@ -26,201 +26,427 @@
 # ==============================================================================
  
  
+# # ──────────────────────────────────────────────────────────────────────────────
+# # 1. Gradient ↔ current calibration
+# # ──────────────────────────────────────────────────────────────────────────────
+ 
+# """
+# Calibration currents (A) used to define the gradient–current lookup.
+# Must be strictly increasing — `DataInterpolations.AkimaInterpolation` requires
+# sorted independent-variable (`t`) data.
+# """
+# const GRAD_CURRENTS = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01]
+ 
+# """
+# Calibration gradients corresponding to `GRAD_CURRENTS`.
+# Units are (T/m).
+# """
+# const GRAD_GRADIENT = [0, 25.6, 58.4, 92.9, 132.2, 164.2, 196.3, 226, 240, 253.7, 277.2, 298.6]
+
+# """
+# Internal: prebuilt Akima-spline interpolant mapping current → gradient.
+# Call via `GvsI(I)` instead of using this object directly.
+ 
+# Built directly as a top-level `const` (no lazy/deferred initialization needed,
+# unlike `_BvsI` below) since `GRAD_CURRENTS`/`GRAD_GRADIENT` are hardcoded
+# literals available immediately at module-load time, with no file I/O. This
+# means `_GvsI`'s type is concretely inferred — calling `_GvsI(x)` is fully
+# type-stable, with none of the `Ref{Any}` concern that applies to `_BvsI`.
+ 
+# NOTE: switched from `Interpolations.LinearInterpolation` (left commented out
+# below, presumably the previous implementation) to an Akima spline. Unlike
+# linear interpolation, an Akima spline can produce values that briefly
+# overshoot/undershoot between calibration points, even when the underlying
+# table is monotonic — worth keeping in mind if anything downstream (e.g. a
+# root-find against `GvsI`/`BvsI`) assumes strict monotonicity between table
+# points, not just at the table points themselves.
+# """
+# # const _GvsI = Interpolations.LinearInterpolation(GRAD_CURRENTS, GRAD_GRADIENT; extrapolation_bc=Line())
+# const _GvsI = DataInterpolations.AkimaInterpolation(GRAD_GRADIENT, GRAD_CURRENTS; extrapolation = ExtrapolationType.Linear)
+
+# """
+# Internal: prebuilt Akima-spline interpolant mapping gradient → current.
+# Call via `IvsG(G)` instead of using this object directly. Same construction
+# pattern and same monotonicity caveat as `_GvsI` — see its docstring.
+# """
+# # const _IvsG = Interpolations.LinearInterpolation(GRAD_GRADIENT, GRAD_CURRENTS; extrapolation_bc=Line())
+# const _IvsG = DataInterpolations.AkimaInterpolation(GRAD_CURRENTS, GRAD_GRADIENT; extrapolation = ExtrapolationType.Linear)
+
+# """
+#     GvsI(I::Real) -> Real
+ 
+# Gradient (e.g. dB/dz) as a function of coil current `I` (A),
+# using the hardcoded calibration table and Akima-spline interpolation.
+# Extrapolates linearly outside the calibrated current range
+# (`extrapolation = ExtrapolationType.Linear`).
+# """
+# GvsI(x) = _GvsI(x)
+
+# """
+#     IvsG(G::Real) -> Real
+ 
+# Current (A) that produces the given gradient `G`,
+# using the hardcoded calibration table and Akima-spline interpolation.
+# Extrapolates linearly outside the calibrated gradient range.
+# """
+# IvsG(x) = _IvsG(x)
+
+
+# # ──────────────────────────────────────────────────────────────────────────────
+# # 2. Magnetic field vs current, from CSV
+# # ──────────────────────────────────────────────────────────────────────────────
+ 
+# """
+# Absolute path to the B-vs-I CSV used at runtime.
+# Expected CSV columns (no header row override): `dI, Bz`.
+ 
+# NOTE: `header=["dI","Bz"]` is passed to `CSV.read` below (forcing these
+# column names and treating row 1 of the file as the first *data* row, not a
+# header row). If `SG_BvsI.csv` actually has its own header line, that line
+# would be silently read as a data row instead — worth confirming the file's
+# actual structure matches this assumption (can't verify without the file).
+# """
+# const B_TABLE_PATH = joinpath(@__DIR__, "SG_BvsI.csv")
+# @info "Importing file from $(B_TABLE_PATH)"
+ 
+# # Strictly-positive floor for B (tesla). Adjust if you want a different minimum.
+# const B_FLOOR = 1.0e-18
+ 
+# """
+#     _posfloor(x::Real) -> Real
+ 
+# Clamp `x` to a strictly-positive lower bound: returns `x` unchanged if
+# `x > B_FLOOR`, otherwise returns `B_FLOOR`. Used to keep field values away
+# from exactly zero (and away from negative measurement noise), since
+# downstream physics divides by `B` in several places (e.g.
+# `μF_effective_B`'s `normalized_B` calculation).
+ 
+# Equivalent to `max(x, B_FLOOR)`.
+# """
+# @inline _posfloor(x::Real) = max(x, B_FLOOR)
+ 
+# """
+# Internal: holds the B(I) interpolant once initialized, via `__init__` below.
+# Use `BvsI(I)` to evaluate; do not access directly.
+ 
+# Typed as `Ref{Any}`, deliberately: the interpolant's concrete type isn't
+# known until `__init__` actually reads `SG_BvsI.csv` and constructs it, and
+# there's nothing else to build that type from ahead of time without coupling
+# this section to some other interpolant defined elsewhere in the file. This
+# makes `_BvsI[]` itself type-unstable to read directly — see `BvsI`/
+# `_bvsi_eval` below for how that instability is contained to a single, cheap
+# dynamic dispatch rather than spreading through every operation performed on
+# the interpolant.
+# """
+# const _BvsI = Ref{Any}(nothing)
+ 
+# """
+#     __init__() -> Nothing
+ 
+# Module init hook. If `SG_BvsI.csv` exists next to this file, read it and build
+# an Akima-spline interpolant `B(I)` with linear extrapolation. Expects columns
+# named `dI` (current, A) and `Bz` (magnetic field, T).
+ 
+# Reading the CSV here (rather than at top-level `const` evaluation time) is
+# the standard Julia pattern for deferring file I/O until the module is
+# actually loaded, rather than during precompilation.
+ 
+# Every value in the `Bz` column is passed through `_posfloor` before building
+# the interpolant, so zero/negative/near-zero measured field values are
+# clamped away from zero (see `_posfloor`'s docstring).
+ 
+# Both columns are explicitly converted to `Vector{Float64}` before
+# construction. This isn't required by anything else in this section — it's
+# simply to pin down one predictable, known concrete type for `_BvsI[]`,
+# rather than leaving it to whatever `CSV.read` happens to infer from the file
+# (e.g. a `dI` column where every entry happens to be a whole number could
+# otherwise infer as `Int64`).
+# """
+# function __init__()
+#     if isfile(B_TABLE_PATH)
+#         df = CSV.read(B_TABLE_PATH, DataFrame; header=["dI","Bz"])
+#         # Enforce positivity in source data (handles any zero/negative entries),
+#         # then force Float64 for a single, predictable concrete type (see docstring).
+#         bz_pos = Float64.(map(_posfloor, df.Bz))
+#         dI_vec = Float64.(df.dI)
+#         # _BvsI[] = linear_interpolation(df.dI, bz_pos; extrapolation_bc=Line())
+#         _BvsI[] = DataInterpolations.AkimaInterpolation(bz_pos, dI_vec; extrapolation = ExtrapolationType.Linear)
+#     else
+#         @warn "B table not found at $B_TABLE_PATH."
+#     end
+# end
+ 
+# """
+#     BvsI(I::Real) -> Real
+ 
+# Magnetic field `B` (e.g. tesla) as a function of current `I` (ampere),
+# evaluated using the prebuilt interpolation loaded from the CSV at module init.
+# The result is passed through `_posfloor` again here (in addition to being
+# applied to the source data before interpolation), so interpolated/extrapolated
+# values are also kept away from zero.
+ 
+# Throws an error if the table was not initialized (i.e. `SG_BvsI.csv` wasn't
+# found when the module loaded).
+ 
+# # Performance
+# `_BvsI[]` reads as `Any` (see its docstring), so calling it directly here
+# would force every subsequent operation — the interpolation call itself, the
+# `_posfloor` clamp — through dynamic dispatch too. Instead, `BvsI` hands `itp`
+# off to `_bvsi_eval` immediately: Julia performs exactly **one** dynamic
+# dispatch, at that call boundary, to resolve `itp`'s concrete type, then
+# compiles (and reuses, on every subsequent call) a fully specialized version
+# of `_bvsi_eval` for that type. Inside that specialized version, the
+# interpolation call and the `_posfloor` clamp both run at full native speed —
+# no further type-instability cost beyond the one dispatch. This is the
+# standard "function barrier" pattern for containing an unavoidably `Any`-typed
+# value to a single, cheap dispatch rather than letting it propagate through
+# an entire computation.
+# """
+# @inline function BvsI(I::Real)
+#     itp = _BvsI[]
+#     itp === nothing && error("BvsI not initialized. Load the table first.")
+#     return _bvsi_eval(itp, float(I))
+# end
+ 
+# """
+#     _bvsi_eval(itp, x::Float64) -> Float64
+ 
+# Internal: evaluate the interpolant `itp` at `x` and apply `_posfloor`. Exists
+# solely to serve as the function barrier described in `BvsI`'s docstring —
+# not intended to be called directly. Julia compiles one specialized version
+# of this function per concrete type `itp` is ever called with; since `_BvsI[]`
+# is assigned exactly once (in `__init__`) and never reassigned to a different
+# type afterward, only one specialization is ever needed.
+# """
+# @inline _bvsi_eval(itp, x::Float64) = _posfloor(itp(x))
+ 
 # ──────────────────────────────────────────────────────────────────────────────
 # 1. Gradient ↔ current calibration
 # ──────────────────────────────────────────────────────────────────────────────
- 
+
 """
-Calibration currents (A) used to define the gradient–current lookup.
-Must be strictly increasing — `DataInterpolations.AkimaInterpolation` requires
-sorted independent-variable (`t`) data.
+Built-in fallback calibration currents (A). Used only if the gradient CSV
+(`GRAD_TABLE_PATH`) is not found. Must be strictly increasing.
 """
 const GRAD_CURRENTS = [0, 0.095, 0.2, 0.302, 0.405, 0.498, 0.6, 0.7, 0.75, 0.8, 0.902, 1.01]
- 
+
 """
-Calibration gradients corresponding to `GRAD_CURRENTS`.
-Units are (T/m).
+Built-in fallback calibration gradients (T/m) corresponding to `GRAD_CURRENTS`.
 """
 const GRAD_GRADIENT = [0, 25.6, 58.4, 92.9, 132.2, 164.2, 196.3, 226, 240, 253.7, 277.2, 298.6]
 
 """
-Internal: prebuilt Akima-spline interpolant mapping current → gradient.
-Call via `GvsI(I)` instead of using this object directly.
- 
-Built directly as a top-level `const` (no lazy/deferred initialization needed,
-unlike `_BvsI` below) since `GRAD_CURRENTS`/`GRAD_GRADIENT` are hardcoded
-literals available immediately at module-load time, with no file I/O. This
-means `_GvsI`'s type is concretely inferred — calling `_GvsI(x)` is fully
-type-stable, with none of the `Ref{Any}` concern that applies to `_BvsI`.
- 
-NOTE: switched from `Interpolations.LinearInterpolation` (left commented out
-below, presumably the previous implementation) to an Akima spline. Unlike
-linear interpolation, an Akima spline can produce values that briefly
-overshoot/undershoot between calibration points, even when the underlying
-table is monotonic — worth keeping in mind if anything downstream (e.g. a
-root-find against `GvsI`/`BvsI`) assumes strict monotonicity between table
-points, not just at the table points themselves.
+Default path of the gradient calibration CSV.
+Expected columns (no header line in the file): `I, G`
+(current in A, gradient in T/m).
+
+NOTE: as with `SG_BvsI.csv`, `header=["I","G"]` is passed to `CSV.read`, so
+row 1 of the file is treated as the first *data* row. If your file has its own
+header line, it would be misread as data.
 """
-# const _GvsI = Interpolations.LinearInterpolation(GRAD_CURRENTS, GRAD_GRADIENT; extrapolation_bc=Line())
-const _GvsI = DataInterpolations.AkimaInterpolation(GRAD_GRADIENT, GRAD_CURRENTS; extrapolation = ExtrapolationType.Linear)
+const GRAD_TABLE_PATH = joinpath(@__DIR__, "SG_GvsI_calibration.csv")
 
 """
-Internal: prebuilt Akima-spline interpolant mapping gradient → current.
-Call via `IvsG(G)` instead of using this object directly. Same construction
-pattern and same monotonicity caveat as `_GvsI` — see its docstring.
+Internal: Akima-spline interpolant mapping current → gradient.
+Filled in by `set_gradient_table!` (called from `__init__` or
+`load_gradient_table!`). Call via `GvsI(I)`, not directly.
+
+Typed `Ref{Any}` because the concrete interpolant type isn't known until the
+table is loaded; see `_eval_itp` for how the resulting type-instability is
+contained to one dynamic dispatch.
 """
-# const _IvsG = Interpolations.LinearInterpolation(GRAD_GRADIENT, GRAD_CURRENTS; extrapolation_bc=Line())
-const _IvsG = DataInterpolations.AkimaInterpolation(GRAD_CURRENTS, GRAD_GRADIENT; extrapolation = ExtrapolationType.Linear)
+const _GvsI = Ref{Any}(nothing)
+
+"""
+Internal: Akima-spline interpolant mapping gradient → current.
+Same construction pattern as `_GvsI`. Call via `IvsG(G)`, not directly.
+"""
+const _IvsG = Ref{Any}(nothing)
+
+"""
+    set_gradient_table!(I::AbstractVector, G::AbstractVector) -> Nothing
+
+Build both gradient interpolants (`_GvsI`, `_IvsG`) from current `I` (A) and
+gradient `G` (T/m) vectors.
+
+Data is sorted by current and converted to `Vector{Float64}`. Throws if the
+lengths differ, if the currents contain duplicates, or if the gradient is not
+strictly increasing with current (required because `IvsG` uses `G` as the
+independent variable, and Akima interpolation needs sorted `t` data).
+
+As with the old hardcoded version, an Akima spline can slightly
+overshoot/undershoot between table points even for monotonic data.
+"""
+function set_gradient_table!(I::AbstractVector, G::AbstractVector)
+    length(I) == length(G) || error("I and G must have the same length (got $(length(I)) and $(length(G))).")
+    p = sortperm(I)
+    I_vec = Float64.(I[p])
+    G_vec = Float64.(G[p])
+    all(diff(I_vec) .> 0) || error("Gradient table: currents must be strictly increasing (duplicate currents?).")
+    all(diff(G_vec) .> 0) || error("Gradient table: gradient must be strictly increasing with current (IvsG inverts the table).")
+    _GvsI[] = DataInterpolations.AkimaInterpolation(G_vec, I_vec; extrapolation = ExtrapolationType.Linear)
+    _IvsG[] = DataInterpolations.AkimaInterpolation(I_vec, G_vec; extrapolation = ExtrapolationType.Linear)
+    return nothing
+end
+
+"""
+    load_gradient_table!(path::AbstractString = GRAD_TABLE_PATH) -> Nothing
+
+Read a two-column CSV (`I, G`; current in A, gradient in T/m) and rebuild the
+gradient interpolants from it. Called automatically from `__init__` with the
+default path; call it yourself to switch calibration files at runtime, e.g.
+
+    load_gradient_table!("C:/data/other_calibration.csv")
+"""
+function load_gradient_table!(path::AbstractString = GRAD_TABLE_PATH)
+    @info "Importing gradient table from $(path)"
+    df = CSV.read(path, DataFrame; header=["I", "G"])
+    set_gradient_table!(df.I, df.G)
+    return nothing
+end
+
+"""
+    _eval_itp(itp, x::Float64) -> Float64
+
+Internal function barrier: `_GvsI[]`/`_IvsG[]` read as `Any`, so they are
+handed to this function immediately. Julia does one dynamic dispatch here,
+then runs a fully specialized version for the concrete interpolant type.
+"""
+@inline _eval_itp(itp, x::Float64) = itp(x)
 
 """
     GvsI(I::Real) -> Real
- 
-Gradient (e.g. dB/dz) as a function of coil current `I` (A),
-using the hardcoded calibration table and Akima-spline interpolation.
-Extrapolates linearly outside the calibrated current range
-(`extrapolation = ExtrapolationType.Linear`).
+
+Gradient (T/m) as a function of coil current `I` (A), using the loaded
+calibration table and Akima-spline interpolation. Extrapolates linearly
+outside the calibrated current range.
 """
-GvsI(x) = _GvsI(x)
+@inline function GvsI(x::Real)
+    itp = _GvsI[]
+    itp === nothing && error("GvsI not initialized. Load the gradient table first.")
+    return _eval_itp(itp, float(x))
+end
 
 """
     IvsG(G::Real) -> Real
- 
-Current (A) that produces the given gradient `G`,
-using the hardcoded calibration table and Akima-spline interpolation.
-Extrapolates linearly outside the calibrated gradient range.
+
+Current (A) that produces the given gradient `G` (T/m), using the loaded
+calibration table and Akima-spline interpolation. Extrapolates linearly
+outside the calibrated gradient range.
 """
-IvsG(x) = _IvsG(x)
+@inline function IvsG(x::Real)
+    itp = _IvsG[]
+    itp === nothing && error("IvsG not initialized. Load the gradient table first.")
+    return _eval_itp(itp, float(x))
+end
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2. Magnetic field vs current, from CSV
 # ──────────────────────────────────────────────────────────────────────────────
- 
+
 """
 Absolute path to the B-vs-I CSV used at runtime.
 Expected CSV columns (no header row override): `dI, Bz`.
- 
+
 NOTE: `header=["dI","Bz"]` is passed to `CSV.read` below (forcing these
 column names and treating row 1 of the file as the first *data* row, not a
 header row). If `SG_BvsI.csv` actually has its own header line, that line
-would be silently read as a data row instead — worth confirming the file's
-actual structure matches this assumption (can't verify without the file).
+would be silently read as a data row instead.
 """
-const B_TABLE_PATH = joinpath(@__DIR__, "SG_BvsI.csv")
+const B_TABLE_PATH = joinpath(@__DIR__, "SG_BvsI_calibration.csv")
 @info "Importing file from $(B_TABLE_PATH)"
- 
+
 # Strictly-positive floor for B (tesla). Adjust if you want a different minimum.
 const B_FLOOR = 1.0e-18
- 
+
 """
     _posfloor(x::Real) -> Real
- 
+
 Clamp `x` to a strictly-positive lower bound: returns `x` unchanged if
-`x > B_FLOOR`, otherwise returns `B_FLOOR`. Used to keep field values away
-from exactly zero (and away from negative measurement noise), since
-downstream physics divides by `B` in several places (e.g.
-`μF_effective_B`'s `normalized_B` calculation).
- 
+`x > B_FLOOR`, otherwise returns `B_FLOOR`. Keeps field values away from
+exactly zero (and negative measurement noise), since downstream physics
+divides by `B` in several places (e.g. `μF_effective_B`'s `normalized_B`).
+
 Equivalent to `max(x, B_FLOOR)`.
 """
 @inline _posfloor(x::Real) = max(x, B_FLOOR)
- 
+
 """
 Internal: holds the B(I) interpolant once initialized, via `__init__` below.
 Use `BvsI(I)` to evaluate; do not access directly.
- 
-Typed as `Ref{Any}`, deliberately: the interpolant's concrete type isn't
-known until `__init__` actually reads `SG_BvsI.csv` and constructs it, and
-there's nothing else to build that type from ahead of time without coupling
-this section to some other interpolant defined elsewhere in the file. This
-makes `_BvsI[]` itself type-unstable to read directly — see `BvsI`/
-`_bvsi_eval` below for how that instability is contained to a single, cheap
-dynamic dispatch rather than spreading through every operation performed on
-the interpolant.
+
+Typed as `Ref{Any}`: the concrete interpolant type isn't known until
+`__init__` reads `SG_BvsI.csv`. See `BvsI`/`_bvsi_eval` for how the
+type-instability is contained to a single cheap dynamic dispatch.
 """
 const _BvsI = Ref{Any}(nothing)
- 
+
 """
     __init__() -> Nothing
- 
-Module init hook. If `SG_BvsI.csv` exists next to this file, read it and build
-an Akima-spline interpolant `B(I)` with linear extrapolation. Expects columns
-named `dI` (current, A) and `Bz` (magnetic field, T).
- 
-Reading the CSV here (rather than at top-level `const` evaluation time) is
-the standard Julia pattern for deferring file I/O until the module is
-actually loaded, rather than during precompilation.
- 
-Every value in the `Bz` column is passed through `_posfloor` before building
-the interpolant, so zero/negative/near-zero measured field values are
-clamped away from zero (see `_posfloor`'s docstring).
- 
-Both columns are explicitly converted to `Vector{Float64}` before
-construction. This isn't required by anything else in this section — it's
-simply to pin down one predictable, known concrete type for `_BvsI[]`,
-rather than leaving it to whatever `CSV.read` happens to infer from the file
-(e.g. a `dI` column where every entry happens to be a whole number could
-otherwise infer as `Int64`).
+
+Module init hook (a module may only have one, so it initializes both tables).
+
+1. Gradient: builds `_GvsI`/`_IvsG` from the built-in `GRAD_CURRENTS`/
+   `GRAD_GRADIENT` first, then overrides them from `SG_GvsI.csv` if that file
+   exists next to this file.
+2. B(I): if `SG_BvsI.csv` exists, reads it and builds an Akima-spline
+   interpolant `B(I)` with linear extrapolation. Every `Bz` value is passed
+   through `_posfloor`, and both columns are forced to `Vector{Float64}` so
+   `_BvsI[]` holds one predictable concrete type.
+
+Reading files here (rather than at top-level `const` evaluation) defers file
+I/O until the module is loaded, not during precompilation.
 """
 function __init__()
+    # ── Gradient table: built-in fallback, then CSV override ──
+    set_gradient_table!(GRAD_CURRENTS, GRAD_GRADIENT)
+    if isfile(GRAD_TABLE_PATH)
+        load_gradient_table!()
+    else
+        @warn "Gradient table not found at $GRAD_TABLE_PATH; using built-in calibration."
+    end
+
+    # ── B(I) table ──
     if isfile(B_TABLE_PATH)
         df = CSV.read(B_TABLE_PATH, DataFrame; header=["dI","Bz"])
-        # Enforce positivity in source data (handles any zero/negative entries),
-        # then force Float64 for a single, predictable concrete type (see docstring).
         bz_pos = Float64.(map(_posfloor, df.Bz))
         dI_vec = Float64.(df.dI)
-        # _BvsI[] = linear_interpolation(df.dI, bz_pos; extrapolation_bc=Line())
         _BvsI[] = DataInterpolations.AkimaInterpolation(bz_pos, dI_vec; extrapolation = ExtrapolationType.Linear)
     else
         @warn "B table not found at $B_TABLE_PATH."
     end
 end
- 
+
 """
     BvsI(I::Real) -> Real
- 
-Magnetic field `B` (e.g. tesla) as a function of current `I` (ampere),
-evaluated using the prebuilt interpolation loaded from the CSV at module init.
-The result is passed through `_posfloor` again here (in addition to being
-applied to the source data before interpolation), so interpolated/extrapolated
-values are also kept away from zero.
- 
+
+Magnetic field `B` (tesla) as a function of current `I` (ampere), evaluated
+using the interpolation loaded from the CSV at module init. The result is
+passed through `_posfloor` again so interpolated/extrapolated values also stay
+away from zero.
+
 Throws an error if the table was not initialized (i.e. `SG_BvsI.csv` wasn't
 found when the module loaded).
- 
+
 # Performance
-`_BvsI[]` reads as `Any` (see its docstring), so calling it directly here
-would force every subsequent operation — the interpolation call itself, the
-`_posfloor` clamp — through dynamic dispatch too. Instead, `BvsI` hands `itp`
-off to `_bvsi_eval` immediately: Julia performs exactly **one** dynamic
-dispatch, at that call boundary, to resolve `itp`'s concrete type, then
-compiles (and reuses, on every subsequent call) a fully specialized version
-of `_bvsi_eval` for that type. Inside that specialized version, the
-interpolation call and the `_posfloor` clamp both run at full native speed —
-no further type-instability cost beyond the one dispatch. This is the
-standard "function barrier" pattern for containing an unavoidably `Any`-typed
-value to a single, cheap dispatch rather than letting it propagate through
-an entire computation.
+`_BvsI[]` reads as `Any`, so `BvsI` hands `itp` off to `_bvsi_eval`
+immediately (function-barrier pattern): one dynamic dispatch, then fully
+specialized code for the interpolation and the `_posfloor` clamp.
 """
 @inline function BvsI(I::Real)
     itp = _BvsI[]
     itp === nothing && error("BvsI not initialized. Load the table first.")
     return _bvsi_eval(itp, float(I))
 end
- 
+
 """
     _bvsi_eval(itp, x::Float64) -> Float64
- 
+
 Internal: evaluate the interpolant `itp` at `x` and apply `_posfloor`. Exists
-solely to serve as the function barrier described in `BvsI`'s docstring —
-not intended to be called directly. Julia compiles one specialized version
-of this function per concrete type `itp` is ever called with; since `_BvsI[]`
-is assigned exactly once (in `__init__`) and never reassigned to a different
-type afterward, only one specialization is ever needed.
+solely as the function barrier described in `BvsI`.
 """
 @inline _bvsi_eval(itp, x::Float64) = _posfloor(itp(x))
- 
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 3. Magnet shape geometry
