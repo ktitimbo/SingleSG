@@ -253,10 +253,10 @@ const WANTED_SMOOTH   = 0.01
 # Parameter combinations to inspect. All combinations are evaluated and shown,
 # but files are written only for WANTED_ZBINNING and WANTED_SMOOTH.
 const ZBINNING_LIST = [1, 2]
-const SMOOTH_LIST   = [0.001, 0.005, 0.01, 0.02, 0.05]
+const SMOOTH_LIST   = [0.001, 0.01, 0.02]
 
 # Polynomial background degree
-const P_DEGREE   = 3
+const P_DEGREE   = 5
 const NCOLS_BG   = P_DEGREE + 1   # number of polynomial coefficients
 
 const NORM_MODE  = :none
@@ -1729,7 +1729,7 @@ function run_analysis_per_repetition(wanted_zbinning::Integer, wanted_smooth::Re
         ),
 
         TextHighlighter(
-            (data, i, j) -> j == 4 && data[i].zmax_mm < 0,
+            (data, i, j) -> j == 6 && data[i].zmax_mm < 0,
             crayon"fg:red",
         ),
     ]
