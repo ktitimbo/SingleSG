@@ -118,7 +118,7 @@ SIMULATION INFORMATION
 ***************************************************
 """)
 # Furnace
-const TCelsius = 200
+const TCelsius = 205
 const T_K = 273.15 + TCelsius ; # Furnace temperature (K)
 # Furnace aperture
 const x_furnace = 2.0e-3 ;
@@ -183,7 +183,7 @@ Icoils = [0.00,
 nI = length(Icoils);
 
 # Sample size: number of atoms arriving to the screen
-const Nss = 20_000 ; 
+const Nss = 8_000_000 ; 
 @info "Number of MonteCarlo particles : $(Nss)\n"
 
 nx_bins , nz_bins = 32 , 2 ; 
@@ -738,7 +738,7 @@ data_screen_path    = joinpath(OUTDIR,"qm_screen_data.jld2")
 if !isfile(data_screen_path)
     @info "Analyzing particles arriving at the screen"
 
-    jldopen(joinpath(OUTDIR, "qm_screen_data.jld2"), "w") do file_out
+    jldopen( data_screen_path , "w") do file_out
         jldopen(joinpath(OUTDIR, "qm_particles_data.jld2"), "r") do file_in
             Icoils_loaded          = file_in["meta/Icoils"]
             quantum_numbers_loaded = file_in["meta/levels"]
@@ -1373,22 +1373,26 @@ end
 # then call it for each manifold
 for state_key in [:F1, :F2]
     state   = states_groups_dict[state_key]
-    @info "=== Original: $(state_key) ==="
-    @time analyze_and_plot_manifold(state, data_screen_path, Icoils, 
-        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
-        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
-    @info "=== Optimized (no threading): $(state_key) ==="
-    @time analyze_and_plot_manifold2(state, data_screen_path, Icoils, 
-        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
-        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
-    @info "=== Optimized (batched threads): $(state_key) ==="
-    @time analyze_and_plot_manifold3(state, data_screen_path, Icoils, 
-        nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
-        Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    # @info "=== Original: $(state_key) ==="
+    # @time analyze_and_plot_manifold(state, data_screen_path, Icoils, 
+    #     nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+    #     Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    # println("peak RSS: ", round(Sys.maxrss()/1024^3, digits=2), " GiB")
+    # @info "=== Optimized (no threading): $(state_key) ==="
+    # @time analyze_and_plot_manifold2(state, data_screen_path, Icoils, 
+    #     nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+    #     Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    # println("peak RSS: ", round(Sys.maxrss()/1024^3, digits=2), " GiB")
+    # @info "=== Optimized (batched threads): $(state_key) ==="
+    # @time analyze_and_plot_manifold3(state, data_screen_path, Icoils, 
+    #     nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
+    #     Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    # println("peak RSS: ", round(Sys.maxrss()/1024^3, digits=2), " GiB")
     @info "=== Optimized single image (threads): $(state_key) ==="
     @time analyze_and_plot_manifold4(state, data_screen_path, Icoils, 
         nx_bins, nz_bins, gaussian_width_mm, λ0_raw_list, λ0_spline,
         Ns, T_K, K39_params, OUTDIR, FIG_EXT)
+    println("peak RSS: ", round(Sys.maxrss()/1024^3, digits=2), " GiB")
 end
 
 
