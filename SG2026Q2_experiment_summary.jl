@@ -39,7 +39,7 @@ include("./Modules/JLD2_MyTools.jl");
 cd(@__DIR__) 
 const BASE_PATH = raw"F:\SternGerlachExperiments"
 const RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSS");
-const OUTDIR    = joinpath(@__DIR__, "EXPDATA_ANALYSIS", "smoothing_binning")
+const OUTDIR    = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", "SUMMARY2026", "AugSep2026")
 isdir(OUTDIR) || mkpath(OUTDIR);
 @info "Created output directory" OUTDIR
 # General setup
@@ -100,7 +100,7 @@ const SETUP = let matched = (:λ0, :nz, :σw)
      paths = (conv   = joinpath(@__DIR__, "data_studies",
                                 "CONV2026_20260916T121229019", "blur_conv_3.jld2"),
               qm     = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP",
-                                "QM_T205_8M", "qm_screen_profiles_f1_table.jld2"),
+                                "QM_T205_8M_Bexp", "qm_screen_profiles_f1_table.jld2"),
               cqd_up = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP",
                                 "CQD_T205_8M_v2",
                                 "cqd_8000000_up_profiles_bykey.jld2")))
@@ -397,7 +397,7 @@ const SIM_PARAMS = let p = resolve_params(sim_matches)
      ki = sim_matches.CQD.free.ki)
 end
 
-
+@info "SIMULATION PARAMETERS MATCHING THE EXPERIMENT" nz = SIM_PARAMS.nz λ0 = SIM_PARAMS.λ0 σw = SIM_PARAMS.σw
 
 
 # =====================================================================
@@ -1511,862 +1511,280 @@ open(joinpath(OUTDIR, "SG_GvsI_calibration.csv"), "w") do io
 end
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# EXPERIMENT
-n_runs = length(DIR_LIST)
-I_all  = Vector{Vector{Float64}}(undef, n_runs);
-B0_all = Vector{Vector{Float64}}(undef, n_runs);
-B1_all = Vector{Vector{Float64}}(undef, n_runs);
-cols = palette(:darkrainbow, n_runs);
-
-for (i, dir) in enumerate(DIR_LIST)
-    d   = load(joinpath(BASE_PATH, "EXPERIMENTS", dir, "data_processed.jld2"), "meta");
-    I_all[i]  = Vector{Float64}(d["SG1currentInA"]);
-    B0_all[i] = -1 * Vector{Float64}(d["SG0BfieldInTesla"]); # -1 due to inconsistencies with field directions
-    B1_all[i] = Vector{Float64}(d["SG1BfieldInTesla"]);
+# ══════════════════════════════════════════════════════════════════════════════
+#  Theory curves: peak position vs. coil current
+# ──────────────────────────────────────────────────────────────────────────────
+#  Loads the precomputed simulation results for the parameters in SIM_PARAMS
+#  (nz, σw, λ0) and extracts, for each coil current:
+#    · Ic_*  : coil current (A)
+#    · zm_*  : peak position from the smoothing-spline maximum (mm)
+#  for two models:
+#    · QM  : Quantum Mechanics            → Ic_qm,  zm_qm
+#    · CQD : CoQuantum Dynamics (spin-up) → Ic_cqd, zm_cqd  (for ki = ki_test)
+#
+#  Sources: SETUP.paths.qm and SETUP.paths.cqd_up
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Quantum Mechanics ─────────────────────────────────────────────────────────
+JLD2_MyTools.summarize_meta_qm_jld2(SETUP.paths.qm)
+chosen_qm = jldopen(SETUP.paths.qm,"r") do file
+    @info "Loading Quantum Mechanics solution" N = file["meta/N"] T_K = file["meta/T"] #=
+        =# nz = Tuple(file["meta/nz"]) λ0 = Tuple(file["meta/λ0"]) σw = Tuple(file["meta/σw"]) 
+    file[JLD2_MyTools.make_keypath_qm(SIM_PARAMS.nz,SIM_PARAMS.σw,SIM_PARAMS.λ0)]
+end;
+Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)];
+zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)];
+
+# ── CoQuantum Dynamics (spin-up branch) ───────────────────────────────────────
+JLD2_MyTools.summarize_meta_cqd_jld2(SETUP.paths.cqd_up)
+ki_test = 1.0
+chosen_cqd = jldopen(SETUP.paths.cqd_up,"r") do file
+    @info "Loading CoQuantum Dynamics solution" N = file["meta/N"] T_K = file["meta/T"] #=
+        =# nz = Tuple(file["meta/nz"]) λ0 = Tuple(file["meta/λ0"]) σw = Tuple(file["meta/σw"]) ki = Tuple(file["meta/ki"]) 
+    file[JLD2_MyTools.make_keypath_cqd(:up, ki_test, SIM_PARAMS.nz,SIM_PARAMS.σw,SIM_PARAMS.λ0)]
 end
+Ic_cqd  = [chosen_cqd[i][:Icoil] for i in eachindex(chosen_cqd)];
+zm_cqd  = [chosen_cqd[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_cqd)];
 
 
-"""
-    read_runs(dirs = DIR_LIST) -> NamedTuple
+# ══════════════════════════════════════════════════════════════════════════════
+#  Experimental Stern–Gerlach peak positions vs. coil current and magnetic field
+# ──────────────────────────────────────────────────────────────────────────────
+#  For every experiment directory `dir` in DIR_LIST:
+#    1. load its summary file `<dir>_report_summary.jld2`;
+#    2. convert the raw F=1 / F=2 peak positions to mm (divide by the
+#       magnification M) and propagate the uncertainties;
+#    3. define the zero-deflection origin z0 as the mean centroid of the repeated
+#       measurements at the lowest current, and shift both peaks to it;
+#    4. plot the F=1 deflection vs. current and vs. field, with the QM and CQD
+#       theory curves, side by side;
+#    5. store the table [I, δI, B, z_F1, δz_F1, z_F2, δz_F2] under the key `dir`
+#       and write all tables to OUT_FILE once the loop has finished.
+#
+#  Expected in scope: DIR_LIST, BASE_PATH, SIM_PARAMS, runs (runs.B1[idx] belongs
+#  to DIR_LIST[idx]), Ic_qm/zm_qm, Ic_cqd/zm_cqd, mag_factor, JLD2_MyTools,
+#  TheoreticalSimulation.
+# ══════════════════════════════════════════════════════════════════════════════
 
-Per-run current and field sweeps, kept separate: `dirs`, plus `I`, `B0`, `B1` as
-vectors-of-vectors indexed like `dirs`. Errors if a run's three columns are
-ragged, which would mean a mismatched write rather than a short sweep.
-"""
-function read_runs(dirs::AbstractVector{<:AbstractString} = DIR_LIST)
-    runs = map(dirs) do dir
-        meta = load(joinpath(BASE_PATH, "EXPERIMENTS", dir, "data_processed.jld2"), "meta")
-        r = (I  = Vector{Float64}(meta["SG1currentInA"]),
-             B0 = Vector{Float64}(meta["SG0BfieldInTesla"]),
-             B1 = Vector{Float64}(meta["SG1BfieldInTesla"]))
-        allequal(length.(values(r))) ||
-            error("$dir: ragged columns $(map(length, r))")
-        r
-    end
-    (dirs = collect(dirs),
-     I = [r.I for r in runs], B0 = [-r.B0 for r in runs], B1 = [r.B1 for r in runs])
-end
+# ── Setup (independent of `dir`) ──────────────────────────────────────────────
+OUT_FILE = joinpath(OUTDIR, "peak_positions_summary.jld2")
 
-# --------------------------------------------------------------- pooling
+column_names = ["I", "δI", "B", "z_F1", "δz_F1", "z_F2", "δz_F2"]
+column_units = ["A", "A", "T", "mm", "mm", "mm", "mm"]
 
-"""
-    pool_runs(runs) -> NamedTuple
+I_lims = (0.010, 1.1)                          # plotted current window (A)
+B_lims = TheoreticalSimulation.BvsI.(I_lims)   # the same window expressed in field (T)
+B_qm   = TheoreticalSimulation.BvsI.(Ic_qm)    # theory curves: current → field
+B_cqd  = TheoreticalSimulation.BvsI.(Ic_cqd)
 
-Flatten per-run sweeps into one point cloud sorted by current: `I`, `B0`, `B1`,
-and `run` (the index into `runs.dirs` each point came from).
+log_ticks  = [1e-3, 1e-2, 1e-1, 1.0]
+log_labels = [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]
 
-Sorting by `I` is what makes the pooled cloud usable — setpoint grouping and the
-noise estimator below both assume neighbouring entries are neighbouring
-currents, regardless of which run supplied them.
-"""
-function pool_runs(runs::NamedTuple)
-    I   = reduce(vcat, runs.I)
-    B0  = reduce(vcat, runs.B0)
-    B1  = reduce(vcat, runs.B1)
-    run = reduce(vcat, [fill(i, length(v)) for (i, v) in enumerate(runs.I)])
-    p   = sortperm(I)
-    (I = I[p], B0 = B0[p], B1 = B1[p], run = run[p])
-end
+results = OrderedDict{String,Matrix{Float64}}()       # dir => table
 
-"""
-    group_setpoints(pooled; atol = 1e-4) -> NamedTuple
 
-Collapse the pooled cloud onto unique current setpoints, averaging the replicate
-measurements at each. Returns `I` (group mean current), `B0`, `B1` (group means),
-`n` (replicate count), `B0_sd`, `B1_sd` (within-group sample SD, `NaN` for
-singletons), `runs` (contributing run indices), and `index` (the group each
-pooled row fell into).
+# ── Main loop ─────────────────────────────────────────────────────────────────
+for (idx, dir) in enumerate(DIR_LIST)
+    printstyled("\tLOADING EXPERIMENTAL DATA [$idx/$(length(DIR_LIST))] ---> $dir\n"; color = :green, bold = true)
 
-`atol` must exceed setpoint reproducibility but stay well below the sweep step:
-replicates of a nominal 0.5 A setpoint may read 0.4999 / 0.5001 and must group,
-while genuinely adjacent setpoints must not. Grouping is single-linkage on the
-sorted currents, so too large an `atol` chains a whole sweep into one group —
-check that `n` comes out as small integers and `length(I)` matches the number of
-distinct setpoints you expect.
-"""
-function group_setpoints(pooled::NamedTuple; atol::Real = 1e-4)
-    starts = [1; findall(>(atol), diff(pooled.I)) .+ 1]
-    groups = [a:b for (a, b) in zip(starts, [starts[2:end] .- 1; length(pooled.I)])]
-    index  = similar(pooled.run)
-    for (j, g) in enumerate(groups)
-        index[g] .= j
-    end
-    sd(v) = length(v) > 1 ? std(v) : NaN
-    (I     = [mean(@view pooled.I[g])  for g in groups],
-     B0    = [mean(@view pooled.B0[g]) for g in groups],
-     B1    = [mean(@view pooled.B1[g]) for g in groups],
-     B0_sd = [sd(@view pooled.B0[g])   for g in groups],
-     B1_sd = [sd(@view pooled.B1[g])   for g in groups],
-     n     = [length(g) for g in groups],
-     runs  = [unique(@view pooled.run[g]) for g in groups],
-     index = index)
-end
+    # Magnification (camera → mm) and its uncertainty.
+    M, δM = mag_factor(dir)
 
-# --------------------------------------------------------------- noise
+    # ── 1. Load the summary file ──────────────────────────────────────────────
+    summary_file = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", "summary", dir, dir * "_report_summary.jld2")
+    JLD2_MyTools.show_exp_summary(summary_file, dir)
 
-"""
-    replicate_noise(sd, n) -> NamedTuple
-
-Pooled within-setpoint noise from replicate scatter: `σ`, its degrees of freedom
-`dof`, and `n_groups`, the number of setpoints that had replicates.
-
-This is the reference noise estimate — model-free *and* curvature-free, unlike
-[`noise_sigma`](@ref). Compare the two: `σ` far below the second-difference
-figure means that one was picking up curvature in `B(I)`; `σ` far above it means
-replicates disagree more than neighbouring setpoints do, which points at drift
-within a run rather than measurement noise.
-
-Returns `σ = NaN` when nothing is replicated.
-"""
-function replicate_noise(sd::AbstractVector, n::AbstractVector)
-    keep = findall(i -> n[i] > 1 && isfinite(sd[i]), eachindex(n))
-    isempty(keep) && return (σ = NaN, dof = 0, n_groups = 0)
-    dof = sum(n[i] - 1 for i in keep)
-    (σ = sqrt(sum(sd[i]^2 * (n[i] - 1) for i in keep) / dof),
-     dof = dof, n_groups = length(keep))
-end
-
-"""
-    noise_sigma(x, y) -> Float64
-
-Measurement noise of `y(x)` from second-difference pseudo-residuals (Gasser,
-Sroka & Jennen-Steinmetz), for `x` sorted ascending and possibly unevenly spaced.
-
-Each interior point is compared against the straight line through its two
-neighbours, so any *smooth* trend cancels and point-to-point scatter remains.
-Needs no model and cannot be deflated by overfitting, but it does absorb
-curvature, so [`replicate_noise`](@ref) is preferred where replicates exist.
-This is the fallback for channels or subranges without them.
-"""
-function noise_sigma(x::AbstractVector, y::AbstractVector)
-    n = length(x)
-    n ≥ 3 || error("need at least 3 points, got $n")
-    acc = 0.0
-    for i in 2:n-1
-        h = x[i+1] - x[i-1]
-        h > 0 || continue                       # coincident currents contribute nothing
-        a, b = (x[i+1] - x[i]) / h, (x[i] - x[i-1]) / h
-        ε = a * y[i-1] + b * y[i+1] - y[i]
-        acc += ε^2 / (a^2 + b^2 + 1)
-    end
-    sqrt(acc / (n - 2))
-end
-
-# --------------------------------------------------------------- fitting
-
-"""
-    fit_channel(setpoints, channel; k = 3, σ = nothing) -> NamedTuple
-
-Smoothing-spline calibration of one field channel (`:B0` or `:B1`) against
-current, fitted to grouped setpoints from [`group_setpoints`](@ref).
-
-Each setpoint is weighted by `√n / σ`, because the mean of `n` replicates has
-standard error `σ/√n` — without this the heavily-replicated anchors (typically
-0 A and the top current) are under-weighted relative to the information they
-carry. With those weights Dierckx's criterion is a chi-square, so the smoothing
-target is `s = length(I)`: one unit of misfit per setpoint, independent of how
-the replicates are distributed.
-
-Returns `spline` (callable, tesla vs amp), `σ` and `σ_source` (`:replicates`,
-`:second_differences` or `:given`), `σ_replicate` (the full replicate estimate),
-`resid` and `zresid` (setpoint residuals, absolute and σ-normalised), and
-`χ²_red`. `χ²_red` near 1 means the curve fits as well as the noise allows; ≫ 1
-means too stiff a spline, a drifting run, or an underestimated σ.
-
-`bc = "error"` makes evaluation outside the fitted current range throw instead of
-silently returning the edge value — a flat plateau at the bottom of a log-spaced
-scan is otherwise easy to mistake for real data.
-"""
-function fit_channel(setpoints::NamedTuple, channel::Symbol; k::Int = 3,
-                     σ::Union{Nothing,Real} = nothing)
-    I, B = setpoints.I, setpoints[channel]
-    sd   = setpoints[Symbol(channel, :_sd)]
-    length(I) > k + 1 || error("$(length(I)) setpoints is too few for a degree-$k spline")
-
-    rep = replicate_noise(sd, setpoints.n)
-    σ_used, source = if σ !== nothing
-        Float64(σ), :given
-    elseif isfinite(rep.σ) && rep.σ > 0
-        rep.σ, :replicates
-    else
-        noise_sigma(I, B), :second_differences
+    data = jldopen(summary_file, "r") do file
+        @info("Loading experiment data",
+            directory  = dir,
+            T_K        = file["meta/TemperatureK"],
+            N_currents = file["meta/n_Currents"],
+            nz         = file["meta/nz"],
+            λ0         = file["meta/λ0"],
+        )
+        file[JLD2_MyTools.make_keypath_exp(dir, SIM_PARAMS.nz, SIM_PARAMS.λ0)]
     end
 
-    w      = sqrt.(setpoints.n) ./ σ_used
-    spline = Spline1D(I, B; w = w, k = k, s = float(length(I)), bc = "error")
-    resid  = B .- spline.(I)
-    (spline = spline, σ = σ_used, σ_source = source, σ_replicate = rep,
-     resid = resid, zresid = resid .* w,
-     χ²_red = sum(abs2, resid .* w) / max(length(I) - k - 1, 1))
-end
+    ic  = data[:Currents]                       # coil current (A)
+    δic = data[:ErrorCurrentsPhys]              # its physical uncertainty (A)
+    B1  = runs.B1[idx]                          # magnetic field at each current (T)
+    x1, δx1 = data[:fw_F1_peak_pos_raw]         # raw F=1 peak position and its error
+    x2, δx2 = data[:fw_F2_peak_pos_raw]         # raw F=2 peak position and its error
 
-"""
-    combine_fields(runs; atol = 1e-4, kwargs...) -> NamedTuple
+    @assert length(ic) == length(B1) == length(x1) == length(x2) "Length mismatch for $dir"
 
-The single combined dataset. Returns the `pooled` cloud, the averaged
-`setpoints`, fitted calibrations `B0` and `B1`, `I_range` (the interval every run
-covers, where the fit is supported by all of them) and `I_span` (the full pooled
-extent). `kwargs` go to [`fit_channel`](@ref).
+    # ── 2. Peak positions in mm ───────────────────────────────────────────────
+    # z = x/M with independent x and M:  δz² = (δx/M)² + (x·δM/M²)².
+    # This equals |z|·√((δx/x)² + (δM/M)²) but stays finite when x = 0.
+    zf1  = x1 ./ M
+    δzf1 = sqrt.((δx1 ./ M) .^ 2 .+ (x1 .* δM ./ M^2) .^ 2)
+    zf2  = x2 ./ M
+    δzf2 = sqrt.((δx2 ./ M) .^ 2 .+ (x2 .* δM ./ M^2) .^ 2)
 
-Stay inside `I_range` for anything quantitative; `I_span` is the hard limit
-beyond which the spline now throws.
-"""
-function combine_fields(runs::NamedTuple; atol::Real = 1e-4, kwargs...)
-    pooled    = pool_runs(runs)
-    setpoints = group_setpoints(pooled; atol = atol)
-    lo, hi    = maximum(minimum, runs.I), minimum(maximum, runs.I)
-    (pooled = pooled, setpoints = setpoints,
-     B0 = fit_channel(setpoints, :B0; kwargs...),
-     B1 = fit_channel(setpoints, :B1; kwargs...),
-     I_range = (lo, hi), I_span = (minimum(pooled.I), maximum(pooled.I)))
-end
+    ΔZ          = zf2 .- zf1                    # peak separation
+    ErrΔZ       = sqrt.(δzf1 .^ 2 .+ δzf2 .^ 2)
+    Centroid    = (zf1 .+ zf2) ./ 2             # midpoint of the two peaks
+    ErrCentroid = ErrΔZ ./ 2
 
-# --------------------------------------------------------------- diagnostics
-
-"""
-    run_offsets(combined, channel; dirs) -> Nothing
-
-Per-run mean σ-normalised residual about the shared calibration.
-
-The drift test a common current grid would have given directly: if all runs
-sample one calibration curve, each run's residuals scatter about zero and
-`mean/SE` sits within roughly ±2. A run several SE away has a systematically
-different `B(I)` — a re-calibration, a moved probe, a different zero — and
-pooling it biases every other run. Setpoints are attributed to a run when that
-run contributed to them, so shared setpoints count for each contributor.
-"""
-function run_offsets(combined::NamedTuple, channel::Symbol;
-                     dirs::AbstractVector = 1:maximum(combined.pooled.run))
-    fit, sp = combined[channel], combined.setpoints
-    @printf("%-10s %6s %12s %10s\n", "run", "n_pts", "mean z", "mean/SE")
-    for i in eachindex(dirs)
-        rows = findall(r -> i in r, sp.runs)
-        isempty(rows) && continue
-        z = fit.zresid[rows]
-        @printf("%-10s %6d %12.4g %10.2f\n",
-                dirs[i], length(z), mean(z), mean(z) * sqrt(length(z)))
-    end
-    return nothing
-end
-
-"""
-    noise_model(combined, channel) -> Nothing
-
-Tabulate within-setpoint SD against field magnitude, in decade bins.
-
-Answers whether the noise is additive (SD roughly constant) or multiplicative
-(SD rising with |B|). Additive justifies the constant-σ weighting used above;
-multiplicative means the high-current end dominates the fit and the low-current
-end is under-resolved — the case for fitting `log B` against `log I` over the
-positive-current subset instead.
-"""
-function noise_model(combined::NamedTuple, channel::Symbol)
-    sp = combined.setpoints
-    B, sd = sp[channel], sp[Symbol(channel, :_sd)]
-    keep = findall(i -> sp.n[i] > 1 && isfinite(sd[i]) && B[i] != 0, eachindex(sp.n))
-    isempty(keep) && return println("$channel: no replicated setpoints")
-    @printf("%-12s %6s %12s %12s\n", "|B| decade", "n", "median SD", "median SD/|B|")
-    for d in sort(unique(floor(Int, log10(abs(B[i]))) for i in keep))
-        rows = filter(i -> floor(Int, log10(abs(B[i]))) == d, keep)
-        @printf("1e%-10d %6d %12.4g %12.4g\n", d, length(rows),
-                median(sd[rows]), median(sd[rows] ./ abs.(B[rows])))
-    end
-    return nothing
-end
-
-"""
-    channel_difference(pooled) -> NamedTuple
-
-Row-wise `B0 - B1` statistics. Both channels are recorded at the same currents
-within a run, so this needs no fit and no grouping.
-
-If the probes see the same field, `mean ≈ 0` and `std ≈ √(σ₀² + σ₁²)` — an
-independent check on the replicate noise estimates. A large, stable `mean`
-instead means the channels differ by a genuine offset or scale factor and must
-be fitted separately, never averaged together.
-"""
-channel_difference(pooled::NamedTuple) =
-    (mean = mean(pooled.B0 .- pooled.B1),
-     std  = std(pooled.B0 .- pooled.B1),
-     ratio_median = median(pooled.B0 ./ pooled.B1))
-
-# --------------------------------------------------------------- sampling
-
-"""
-    sample_fields(combined; n = 200, scale = :log, lo = nothing, hi = nothing)
-
-Evaluate both calibrations on one current grid: `I`, `B0`, `B1`, and the
-per-point standard errors `B0_err`, `B1_err`.
-
-`scale = :log` spaces currents geometrically (via `Base.logrange`), `:linear`
-uniformly. Bounds default to `combined.I_range` and are clipped to `I_span`,
-since the spline throws outside its data. A log grid needs a positive lower
-bound: when the requested one is ≤ 0 — as it is whenever the sweep includes
-0 A — it is raised to the smallest positive measured current and a notice is
-printed. The grid then no longer reaches the zero-field end; keep `I = 0` as a
-separate point if you need it.
-
-!!! note "Correlated points"
-    The spline's resolution is roughly uniform in `I`, so a log grid oversamples
-    the low-current decade: points there are reading one spline segment at high
-    density and are strongly correlated. `B*_err` reflects per-point noise only,
-    not that correlation.
-"""
-function sample_fields(combined::NamedTuple; n::Int = 200, scale::Symbol = :log,
-                       lo::Union{Nothing,Real} = nothing,
-                       hi::Union{Nothing,Real} = nothing)
-    n ≥ 2 || error("need at least 2 grid points, got $n")
-    span = combined.I_span
-    lo = clamp(something(lo, combined.I_range[1]), span...)
-    hi = clamp(something(hi, combined.I_range[2]), span...)
-    lo < hi || error("empty current range [$lo, $hi]")
-
-    I = if scale === :linear
-        collect(range(lo, hi; length = n))
-    elseif scale === :log
-        if lo ≤ 0
-            positive = filter(>(0), combined.pooled.I)
-            isempty(positive) && error("no positive currents — a log grid is impossible")
-            lo = minimum(positive)
-            @info "Log grid lower bound raised to the smallest positive measured current" lo
-        end
-        collect(logrange(lo, hi, n))      # Base.logrange, Julia ≥ 1.11
-    else
-        error("scale must be :linear or :log, got :$scale")
-    end
-
-    (I = I, scale = scale,
-     B0 = combined.B0.spline.(I), B1 = combined.B1.spline.(I),
-     B0_err = fill(combined.B0.σ, n), B1_err = fill(combined.B1.σ, n))
-end
-
-# --------------------------------------------------------------- run
-
-runs     = read_runs()
-combined = combine_fields(runs)
-
-for ch in (:B0, :B1)
-    f = combined[ch]
-    @printf("%s: σ = %.4g T (%s, %d replicated setpoints, %d dof), χ²_red = %.2f\n",
-            ch, f.σ, f.σ_source, f.σ_replicate.n_groups, f.σ_replicate.dof, f.χ²_red)
-end
-@printf("%d raw points → %d setpoints; I ∈ [%.4f, %.4f] A (all runs)\n",
-        length(combined.pooled.I), length(combined.setpoints.I), combined.I_range...)
-
-run_offsets(combined, :B1; dirs = DIR_LIST)
-noise_model(combined, :B1)
-
-scan = sample_fields(combined; n = 200, scale = :log)
-
-fig_Is = plot(
-        title = "Stern–Gerlach Currents Sampled",
-        titlefontsize = 12,
-        legend = :bottomright,
-        xgrid=false,
-        gridalpha = 0.25,
-        gridstyle = :dot,
-        minorgridalpha = 0.05,
-        tickfontsize=11,
-        guidefontsize=14,
-    );
-for (idx,data_directory) in enumerate(DIR_LIST)
-    scatter!(fig_Is,
-        idx .* ones(length(I_all[idx])), 
-        I_all[idx],
-        # yerror=dI_all[idx],
-        label=false,
-        marker = (:circle, :white, 2.5),
-        markerstrokecolor = cols[idx],
-        markerstrokewidth = 1.5,)
-end
-plot!(fig_Is,
-    ylim = (1e-4,1.05),
-    xlim=(-1,n_runs+2),
-    yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$"),
-    xticks = (1:n_runs, DIR_LIST),
-    yticks = ([1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xminorticks = false,
-    xrotation=75,
-    bottom_margin=-2mm,
-    left_margin = 6mm,
-    right_margin = 6mm,
-    size=(350,720)
-)
-display(fig_Is)
-
-fig_Bfield = plot(
-        title = "Stern–Gerlach Currents Sampled",
-        titlefontsize = 12,
-        legend = :bottomright,
-        xgrid=false,
-        gridalpha = 0.25,
-        gridstyle = :dot,
-        minorgridalpha = 0.05,
-        tickfontsize=11,
-        guidefontsize=14,
-    );
-for (idx,data_directory) in enumerate(DIR_LIST)
-    scatter!(fig_Bfield,
-        I_all[idx], B0_all[idx],
-        label=data_directory,
-        # yerror=dI_all[idx],
-        # label=false,
-        marker = (:circle, :white, 2.5),
-        markerstrokecolor = cols[idx],
-        markerstrokewidth = 1.5,)
-    scatter!(fig_Bfield,
-        I_all[idx], B1_all[idx],
-        # yerror=dI_all[idx],
-        label=false,
-        marker = (:square, :white, 2.5),
-        markerstrokecolor = cols[idx],
-        markerstrokewidth = 1.5,)
-end
-display(fig_Bfield)
-plot!(fig_Bfield,
-    scan.I, scan.B0)
-plot!(fig_Bfield,
-    scan.I, scan.B1)
-
-
-
-plot!(fig_Bfield,
-    xlims = (1e-5,1.1),
-    ylims = (1e-6,1),
-    xscale=:log10,
-    yscale=:log10,
-    # yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$"),
-    # xticks = (1:n_runs, DIR_LIST),
-    xticks = ([1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xminorticks = false,
-    # xrotation=75,
-    bottom_margin=-2mm,
-    left_margin = 6mm,
-    right_margin = 6mm,
-    # size=(350,720)
-)
-display(fig_Bfield)
-
-
-
-
-
-
-
-
-
-
-
-JLD2_MyTools.show_exp_summary(joinpath(BASE_PATH, "EXPERIMENTS", dir, "data_processed.jld2"), dir)
-
-d   = load(joinpath(BASE_PATH, "EXPERIMENTS", dir, "data_processed.jld2"), "meta")
-
-d["F1ProcessedImages"]
-
-# Quantum mechanics
-data_qm_path = joinpath(BASE_PATH,"SIMULATIONS",
-                "2026Q2_SETUP","CQD_T205_8M_v2",
-                "cqd_8000000_up_profiles_bykey.jld2");
-
-JLD2_MyTools.list_keys_jld_qm(data_qm_path)
-
-σw_sim_qm =  jldopen(data_qm_path,"r") do file
-    file["meta/σw"]
-    file["meta/λ0"]
-    ile["meta/nz"]
-end
-
-JLD2_MyTools.summarize_meta_qm_jld2(data_qm_path)
-
-
-nz_fix, σ_fix, λ0_fix = (2,0.250,0.01);
-data_qm_path = joinpath(@__DIR__,"simulation_data","QM_T200_8M","qm_screen_profiles_f1_table.jld2");
-chosen_qm = jldopen(data_qm_path,"r") do file
-    file[JLD2_MyTools.make_keypath_qm(nz_fix,σ_fix,λ0_fix)]
-end
-Ic_qm     = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end];
-zm_qm     = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end];
-
-data_directories = [
-    # "20250814", "20250820", "20250825","20250919","20251002","20251003","20251006",
-    # "20251109",
-    # "20260211", "20260213", 
-    "20260220", "20260225", "20260226am","20260226pm","20260227", "20260303", "20260306r1", "20260306r2"
-];
-
-n_runs = length(data_directories)
-I_all  = Vector{Vector{Float64}}(undef, n_runs);
-dI_all = Vector{Vector{Float64}}(undef, n_runs);
-cols = palette(:darkrainbow, n_runs);
-
-for (i, dir) in enumerate(data_directories)
-    d   = load(joinpath(@__DIR__, "EXPERIMENTS", dir, "data_processed.jld2"), "data");
-    I_all[i]  = Vector{Float64}(d[:Currents]);
-    dI_all[i] = Vector{Float64}(d[:CurrentsError]);
-end
-
-fig_Is = plot(
-        title = "Coil Currents",
-        legend = :bottomright,
-        xgrid=false,
-        gridalpha = 0.25,
-        gridstyle = :dot,
-        minorgridalpha = 0.05,
-        tickfontsize=11,
-        guidefontsize=14,
-    );
-for (idx,data_directory) in enumerate(data_directories)
-    scatter!(fig_Is,
-        idx .* ones(length(I_all[idx])), 
-        I_all[idx],
-        yerror=dI_all[idx],
-        label=false,
-        marker = (:circle, :white, 2.5),
-        markerstrokecolor = cols[idx],
-        markerstrokewidth = 1.5,)
-end
-plot!(fig_Is,
-    ylim = (1e-5,1.05),
-    xlim=(-1,n_runs+2),
-    yaxis = (:log10, L"$I_{0} \ (\mathrm{A})$"),
-    xticks = (1:n_runs, data_directories),
-    yticks = ([1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [ L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xminorticks = false,
-    xrotation=75,
-    bottom_margin=-2mm,
-    left_margin = 6mm,
-    size=(350,720)
-)
-display(fig_Is)
-saveplot(fig_Is, "currents_sampled")
-
-sel = [:Icoil_A, :Icoil_error_A, :F1_z_centroid_mm, :F1_z_centroid_se_mm]; 
-for data_directory in data_directories
-    # Data Directory
-    # data_directory = "20250814" ;
-
-    magnification_factor = mag_factor(data_directory) ;
-
-    parent_folder = joinpath(@__DIR__, "EXPDATA_ANALYSIS",data_directory);        
-    m = DataReading.collect_fw_map(parent_folder; 
-                                    select=sel, 
-                                    filename="fw_data.csv", 
-                                    report_name="experiment_report.txt", 
-                                    sort_on=:binning, 
-                                    data_dir_filter=data_directory);
-  
-    pretty_table(hcat(collect(keys(m)),
-                        [v.binning   for v in values(m)],
-                        [v.smoothing for v in values(m)]); 
-                title = "Analysis for $(data_directory)",
-                column_labels=["Run Label","Binning","Smoothing"],
-                alignment=:c,
-                style = TextTableStyle(
-                        first_line_column_label = crayon"yellow bold",
-                        table_border  = crayon"blue bold",
-                        # column_label  = crayon"yellow bold",
-                ),
-                # border_crayon = crayon"blue bold",
-                table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-                # header_crayon = crayon"yellow bold",
-                equal_data_column_widths= true,
+    pretty_table(hcat(ic, δic, B1, zf1, δzf1, zf2, δzf2, ΔZ, ErrΔZ, Centroid, ErrCentroid);
+        title         = "ANALYSIS FOR $dir",
+        formatters    = [fmt__printf("%4.4f", 1:2), fmt__printf("%8.5f", 3:3), fmt__printf("%8.3f", 4:11)],
+        alignment     = :c,
+        column_labels = [
+            ["Current", "Current Error", "B", "F1 z", "Err F1 z", "F2 z", "Err F2 z", "Δz", "Err ΔZ", "Centroid", "Err Centroid"],
+            ["[A]", "[A]", "[T]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]", "[mm]"],
+        ],
+        table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
+        style = TextTableStyle(
+            first_line_column_label = crayon"yellow bold",
+            column_label            = crayon"yellow",
+            table_border            = crayon"blue bold",
+            title                   = crayon"bold red"),
+        equal_data_column_widths    = true,
+        show_row_number_column      = true,
+        row_number_column_label     = "No.",
+        row_number_column_alignment = :c,
     )
 
-    summary_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",data_directory, data_directory*"_report_summary.jld2")
-    Icoils = jldopen(summary_path,"r") do mfile
-            abs.(mfile["meta/Currents"])
-    end
+    # ── 3. Origin from the repeated points at the lowest current ─────────────
+    # At the lowest current the two peaks should coincide, so the mean centroid
+    # of the repeats defines z0. Their errors are combined in quadrature and
+    # divided by n (uncertainty of a mean of independent points).
+    ic_min  = minimum(ic)
+    rep_idx = findall(x -> isapprox(x, ic_min; atol = 1e-9), ic)
+    n       = length(rep_idx)
 
-    nz_list = [1,2]
-    λ0_list = [0.001, 0.005, 0.01, 0.02]
-    param_grid = vec(collect(Iterators.product(nz_list, λ0_list)))
-    sort!(param_grid, by = x -> (x[1], x[2]))
-    N_labels = length(param_grid);
-    cols_k = palette(:darkrainbow, N_labels)
-    
-    fig=plot(title="Experimental Data : binning & spline smoothing factor",
-        titlefontsize = 12)
-    i = 1
-    for (nz,λ0) in param_grid
-        # Check experimental data
-        data_exp = jldopen(summary_path,"r") do mfile
-                mfile[JLD2_MyTools.make_keypath_exp(data_directory,nz,λ0)]
-        end
-        
-        ic = Icoils
-        δic = data_exp[:ErrorCurrentsPhys]
-        zf1 = data_exp[:fw_F1_peak_pos][1] / magnification_factor[1]
-        δzf1 = abs.(zf1) .* sqrt.( (data_exp[:fw_F1_peak_pos][2] ./ data_exp[:fw_F1_peak_pos][1]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
+    ΔZ_0    = mean(ΔZ[rep_idx])                 # ≈ 0 if the peaks really coincide
+    ErrΔZ_0 = sqrt(sum(abs2, ErrΔZ[rep_idx])) / n
+    z0      = mean(Centroid[rep_idx])
+    δz0     = sqrt(sum(abs2, ErrCentroid[rep_idx])) / n
 
-        plot!(fig,
-        ic, zf1, 
-        xerror = δic,
-        yerror = δzf1,
-        label="n=$(nz) | λ=$(λ0)", 
-        color=cols_k[i],
-        marker=(:circle,cols_k[i],2),
-        markerstrokewidth = 1,
-        markerstrokecolor=cols_k[i]
-        )
+    @info("Repeated points at lowest current",
+        ic               = ic_min,
+        n                = n,
+        indices          = Tuple(rep_idx),
+        ΔZ               = Tuple(ΔZ[rep_idx]),
+        ΔZ_mean          = ΔZ_0,
+        ΔZ_err           = ErrΔZ_0,
+        ΔZ_scatter       = n > 1 ? std(ΔZ[rep_idx]) : NaN,        # compare with ΔZ_err
+        Centroid         = Tuple(Centroid[rep_idx]),
+        Centroid_scatter = n > 1 ? std(Centroid[rep_idx]) : NaN,  # compare with δz0·√n
+    )
+    @info "ORIGIN IN THE EXPERIMENT CAMERA FRAME" Centroid = z0 ErrCentroid = δz0
 
-        chosen_qm_i  = jldopen(data_qm_path,"r") do file
-                            file[JLD2_MyTools.make_keypath_qm(nz,σ_fix,λ0)]
-        end       
-        Ic_qm_i      = [chosen_qm_i[i][:Icoil] for i in eachindex(chosen_qm_i)]
-        zm_qm_i      = [chosen_qm_i[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm_i)]
-        if nz == 1
-            qm_color = :grey28
-        elseif nz == 2
-            qm_color = :grey42
-        elseif nz ==4
-            qm_color = :grey56
-        else
-            qm_color = :grey70
-        end
-        plot!(Ic_qm_i,zm_qm_i,
-            label=false,
-            line=(qm_color,:dash,1.5)
-        )
-        i+=1
-    end
-    display(fig)
-    plot!(fig,Ic_qm,zm_qm, label=L"QM: 
-        $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:solid,:black,2), marker=(:square,:grey66,2))
-    plot!(fig,
-        xlabel="Current (A)",
-        ylabel=L"$z_{F_{1}}$ (mm)",
-        xaxis=:log10,
-        yaxis=:log10,
-        xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        yticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-6}", L"10^{-5}", L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        xlims=(1e-4,1.2),
-        ylims=(1e-4,5),
-        size=(1050,600),
-        legend=:outerright,
-        legend_columns=1,
-        legendfontsize=8,
+    # ── 4. Deflection from the origin ────────────────────────────────────────
+    # F=1 lies at lower z than F=2 (ΔZ > 0), so its sign is flipped to make the
+    # deflection positive, as needed for the log–log plots. The origin error is
+    # added in quadrature.
+    F1_z_peak     = -(zf1 .- z0)
+    Err_F1_z_peak = sqrt.(δzf1 .^ 2 .+ δz0^2)
+    F2_z_peak     = zf2 .- z0
+    Err_F2_z_peak = sqrt.(δzf2 .^ 2 .+ δz0^2)
+
+    # ── 5. Figures: F=1 deflection vs. current (left) and vs. field (right) ──
+    fig_vsI = plot(ic, F1_z_peak;
+        yerr              = Err_F1_z_peak,
+        label             = dir,
+        seriestype        = :scatter,
+        marker            = (:circle, 2, :white),
+        markerstrokecolor = :black)
+    plot!(fig_vsI, Ic_qm, zm_qm;
+        label = "Quantum mechanics",
+        line  = (:solid, 1, :blue))
+    plot!(fig_vsI, Ic_cqd, zm_cqd;
+        label = L"CoQuantum Dynamics: $k_{i} = 1\times 10^{-6}$",
+        line  = (:solid, 1, :red))
+    plot!(fig_vsI;
+        xlabel                  = "SG current (A)",
+        ylabel                  = L"$F=1$ peak position (mm)",
+        legend                  = :topleft,
         foreground_color_legend = nothing,
-        left_margin=5mm,
-        bottom_margin=3mm,
-        legend_title = data_directory,
-    )
-    saveplot(fig,"bin_vs_smoothing_$(data_directory)")
-    display(fig)
-    println("\n")
+        background_color_legend = nothing,
+        xticks                  = (log_ticks, log_labels),
+        yticks                  = (log_ticks, log_labels),
+        xlims                   = I_lims,
+        ylims                   = (1e-2, 3),
+        xaxis                   = :log10,
+        yaxis                   = :log10)
+
+    fig_vsB = plot(B1, F1_z_peak;
+        yerr              = Err_F1_z_peak,
+        label             = dir,
+        seriestype        = :scatter,
+        marker            = (:circle, 2, :white),
+        markerstrokecolor = :black)
+    plot!(fig_vsB, B_qm, zm_qm;
+        label = "Quantum mechanics",
+        line  = (:solid, 1, :blue))
+    plot!(fig_vsB, B_cqd, zm_cqd;
+        label = L"CoQuantum Dynamics: $k_{i} = 1\times 10^{-6}$",
+        line  = (:solid, 1, :red))
+    plot!(fig_vsB;
+        xlabel                  = "SG Magnetic field (T)",
+        ylabel                  = L"$F=1$ peak position (mm)",
+        legend                  = :topleft,
+        foreground_color_legend = nothing,
+        background_color_legend = nothing,
+        yticks                  = (log_ticks, log_labels),
+        xlims                   = B_lims,
+        ylims                   = (1e-2, 3),
+        xaxis                   = :log10,
+        yaxis                   = :log10)
+
+    fig_both = plot(fig_vsI, fig_vsB;
+        suptitle      = L"($n_{z}=%$(SIM_PARAMS.nz)$ | $λ_{0} = %$(SIM_PARAMS.λ0)$ | $σ_{w} = %$(round(Int, 1000 * SIM_PARAMS.σw)) \mathrm{\mu m}$)",
+        layout        = (1, 2),
+        link          = :y,
+        size          = (1000, 420),
+        left_margin   = 5Plots.mm,
+        bottom_margin = 5Plots.mm)
+    # Right panel shares the y axis: hide its y label and tick labels (the ticks
+    # are given as (positions, labels) so `yformatter` would be ignored).
+    plot!(fig_both[2];
+        ylabel      = "",
+        yticks      = (log_ticks, fill("", length(log_ticks))),
+        left_margin = -7Plots.mm)
+    display(fig_both)
+
+    save(joinpath(OUTDIR, "fig1_$(dir).png"),fig_both)
+
+    # ── 6. Keep the table for this directory ─────────────────────────────────
+    results[dir] = hcat(ic, δic, B1, F1_z_peak, Err_F1_z_peak, F2_z_peak, Err_F2_z_peak)
+
 end
 
-println("Experiment analysis finished!\n\n")
-
-#########################################################################################
-# Choose a particular configuration for comparison purposes 
-#########################################################################################
-
-# desired values
-selected_bin = nz_fix
-selected_spl = λ0_fix
-
-cols = palette(:darkrainbow, n_runs)
-
-# ---------- common axis + style ----------
-xticks_vals = 10.0 .^ (-6:-1); xticks_vals = vcat(xticks_vals, 1.0)
-yticks_vals = 10.0 .^ (-6:-1); yticks_vals = vcat(yticks_vals, 1.0)
-xtick_labels = [L"10^{%$k}" for k in -6:-1]; xtick_labels = vcat(xtick_labels, L"10^{0}")
-ytick_labels = [L"10^{%$k}" for k in -6:-1]; ytick_labels = vcat(ytick_labels, L"10^{0}")
-
-fig1 = plot(
-    xlabel = "Current (A)",
-    ylabel = L"$z_{F_{1}}$ (mm)",
-    xaxis  = :log10,
-    yaxis  = :log10,
-    xticks = (xticks_vals, xtick_labels),
-    yticks = (yticks_vals, ytick_labels),
-    xlims  = (1e-3, 1.2),
-    ylims  = (1e-4, 3.0),
-    legend = :outerright,
-    legend_title = L"$n=%$(selected_bin)$ & $\lambda_{0}=%$(selected_spl)$",
-    size   = (900, 420),
-    left_margin = 4mm,
-    bottom_margin = 3mm,
-)
-for (idx,data_directory) in enumerate(data_directories)
-    magnification_factor = mag_factor(data_directory) ;
-
-    summary_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",data_directory, data_directory*"_report_summary.jld2")
-
-    Icoils = jldopen(summary_path,"r") do mfile
-            mfile["meta/Currents"]
+# ── Write everything to a single JLD2 file ────────────────────────────────────
+# Layout:  file[dir] → Matrix (rows = currents, columns = `meta/columns`)
+mkpath(dirname(OUT_FILE))
+jldopen(OUT_FILE, "w") do file
+    file["meta/columns"] = column_names
+    file["meta/units"]   = column_units
+    for dir in DIR_LIST                        # keep the DIR_LIST order in the file
+        file[dir] = results[dir]
     end
-
-    # Check experimental data
-    data_exp = jldopen(summary_path,"r") do mfile
-            mfile[JLD2_MyTools.make_keypath_exp(data_directory,selected_bin,selected_spl)]
-    end
-
-    ic = Icoils
-    δic = data_exp[:ErrorCurrentsPhys]
-    zf1 = data_exp[:fw_F1_peak_pos][1] / magnification_factor[1]
-    δzf1 = zf1 .* sqrt.( (data_exp[:fw_F1_peak_pos][2] ./ data_exp[:fw_F1_peak_pos][1]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
-
-    # guard for log10 axes: filter out non-positive values
-    ic   = ifelse.(ic .> 0, ic, missing)
-    zf1  = ifelse.(zf1 .> 0, zf1, missing)
-    plot!(fig1, ic, zf1;
-        xerror = δic,
-        yerror = δzf1,
-        label = "Experiment $(data_directory)",
-        marker = (:circle,cols[idx],3),
-        markerstrokewidth = 1,
-        markerstrokecolor = cols[idx],
-        line = (:solid,cols[idx],1) # pure markers; change to :solid if you want lines
-    )
-    display(fig1)
 end
-plot!(fig1, # ---------- Alexander's data ----------
-    data_JSF[:exp][:, 1],
-    data_JSF[:exp][:, 2],
-    label = "Alexander's data",
-    line = (:dash, :green, 2),
-)
-plot!(fig1, Ic_qm, zm_qm, label=L"QM $(\sigma_{w}=%$(Int(1000*σ_fix))\mathrm{\mu m})$", line=(:black,2))
-display(fig1)
-saveplot(fig1, "bin_vs_smoothing_log")   # use explicit extension; pdf/png/svg as you like
+@info "Saved peak-position tables" file = OUT_FILE n_directories = length(results)
 
 
-fig2 = plot(
-    xlabel = "Current (A)",
-    ylabel = L"$z_{F_{1}}$ (mm)",
-    xlims  = (1e-3, 1.1),
-    ylims  = (1e-4, 2.0),
-    legend = :outerright,
-    legend_title = L"$n=%$(selected_bin)$ & $\lambda_{0}=%$(selected_spl)$",
-    size   = (900, 420),
-    left_margin = 4mm,
-    bottom_margin = 3mm,
-)
-for (idx,data_directory) in enumerate(data_directories)
-    magnification_factor = mag_factor(data_directory) ;
+results["20260821"]
 
-    summary_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",data_directory, data_directory*"_report_summary.jld2")
+# same decade ticks as in fig_vsI, generated from the limits
+# decade_ticks(lo, hi) = (p = floor(Int, log10(lo)):ceil(Int, log10(hi));
+#                         (10.0 .^ p, [latexstring("10^{$k}") for k in p]))
 
-    Icoils = jldopen(summary_path,"r") do mfile
-            mfile["meta/Currents"]
-    end
 
-    # Check experimental data
-    data_exp = jldopen(summary_path,"r") do mfile
-            mfile[JLD2_MyTools.make_keypath_exp(data_directory,selected_bin,selected_spl)]
-    end
 
-    ic = Icoils
-    δic = data_exp[:ErrorCurrentsPhys]
-    zf1 = data_exp[:fw_F1_peak_pos][1] / magnification_factor[1]
-    δzf1 = abs.(zf1) .* sqrt.( (data_exp[:fw_F1_peak_pos][2] ./ data_exp[:fw_F1_peak_pos][1]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
 
-    # guard for log10 axes: filter out non-positive values
-    ic   = ifelse.(ic .> 0, ic, missing)
-    zf1  = ifelse.(zf1 .> 0, zf1, missing)
-    plot!(fig2, ic, zf1;
-        xerror = δic,
-        yerror = δzf1,
-        label = "Experiment $(data_directory)",
-        marker = (:circle,cols[idx],3),
-        markerstrokewidth = 1,
-        markerstrokecolor = cols[idx],
-        line = (:solid,cols[idx],1) # pure markers; change to :solid if you want lines
-    )
-    display(fig2)
-end
-plot!(fig2, # ---------- Alexander's data ----------
-    data_JSF[:exp][:, 1],
-    data_JSF[:exp][:, 2],
-    label = "Alexander's data",
-    line = (:dash, :green, 2),
-)
-plot!(fig2, Ic_qm, zm_qm, label=L"QM $(\sigma_{w}=%$(Int(1000*σ_fix))\mathrm{\mu m})$", line=(:black,2))
-display(fig2)
-saveplot(fig2, "bin_vs_smoothing_lin")   # use explicit extension; pdf/png/svg as you like
-
-println("\nComparison of differente experiments finished!\n\n")
 
 #######################################################################################################################
 ######################################### AVERAGING ###################################################################
 #######################################################################################################################
 Ics = Vector{Vector{Float64}}(undef, n_runs);
-tol_grouping = 0.05
-for (i, dir) in enumerate(data_directories)
-    data = load(joinpath(@__DIR__, "EXPERIMENTS", dir, "data_processed.jld2"), "data")
-    Ics[i] = data[:Currents]
+Bcs = Vector{Vector{Float64}}(undef, n_runs);
+tol_grouping = 0.03
+for (i, dir) in enumerate(DIR_LIST)
+    Ics[i] = results[dir][:,1]
+    Bcs[i] = results[dir][:,3]
 end
 clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping);
 for s in clusters.summary
@@ -2375,8 +1793,8 @@ end
 Ic_grouped  = round.([clusters.summary[i].mean_val for i in 1:length(clusters.summary)]; digits=3)
 δIc_grouped = round.([clusters.summary[i].std_val for i in 1:length(clusters.summary)]; sigdigits=1)
 
-magnification_factor_ith        =  [mag_factor(d)[1] for d in data_directories]
-magnification_factor_error_ith  =  [mag_factor(d)[2] for d in data_directories]
+magnification_factor_ith        =  [mag_factor(d)[1] for d in DIR_LIST]
+magnification_factor_error_ith  =  [mag_factor(d)[2] for d in DIR_LIST]
 """
     average_on_grid_mc(xsets, ysets;
                        σxsets=nothing, σysets=nothing,
@@ -2530,7 +1948,7 @@ end
 end
 
 tables = Vector{DataFrame}(undef, n_runs)
-for (idx,data_directory) in enumerate(data_directories)
+for (idx,data_directory) in enumerate(DIR_LIST)
     magnification_factor = mag_factor(data_directory) ;
 
     summary_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",data_directory, data_directory*"_report_summary.jld2")
