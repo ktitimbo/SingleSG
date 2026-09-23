@@ -2077,18 +2077,27 @@ end
 
 
 """
-    cluster_by_tolerance(Ics; tol = 0.08)
+    cluster_by_tolerance(Ics; tol = 0.08, atol = 1e-6)
 
-Cluster values from multiple datasets when they are numerically close within a
-relative tolerance. This is useful when several datasets contain floating-point
-values (for example, peak positions or inferred parameters) and you want to
-identify common values across datasets.
+Cluster values from multiple datasets when they are numerically close, so that
+common values across datasets can be identified. This is useful when several
+datasets contain floating-point values (for example, peak positions or
+inferred parameters) that should agree up to noise.
 
 # Arguments
 - `Ics`: A vector of vectors. Each element `Ics[j]` is a dataset containing
-numerical values.
-- `tol`: Relative tolerance (default = 0.08). Two values `x` and `y` belong to
-the same cluster when `abs(x - y) ≤ tol * min(x, y)`.
+  numerical values.
+- `tol`: Relative tolerance (default = 0.08).
+- `atol`: Absolute tolerance floor (default = 1e-6).
+
+A value `x` joins a cluster whose anchor (the value that opened it, see
+Algorithm) is `a` when
+
+    abs(x - a) ≤ max(atol, tol * abs(a))
+
+`atol` matters near `a = 0`, where a purely relative test would require `x`
+to equal `a` exactly to join the cluster. Choose `atol` to match the smallest
+meaningful difference in your data (e.g. the measurement resolution).
 
 A named tuple with two fields:
 
@@ -2128,33 +2137,37 @@ This provides a compact, analysis-ready representation of each cluster.
 
 # Algorithm
 1. Flatten all values across datasets while recording dataset index (`set`) and
-within-dataset index (`idx`).
+   within-dataset index (`idx`).
 2. Sort the flattened values.
-3. Group consecutive sorted values into clusters if they satisfy the relative
-tolerance condition.
+3. Scan the sorted values and grow a cluster while the tolerance condition
+   holds against that cluster's anchor — the value that opened it — rather
+   than against the previous value. This keeps a long run of closely spaced
+   values from drifting past `tol` of where the cluster started.
 4. Sort each cluster by dataset index.
 5. Discard clusters appearing in fewer than two datasets.
 6. Construct both:
-- the `raw` cluster representation, and
-- the `summary` representation with aggregated statistics.
+   - the `raw` cluster representation, and
+   - the `summary` representation with aggregated statistics.
 
 # Example
     A = [1.00, 1.05, 2.10]
     B = [0.97, 2.05, 4.00]
     C = [1.08, 2.00, 3.90]
 
-    out = cluster_by_tolerance([A, B, C]; tol = 0.08)
+    out = cluster_by_tolerance([A, B, C]; tol = 0.08, atol = 1e-6)
 
     out.raw      # vector of clusters
     out.summary  # vector of summary statistics
 
 # Notes
-- Tolerance is relative, scaled by the smaller of the two values.
+- Each cluster is anchored to the value that opened it, not to the previous
+  sorted value, so clusters can't drift through a chain of close values.
+- `atol` lets values near zero (or exact duplicates) cluster correctly, where
+  a purely relative tolerance would otherwise require an exact match.
 - Complexity is O(N log N) due to sorting.
 - The function is deterministic for fixed inputs.
 """
-function cluster_by_tolerance(Ics; tol=0.08)
-    # Flatten values, dataset ids, and index-in-dataset
+function cluster_by_tolerance(Ics; tol=0.08, atol=1e-6)
     vals  = Float64[]
     vidx  = Int[]
     iidx  = Int[]
@@ -2167,48 +2180,48 @@ function cluster_by_tolerance(Ics; tol=0.08)
         end
     end
 
-    # Sort all flattened values
-    p = sortperm(vals)
-    v  = vals[p]
-    g  = vidx[p]
+    p   = sortperm(vals)
+    v   = vals[p]
+    g   = vidx[p]
     idx = iidx[p]
 
-    # Clustering
     clusters = Vector{Vector{NamedTuple{(:val, :set, :idx), Tuple{Float64,Int,Int}}}}()
 
     current = [(val=v[1], set=g[1], idx=idx[1])]
+    anchor  = v[1]                      # value that opened the current cluster
 
     for i in 2:length(v)
-        prev = v[i-1]
         curr = v[i]
-
-        if abs(curr - prev) ≤ tol * min(curr, prev)
+        # Compare to the cluster's ANCHOR (not the previous point), so a long
+        # run of close values can't drift outside `tol` of where it started.
+        # `atol` gives a fixed floor so an exact 0.0 anchor can still absorb
+        # nearby tiny nonzero values (a pure relative test requires curr==0).
+        if abs(curr - anchor) ≤ max(atol, tol * abs(anchor))
             push!(current, (val=curr, set=g[i], idx=idx[i]))
         else
             push!(clusters, current)
             current = [(val=curr, set=g[i], idx=idx[i])]
+            anchor  = curr
         end
     end
-
     push!(clusters, current)
 
     for c in clusters
         sort!(c, by = x -> x.set)
     end
 
-    # Keep only clusters appearing in ≥2 datasets
     multi = [c for c in clusters if length(unique(getfield.(c, :set))) ≥ 2]
 
     summary = [
-    (
-        mean_val = mean(getfield.(c, :val)),
-        std_val  = std(getfield.(c, :val)),
-        currents = getfield.(c, :val),
-        datasets = getfield.(c, :set),
-        indices  = getfield.(c, :idx)
-    )
-    for c in multi
-];
+        (
+            mean_val = mean(getfield.(c, :val)),
+            std_val  = std(getfield.(c, :val)),
+            currents = getfield.(c, :val),
+            datasets = getfield.(c, :set),
+            indices  = getfield.(c, :idx)
+        )
+        for c in multi
+    ]
 
     return (raw = multi, summary = summary)
 end
