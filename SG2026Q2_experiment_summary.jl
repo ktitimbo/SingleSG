@@ -1,6 +1,6 @@
 # Kelvin Titimbo
 # California Institute of Technology
-# February 2026
+# September 2026
 
 ############## EXPERIMENT ANALYSIS PREAMBLE ##############
 # Headless/Windows-safe GR: set before using Plots
@@ -19,8 +19,17 @@ Plots.default(
 using Plots.PlotMeasures
 # Data I/O and numerical tools
 using LinearAlgebra, Random
-using Statistics, StatsBase, OrderedCollections, Interpolations
-using Dierckx
+using Statistics, StatsBase, OrderedCollections
+# Interpolation/spline packages, declared together: Interpolations, Dierckx and
+# BSplineKit all export overlapping generic names (`interpolate`, `extrapolate`,
+# `Linear`, `Flat`, `Natural`, ...). Keeping them in one place here — instead of
+# a `using BSplineKit` appearing mid-script, as it used to — is what makes the
+# clash visible. Every call into Interpolations or BSplineKit below stays fully
+# qualified (`Interpolations.interpolate`, `BSplineKit.fit`, ...) for exactly
+# this reason; Dierckx's own names (`Spline1D`, `get_knots`, ...) are distinct
+# and safe unqualified. Adding another interpolation package later: check its
+# exports against these three before trusting an unqualified call to any of them.
+using Interpolations, Dierckx, BSplineKit
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using Printf, LaTeXStrings, PrettyTables
@@ -1766,35 +1775,125 @@ end
 @info "Saved peak-position tables" file = OUT_FILE n_directories = length(results)
 
 
-results["20260821"]
+# ══════════════════════════════════════════════════════════════════════════════
+#  Collapse near-duplicate currents in each table
+# ──────────────────────────────────────────────────────────────────────────────
+#  For every dir in results, rows are already sorted by current (column 1).
+#
+#  Grouping:
+#    A new group starts whenever a current is more than 2% (rtol) away from the
+#    value that opened the current group (its "anchor"), so drift can't
+#    accumulate across a run of close values. atol handles current == 0, where
+#    a relative tolerance is undefined.
+#
+#  Combining a group of m rows into one:
+#    · value_cols (I, B, z_F1, z_F2): plain mean over the group.
+#    · error_cols (δI, δz_F1, δz_F2): each is paired with its value column
+#      (error_pairs) and combined as the LARGER of two estimates —
+#        - propagated: √(Σ σᵢ²) / m,  the error of a mean of m independent
+#          measurements, assuming each σᵢ is correct and the repeats agree;
+#        - scatter:    std(values) / √m,  the standard error of the mean
+#          computed from how much the m repeated values actually disagree.
+#      Taking the max means: if the repeats scatter more than their stated
+#      errors predict (unaccounted noise, drift, misestimated σᵢ, ...), the
+#      reported error grows to reflect that instead of understating it.
+#      For a single-row "group" (m = 1) scatter = 0, so the result is just the
+#      original error, unchanged.
+#    · B (column 3) has no error column of its own here — it is only averaged.
+#      If B is a deterministic function of I from a calibration, δB should
+#      really be δI propagated through that function, not this group's mean.
+# ══════════════════════════════════════════════════════════════════════════════
+rtol = 0.02
+value_cols  = (1, 3, 4, 6)                   # I, B, z_F1, z_F2 — averaged
+error_cols  = (2, 5, 7)                      # δI, δz_F1, δz_F2 — combined below
+error_pairs = Dict(2 => 1, 5 => 4, 7 => 6)   # error col => its value col
+
+results_grouped = Dict{String,Matrix{Float64}}()
+
+for dir in DIR_LIST
+    tbl = results[dir]
+    n   = size(tbl, 1)
+
+    group_start  = 1
+    grouped_rows = Vector{Vector{Float64}}()
+    for i in vcat(2:n, n + 1)                 # sentinel n+1 closes the last group
+        anchor    = tbl[group_start, 1]
+        new_group = i > n || !isapprox(tbl[i, 1], anchor; rtol = rtol, atol = 1e-6)
+        if new_group
+            g = group_start:i-1               # row indices in this group
+            m = length(g)
+            row = zeros(size(tbl, 2))
+
+            # Measurements: mean of the group.
+            for c in value_cols
+                row[c] = mean(tbl[g, c])
+            end
+
+            # Errors: max(error propagated from the individual σᵢ, standard
+            # error of the mean from the group's own scatter) — see header.
+            for c in error_cols
+                vcol       = error_pairs[c]
+                propagated = sqrt(sum(abs2, tbl[g, c])) / m
+                scatter    = m > 1 ? std(tbl[g, vcol]) / sqrt(m) : 0.0
+                row[c]     = max(propagated, scatter)
+            end
+
+            push!(grouped_rows, row)
+            group_start = i
+        end
+    end
+
+    results_grouped[dir] = reduce(vcat, transpose.(grouped_rows))
+    @info "Collapsed near-duplicate currents" dir = dir n_before = n n_after = size(results_grouped[dir], 1)
+end
+
+# ── Write the grouped tables to their own file ────────────────────────────────
+OUT_FILE_GROUPED = joinpath(OUTDIR, "peak_positions_summary_grouped.jld2")
+jldopen(OUT_FILE_GROUPED, "w") do file
+    file["meta/columns"] = column_names
+    file["meta/units"]   = column_units
+    file["meta/rtol"]    = rtol
+    for dir in DIR_LIST
+        file[dir] = results_grouped[dir]
+    end
+end
+@info "Saved grouped peak-position tables" file = OUT_FILE_GROUPED n_directories = length(results_grouped)
+
 
 # same decade ticks as in fig_vsI, generated from the limits
 # decade_ticks(lo, hi) = (p = floor(Int, log10(lo)):ceil(Int, log10(hi));
 #                         (10.0 .^ p, [latexstring("10^{$k}") for k in p]))
 
 
-
-
-
-#######################################################################################################################
-######################################### AVERAGING ###################################################################
-#######################################################################################################################
+# ══════════════════════════════════════════════════════════════════════════════
+#  Common current grid across datasets, and per-dataset magnification
+# ──────────────────────────────────────────────────────────────────────────────
+#  Ics/Bcs: current and field columns from each dataset's grouped table, used
+#  to find which nominal current values are shared across datasets.
+# ══════════════════════════════════════════════════════════════════════════════
 Ics = Vector{Vector{Float64}}(undef, n_runs);
 Bcs = Vector{Vector{Float64}}(undef, n_runs);
 tol_grouping = 0.03
 for (i, dir) in enumerate(DIR_LIST)
-    Ics[i] = results[dir][:,1]
-    Bcs[i] = results[dir][:,3]
+    Ics[i] = results_grouped[dir][:,1]
+    Bcs[i] = results_grouped[dir][:,3]
 end
-clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping);
+clusters = MyExperimentalAnalysis.cluster_by_tolerance(Ics; tol=tol_grouping, atol=5e-4);
 for s in clusters.summary
     println("Value group ≈ $(@sprintf("%1.3f", s.mean_val)) ± $(round(s.std_val;sigdigits=1)) \t appears in datasets: ", s.datasets)
 end
 Ic_grouped  = round.([clusters.summary[i].mean_val for i in 1:length(clusters.summary)]; digits=3)
 δIc_grouped = round.([clusters.summary[i].std_val for i in 1:length(clusters.summary)]; sigdigits=1)
 
+# Magnification (and its error) per dataset, indexed the same way as DIR_LIST.
 magnification_factor_ith        =  [mag_factor(d)[1] for d in DIR_LIST]
 magnification_factor_error_ith  =  [mag_factor(d)[2] for d in DIR_LIST]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  average_on_grid_mc: Monte-Carlo average of several noisy curves onto one grid
+#  (docstring below has the full contract — arguments, keywords, return values).
+# ══════════════════════════════════════════════════════════════════════════════
 """
     average_on_grid_mc(xsets, ysets;
                        σxsets=nothing, σysets=nothing,
@@ -1872,9 +1971,9 @@ function average_on_grid_mc(xsets, ysets;
     function eval_on_grid(xb, yb, xq)
         p = sortperm(xb); xb = xb[p]; yb = yb[p]
         itp = Interpolations.interpolate((xb,), yb, Gridded(Interpolations.Linear()))
-        ext = outside === :linear ? Interpolations.extrapolate(itp, Line()) :
-              outside === :flat   ? Interpolations.extrapolate(itp, Flat()) :
-                                    Interpolations.extrapolate(itp, Throw())
+        ext = outside === :linear ? Interpolations.extrapolate(itp, Interpolations.Line()) :
+              outside === :flat   ? Interpolations.extrapolate(itp, Interpolations.Flat()) :
+                                    Interpolations.extrapolate(itp, Interpolations.Throw())
         vals = similar(xq, Float64); fill!(vals, NaN)
         if outside === :mask
             mask = (xq .>= first(xb)) .& (xq .<= last(xb))
@@ -1940,41 +2039,32 @@ function average_on_grid_mc(xsets, ysets;
     return xq_vec, μ, σ
 end
 
-# helper: first index where column > threshold (skips missings; falls back to 1)
+# Small helper: first row index in `df` where column `col` reaches `thr`
+# (used below to drop currents at/under a threshold, per dataset).
 @inline function first_gt_idx(df::DataFrame, col::Symbol, thr::Real)
     v = df[!, col]
     idx = findfirst(x -> !ismissing(x) && x >= thr, v)
     return idx === nothing ? 1 : idx
 end
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  Per-dataset tables: current, F=1/F=2 peak positions and their errors, taken
+#  directly from the grouped results (no need to reopen the JLD2 files or
+#  redo the magnification/error propagation — that's already in results_grouped).
+# ══════════════════════════════════════════════════════════════════════════════
 tables = Vector{DataFrame}(undef, n_runs)
-for (idx,data_directory) in enumerate(DIR_LIST)
-    magnification_factor = mag_factor(data_directory) ;
-
-    summary_path = joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary",data_directory, data_directory*"_report_summary.jld2")
-
-    Icoils = jldopen(summary_path,"r") do mfile
-            mfile["meta/Currents"]
-    end
-
-    # Check experimental data
-    data_exp = jldopen(summary_path,"r") do mfile
-            mfile[JLD2_MyTools.make_keypath_exp(data_directory,selected_bin,selected_spl)]
-    end
-
-    ic = Icoils
-    δic = data_exp[:ErrorCurrentsPhys]
-    zf1 = data_exp[:fw_F1_peak_pos][1] / magnification_factor[1]
-    δzf1 = abs.(zf1) .* sqrt.( (data_exp[:fw_F1_peak_pos][2] ./ data_exp[:fw_F1_peak_pos][1]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
-    zf2 = data_exp[:fw_F2_peak_pos][1] / magnification_factor[1]
-    δzf2 = abs.(zf2) .* sqrt.( (data_exp[:fw_F2_peak_pos][2] ./ data_exp[:fw_F2_peak_pos][1]).^2 .+ (magnification_factor[2] ./ magnification_factor[1]).^2 )
-
-    tables[idx] = DataFrame(hcat(ic,δic,zf1,δzf1,zf2,δzf2),[:x,:sx,:y1,:sy1,:y2,:sy2])
+for (idx, dir) in enumerate(DIR_LIST)
+    tables[idx] = DataFrame(results_grouped[dir][:, [1, 2, 4, 5, 6, 7]], [:x, :sx, :y1, :sy1, :y2, :sy2])
 end
 
-threshold = 0.000 # lower cut-off for experimental currents
+# ── Drop currents at/under `threshold` from each dataset before averaging ────
+threshold = 0.010 # lower cut-off for experimental currents (0 keeps every row here)
 CURRENT_ROW_START = [first_gt_idx(t, :x, threshold) for t in tables]
 
+
+# QM theory curve, masked the same way everywhere it's overlaid below, so no
+# figure ever plots a current below `threshold` (a log-log axis can't take one).
+mask_qm = Ic_qm .>= threshold
 xsets  = [ t[i:end, :x]  for (t,i) in zip(tables, CURRENT_ROW_START)]
 y1sets = [ t[i:end, :y1] for (t,i) in zip(tables, CURRENT_ROW_START)]
 y2sets = [ t[i:end, :y2] for (t,i) in zip(tables, CURRENT_ROW_START)]
@@ -1982,48 +2072,60 @@ y2sets = [ t[i:end, :y2] for (t,i) in zip(tables, CURRENT_ROW_START)]
 σy1sets = [ t[i:end, :sy1] for (t, i) in zip(tables, CURRENT_ROW_START)]
 σy2sets = [ t[i:end, :sy2] for (t, i) in zip(tables, CURRENT_ROW_START)]
 
-# pick a log-spaced grid across the overall x-range (nice for decades-wide currents)
+# ── Common query grid: log-spaced across the overall current range ──────────
+# (log spacing suits currents spanning several decades)
 i_sampled_length = 20001
 xlo = maximum([minimum(first.(xsets)),1e-9])
 xhi = maximum([maximum(last.(xsets)),1.000])
 xq  = exp10.(range(log10(xlo), log10(xhi), length=i_sampled_length))
 
+# ── Monte-Carlo average of F=1 peak position across all datasets ────────────
+# xi1: the grid actually used (:union of all currents, since xq= keyword here
+#      isn't passed as `xq_vec` — the `xq` array above is unused unless you
+#      pass xq=xq below); μ1/σ1: pointwise MC mean and std of the F=1 position.
 xi1, μ1, σ1 = average_on_grid_mc(xsets, y1sets; σxsets=σxsets, σysets=σy1sets,
                               xq=:union, B=500, outside=:mask, rel_x=true)
 
+# Diagnostic (commented out): decompose the total MC scatter σ_xy into the part
+# from y-uncertainty alone (σ_y) and from x-uncertainty alone (σ_x), and check
+# that they add in quadrature to (approximately) the combined σ_xy — a sanity
+# check that the two error sources are being propagated independently/correctly.
 # xq, μ, σ_xy = average_on_grid_mc(xsets, y1sets; σxsets=σxsets, σy1sets=σy1sets)
 # _,  _, σ_y  = average_on_grid_mc(xsets, y1sets; σxsets=nothing,   σy1sets=σy1sets)
 # _,  _, σ_x  = average_on_grid_mc(xsets, y1sets; σxsets=σxsets,    σy1sets=nothing)
-## If x and y errors are independent, typically:
 # σ_quad = sqrt.(σ_x.^2 .+ σ_y.^2)  # should be close to σ_xy
 # hcat(σ_xy, σ_quad )
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  Figure: F=1 peak position vs. current — raw points per dataset, QM theory,
+#  and the Monte-Carlo–averaged curve with its ±1σ band.
+# ══════════════════════════════════════════════════════════════════════════════
 fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
-    xlims = (1e-3,1.0),
-    ylims = (1e-3, 2),
+    xlims = (threshold,1.0),
+    # ylims = (1e-3, 3),
     legend=:bottomright,
 )
 for i=1:n_runs
     xs = tables[i][CURRENT_ROW_START[i]:end,:x]
     ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
     scatter!(fig,xs,ys,
-        label=data_directories[i],
+        label=DIR_LIST[i],
         marker=(:circle, :white,3),
         markerstrokecolor=cols[i],
         markerstrokewidth=1,
         )
 end
-plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
-plot!(fig, xi1, μ1; 
+plot!(fig, Ic_qm[mask_qm], zm_qm[mask_qm], label="QM", line=(:red,:dash,2))
+plot!(fig, xi1, μ1;
     ribbon=σ1,
-    # yerror=σ1,
     label=false,
 )
 plot!(fig,
+    foreground_color_legend = nothing,
     xscale=:log10,
-    yscale=:log10, 
+    yscale=:log10,
     title = "Interpolation MC",
     color=:black,
 )
@@ -2031,14 +2133,32 @@ display(fig)
 saveplot(fig, "MC_interpolation")
 
 
-# using Dierckx
-# spl = Spline1D(m_sets[1][runs[1]][3][!,"Icoil_A"], m_sets[1][runs[1]][3][!,"F1_z_centroid_mm"]; k=3, s=0.5, bc="extrapolate")   # k=3 cubic; s=0 exact interpolate, s>0 smoothing
+# ══════════════════════════════════════════════════════════════════════════════
+#  Spline-based cross-dataset averages of the F=1 (and F=2) peak position
+# ──────────────────────────────────────────────────────────────────────────────
+#  Alternative to the Monte-Carlo grid average above: fit one spline per
+#  dataset, evaluate all of them on a common grid `i_xx0`, then average across
+#  datasets point-by-point. Two variants:
+#    1. "interpolation"           — natural cubic spline through the (grouped)
+#                                    points exactly (no smoothing).
+#    2. "smoothing_interpolation" — weighted smoothing cubic spline (weights
+#                                    = 1/δy², smoothing parameter 0.002), which
+#                                    tolerates scatter instead of passing
+#                                    through every point.
+#  The band in each figure is the standard error of the mean across the n_runs
+#  per-dataset curves, sqrt(corrected variance)/√n_runs — not a Monte-Carlo
+#  estimate, so it only reflects dataset-to-dataset spread, not the individual
+#  point uncertainties (unlike σ1 from average_on_grid_mc, which does fold
+#  those in through the perturbation step).
+# ══════════════════════════════════════════════════════════════════════════════
 
-using BSplineKit
-# i_sampled_length = 2*i_sampled_length
-# i_xx = round.(range(threshold,1.000,length=i_sampled_length); digits=5)
-i_xx0 = unique(round.(sort(union(xq,Ic_grouped)); digits=9))
-i_sampled_length = length(i_xx0)
+# Common evaluation grid: union of the MC grid (xq) and the clustered current
+# values (Ic_grouped), restricted to the same current window as the rest of
+# this analysis (x ≥ threshold), so no spline is ever evaluated below the
+# cutoff and the log-log plots never see a non-positive x.
+i_xx0 = unique(round.(sort(union(xq, Ic_grouped)); digits=9))
+i_xx0 = i_xx0[i_xx0 .>= threshold]
+i_n_eval = length(i_xx0)
 
 fig = plot(
     xlabel="Current (A)",
@@ -2046,15 +2166,14 @@ fig = plot(
     xlims = (10e-3,1.0),
     ylims = (8e-3, 2),
 )
-z_final = zeros(n_runs,i_sampled_length)
-cols = palette(:darkrainbow, n_runs);
+z_final = zeros(n_runs,i_n_eval)
 for i=1:n_runs
     xs = tables[i][CURRENT_ROW_START[i]:end,:x]
     ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
     spl = BSplineKit.extrapolate(BSplineKit.interpolate(xs,ys, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
     z_final[i,:] = spl.(i_xx0)
     scatter!(fig,xs, ys,
-        label=data_directories[i],
+        label=DIR_LIST[i],
         marker=(:circle, :white,3),
         markerstrokecolor=cols[i],
         markerstrokewidth=1,
@@ -2063,7 +2182,7 @@ for i=1:n_runs
         label=false,
         line=(cols[i],1))
 end
-plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
+plot!(fig, Ic_qm[mask_qm], zm_qm[mask_qm], label="QM", line=(:red,:dash,2))
 display(fig)
 plot!(fig,
 title="Interpolation: cubic splines",
@@ -2087,16 +2206,15 @@ fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
 )
-z_final_fit = zeros(n_runs,i_sampled_length)
-cols = palette(:darkrainbow, n_runs)
+z_final_fit = zeros(n_runs,i_n_eval)
 for i=1:n_runs
     xs = tables[i][CURRENT_ROW_START[i]:end,:x]
     ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
     δys = tables[i][CURRENT_ROW_START[i]:end,:sy1]
-    spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
+    spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.005, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
     z_final_fit[i,:] = spl.(i_xx0)
     scatter!(fig,xs, ys,
-        label=data_directories[i],
+        label=DIR_LIST[i],
         marker=(:circle, :white,3),
         markerstrokecolor=cols[i],
         markerstrokewidth=1,
@@ -2105,7 +2223,7 @@ for i=1:n_runs
         label=false,
         line=(cols[i],1))
 end
-plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
+plot!(fig, Ic_qm[mask_qm], zm_qm[mask_qm], label="QM", line=(:red,:dash,2))
 display(fig)
 plot!(fig,
 title = "Fit smoothing cubic spline",
@@ -2128,26 +2246,33 @@ plot!(fig,i_xx0, zf1_fit,
 display(fig)
 saveplot(fig, "smoothing_interpolation")
 
-
-z2_final_fit = zeros(n_runs,i_sampled_length)
+# ── Same smoothing fit for F=2, in its own figure (was silently reusing the F1
+#    `fig` above — harmless since that figure is never touched again, but
+#    confusing, and no scatter/curve from this loop was ever shown or saved) ──
+fig2 = plot(
+    xlabel="Current (A)",
+    ylabel=L"$F_{2} : z_{\mathrm{peak}}$ (mm)",
+)
+z2_final_fit = zeros(n_runs,i_n_eval)
 for i=1:n_runs
     xs = tables[i][CURRENT_ROW_START[i]:end,:x]
     ys = tables[i][CURRENT_ROW_START[i]:end,:y2]
     δys = tables[i][CURRENT_ROW_START[i]:end,:sy2]
     spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
     z2_final_fit[i,:] = spl.(i_xx0)
-    scatter!(fig,xs, ys,
-        label=data_directories[i],
+    scatter!(fig2,xs, ys,
+        label=DIR_LIST[i],
         marker=(:circle, :white,3),
         markerstrokecolor=cols[i],
         markerstrokewidth=1,
         )
-    plot!(fig,i_xx0,spl.(i_xx0),
+    plot!(fig2,i_xx0,spl.(i_xx0),
         label=false,
         line=(cols[i],1))
 end
 zf2_fit = vec(mean(z2_final_fit, dims=1))
 δzf2_fit = vec(std(z2_final_fit; dims=1, corrected=true)/sqrt(n_runs))
+
 fig_c = plot(i_xx0, zf1_fit,
     ribbon = δzf1_fit,
     fillalpha=0.40, 
@@ -2158,9 +2283,9 @@ plot!(fig_c,
     i_xx0, zf2_fit,
     ribbon = δzf2_fit,
     fillalpha=0.40, 
-    fillcolor=:gray36, 
+    fillcolor=:purple, 
     label="Mean F2",
-    line=(:dash,:black,1)
+    line=(:dash,:purple,1)
 )
 plot!(fig_c,
     xlabel="Current (A)",
@@ -2171,9 +2296,9 @@ display(fig_c)
 saveplot(fig_c, "fit_interpol_centroid")
 
 
-Ic_around_0 = filter(v -> v <= 0.010, i_xx0)
+Ic_around_0 = filter(v -> v <= 0.030, i_xx0)
 ni_0  = length(Ic_around_0)
-δi, eδi, m, b0, i0, σd0, ishift = curr_error_physical(
+δi, eδi, m, b0, i0, σd0, ishift = MyExperimentalAnalysis.curr_error_physical(
                 i_xx0, 0.001*i_xx0,
                 zf1_fit, zf2_fit;
                 δz1 = δzf1_fit,
@@ -2182,34 +2307,31 @@ ni_0  = length(Ic_around_0)
                 nfit = ni_0, order = 2,
                 weight = :gaussian, h = nothing
             );
-@info "Error computed $(round(eδi,sigdigits=1))mA"
+@info "Error computed $(round(1000*eδi,sigdigits=1))mA"
 @info "Current shift $(round(1000*ishift; sigdigits=3))mA"
 @info "Channel disagreement at Ic=$(i_xx0[i0])A is $(round(1000*abs.((zf1_fit[i0] + zf2_fit[i0]) / 2 );sigdigits=3))μm"
 @info "Channel error measured at Ic=$(i_xx0[i0])A is $(round(1000*abs.( 0.5 * sqrt( δzf1_fit[i0]^2 + δzf2_fit[i0]^2 ) ); sigdigits=3))μm"
 
+
+# ── Smoothing-spline fit for F1, with a coarse error-bar overlay ─────────────
 fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
 )
-z_final_fit = zeros(n_runs,i_sampled_length)
-cols = palette(:darkrainbow, n_runs)
 for i=1:n_runs
     xs = tables[i][CURRENT_ROW_START[i]:end,:x]
     ys = tables[i][CURRENT_ROW_START[i]:end,:y1]
-    δys = tables[i][CURRENT_ROW_START[i]:end,:sy1]
-    spl = BSplineKit.extrapolate(BSplineKit.fit(BSplineKit.BSplineOrder(4),xs,ys, 0.002, BSplineKit.Natural(); weights=1 ./ δys.^2),BSplineKit.Smooth())
-    z_final_fit[i,:] = spl.(i_xx0)
     scatter!(fig,xs, ys,
-        label=data_directories[i],
+        label=DIR_LIST[i],
         marker=(:circle, :white,3),
         markerstrokecolor=cols[i],
         markerstrokewidth=1,
         )
-    plot!(fig,i_xx0,spl.(i_xx0),
+    plot!(fig,i_xx0,z_final_fit[i,:],   # reuse the per-dataset curves fitted earlier
         label=false,
         line=(cols[i],1))
 end
-plot!(fig, Ic_qm, zm_qm, label="QM", line=(:red,:dash,2))
+plot!(fig, Ic_qm[mask_qm], zm_qm[mask_qm], label="QM", line=(:red,:dash,2))
 display(fig)
 plot!(fig,
 title = "Fit smoothing cubic spline",
@@ -2225,7 +2347,7 @@ if idx[end] != length(i_xx0)
     push!(idx, length(i_xx0))
 end
 plot!(fig,i_xx0[idx], zf1_fit[idx],
-    xerror = δi[idx] ./ 2,
+    xerror = δi[idx],          # δi is already a 1σ-style uncertainty — no /2
     yerror = δzf1_fit[idx],
     marker=(:square,1,:black),
     fillalpha=0.40, 
@@ -2236,6 +2358,9 @@ display(fig)
 saveplot(fig, "smoothing_interpolation_err")
 
 
+
+
+# ── Compare the three averaging methods against QM ──────────────────────────
 fig = plot(
     xlabel="Current (A)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
@@ -2252,49 +2377,49 @@ plot!(fig, i_xx0, zf1,
     fillcolor=:dodgerblue, 
     label="Average: interpolation cubic spline",
     line=(:dash,:dodgerblue,:2))
-plot!(fig, xi1, μ1; 
-    ribbon=σ1, 
+
+mask_mc = (xi1 .>= threshold) .& isfinite.(μ1) .& isfinite.(σ1)
+plot!(fig, xi1[mask_mc], μ1[mask_mc]; 
+    ribbon=σ1[mask_mc], 
     label="Interpolation MC",
     color=:orangered2
 )
-plot!(fig, Ic_qm, zm_qm, label=L"QM $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:red,:dash,2))
+plot!(fig, Ic_qm[mask_qm], zm_qm[mask_qm], label=L"QM $(n_{z},\sigma,λ_{0})=(%$(SIM_PARAMS.nz),%$(Int(1000*SIM_PARAMS.σw ))\mathrm{\mu m},%$(SIM_PARAMS.λ0 ))$", line=(:red,:dash,2))
 plot!(fig,
 xaxis=:log10, 
 yaxis=:log10,
 xticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
 yticks = ([ 1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-xlims = (15e-3,1.0),
-ylims = (1e-3, 2),
+xlims = (10e-3,1.0),
+ylims = (1e-2, 2),
 legend=:bottomright,
 )
 display(fig)
 saveplot(fig, "inter_vs_mc_vs_fit")
 
 
-
-include("./Modules/TheoreticalSimulation.jl");
 fig = plot(
     xlabel="Magnetic field gradient  (T/m)",
     ylabel=L"$F_{1} : z_{\mathrm{peak}}$ (mm)",
 )
-plot!(fig,TheoreticalSimulation.GvsI(i_xx0), zf1_fit,
+plot!(fig,TheoreticalSimulation.GvsI.(i_xx0), zf1_fit,
     ribbon = δzf1_fit,
     fillalpha=0.40, 
     fillcolor=:green, 
     label="Average: smoothing cubic spline",
     line=(:dot,:green,:2))
-plot!(fig, TheoreticalSimulation.GvsI(i_xx0), zf1,
+plot!(fig, TheoreticalSimulation.GvsI.(i_xx0), zf1,
     ribbon = δzf1,
     fillalpha=0.40, 
     fillcolor=:dodgerblue, 
     label="Average: interpolation cubic spline",
     line=(:dash,:dodgerblue,:2))
-plot!(fig, TheoreticalSimulation.GvsI(xi1), μ1; 
+plot!(fig, TheoreticalSimulation.GvsI.(xi1), μ1; 
     ribbon=σ1, 
     label="Interpolation MC",
     color=:orangered2
 )
-plot!(fig, TheoreticalSimulation.GvsI.(Ic_qm), zm_qm, label=L"QM $(n_{z},\sigma,λ_{0})=(%$(nz_fix),%$(Int(1000*σ_fix))\mathrm{\mu m},%$(λ0_fix))$", line=(:red,:dash,2))
+plot!(fig, TheoreticalSimulation.GvsI.(Ic_qm), zm_qm,label=L"QM $(n_{z},\sigma,λ_{0})=(%$(SIM_PARAMS.nz),%$(Int(1000*SIM_PARAMS.σw ))\mathrm{\mu m},%$(SIM_PARAMS.λ0 ))$", line=(:red,:dash,2))
 plot!(fig,
 xaxis=:log10, 
 yaxis=:log10,
@@ -2308,12 +2433,12 @@ display(fig)
 saveplot(fig, "g_inter_vs_mc_vs_fit")
 
 
-jldsave(joinpath(OUTDIR,"data_averaged_$(selected_bin).jld2"), 
+jldsave(joinpath(OUTDIR,"data_averaged_$(SIM_PARAMS.nz).jld2"), 
     data=OrderedDict(
-        :nz_bin         => selected_bin,
-        :σw_um          => round(1000*σ_fix; sigdigits=6),
-        :λ0_spl         => selected_spl,
-        :dir            => data_directories,
+        :nz_bin         => SIM_PARAMS.nz,
+        :σw_um          => round(1000*SIM_PARAMS.σw; sigdigits=6),
+        :λ0_spl         => SIM_PARAMS.λ0,
+        :dir            => DIR_LIST,
         :mag_factor     => hcat(magnification_factor_ith ,magnification_factor_error_ith),
         :tol_grouping   => tol_grouping,
         :Ic_grouped     => hcat(Ic_grouped , δIc_grouped),
@@ -2340,116 +2465,3 @@ T_RUN = Dates.canonicalize(T_END-T_START)
 println("\nEXPERIMENTS ANALYSIS FINISHED! $(T_RUN)")
 alert("EXPERIMENTS ANALYSIS FINISHED!")
 
-
-# using Optim
-
-# zQM_itpl = BSplineKit.extrapolate(BSplineKit.interpolate(Ic_qm, zm_qm, BSplineKit.BSplineOrder(4),BSplineKit.Natural()),BSplineKit.Linear())
-# # index cutoff
-# idx = 8
-
-
-
-# # -------------------------------------------------------------
-# # 1. Scaling model:   z_scaled = X/s + r
-# # -------------------------------------------------------------
-# scale_model(X, r, s) = @. X/s + r 
-
-# # -------------------------------------------------------------
-# # 2. Log-error function with positivity constraints
-# # -------------------------------------------------------------
-# function log_error(X::Vector, Y::Vector)
-#     function f(x)
-#         r, s = x
-#         s <= 0 && return Inf
-
-#         vals = scale_model(X, r, s)
-#         any(vals .<= 0) && return Inf  # log safety
-
-#         diff = log10.(Y) .- log10.(vals)
-#         return sum(diff .^ 2)
-#     end
-#     return f
-# end
-
-# # -------------------------------------------------------------
-# # 3. Fit (r, s) using Nelder–Mead
-# # -------------------------------------------------------------
-# function fit_rs(X::Vector, Y::Vector; x0=[0.0, 1.0])
-#     f = log_error(X, Y)
-#     res = optimize(f, x0, NelderMead())
-#     return Optim.minimizer(res) 
-# end
-
-# # -------------------------------------------------------------
-# # Plot (QM vs Experiment)
-# # -------------------------------------------------------------
-# function plotting_qm_fixed(X::Vector,Y::Vector; idx::Integer = 1, title::String = "title" , yscale::Symbol = :identity)
-#     z0_fit, m_fit = fit_rs(X, Y; x0=[0.0, 1.0])
-
-#     X_scaled = scale_model(X, z0_fit, m_fit)
-
-#     fig1 = plot(Ic_qm, zm_qm,
-#         label="Model: QM",
-#         line=(:dash,:blue,2));
-#     plot!(i_xx0[idx:end], X_scaled,
-#         label="Experiment: Scaled ($(@sprintf("%2.2f",m_fit*mean(magnification_factor_ith))), $(@sprintf("%2.2f",1000*z0_fit))μm)",
-#         line=(:solid,0.75,2,:red)
-#     );
-#     plot!(
-#         title=title,
-#         xaxis = (L"$I_{c} \ (\mathrm{A})$",
-#                 (10e-3,1),
-#                 ([1e-3, 1e-2, 1e-1, 1.0], 
-#                     [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#                 :log10,),
-#         yaxis=(L"$z_{\mathrm{max}} \ (\mathrm{mm})$",yscale),
-#         legend=:bottomright,
-#     );
-#     display(fig1)
-
-#     fig2 = plot(i_xx0[idx:end], 100 .*( Y ./ X  .- 1),
-#         label="Experiment : original",
-#         line=(:solid,:red,2)
-#     );
-#     plot!(i_xx0[idx:end], 100*(Y ./ X_scaled .- 1),
-#         label  = "Experiment : scaled",
-#         line=(:solid,:dodgerblue4,2),
-#         ylabel = "Relative Error (%)",
-#         xaxis = (L"$I_{c} \ (\mathrm{A})$",
-#                 (10e-3,1),
-#                 ([1e-3, 1e-2, 1e-1, 1.0], 
-#                     [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-#                 :log10,),
-#     );
-#     hline!([0], line=(:dash,:black,1), label=nothing)
-
-#     fig = plot(fig1,fig2,
-#         layout=(2,1),
-#         size=(800,500),
-#         left_margin=3mm,)
-#     display(fig)
-
-#     return (m_fit = m_fit, z0_fit = z0_fit, fig=fig)
-# end
-
-# # plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:log10)
-# # plotting_qm_fixed(zf1_fit[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline fitting", yscale=:identity)
-
-# # plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:log10)
-# # plotting_qm_fixed(zf1[idx:end],zQM_itpl.(i_xx0[idx:end]); idx=idx, title="Spline interpolation", yscale=:identity)
-
-# # ss = load(joinpath(@__DIR__,"20250820","data_processed.jld2"))
-
-# # ss["data"]
-# # ss["data"][:Currents]
-# # size(ss["data"][:F1ProcessedImages])
-# # ss["data"][:F1ProcessedImages]
-
-
-# jldopen(joinpath(@__DIR__,"EXPDATA_ANALYSIS","summary","20260225","20260225_report_summary.jld2"),"r") do file
-#     println(file["meta/Currents"])
-#     file[JLD2_MyTools.make_keypath_exp("20260225",2,0.10)]
-# end
-
-# f["meta"]
-# f[JLD2_MyTools.make_keypath_exp("20260211",2,0.01)]
