@@ -68,6 +68,10 @@ using .TheoreticalSimulation;
 TheoreticalSimulation.SAVE_FIG = SAVE_FIG;
 TheoreticalSimulation.FIG_EXT  = FIG_EXT;
 TheoreticalSimulation.OUTDIR   = OUTDIR;
+TheoreticalSimulation.set_magnetic_field!(:manual)       # back to the default (apparatus manual)
+TheoreticalSimulation.set_magnetic_field!(:calibration)  # switch B and G together
+TheoreticalSimulation.magnetic_field_mode()              # which one is active
+
 
 println("\n\t\tRunning process on:\t $(RUN_STAMP) \n")
 
@@ -678,6 +682,7 @@ EXPERIMENT
     atom                    : $(atom)
     Output directory        : $(OUTDIR)
     RUN_STAMP               : $(RUN_STAMP)
+    Magnetic field          : $(String(TheoreticalSimulation.magnetic_field_mode()))
 
 CAMERA FEATURES
     Number of pixels        : $(nx_pixels) × $(nz_pixels)
@@ -1410,6 +1415,7 @@ EXPERIMENT
     atom                    : $(atom)
     Output directory        : $(OUTDIR)
     RUN_STAMP               : $(RUN_STAMP)
+    Magnetic field          : $(String(TheoreticalSimulation.magnetic_field_mode()))
 
 CAMERA FEATURES
     Number of pixels        : $(nx_pixels) × $(nz_pixels)
