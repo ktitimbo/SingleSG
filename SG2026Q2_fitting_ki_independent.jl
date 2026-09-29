@@ -136,6 +136,8 @@ include("./Modules/DataReading.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
 include("./Modules/JLD2_MyTools.jl");
 
+
+
 ##################################################################################################
 JLD2_MyTools.save_script_copy(OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP)
 ##################################################################################################
@@ -156,7 +158,17 @@ const δI_FRAC = 0.001       # δI placeholder for the δI curve
 const TAIL_SCALE_MODE = :log     # :linear | :log | :legacy — same for CQD and QM
 const I_PLATEAU       = 0.60     # (A) plateau = tails confined to I_min ≥ I_PLATEAU
 
-
+# =============================================================================
+# -----------------------------------------------------------------------------
+TheoreticalSimulation.set_magnetic_field!(:calibration)  # Calibration/Experimental field
+table_qm_path = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP", "QM_T205_8M_Bexp",
+                         "qm_screen_profiles_f1_table.jld2");
+table_cqd_path = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP", "CQD_T205_8M_Bexp",
+                          "cqd_8M_up_profiles.jld2");
+experiment_path = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", "SUMMARY2026", "AugSep2026",
+                        "data_averaged_2.jld2")
+# -----------------------------------------------------------------------------
+# =============================================================================
 
 # =============================================================================
 # 0a) Small numerical helpers
@@ -1377,8 +1389,6 @@ nI = length(Icoils);
 # QM table: dictionary keyed by (nz_bins, gaussian_width_mm, λ0_raw); each entry
 # holds the screen-profile analysis for all currents in `Icoils`.
 # -----------------------------------------------------------------------------
-table_qm_path = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP", "QM_T205_8M_Bexp",
-                         "qm_screen_profiles_f1_table.jld2");
 JLD2_MyTools.summarize_meta_qm_jld2(table_qm_path)
 qm_meta = JLD2_MyTools.list_keys_jld_qm(table_qm_path);
 @info "QM table" n_keys = length(qm_meta.keys) nz = qm_meta.nz σw = qm_meta.σw λ0 = qm_meta.λ0
@@ -1391,8 +1401,6 @@ qm_meta = JLD2_MyTools.list_keys_jld_qm(table_qm_path);
 #   nz : z-bins, σw : Gaussian smoothing width (mm), λ0 : raw smoothing,
 #   λs : spline smoothing (present in `meta` only)
 # -----------------------------------------------------------------------------
-table_cqd_path = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP", "CQD_T205_8M",
-                          "cqd_8M_up_profiles.jld2");
 cqd_info = JLD2_MyTools.list_keys_jld_cqd(table_cqd_path);
 cqd_meta = OrderedDict{Symbol,Any}(
     :ki => round.(cqd_info.ki, digits=3),
@@ -1464,9 +1472,6 @@ end
 section("2", "EXPERIMENTAL DATA — combined curve and scattered table")
 ##################################################################################################
 
-
-experiment_path = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", "SUMMARY2026", "AugSep2026",
-                        "data_averaged_2.jld2")
 exp_avg = load(experiment_path)["data"];
 @info "Experimental data loaded" n_smooth = length(exp_avg[:i_smooth]) n_grouped = size(exp_avg[:Ic_grouped], 1)
  
@@ -1624,8 +1629,8 @@ pretty_table(data;
 # The calibration tail is chosen separately (N_TAIL) and may overlap.
 # -----------------------------------------------------------------------------
 # kᵢ-loss subset on the continuous curve
-const FIT_KI_MODE = :full   # :full | :low | :high | :low_high
-const N_FRONT     = 30      # points in the low-current window
+const FIT_KI_MODE = :low   # :full | :low | :high | :low_high
+const N_FRONT     = 4600      # points in the low-current window
 const N_BACK      = 200     # points in the high-current window
 
 low_range  = 1:N_FRONT;
@@ -2102,6 +2107,9 @@ jldopen(archive_path, "w") do f
     f["meta/host"]            = gethostname()
     f["meta/julia"]           = string(VERSION)
     f["meta/experiment_file"] = experiment_path
+    f["meta/qm_file"]         = table_qm_path
+    f["meta/cqd_file"]        = table_cqd_path
+
 
     # --- settings ---
     f["settings/nx"]            = NX_FIXED
