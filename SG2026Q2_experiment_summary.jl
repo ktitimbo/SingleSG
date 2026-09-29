@@ -111,8 +111,8 @@ const SETUP = let matched = (:λ0, :nz, :σw)
               qm     = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP",
                                 "QM_T205_8M_Bexp", "qm_screen_profiles_f1_table.jld2"),
               cqd_up = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP",
-                                "CQD_T205_8M_v2",
-                                "cqd_8000000_up_profiles_bykey.jld2")))
+                                "CQD_T205_8M_Bexp",
+                                "cqd_8000000_up_profiles.jld2")))
 end
 
 
