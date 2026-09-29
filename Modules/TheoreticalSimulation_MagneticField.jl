@@ -9,9 +9,12 @@
 #      converting between coil current and the resulting field gradient.
 #
 #   2. Magnetic field vs current (BvsI)
-#      A second, independent calibration — this one loaded from a CSV file
-#      at module-init time rather than hardcoded — mapping coil current to
+#      A second calibration, loaded from a CSV file, mapping coil current to
 #      field magnitude.
+#
+#      B and G are always installed as a matched pair via
+#      `set_magnetic_field!(:manual | :calibration)` (default chosen in
+#      `__init__`, overridable with ENV["SG_CALIBRATION"]).
 #
 #   3. Magnet shape geometry (EdgeGeom / TrenchGeom / z_magnet_edge / z_magnet_trench)
 #      Closed-form piecewise profiles for the physical top-edge and
@@ -248,8 +251,8 @@ const GRAD_TABLE_PATH = joinpath(@__DIR__, "SG_GvsI_calibration.csv")
 
 """
 Internal: Akima-spline interpolant mapping current → gradient.
-Filled in by `set_gradient_table!` (called from `__init__` or
-`load_gradient_table!`). Call via `GvsI(I)`, not directly.
+Filled in by `set_magnetic_field!` (called from `__init__`), or manually by
+`set_gradient_table!`/`load_gradient_table!`. Call via `GvsI(I)`, not directly.
 
 Typed `Ref{Any}` because the concrete interpolant type isn't known until the
 table is loaded; see `_eval_itp` for how the resulting type-instability is
@@ -276,25 +279,42 @@ independent variable, and Akima interpolation needs sorted `t` data).
 
 As with the old hardcoded version, an Akima spline can slightly
 overshoot/undershoot between table points even for monotonic data.
+
+NOTE: this overrides only the gradient, so B and G are no longer a matched
+pair. The active calibration mode is set to `:custom` to reflect that (see
+`set_magnetic_field!` for switching both together).
 """
 function set_gradient_table!(I::AbstractVector, G::AbstractVector)
+    itps = _build_gradient_itps(I, G)
+    _GvsI[] = itps.GvsI
+    _IvsG[] = itps.IvsG
+    _CALIBRATION_MODE[] = :custom
+    return nothing
+end
+
+"""
+    _build_gradient_itps(I, G) -> NamedTuple{(:GvsI, :IvsG)}
+
+Internal: validate the `I, G` table and build (without installing) the
+current → gradient and gradient → current Akima interpolants.
+"""
+function _build_gradient_itps(I::AbstractVector, G::AbstractVector)
     length(I) == length(G) || error("I and G must have the same length (got $(length(I)) and $(length(G))).")
     p = sortperm(I)
     I_vec = Float64.(I[p])
     G_vec = Float64.(G[p])
     all(diff(I_vec) .> 0) || error("Gradient table: currents must be strictly increasing (duplicate currents?).")
     all(diff(G_vec) .> 0) || error("Gradient table: gradient must be strictly increasing with current (IvsG inverts the table).")
-    _GvsI[] = DataInterpolations.AkimaInterpolation(G_vec, I_vec; extrapolation = ExtrapolationType.Linear)
-    _IvsG[] = DataInterpolations.AkimaInterpolation(I_vec, G_vec; extrapolation = ExtrapolationType.Linear)
-    return nothing
+    return (GvsI = DataInterpolations.AkimaInterpolation(G_vec, I_vec; extrapolation = ExtrapolationType.Linear),
+            IvsG = DataInterpolations.AkimaInterpolation(I_vec, G_vec; extrapolation = ExtrapolationType.Linear))
 end
 
 """
     load_gradient_table!(path::AbstractString = GRAD_TABLE_PATH) -> Nothing
 
-Read a two-column CSV (`I, G`; current in A, gradient in T/m) and rebuild the
-gradient interpolants from it. Called automatically from `__init__` with the
-default path; call it yourself to switch calibration files at runtime, e.g.
+Read a two-column CSV (`I, G`; current in A, gradient in T/m) and rebuild only
+the gradient interpolants from it (B(I) is left untouched, mode → `:custom`).
+For the normal paired switch use `set_magnetic_field!` instead, e.g.
 
     load_gradient_table!("C:/data/other_calibration.csv")
 """
@@ -346,16 +366,23 @@ end
 # ──────────────────────────────────────────────────────────────────────────────
 
 """
-Absolute path to the B-vs-I CSV used at runtime.
+Absolute path to the B-vs-I CSV used by the `:calibration` mode
+(paired with `GRAD_TABLE_PATH`).
 Expected CSV columns (no header row override): `dI, Bz`.
 
 NOTE: `header=["dI","Bz"]` is passed to `CSV.read` below (forcing these
 column names and treating row 1 of the file as the first *data* row, not a
-header row). If `SG_BvsI.csv` actually has its own header line, that line
+header row). If the file actually has its own header line, that line
 would be silently read as a data row instead.
 """
 const B_TABLE_PATH = joinpath(@__DIR__, "SG_BvsI_calibration.csv")
-@info "Importing file from $(B_TABLE_PATH)"
+
+"""
+Absolute path to the B-vs-I CSV used by the `:manual` mode (calibration from
+the apparatus manual; paired with the built-in `GRAD_CURRENTS`/`GRAD_GRADIENT`
+table). Same format as `B_TABLE_PATH`.
+"""
+const B_TABLE_PATH_MANUAL = joinpath(@__DIR__, "SG_BvsI.csv")
 
 # Strictly-positive floor for B (tesla). Adjust if you want a different minimum.
 const B_FLOOR = 1.0e-18
@@ -383,39 +410,172 @@ type-instability is contained to a single cheap dynamic dispatch.
 const _BvsI = Ref{Any}(nothing)
 
 """
+    _build_B_itp(path::AbstractString) -> AkimaInterpolation
+
+Internal: read a two-column `dI, Bz` CSV and build the Akima-spline
+interpolant `B(I)` with linear extrapolation. Every `Bz` value is passed
+through `_posfloor`, and both columns are forced to `Vector{Float64}` so
+`_BvsI[]` always holds one predictable concrete type (whichever mode is used).
+"""
+function _build_B_itp(path::AbstractString)
+    isfile(path) || error("B table not found at $path.")
+    df = CSV.read(path, DataFrame; header=["dI","Bz"])
+    bz_pos = Float64.(map(_posfloor, df.Bz))
+    dI_vec = Float64.(df.dI)
+    return DataInterpolations.AkimaInterpolation(bz_pos, dI_vec; extrapolation = ExtrapolationType.Linear)
+end
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Calibration selector: B(I) and G(I) are always switched together
+# ──────────────────────────────────────────────────────────────────────────────
+
+"""
+Available calibration modes. B(I) and G(I)/I(G) always come as a pair:
+
+| mode           | B(I) source               | G(I) / I(G) source                         |
+|:---------------|:--------------------------|:-------------------------------------------|
+| `:manual`      | `SG_BvsI.csv`             | built-in `GRAD_CURRENTS` / `GRAD_GRADIENT` |
+| `:calibration` | `SG_BvsI_calibration.csv` | `SG_GvsI_calibration.csv`                  |
+
+`:manual` is the calibration given in the apparatus manual (default).
+"""
+const CALIBRATION_MODES = (:manual, :calibration)
+
+"""
+Default mode selected in `__init__`. Can be overridden *before* loading the
+module with the environment variable `SG_CALIBRATION` (`"manual"` or
+`"calibration"`), e.g. `ENV["SG_CALIBRATION"] = "calibration"` at the top of a script.
+"""
+const DEFAULT_CALIBRATION = :manual
+
+"""
+Internal: currently installed mode (`:none` before init, `:custom` after a
+manual `set_gradient_table!`/`load_gradient_table!` override).
+"""
+const _CALIBRATION_MODE = Ref{Symbol}(:none)
+
+"""
+Internal: interpolants already built for each mode, so switching back and
+forth only swaps references (no CSV re-read, no new compilation — every mode
+produces the same concrete interpolant types).
+"""
+const _CALIBRATION_CACHE = Dict{Symbol,Any}()
+
+"""
+    _build_calibration(mode::Symbol) -> NamedTuple{(:GvsI, :IvsG, :BvsI)}
+
+Internal: build the three paired interpolants for `mode` (see `CALIBRATION_MODES`).
+"""
+function _build_calibration(mode::Symbol)
+    if mode === :manual
+        g = _build_gradient_itps(GRAD_CURRENTS, GRAD_GRADIENT)
+        b = _build_B_itp(B_TABLE_PATH_MANUAL)
+    elseif mode === :calibration
+        isfile(GRAD_TABLE_PATH) || error("Gradient table not found at $GRAD_TABLE_PATH.")
+        df = CSV.read(GRAD_TABLE_PATH, DataFrame; header=["I", "G"])
+        g = _build_gradient_itps(df.I, df.G)
+        b = _build_B_itp(B_TABLE_PATH)
+    else
+        throw(ArgumentError("Unknown calibration mode :$mode. Valid modes: $(CALIBRATION_MODES)."))
+    end
+    return (GvsI = g.GvsI, IvsG = g.IvsG, BvsI = b)
+end
+
+"""
+    set_magnetic_field!(mode::Symbol) -> Symbol
+
+Select the field/gradient calibration used by **every** function that calls
+`BvsI`, `GvsI` or `IvsG` (equations of motion, discarded-particle kernels,
+μF_effective, analytic-field matching, ...). B and G are always switched
+together — see `CALIBRATION_MODES` for the pairing.
+
+    TheoreticalSimulation.set_magnetic_field!(:manual)       # SG_BvsI.csv + built-in gradient table
+    TheoreticalSimulation.set_magnetic_field!(:calibration)  # SG_BvsI_calibration.csv + SG_GvsI_calibration.csv
+
+Interpolants are built on first use of each mode and cached afterwards.
+
+NOTE: this mutates global state. Call it before launching threaded work
+(`@threads`, `EnsembleThreads`, ...), not from inside it.
+"""
+function set_magnetic_field!(mode::Symbol)
+    mode in CALIBRATION_MODES ||
+        throw(ArgumentError("Unknown calibration mode :$mode. Valid modes: $(CALIBRATION_MODES)."))
+    itps = get!(() -> _build_calibration(mode), _CALIBRATION_CACHE, mode)
+    _GvsI[] = itps.GvsI
+    _IvsG[] = itps.IvsG
+    _BvsI[] = itps.BvsI
+    _CALIBRATION_MODE[] = mode
+    @info "SG magnetic field calibration: :$mode" _calibration_sources(mode)...
+    return mode
+end
+
+"""
+    _calibration_sources(mode::Symbol) -> NamedTuple
+
+Internal: human-readable description of where B(I) and G(I) come from in
+`mode`, used for the `@info` line printed by `set_magnetic_field!`.
+"""
+function _calibration_sources(mode::Symbol)
+    if mode === :manual
+        return (description = "apparatus manual",
+                B = basename(B_TABLE_PATH_MANUAL),
+                G = "built-in GRAD_CURRENTS / GRAD_GRADIENT table")
+    else
+        return (description = "measured calibration",
+                B = basename(B_TABLE_PATH),
+                G = basename(GRAD_TABLE_PATH))
+    end
+end
+
+"""
+    magnetic_field_mode() -> Symbol
+
+Currently active calibration mode (`:manual`, `:calibration`, `:custom`, or
+`:none` if nothing was loaded). Useful to store alongside simulation results.
+"""
+magnetic_field_mode() = _CALIBRATION_MODE[]
+
+"""
+    with_magnetic_field(f, mode::Symbol)
+
+Run `f()` with `mode` active, then restore the previous mode (even on error):
+
+    TheoreticalSimulation.with_magnetic_field(:calibration) do
+        QM_analyze_profiles_to_dict(...)
+    end
+
+Not thread-safe: do not nest inside threaded code (see `set_magnetic_field!`).
+"""
+function with_magnetic_field(f, mode::Symbol)
+    old = _CALIBRATION_MODE[]
+    set_magnetic_field!(mode)
+    try
+        return f()
+    finally
+        old in CALIBRATION_MODES && set_magnetic_field!(old)
+    end
+end
+
+"""
     __init__() -> Nothing
 
-Module init hook (a module may only have one, so it initializes both tables).
-
-1. Gradient: builds `_GvsI`/`_IvsG` from the built-in `GRAD_CURRENTS`/
-   `GRAD_GRADIENT` first, then overrides them from `SG_GvsI.csv` if that file
-   exists next to this file.
-2. B(I): if `SG_BvsI.csv` exists, reads it and builds an Akima-spline
-   interpolant `B(I)` with linear extrapolation. Every `Bz` value is passed
-   through `_posfloor`, and both columns are forced to `Vector{Float64}` so
-   `_BvsI[]` holds one predictable concrete type.
+Module init hook (a module may only have one). Installs the paired B/G
+calibration given by `ENV["SG_CALIBRATION"]` if set, else `DEFAULT_CALIBRATION`.
+If the needed files are missing, it warns and leaves the tables uninitialized
+(so `BvsI`/`GvsI` error on use instead of silently mixing calibrations).
 
 Reading files here (rather than at top-level `const` evaluation) defers file
 I/O until the module is loaded, not during precompilation.
 """
 function __init__()
-    # ── Gradient table: built-in fallback, then CSV override ──
-    set_gradient_table!(GRAD_CURRENTS, GRAD_GRADIENT)
-    if isfile(GRAD_TABLE_PATH)
-        load_gradient_table!()
-    else
-        @warn "Gradient table not found at $GRAD_TABLE_PATH; using built-in calibration."
+    mode = Symbol(get(ENV, "SG_CALIBRATION", String(DEFAULT_CALIBRATION)))
+    try
+        set_magnetic_field!(mode)
+    catch err
+        @warn "Could not initialize SG calibration :$mode" exception = err
     end
-
-    # ── B(I) table ──
-    if isfile(B_TABLE_PATH)
-        df = CSV.read(B_TABLE_PATH, DataFrame; header=["dI","Bz"])
-        bz_pos = Float64.(map(_posfloor, df.Bz))
-        dI_vec = Float64.(df.dI)
-        _BvsI[] = DataInterpolations.AkimaInterpolation(bz_pos, dI_vec; extrapolation = ExtrapolationType.Linear)
-    else
-        @warn "B table not found at $B_TABLE_PATH."
-    end
+    return nothing
 end
 
 """
@@ -426,8 +586,8 @@ using the interpolation loaded from the CSV at module init. The result is
 passed through `_posfloor` again so interpolated/extrapolated values also stay
 away from zero.
 
-Throws an error if the table was not initialized (i.e. `SG_BvsI.csv` wasn't
-found when the module loaded).
+The source table depends on the active mode (see `set_magnetic_field!`).
+Throws an error if no calibration was initialized.
 
 # Performance
 `_BvsI[]` reads as `Any`, so `BvsI` hands `itp` off to `_bvsi_eval`
