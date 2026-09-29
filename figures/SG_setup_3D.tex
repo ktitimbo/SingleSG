@@ -1,0 +1,331 @@
+\documentclass[tikz,border=6pt]{standalone}
+
+\usepackage{amsmath}
+\usetikzlibrary{3d,arrows.meta,calc}
+
+% =====================================================================
+%  3D schematic of the Stern--Gerlach setup
+%  Oven -> S1 (slit) -> SG magnet -> S2 (circular aperture) -> Detector
+%
+%  All coordinates are in mm.  Transverse sizes (x,z) of the magnet are
+%  the real ones; the longitudinal distances (y) are schematic and can be
+%  changed in the "LAYOUT" block below.
+%  Beam propagates along +y, the field gradient is along +z.
+% =====================================================================
+
+\begin{document}
+
+\begin{tikzpicture}[
+    % ---- projection: x toward the viewer (left-down), y along the beam, z up
+    x={(-0.090cm,-0.042cm)},
+    y={( 0.044cm,-0.014cm)},
+    z={( 0.000cm, 0.160cm)},
+    line join=round, line cap=round,
+    dim/.style={{Latex[length=5pt]}-{Latex[length=5pt]}, line width=0.9pt, draw=dimcolor},
+    guide/.style={dotted, line width=0.6pt, draw=dimcolor},
+]
+
+% ---------------------------------------------------------------------
+% Colors
+% ---------------------------------------------------------------------
+\definecolor{botcolor}{RGB}{200, 10, 10}
+\definecolor{topcolor}{RGB}{10, 10, 200}
+\definecolor{edgecolor}{RGB}{30, 30, 30}
+\definecolor{dimcolor}{RGB}{60, 120, 200}
+\definecolor{ovencolor}{RGB}{245, 160, 80}
+\colorlet{beamcolor}{red!50!blue}
+\colorlet{upbeam}{topcolor!80!white}
+\colorlet{downbeam}{botcolor!85!white}
+
+% ---------------------------------------------------------------------
+% LAYOUT (y positions, mm) -- schematic, change freely
+% ---------------------------------------------------------------------
+\pgfmathsetmacro{\lOne}{70}   % oven aperture  -> S1
+\pgfmathsetmacro{\lTwo}{22}   % S1             -> magnet entrance
+\pgfmathsetmacro{\lSG}{100}   % magnet length
+\pgfmathsetmacro{\lThr}{45}   % magnet exit    -> S2
+\pgfmathsetmacro{\lFou}{85}   % S2             -> detector
+
+\pgfmathsetmacro{\yOven}{0}
+\pgfmathsetmacro{\yOvenBack}{-35}
+\pgfmathsetmacro{\ySa}{\yOven+\lOne}
+\pgfmathsetmacro{\yMin}{\ySa+\lTwo}
+\pgfmathsetmacro{\yMout}{\yMin+\lSG}
+\pgfmathsetmacro{\ySb}{\yMout+\lThr}
+\pgfmathsetmacro{\yDet}{\ySb+\lFou}
+
+\pgfmathsetmacro{\tp}{1.5}    % half thickness of the plates S1, S2
+
+% Plates / oven / detector transverse half-sizes
+\pgfmathsetmacro{\px}{12}  \pgfmathsetmacro{\pz}{10}
+\pgfmathsetmacro{\ox}{12}  \pgfmathsetmacro{\oz}{11}
+\pgfmathsetmacro{\dx}{15}  \pgfmathsetmacro{\dzz}{13}
+
+% Apertures
+\pgfmathsetmacro{\ovenAx}{4.0}  \pgfmathsetmacro{\ovenAz}{0.6}  % oven slit half-sizes
+\pgfmathsetmacro{\saAx}{5.0}    \pgfmathsetmacro{\saAz}{0.8}    % S1 slit half-sizes
+\pgfmathsetmacro{\sbR}{3.0}                                     % S2 radius
+
+% ---------------------------------------------------------------------
+% Magnet cross-section (identical to the stand-alone magnet figure)
+% ---------------------------------------------------------------------
+\pgfmathsetmacro{\xmin}{-10.5}
+\pgfmathsetmacro{\xmax}{ 10.5}
+\pgfmathsetmacro{\zmin}{-5.0}
+\pgfmathsetmacro{\aa}{2.5}
+\pgfmathsetmacro{\zc}{1.3*\aa}
+\pgfmathsetmacro{\redge}{1.0*\aa}
+\pgfmathsetmacro{\rtrench}{1.362*\aa}
+\pgfmathsetmacro{\rtrenchc}{(1.3 - 1.018)*\aa}
+\pgfmathsetmacro{\lw}{1.58*\aa}
+\pgfmathsetmacro{\phi}{30}
+\pgfmathsetmacro{\m}{tan(\phi)}
+\pgfmathsetmacro{\xledge}{\rtrench + \lw*cos(\phi)}
+\pgfmathsetmacro{\zledge}{\rtrenchc + \lw*sin(\phi)}
+\pgfmathsetmacro{\zup}{\zc + \m*(\xmax - \redge)}
+
+\pgfmathsetmacro{\opFace}{0.55}
+\pgfmathsetmacro{\opSurf}{0.40}
+
+% ---------------------------------------------------------------------
+% Beam trajectories (deflection exaggerated for clarity)
+% ---------------------------------------------------------------------
+\pgfmathsetmacro{\dzm}{0.5}   % |z| at magnet exit
+\pgfmathsetmacro{\zdet}{7.0}  % |z| at detector
+\pgfmathsetmacro{\kk}{(\zdet-\dzm)/(\yDet-\yMout)}
+\pgfmathsetmacro{\zSb}{\dzm+\kk*(\ySb+\tp-\yMout)}
+
+% Dimension line position
+\pgfmathsetmacro{\xdim}{20}
+\pgfmathsetmacro{\zdim}{-16}
+
+% =====================================================================
+% Helper macros
+% =====================================================================
+
+% Magnet cross-section outlines at a given y  (#1 = y)
+\newcommand{\topProfile}[1]{%
+    (\xmin,#1,\zup) -- (\xmax,#1,\zup) -- (\redge,#1,\zc)
+    -- plot[domain=360:180, samples=60, variable=\ang]
+        ({\redge*cos(\ang)},#1,{\zc+\redge*sin(\ang)})
+    -- cycle}
+\newcommand{\botProfile}[1]{%
+    (\xmin,#1,\zmin) -- (\xmax,#1,\zmin) -- (\xmax,#1,\zledge)
+    -- (\xledge,#1,\zledge) -- (\rtrench,#1,\rtrenchc)
+    -- plot[domain=0:180, samples=60, variable=\ang]
+        ({\rtrench*cos(\ang)},#1,{\rtrenchc-\rtrench*sin(\ang)})
+    -- (-\xledge,#1,\zledge) -- (\xmin,#1,\zledge) -- cycle}
+
+% Inner (pole-face) profile lines of one end face  (#1 = y)
+\newcommand{\poleLines}[1]{%
+    \draw[topcolor!70!black, line width=1.0pt]
+        (\xmax,#1,\zup) -- (\redge,#1,\zc)
+        -- plot[domain=360:180, samples=60, variable=\ang]
+            ({\redge*cos(\ang)},#1,{\zc+\redge*sin(\ang)})
+        -- (\xmin,#1,\zup);
+    \draw[botcolor!70!black, line width=1.0pt]
+        (\xmax,#1,\zledge) -- (\xledge,#1,\zledge) -- (\rtrench,#1,\rtrenchc)
+        -- plot[domain=0:180, samples=60, variable=\ang]
+            ({\rtrench*cos(\ang)},#1,{\rtrenchc-\rtrench*sin(\ang)})
+        -- (-\xledge,#1,\zledge) -- (\xmin,#1,\zledge);
+    \draw[edgecolor, line width=1.2pt]
+        (\xmin,#1,\zup) -- (\xmax,#1,\zup)
+        (\xmin,#1,\zmin) -- (\xmax,#1,\zmin)
+        (\xmin,#1,\zmin) -- (\xmin,#1,\zledge)
+        (\xmax,#1,\zmin) -- (\xmax,#1,\zledge);
+}
+
+% Thin plate centred at y = #1 ; #2 = aperture path in the xz canvas
+\newcommand{\plate}[2]{%
+    % side (+x) and top (+z) faces
+    \fill[gray!55] (\px,#1-\tp,-\pz) -- (\px,#1+\tp,-\pz)
+                -- (\px,#1+\tp,\pz) -- (\px,#1-\tp,\pz) -- cycle;
+    \fill[gray!30] (-\px,#1-\tp,\pz) -- (\px,#1-\tp,\pz)
+                -- (\px,#1+\tp,\pz) -- (-\px,#1+\tp,\pz) -- cycle;
+    % downstream face with the aperture cut out
+    \begin{scope}[canvas is xz plane at y=#1+\tp]
+        \shade[left color=gray!10, right color=gray!45, even odd rule]
+            (-\px,-\pz) rectangle (\px,\pz) #2;
+        \draw[edgecolor, line width=0.5pt] (-\px,-\pz) rectangle (\px,\pz);
+        \draw[edgecolor, line width=0.5pt] #2;
+    \end{scope}
+    \draw[edgecolor, line width=0.5pt]
+        (\px,#1+\tp,-\pz) -- (\px,#1-\tp,-\pz) -- (\px,#1-\tp,\pz)
+        -- (-\px,#1-\tp,\pz) -- (-\px,#1+\tp,\pz)
+        (\px,#1-\tp,\pz) -- (\px,#1+\tp,\pz);
+}
+
+% =====================================================================
+% 1) OVEN
+% =====================================================================
+\fill[ovencolor!80!black]
+    (\ox,\yOvenBack,-\oz) -- (\ox,\yOven,-\oz) -- (\ox,\yOven,\oz) -- (\ox,\yOvenBack,\oz) -- cycle;
+\fill[ovencolor!55]
+    (-\ox,\yOvenBack,\oz) -- (\ox,\yOvenBack,\oz) -- (\ox,\yOven,\oz) -- (-\ox,\yOven,\oz) -- cycle;
+\begin{scope}[canvas is xz plane at y=\yOven]
+    \shade[left color=ovencolor!45, right color=ovencolor!85, even odd rule]
+        (-\ox,-\oz) rectangle (\ox,\oz)
+        (-\ovenAx,-\ovenAz) rectangle (\ovenAx,\ovenAz);
+    \fill[black!80] (-\ovenAx,-\ovenAz) rectangle (\ovenAx,\ovenAz);
+    \draw[edgecolor, line width=0.5pt] (-\ox,-\oz) rectangle (\ox,\oz);
+\end{scope}
+\draw[edgecolor, line width=0.5pt]
+    (\ox,\yOven,-\oz) -- (\ox,\yOvenBack,-\oz) -- (\ox,\yOvenBack,\oz)
+    -- (-\ox,\yOvenBack,\oz) -- (-\ox,\yOven,\oz)
+    (\ox,\yOvenBack,\oz) -- (\ox,\yOven,\oz);
+
+% beam: oven -> S1
+\draw[beamcolor, line width=1.3pt] (0,\yOven,0) -- (0,\ySa+\tp,0);
+
+% =====================================================================
+% 2) PLATE S1  (rectangular slit)
+% =====================================================================
+\plate{\ySa}{(-\saAx,-\saAz) rectangle (\saAx,\saAz)}
+
+% =====================================================================
+% 3) Beam through the magnet (drawn before the magnet -> seen through it)
+% =====================================================================
+\draw[beamcolor, line width=1.3pt] (0,\ySa+\tp,0) -- (0,\yMin,0);
+\draw[upbeam, line width=1.3pt]
+    plot[domain=\yMin:\yMout, samples=40, variable=\t]
+        (0,\t,{\dzm*((\t-\yMin)/\lSG)^2})
+    -- (0,\ySb+\tp,\zSb);
+\draw[downbeam, line width=1.3pt]
+    plot[domain=\yMin:\yMout, samples=40, variable=\t]
+        (0,\t,{-\dzm*((\t-\yMin)/\lSG)^2})
+    -- (0,\ySb+\tp,-\zSb);
+\draw[gray, dashed, line width=0.5pt] (0,\yMout,0) -- (0,\ySb+\tp,0);
+
+% =====================================================================
+% 4) STERN--GERLACH MAGNET (extruded cross-section)
+% =====================================================================
+% --- upstream end face
+\fill[topcolor, fill opacity=\opFace] \topProfile{\yMin};
+\fill[botcolor, fill opacity=\opFace] \botProfile{\yMin};
+\poleLines{\yMin}
+
+% --- bottom pole: bottom, outer sides, ledges, slanted walls
+\fill[botcolor, fill opacity=\opSurf]
+    (\xmin,\yMin,\zmin) -- (\xmax,\yMin,\zmin) -- (\xmax,\yMout,\zmin) -- (\xmin,\yMout,\zmin) -- cycle;
+\foreach \xs in {\xmin,\xmax}{
+    \fill[botcolor, fill opacity=\opSurf]
+        (\xs,\yMin,\zmin) -- (\xs,\yMout,\zmin) -- (\xs,\yMout,\zledge) -- (\xs,\yMin,\zledge) -- cycle;
+}
+\foreach \sg in {-1,1}{
+    \fill[botcolor, fill opacity=\opSurf]
+        ({\sg*\xledge},\yMin,\zledge) -- ({\sg*\xmax},\yMin,\zledge)
+        -- ({\sg*\xmax},\yMout,\zledge) -- ({\sg*\xledge},\yMout,\zledge) -- cycle;
+    \fill[botcolor, fill opacity=\opSurf]
+        ({\sg*\rtrench},\yMin,\rtrenchc) -- ({\sg*\xledge},\yMin,\zledge)
+        -- ({\sg*\xledge},\yMout,\zledge) -- ({\sg*\rtrench},\yMout,\rtrenchc) -- cycle;
+}
+% --- trench barrel
+\foreach \i in {0,1,...,35}{
+    \pgfmathsetmacro{\angA}{\i*5}
+    \pgfmathsetmacro{\angB}{(\i+1)*5}
+    \fill[botcolor, fill opacity=\opSurf]
+        ({\rtrench*cos(\angA)},\yMin,{\rtrenchc-\rtrench*sin(\angA)})
+        -- ({\rtrench*cos(\angA)},\yMout,{\rtrenchc-\rtrench*sin(\angA)})
+        -- ({\rtrench*cos(\angB)},\yMout,{\rtrenchc-\rtrench*sin(\angB)})
+        -- ({\rtrench*cos(\angB)},\yMin,{\rtrenchc-\rtrench*sin(\angB)}) -- cycle;
+}
+
+% --- top pole: flanks, arch barrel, flat top
+\foreach \sg in {-1,1}{
+    \fill[topcolor, fill opacity=\opSurf]
+        ({\sg*\redge},\yMin,\zc) -- ({\sg*\xmax},\yMin,\zup)
+        -- ({\sg*\xmax},\yMout,\zup) -- ({\sg*\redge},\yMout,\zc) -- cycle;
+}
+\foreach \i in {0,1,...,35}{
+    \pgfmathsetmacro{\angA}{180+\i*5}
+    \pgfmathsetmacro{\angB}{180+(\i+1)*5}
+    \fill[topcolor, fill opacity=\opSurf]
+        ({\redge*cos(\angA)},\yMin,{\zc+\redge*sin(\angA)})
+        -- ({\redge*cos(\angA)},\yMout,{\zc+\redge*sin(\angA)})
+        -- ({\redge*cos(\angB)},\yMout,{\zc+\redge*sin(\angB)})
+        -- ({\redge*cos(\angB)},\yMin,{\zc+\redge*sin(\angB)}) -- cycle;
+}
+\fill[topcolor, fill opacity=\opSurf]
+    (\xmin,\yMin,\zup) -- (\xmax,\yMin,\zup) -- (\xmax,\yMout,\zup) -- (\xmin,\yMout,\zup) -- cycle;
+
+% --- extrusion edges
+\foreach \xs/\zs in {\xmin/\zup, \xmax/\zup, \xmin/\zmin, \xmax/\zmin}{
+    \draw[edgecolor, line width=1.2pt] (\xs,\yMin,\zs) -- (\xs,\yMout,\zs);
+}
+\foreach \xs in {-\redge,\redge}{
+    \draw[topcolor!70!black, line width=1.0pt] (\xs,\yMin,\zc) -- (\xs,\yMout,\zc);
+}
+\foreach \xs/\zs in {\xmin/\zledge, \xmax/\zledge, -\xledge/\zledge, \xledge/\zledge,
+                     -\rtrench/\rtrenchc, \rtrench/\rtrenchc}{
+    \draw[botcolor!70!black, line width=1.0pt] (\xs,\yMin,\zs) -- (\xs,\yMout,\zs);
+}
+
+% --- downstream end face
+\fill[topcolor, fill opacity=\opFace] \topProfile{\yMout};
+\fill[botcolor, fill opacity=\opFace] \botProfile{\yMout};
+\poleLines{\yMout}
+
+% gradient direction
+\draw[-{Latex[length=5pt]}, line width=0.9pt]
+    (-\xmax,\yMin+0.95*\lSG,\zup+3) -- ++(0,0,6)
+    node[above, font=\small] {$\nabla B \parallel \hat{z}$};
+
+% =====================================================================
+% 5) PLATE S2  (circular aperture)
+% =====================================================================
+\plate{\ySb}{(0,0) circle (\sbR)}
+
+% beams: S2 -> detector
+\draw[gray, dashed, line width=0.5pt] (0,\ySb+\tp,0) -- (0,\yDet,0);
+\draw[upbeam,   line width=1.3pt] (0,\ySb+\tp, \zSb) -- (0,\yDet, \zdet);
+\draw[downbeam, line width=1.3pt] (0,\ySb+\tp,-\zSb) -- (0,\yDet,-\zdet);
+
+% =====================================================================
+% 6) DETECTOR (semi-transparent screen) + SG pattern
+% =====================================================================
+\begin{scope}[canvas is xz plane at y=\yDet]
+    \fill[cyan!30!gray!40, fill opacity=0.55] (-\dx,-\dzz) rectangle (\dx,\dzz);
+    \draw[dimcolor!70!black, line width=0.6pt] (-\dx,-\dzz) rectangle (\dx,\dzz);
+    \shade[inner color=upbeam,   outer color=upbeam!10,   opacity=0.9] (0, \zdet) ellipse (5 and 1.3);
+    \shade[inner color=downbeam, outer color=downbeam!10, opacity=0.9] (0,-\zdet) ellipse (5 and 1.3);
+\end{scope}
+
+% =====================================================================
+% 7) DIMENSIONS
+% =====================================================================
+\draw[guide] (\ox,\yOven,-\oz)   -- (\xdim,\yOven,\zdim);
+\draw[guide] (\px,\ySa,-\pz)     -- (\xdim,\ySa,\zdim);
+\draw[guide] (\xmax,\yMin,\zmin) -- (\xdim,\yMin,\zdim);
+\draw[guide] (\xmax,\yMout,\zmin)-- (\xdim,\yMout,\zdim);
+\draw[guide] (\px,\ySb,-\pz)     -- (\xdim,\ySb,\zdim);
+\draw[guide] (\dx,\yDet,-\dzz)   -- (\xdim,\yDet,\zdim);
+
+\foreach \ya/\yb/\lab in {\yOven/\ySa/{\ell_1}, \ySa/\yMin/{\ell_2},
+                          \yMin/\yMout/{\ell_{\mathrm{SG}}},
+                          \yMout/\ySb/{\ell_3}, \ySb/\yDet/{\ell_4}}{
+    \draw[dim] (\xdim,\ya,\zdim) -- (\xdim,\yb,\zdim);
+    \node[below left=-1pt, font=\small] at (\xdim,{0.5*(\ya+\yb)},\zdim) {$\lab$};
+}
+
+% =====================================================================
+% 8) LABELS
+% =====================================================================
+\node[font=\bfseries\small, anchor=east]  at (\ox,{0.5*(\yOven+\yOvenBack)},-\oz-2) {Oven};
+\node[font=\small, anchor=south west]     at (-\px,\ySa,\pz) {$\mathcal{S}_1$};
+\node[font=\small, anchor=south] at (-\xmax,\yMin+0.40*\lSG,\zup+5)
+    {Stern--Gerlach magnet};
+\node[font=\small, anchor=south west]     at (-\px,\ySb,\pz) {$\mathcal{S}_2$};
+\node[font=\bfseries\small, anchor=south] at (0,\yDet,\dzz+2) {Detector};
+
+% =====================================================================
+% 9) COORDINATE TRIAD
+% =====================================================================
+\begin{scope}[shift={(0,\yDet+5,30)}]
+    \draw[-{Latex[length=5pt]}, line width=1.0pt, dimcolor] (0,0,0) -- (12,0,0) node[below left=-2pt] {$x$};
+    \draw[-{Latex[length=5pt]}, line width=1.0pt, dimcolor] (0,0,0) -- (0,30,0) node[right]            {$y$};
+    \draw[-{Latex[length=5pt]}, line width=1.0pt, dimcolor] (0,0,0) -- (0,0,9)  node[above]            {$z$};
+\end{scope}
+
+\end{tikzpicture}
+
+\end{document}
