@@ -1629,7 +1629,7 @@ pretty_table(data;
 # The calibration tail is chosen separately (N_TAIL) and may overlap.
 # -----------------------------------------------------------------------------
 # kᵢ-loss subset on the continuous curve
-const FIT_KI_MODE = :low   # :full | :low | :high | :low_high
+const FIT_KI_MODE = :full   # :full | :low | :high | :low_high
 const N_FRONT     = 4600      # points in the low-current window
 const N_BACK      = 200     # points in the high-current window
 
