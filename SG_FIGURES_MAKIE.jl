@@ -96,7 +96,9 @@ isdir(OUTDIR) || mkpath(OUTDIR)
 #   FIT_DIR = joinpath(STUDIES_DIR, last(sort(filter(startswith("FIT2025_ki_scale_"), readdir(STUDIES_DIR)))))
 const FIT_DIR         = joinpath(STUDIES_DIR, "FIT2025_ki_scale_20260911T164352057")
 const FIT_ARCHIVE     = joinpath(FIT_DIR, "SG_ki_scale_results.jld2")
-const EXPERIMENT_FILE = joinpath(BASE_PATH, "EXPERIMENTS", "20260220", "data_processed.jld2")
+# const EXPERIMENT_FILE = joinpath(BASE_PATH, "EXPERIMENTS", "20260220", "data_processed.jld2")
+const EXPERIMENT_FILE = joinpath(BASE_PATH, "EXPERIMENTS", "20260827", "data_processed.jld2")
+
 
 const TEMP_DIR = joinpath(@__DIR__,"artifacts", "JuliaTemp")
 isdir(TEMP_DIR) || mkpath(TEMP_DIR);
@@ -140,8 +142,8 @@ const gₑ    = -2.00231930436092    # Electron g-factor
 
 # ── Atom ────────────────────────────────────────────────────────────────────────────────────────
 atom            = "39K"
-K39_params      = AtomParams(atom)          # [R μn γn Ispin Ahfs M]
-quantum_numbers = fmf_levels(K39_params)
+K39_params      = TheoreticalSimulation.AtomParams(atom)          # [R μn γn Ispin Ahfs M]
+quantum_numbers = TheoreticalSimulation.fmf_levels(K39_params)
 
 # ── Camera and pixel geometry ───────────────────────────────────────────────────────────────────
 # Intrinsic camera properties
@@ -630,29 +632,51 @@ end
 
 """
     load_experiment(filepath) -> data
- 
+
 Load the processed Stern–Gerlach dataset from a JLD2 file and print the coil-current / field
 table for the run.
- 
-The returned dictionary carries at least `:Currents`, `:CurrentsError`, `:BzTesla` (one entry per
-coil-current setting) and the image stacks `:F1ProcessedImages`, `:F2ProcessedImages`, each of
-shape (x × z × repetition × current). The three current/field columns are checked for equal
-length so a truncated or mis-saved file is caught here rather than at plotting time.
+
+Two file layouts are accepted:
+
+- **Legacy**: a single `"data"` entry holding a `Dict{Symbol}` with `:Currents`,
+  `:CurrentsError`, `:BzTesla`, `:F1ProcessedImages`, `:F2ProcessedImages`.
+- **Meta**: flat group paths (`"meta/SG1currentInA"`, `"meta/SG0BfieldInTesla"`,
+  `"meta/SG1BfieldInTesla"`, `"data/F1ProcessedImages"`, …). These are normalised into the
+  legacy keys — `:Currents` ← SG1 current, `:BzTesla` ← SG1 field, `:CurrentsError` ← zeros
+  (not recorded) — and every entry is also kept under its bare name (e.g. `:SG0BfieldInTesla`,
+  `:TemperatureInCelsius`).
+
+Either way the returned dictionary carries at least `:Currents`, `:CurrentsError`, `:BzTesla`
+(one entry per coil-current setting) and the image stacks `:F1ProcessedImages`,
+`:F2ProcessedImages`, each of shape (x × z × repetition × current). The printed columns are
+checked for equal length so a truncated or mis-saved file is caught here rather than at
+plotting time.
 """
 function load_experiment(filepath::AbstractString)
-    data = load(filepath, "data")
-    currents     = vec(data[:Currents])
-    currents_err = vec(data[:CurrentsError])
-    bz_mT        = 1e3 .* vec(data[:BzTesla])
+    raw   = load(filepath)
+    title = joinpath(splitpath(filepath)[end-1:end]...)
 
-    lengths = length.((currents, currents_err, bz_mT))
+    if haskey(raw, "data")
+        data = raw["data"]
+        columns = (vec(data[:Currents]), vec(data[:CurrentsError]), 1e3 .* vec(data[:BzTesla]))
+        labels  = [["I0 Current", "I0 CurrentError", "Bz field"], ["[A]", "[A]", "[mT]"]]
+    else
+        data = Dict{Symbol,Any}(Symbol(last(splitpath(k))) => v for (k, v) in raw)
+        data[:Currents]      = vec(data[:SG1currentInA])
+        data[:BzTesla]       = vec(data[:SG1BfieldInTesla])
+        data[:CurrentsError] = zero(data[:Currents])
+        columns = (data[:Currents], 1e3 .* vec(data[:SG0BfieldInTesla]), 1e3 .* data[:BzTesla])
+        labels  = [["SG1 Current", "SG0 Bz field", "SG1 Bz field"], ["[A]", "[mT]", "[mT]"]]
+    end
+
+    lengths = length.(columns)
     all(==(lengths[1]), lengths) || throw(DimensionMismatch("Columns have different lengths: $lengths"))
- 
-    pretty_table(hcat(currents, currents_err, bz_mT);
-        title         = joinpath(splitpath(filepath)[end-1:end]...),
+
+    pretty_table(hcat(columns...);
+        title         = title,
         formatters    = [fmt__printf("%8.4f", [1]), fmt__printf("%8.4f", [2]), fmt__printf("%8.4f", [3])],
         alignment     = :c,
-        column_labels = [["I0 Current", "I0 CurrentError", "Bz field"], ["[A]", "[A]", "[mT]"]],
+        column_labels = labels,
         table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
         style = TextTableStyle(
             first_line_column_label = crayon"yellow bold",
@@ -940,9 +964,10 @@ function plot_image_with_z_profile(data;
 end
 
 
+
 exp_data = load_experiment(EXPERIMENT_FILE)
  # Coil-current index shown in the manuscript figure; top-level so §8 can record it.
-NI_IDX = 16
+NI_IDX = 29 # 16
 
 let
     I_sel  = exp_data[:Currents][NI_IDX]
@@ -964,6 +989,60 @@ let
 end
  
 
+"""
+    signal_window(F; frac = 0.2, pad = 40) -> (xr, zr)
+
+Bounding box of the region where the background-subtracted signal exceeds `frac` of its
+peak, found separately along x and z from the 1-D projections, padded by `pad` pixels.
+"""
+function signal_window(F; frac = 0.2, pad = 40)
+    P  = replace(x -> isfinite(x) ? max(x, 0) : 0, F)   # positive signal only, NaN → 0
+    px = vec(sum(P; dims = 2))                         # profile along x
+    pz = vec(sum(P; dims = 1))                         # profile along z
+    span(p) = let idx = findall(>=(frac * maximum(p)), p)
+        max(first(idx) - pad, 1):min(last(idx) + pad, length(p))
+    end
+    return span(px), span(pz)
+end
+
+let
+    F1_mean = mean_image(exp_data[:F1ProcessedImages], NI_IDX)
+    F2_mean = mean_image(exp_data[:F2ProcessedImages], NI_IDX)
+    F_total = F1_mean .+ F2_mean
+
+    # 1. Background: per-z median over a signal-free x band (right side of the image).
+    #    Per-row handles any vertical gradient; median ignores stray hot/cold pixels.
+    bg_cols = 350:size(F_total, 1)
+    bg      = [median(filter(isfinite, @view F_total[bg_cols, j])) for j in axes(F_total, 2)]
+    F_sub   = F_total .- bg'                    # bg' is 1×nz, broadcasts over x
+
+    # 2. Window centred on the signal, and a robust colour range from that window only.
+    xr, zr = signal_window(F_sub)
+    vals   = filter(isfinite, @view F_sub[xr, zr])
+    lo, hi = quantile(vals, (0.010, 0.9999))
+    @info "Scale" window = (xr, zr) raw = extrema(vals) shown = (lo, hi)
+
+    I_sel = exp_data[:Currents][NI_IDX]
+
+    fig = Figure(size = (600, 550))
+    ax  = Axis(fig[1, 1];
+        xlabel = L"x", ylabel = L"z",
+        # title  = L"Signal   ($I = %$(round(I_sel, digits = 4)) \mathrm{A}$)"
+        )
+
+    hm = heatmap!(ax, F_sub; colormap = :viridis, colorrange = (lo, hi),
+                  lowclip = :black, highclip = :white, nan_color = :transparent)
+    limits!(ax, first(xr), last(xr), first(zr), last(zr))
+    hidedecorations!(ax)
+
+    # Colorbar(fig[1, 2], hm)
+
+    colsize!(fig.layout, 1, Aspect(1, 0.75))    # keeps the colorbar next to the axis
+    resize_to_layout!(fig)
+
+    display(fig)
+    savefig(fig, "SG_img_ftotal.png")
+end
 ##################################################################################################
 ## §4  COIL CURRENTS AND CQD INDUCTION-TERM RUN (shared by §5 and §6)
 ##################################################################################################
