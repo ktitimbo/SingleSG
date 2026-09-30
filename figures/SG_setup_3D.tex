@@ -28,23 +28,23 @@
 % ---------------------------------------------------------------------
 % Colors
 % ---------------------------------------------------------------------
-\definecolor{botcolor}{RGB}{200, 10, 10}
-\definecolor{topcolor}{RGB}{10, 10, 200}
+\definecolor{botcolor}{RGB}{150, 150, 150}   % lower pole (trench)
+\definecolor{topcolor}{RGB}{195, 195, 195}   % upper pole (arch)
 \definecolor{edgecolor}{RGB}{30, 30, 30}
 \definecolor{dimcolor}{RGB}{60, 120, 200}
 \definecolor{ovencolor}{RGB}{245, 160, 80}
 \colorlet{beamcolor}{red!50!blue}
-\colorlet{upbeam}{topcolor!80!white}
-\colorlet{downbeam}{botcolor!85!white}
+\colorlet{upbeam}{blue!70!white}
+\colorlet{downbeam}{red!80!white}
 
 % ---------------------------------------------------------------------
 % LAYOUT (y positions, mm) -- schematic, change freely
 % ---------------------------------------------------------------------
-\pgfmathsetmacro{\lOne}{70}   % oven aperture  -> S1
-\pgfmathsetmacro{\lTwo}{22}   % S1             -> magnet entrance
+\pgfmathsetmacro{\lOne}{110}   % oven aperture  -> S1
+\pgfmathsetmacro{\lTwo}{40}   % S1             -> magnet entrance
 \pgfmathsetmacro{\lSG}{100}   % magnet length
 \pgfmathsetmacro{\lThr}{45}   % magnet exit    -> S2
-\pgfmathsetmacro{\lFou}{85}   % S2             -> detector
+\pgfmathsetmacro{\lFou}{105}   % S2             -> detector
 
 \pgfmathsetmacro{\yOven}{0}
 \pgfmathsetmacro{\yOvenBack}{-35}
@@ -84,8 +84,21 @@
 \pgfmathsetmacro{\zledge}{\rtrenchc + \lw*sin(\phi)}
 \pgfmathsetmacro{\zup}{\zc + \m*(\xmax - \redge)}
 
-\pgfmathsetmacro{\opFace}{0.55}
-\pgfmathsetmacro{\opSurf}{0.40}
+\def\poleFaceLW{1.25pt}            % profile width on the face toward S2
+\def\opTop{0.85}                  % opacity of the upper pole (1 = solid)
+\def\opBot{0.85}                  % opacity of the lower pole (1 = solid)
+
+% ---------------------------------------------------------------------
+% Shading of the (opaque) magnet
+%   brightness = \shMin + (100-\shMin) * max(0, n.L)   [% of base color]
+%   L = light direction (unit vector), n = outward face normal
+% ---------------------------------------------------------------------
+\def\Lx{0.15}  \def\Ly{0.15}  \def\Lz{0.40}
+\def\shMin{120}
+% View direction (toward the viewer), derived from the x,y,z vectors
+% of the tikzpicture:  V = (y1, -x1, (y2*x1 - x2*y1)/z2).  Faces with
+% n.V < 0 point away from the viewer and are not drawn.
+\def\Vx{0.044}  \def\Vy{0.090}  \def\Vz{0.0194}
 
 % ---------------------------------------------------------------------
 % Beam trajectories (deflection exaggerated for clarity)
@@ -95,9 +108,12 @@
 \pgfmathsetmacro{\kk}{(\zdet-\dzm)/(\yDet-\yMout)}
 \pgfmathsetmacro{\zSb}{\dzm+\kk*(\ySb+\tp-\yMout)}
 
-% Dimension line position
-\pgfmathsetmacro{\xdim}{20}
-\pgfmathsetmacro{\zdim}{-16}
+% Dimension line: runs along y at (x = \xdim, z = \zdim), below all parts.
+% Every guide drops straight down (along -z) from the bottom edge of its
+% part at x = \xdim, so all guides are parallel and start on the part.
+% \xdim must lie within the x-range of every part (|x| <= 10.5 mm).
+\pgfmathsetmacro{\xdim}{\xmax}
+\pgfmathsetmacro{\zdim}{-20}
 
 % =====================================================================
 % Helper macros
@@ -117,23 +133,35 @@
     -- (-\xledge,#1,\zledge) -- (\xmin,#1,\zledge) -- cycle}
 
 % Inner (pole-face) profile lines of one end face  (#1 = y)
-\newcommand{\poleLines}[1]{%
-    \draw[topcolor!70!black, line width=1.0pt]
-        (\xmax,#1,\zup) -- (\redge,#1,\zc)
+% Optional #1 = line width of the pole-face profile (default 1.0pt);
+% the outer outline is always drawn 0.2pt thicker.
+\newcommand{\poleLines}[2][1.0pt]{%
+    \draw[topcolor!45!black, line width=#1]
+        (\xmax,#2,\zup) -- (\redge,#2,\zc)
         -- plot[domain=360:180, samples=60, variable=\ang]
-            ({\redge*cos(\ang)},#1,{\zc+\redge*sin(\ang)})
-        -- (\xmin,#1,\zup);
-    \draw[botcolor!70!black, line width=1.0pt]
-        (\xmax,#1,\zledge) -- (\xledge,#1,\zledge) -- (\rtrench,#1,\rtrenchc)
+            ({\redge*cos(\ang)},#2,{\zc+\redge*sin(\ang)})
+        -- (\xmin,#2,\zup);
+    \draw[botcolor!45!black, line width=#1]
+        (\xmax,#2,\zledge) -- (\xledge,#2,\zledge) -- (\rtrench,#2,\rtrenchc)
         -- plot[domain=0:180, samples=60, variable=\ang]
-            ({\rtrench*cos(\ang)},#1,{\rtrenchc-\rtrench*sin(\ang)})
-        -- (-\xledge,#1,\zledge) -- (\xmin,#1,\zledge);
-    \draw[edgecolor, line width=1.2pt]
-        (\xmin,#1,\zup) -- (\xmax,#1,\zup)
-        (\xmin,#1,\zmin) -- (\xmax,#1,\zmin)
-        (\xmin,#1,\zmin) -- (\xmin,#1,\zledge)
-        (\xmax,#1,\zmin) -- (\xmax,#1,\zledge);
+            ({\rtrench*cos(\ang)},#2,{\rtrenchc-\rtrench*sin(\ang)})
+        -- (-\xledge,#2,\zledge) -- (\xmin,#2,\zledge);
+    \draw[edgecolor, line width={#1+0.2pt}]
+        (\xmin,#2,\zup) -- (\xmax,#2,\zup)
+        (\xmin,#2,\zmin) -- (\xmax,#2,\zmin)
+        (\xmin,#2,\zmin) -- (\xmin,#2,\zledge)
+        (\xmax,#2,\zmin) -- (\xmax,#2,\zledge);
 }
+
+% Brightness \sh for a face with outward normal (#1,#2,#3)
+\newcommand{\setshade}[3]{%
+    \pgfmathtruncatemacro{\sh}{\shMin+(100-\shMin)*max(0,(#1)*\Lx+(#2)*\Ly+(#3)*\Lz)}}
+
+% Flat magnet surface: #1 = base color, #2 = normal "nx,ny,nz",
+% #3 = edge style, #4 = polygon
+\newcommand{\magface}[4]{%
+    \setshade#2
+    \filldraw[fill=#1!\sh!black, #3] #4;}
 
 % Thin plate centred at y = #1 ; #2 = aperture path in the xz canvas
 \newcommand{\plate}[2]{%
@@ -183,87 +211,136 @@
 \plate{\ySa}{(-\saAx,-\saAz) rectangle (\saAx,\saAz)}
 
 % =====================================================================
-% 3) Beam through the magnet (drawn before the magnet -> seen through it)
+% 3) Beam before the magnet
 % =====================================================================
 \draw[beamcolor, line width=1.3pt] (0,\ySa+\tp,0) -- (0,\yMin,0);
-\draw[upbeam, line width=1.3pt]
-    plot[domain=\yMin:\yMout, samples=40, variable=\t]
-        (0,\t,{\dzm*((\t-\yMin)/\lSG)^2})
-    -- (0,\ySb+\tp,\zSb);
-\draw[downbeam, line width=1.3pt]
-    plot[domain=\yMin:\yMout, samples=40, variable=\t]
-        (0,\t,{-\dzm*((\t-\yMin)/\lSG)^2})
-    -- (0,\ySb+\tp,-\zSb);
-\draw[gray, dashed, line width=0.5pt] (0,\yMout,0) -- (0,\ySb+\tp,0);
 
 % =====================================================================
-% 4) STERN--GERLACH MAGNET (extruded cross-section)
+% 4) STERN--GERLACH MAGNET (opaque, shaded extrusion of the cross-section)
+%    Painter's order: surfaces behind the beam -> beam -> surfaces in
+%    front of the beam -> end face toward S2.
 % =====================================================================
-% --- upstream end face
-\fill[topcolor, fill opacity=\opFace] \topProfile{\yMin};
-\fill[botcolor, fill opacity=\opFace] \botProfile{\yMin};
-\poleLines{\yMin}
+\tikzset{
+    botedge/.style={draw=botcolor!70!black, line width=1.0pt},
+    topedge/.style={draw=topcolor!70!black, line width=1.0pt},
+    outedge/.style={draw=edgecolor, line width=1.2pt},
+}
 
-% --- bottom pole: bottom, outer sides, ledges, slanted walls
-\fill[botcolor, fill opacity=\opSurf]
-    (\xmin,\yMin,\zmin) -- (\xmax,\yMin,\zmin) -- (\xmax,\yMout,\zmin) -- (\xmin,\yMout,\zmin) -- cycle;
-\foreach \xs in {\xmin,\xmax}{
-    \fill[botcolor, fill opacity=\opSurf]
-        (\xs,\yMin,\zmin) -- (\xs,\yMout,\zmin) -- (\xs,\yMout,\zledge) -- (\xs,\yMin,\zledge) -- cycle;
-}
-\foreach \sg in {-1,1}{
-    \fill[botcolor, fill opacity=\opSurf]
-        ({\sg*\xledge},\yMin,\zledge) -- ({\sg*\xmax},\yMin,\zledge)
-        -- ({\sg*\xmax},\yMout,\zledge) -- ({\sg*\xledge},\yMout,\zledge) -- cycle;
-    \fill[botcolor, fill opacity=\opSurf]
-        ({\sg*\rtrench},\yMin,\rtrenchc) -- ({\sg*\xledge},\yMin,\zledge)
-        -- ({\sg*\xledge},\yMout,\zledge) -- ({\sg*\rtrench},\yMout,\rtrenchc) -- cycle;
-}
-% --- trench barrel
+% --- end face toward S1: it faces away from the viewer, so it is drawn
+%     first (behind everything). It only shows through transparent poles.
+\setshade{0}{-1}{0}
+\begin{scope}[transparency group, opacity=\opBot]
+    \fill[botcolor!\sh!black] \botProfile{\yMin};
+\end{scope}
+\begin{scope}[transparency group, opacity=\opTop]
+    \fill[topcolor!\sh!black] \topProfile{\yMin};
+\end{scope}
+\pgfmathsetmacro{\opEnd}{min(\opTop,\opBot)}
+\begin{scope}[transparency group, opacity=\opEnd]
+    \poleLines{\yMin}
+\end{scope}
+
+% Each block below is a transparency group: it is drawn opaque and then
+% faded as a whole with \opBot / \opTop, so overlapping strips and edges
+% inside a pole do not produce darker seams.
+
+\begin{scope}[transparency group, opacity=\opBot]   % ---- lower pole, behind beam
+% --- trench (bottom pole groove): only strips facing the viewer
 \foreach \i in {0,1,...,35}{
     \pgfmathsetmacro{\angA}{\i*5}
     \pgfmathsetmacro{\angB}{(\i+1)*5}
-    \fill[botcolor, fill opacity=\opSurf]
-        ({\rtrench*cos(\angA)},\yMin,{\rtrenchc-\rtrench*sin(\angA)})
-        -- ({\rtrench*cos(\angA)},\yMout,{\rtrenchc-\rtrench*sin(\angA)})
-        -- ({\rtrench*cos(\angB)},\yMout,{\rtrenchc-\rtrench*sin(\angB)})
-        -- ({\rtrench*cos(\angB)},\yMin,{\rtrenchc-\rtrench*sin(\angB)}) -- cycle;
+    \pgfmathsetmacro{\nx}{-cos((\i+0.5)*5)}
+    \pgfmathsetmacro{\nz}{ sin((\i+0.5)*5)}
+    \pgfmathsetmacro{\vis}{\nx*\Vx+\nz*\Vz}
+    \ifdim\vis pt>0pt
+        \setshade{\nx}{0}{\nz}
+        \filldraw[botcolor!\sh!black, line width=0.3pt]
+            ({\rtrench*cos(\angA)},\yMin,{\rtrenchc-\rtrench*sin(\angA)})
+            -- ({\rtrench*cos(\angA)},\yMout,{\rtrenchc-\rtrench*sin(\angA)})
+            -- ({\rtrench*cos(\angB)},\yMout,{\rtrenchc-\rtrench*sin(\angB)})
+            -- ({\rtrench*cos(\angB)},\yMin,{\rtrenchc-\rtrench*sin(\angB)}) -- cycle;
+        \draw[botedge]
+            ({\rtrench*cos(\angA)},\yMin,{\rtrenchc-\rtrench*sin(\angA)})
+            -- ({\rtrench*cos(\angB)},\yMin,{\rtrenchc-\rtrench*sin(\angB)});
+    \fi
 }
 
-% --- top pole: flanks, arch barrel, flat top
-\foreach \sg in {-1,1}{
-    \fill[topcolor, fill opacity=\opSurf]
-        ({\sg*\redge},\yMin,\zc) -- ({\sg*\xmax},\yMin,\zup)
-        -- ({\sg*\xmax},\yMout,\zup) -- ({\sg*\redge},\yMout,\zc) -- cycle;
-}
+% --- far (-x) slanted wall and ledge of the bottom pole
+\magface{botcolor}{{0.5}{0}{0.866}}{botedge}
+    {(-\rtrench,\yMin,\rtrenchc) -- (-\xledge,\yMin,\zledge)
+     -- (-\xledge,\yMout,\zledge) -- (-\rtrench,\yMout,\rtrenchc) -- cycle}
+\magface{botcolor}{{0}{0}{1}}{botedge}
+    {(\xmin,\yMin,\zledge) -- (-\xledge,\yMin,\zledge)
+     -- (-\xledge,\yMout,\zledge) -- (\xmin,\yMout,\zledge) -- cycle}
+\end{scope}
+
+% --- beam inside the magnet (mostly hidden by the poles)
+\draw[upbeam, line width=1.3pt]
+    plot[domain=\yMin:\yMout, samples=40, variable=\t]
+        (0,\t,{\dzm*((\t-\yMin)/\lSG)^2});
+\draw[downbeam, line width=1.3pt]
+    plot[domain=\yMin:\yMout, samples=40, variable=\t]
+        (0,\t,{-\dzm*((\t-\yMin)/\lSG)^2});
+
+\begin{scope}[transparency group, opacity=\opBot]   % ---- lower pole, in front of beam
+% --- near (+x) ledge and outer side of the bottom pole
+\magface{botcolor}{{0}{0}{1}}{botedge}
+    {(\xledge,\yMin,\zledge) -- (\xmax,\yMin,\zledge)
+     -- (\xmax,\yMout,\zledge) -- (\xledge,\yMout,\zledge) -- cycle}
+\magface{botcolor}{{1}{0}{0}}{outedge}
+    {(\xmax,\yMin,\zmin) -- (\xmax,\yMout,\zmin)
+     -- (\xmax,\yMout,\zledge) -- (\xmax,\yMin,\zledge) -- cycle}
+\end{scope}
+
+\begin{scope}[transparency group, opacity=\opTop]   % ---- upper pole
+% --- top pole: near (+x) flank underside
+\magface{topcolor}{{0.5}{0}{-0.866}}{topedge}
+    {(\redge,\yMin,\zc) -- (\xmax,\yMin,\zup)
+     -- (\xmax,\yMout,\zup) -- (\redge,\yMout,\zc) -- cycle}
+
+% --- top pole: rounded tip, only strips facing the viewer
 \foreach \i in {0,1,...,35}{
     \pgfmathsetmacro{\angA}{180+\i*5}
     \pgfmathsetmacro{\angB}{180+(\i+1)*5}
-    \fill[topcolor, fill opacity=\opSurf]
-        ({\redge*cos(\angA)},\yMin,{\zc+\redge*sin(\angA)})
-        -- ({\redge*cos(\angA)},\yMout,{\zc+\redge*sin(\angA)})
-        -- ({\redge*cos(\angB)},\yMout,{\zc+\redge*sin(\angB)})
-        -- ({\redge*cos(\angB)},\yMin,{\zc+\redge*sin(\angB)}) -- cycle;
-}
-\fill[topcolor, fill opacity=\opSurf]
-    (\xmin,\yMin,\zup) -- (\xmax,\yMin,\zup) -- (\xmax,\yMout,\zup) -- (\xmin,\yMout,\zup) -- cycle;
-
-% --- extrusion edges
-\foreach \xs/\zs in {\xmin/\zup, \xmax/\zup, \xmin/\zmin, \xmax/\zmin}{
-    \draw[edgecolor, line width=1.2pt] (\xs,\yMin,\zs) -- (\xs,\yMout,\zs);
-}
-\foreach \xs in {-\redge,\redge}{
-    \draw[topcolor!70!black, line width=1.0pt] (\xs,\yMin,\zc) -- (\xs,\yMout,\zc);
-}
-\foreach \xs/\zs in {\xmin/\zledge, \xmax/\zledge, -\xledge/\zledge, \xledge/\zledge,
-                     -\rtrench/\rtrenchc, \rtrench/\rtrenchc}{
-    \draw[botcolor!70!black, line width=1.0pt] (\xs,\yMin,\zs) -- (\xs,\yMout,\zs);
+    \pgfmathsetmacro{\nx}{cos(180+(\i+0.5)*5)}
+    \pgfmathsetmacro{\nz}{sin(180+(\i+0.5)*5)}
+    \pgfmathsetmacro{\vis}{\nx*\Vx+\nz*\Vz}
+    \ifdim\vis pt>0pt
+        \setshade{\nx}{0}{\nz}
+        \filldraw[topcolor!\sh!black, line width=0.3pt]
+            ({\redge*cos(\angA)},\yMin,{\zc+\redge*sin(\angA)})
+            -- ({\redge*cos(\angA)},\yMout,{\zc+\redge*sin(\angA)})
+            -- ({\redge*cos(\angB)},\yMout,{\zc+\redge*sin(\angB)})
+            -- ({\redge*cos(\angB)},\yMin,{\zc+\redge*sin(\angB)}) -- cycle;
+        \draw[topedge]
+            ({\redge*cos(\angA)},\yMin,{\zc+\redge*sin(\angA)})
+            -- ({\redge*cos(\angB)},\yMin,{\zc+\redge*sin(\angB)});
+    \fi
 }
 
-% --- downstream end face
-\fill[topcolor, fill opacity=\opFace] \topProfile{\yMout};
-\fill[botcolor, fill opacity=\opFace] \botProfile{\yMout};
-\poleLines{\yMout}
+% --- top pole: flat top
+\magface{topcolor}{{0}{0}{1}}{outedge}
+    {(\xmin,\yMin,\zup) -- (\xmax,\yMin,\zup)
+     -- (\xmax,\yMout,\zup) -- (\xmin,\yMout,\zup) -- cycle}
+\end{scope}
+
+% --- end face toward S2 (drawn last, on top of everything)
+\setshade{0}{1}{0}
+\fill[topcolor!\sh!black, fill opacity=\opTop] \topProfile{\yMout};
+\fill[botcolor!\sh!black, fill opacity=\opBot] \botProfile{\yMout};
+\poleLines[\poleFaceLW]{\yMout}   % outline kept fully opaque
+
+% --- beams from the magnet exit to S2
+\draw[gray, dashed, line width=0.5pt] (0,\yMout,0) -- (0,\ySb+\tp,0);
+% (smooth join between the in-magnet parabola and the straight flight)
+\pgfmathsetmacro{\hh}{(\ySb+\tp-\yMout)/3}
+\pgfmathsetmacro{\sx}{2*\dzm/\lSG}   % slope at the magnet exit
+\draw[upbeam, line width=1.3pt] (0,\yMout,\dzm)
+    .. controls (0,\yMout+\hh,{\dzm+\sx*\hh}) and (0,\ySb+\tp-\hh,{\zSb-\kk*\hh})
+    .. (0,\ySb+\tp,\zSb);
+\draw[downbeam, line width=1.3pt] (0,\yMout,-\dzm)
+    .. controls (0,\yMout+\hh,{-\dzm-\sx*\hh}) and (0,\ySb+\tp-\hh,{-\zSb+\kk*\hh})
+    .. (0,\ySb+\tp,-\zSb);
 
 % gradient direction
 \draw[-{Latex[length=5pt]}, line width=0.9pt]
@@ -293,24 +370,34 @@
 % =====================================================================
 % 7) DIMENSIONS
 % =====================================================================
-\draw[guide] (\ox,\yOven,-\oz)   -- (\xdim,\yOven,\zdim);
-\draw[guide] (\px,\ySa,-\pz)     -- (\xdim,\ySa,\zdim);
-\draw[guide] (\xmax,\yMin,\zmin) -- (\xdim,\yMin,\zdim);
-\draw[guide] (\xmax,\yMout,\zmin)-- (\xdim,\yMout,\zdim);
-\draw[guide] (\px,\ySb,-\pz)     -- (\xdim,\ySb,\zdim);
-\draw[guide] (\dx,\yDet,-\dzz)   -- (\xdim,\yDet,\zdim);
+% Guides start exactly at the near bottom corner of each part and drop
+% vertically (on the page) until they meet the dimension line, so they
+% stay parallel whatever the part sizes and distances are.
+\coordinate (dimA) at (\xdim,\yOven,\zdim);   % two points defining
+\coordinate (dimB) at (\xdim,\yDet,\zdim);    % the dimension line
+% #1 = name of the foot point on the dimension line, #2 = start corner
+\newcommand{\dimguide}[2]{%
+    \coordinate (c#1) at #2;
+    \coordinate (d#1) at ($(c#1)+(0,-1cm)$);
+    \coordinate (#1) at (intersection of c#1--d#1 and dimA--dimB);
+    \draw[guide] (c#1) -- (#1);}
+\dimguide{g0}{(\ox,\yOven,-\oz)}      % oven aperture face
+\dimguide{g1}{(\px,\ySa,-\pz)}        % S1 (centre of the plate)
+\dimguide{g2}{(\xmax,\yMin,\zmin)}    % magnet entrance
+\dimguide{g3}{(\xmax,\yMout,\zmin)}   % magnet exit
+\dimguide{g4}{(\px,\ySb,-\pz)}        % S2 (centre of the plate)
+\dimguide{g5}{(\dx,\yDet,-\dzz)}      % detector
 
-\foreach \ya/\yb/\lab in {\yOven/\ySa/{\ell_1}, \ySa/\yMin/{\ell_2},
-                          \yMin/\yMout/{\ell_{\mathrm{SG}}},
-                          \yMout/\ySb/{\ell_3}, \ySb/\yDet/{\ell_4}}{
-    \draw[dim] (\xdim,\ya,\zdim) -- (\xdim,\yb,\zdim);
-    \node[below left=-1pt, font=\small] at (\xdim,{0.5*(\ya+\yb)},\zdim) {$\lab$};
+\foreach \a/\b/\lab in {g0/g1/{\ell_1}, g1/g2/{\ell_2}, g2/g3/{\ell_{\mathrm{SG}}},
+                        g3/g4/{\ell_3}, g4/g5/{\ell_4}}{
+    \draw[dim] (\a) -- (\b);
+    \node[below left=-1pt, font=\small] at ($(\a)!0.5!(\b)$) {$\lab$};
 }
 
 % =====================================================================
 % 8) LABELS
 % =====================================================================
-\node[font=\bfseries\small, anchor=east]  at (\ox,{0.5*(\yOven+\yOvenBack)},-\oz-2) {Oven};
+\node[font=\bfseries\small, anchor=south] at (-\ox,{0.5*(\yOven+\yOvenBack)},\oz+1) {Oven};
 \node[font=\small, anchor=south west]     at (-\px,\ySa,\pz) {$\mathcal{S}_1$};
 \node[font=\small, anchor=south] at (-\xmax,\yMin+0.40*\lSG,\zup+5)
     {Stern--Gerlach magnet};
