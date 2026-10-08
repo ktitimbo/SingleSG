@@ -1,0 +1,519 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+
+\newcommand{\artanh}{\operatorname{artanh}}
+\newcommand{\csch}{\operatorname{csch}}
+\newcommand{\QM}{\mathrm{QM}}
+\newcommand{\keybox}[1]{\begin{center}\fbox{\begin{minipage}{0.9\textwidth}\centering\vspace{2pt}#1\vspace{2pt}\end{minipage}}\end{center}}
+
+\title{Analytical CQD fit of the single Stern--Gerlach (SG1) peak positions\\[4pt]
+\large Model, derivations, fitting procedure, and results for a drift distance $L_2 = 39.525$~cm}
+\author{Kelvin Titimbo}
+\date{October 7, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent This report is a self-contained description of the analytical co-quantum dynamics (CQD) model used to extract the induction coefficient $k_i$ from the measured $F=1$ peak positions of the August--September 2026 single Stern--Gerlach (SG1) data. Every equation is derived from its physical starting point. The fitting procedure is described step by step, and the results are given for a drift distance of $L_2 = 0.39525$~m. The model follows the reference analysis by L.~Wang (October 7, 2026)~\cite{wang2026}, rewritten in simpler notation. Appendix~\ref{app:notation} maps the two notations onto each other. As a check, the same code reproduces every number of the reference analysis at its original drift distance of $0.403$~m.
+\end{abstract}
+
+\tableofcontents
+
+%=====================================================================
+\section{Summary of results}
+%=====================================================================
+
+All values below use the drift distance $L_2 = 0.39525$~m, the magnet length $L_1 = 0.070$~m, and the beam speed $v = 600.51$~m/s.
+
+\begin{center}
+\small\begin{tabular}{lccc}
+\toprule
+Fit & $k_i$ & Relative RMS & Section \\
+\midrule
+Low field (6 points), solution 1 (low dose)   & $8.80\times10^{-7}$  & 0.834\% & \ref{sec:res-low}\\
+Low field (6 points), solution 2 (high dose, smaller $\chi^2$) & $6.71\times10^{-6}$  & 0.547\% & \ref{sec:res-low}\\
+\textbf{Whole field, amplitude fitted}         & $\mathbf{1.29\times10^{-6}}$ & \textbf{2.873\%} & \ref{sec:res-whole}\\
+Whole field, amplitude fixed to 1              & $1.99\times10^{-6}$  & 3.531\% & \ref{sec:res-whole}\\
+Whole field, $k_i$ fixed at $1.5\times10^{-6}$ & $1.50\times10^{-6}$  & 2.909\% & \ref{sec:res-whole}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Main conclusions:
+\begin{enumerate}
+\item With the scale left free, the low-field data allow \emph{two} values of $k_i$ that fit almost equally well. The low-field data alone therefore do not determine $k_i$ (Sec.~\ref{sec:twominima}).
+\item The whole-field fit gives $k_i \approx 1.3\times10^{-6}$. The earlier estimate $k_i \simeq 1.5\times10^{-6}$ fits almost as well (2.909\% vs 2.873\%).
+\item Going from $L_2 = 0.403$~m to $0.39525$~m changes every fitted $k_i$ by at most $0.2\%$. Section~\ref{sec:drift} explains why the dependence is so weak.
+\item Normalization, the choice of fit window, and the residual weighting change $k_i$ by 50--110\%. These choices, not the geometry, dominate the uncertainty.
+\end{enumerate}
+
+%=====================================================================
+\section{Data and fixed inputs}
+%=====================================================================
+
+\subsection{Measured data}
+The data file \texttt{model\_data.csv} contains $N=28$ rows, indexed by $j=1,\dots,N$. Each row has:
+\begin{itemize}
+\item the coil current $I_j$, from 0.020 to 1.000~A;
+\item the magnetic field $B_j$ at the beam, from 0.0122 to 0.749~T;
+\item the field gradient $G_j = \partial B_z/\partial z$, from 4.61 to 282.5~T/m;
+\item the measured $F=1$ peak position $z_j$ in mm (column \texttt{Experiment});
+\item two tabulated simulations: a quantum-mechanical curve $z_j^{\QM}$ (column \texttt{QM\_F1\_mm}) and a CQD curve (column \texttt{CQD\_up\_mm}).
+\end{itemize}
+The full table is listed in Appendix~\ref{app:data}. Field and gradient are exactly proportional, with $B_j/G_j = 2.651676\times10^{-3}$~m for every point. The data therefore never vary $B$ and $G$ independently.
+
+\subsection{Fixed physical constants and geometry}
+
+\begin{center}
+\small\begin{tabular}{llll}
+\toprule
+Symbol & Meaning & Value & Note\\
+\midrule
+$\gamma$ & electron gyromagnetic ratio $|\gamma_e|$ & $1.76086\times10^{11}$ rad\,s$^{-1}$T$^{-1}$ & CODATA\\
+$\mu$    & electron magnetic moment $|\mu_e|$ & $9.28476\times10^{-24}$ J/T & CODATA\\
+$M$      & mass of $^{39}$K & 38.9637064864 u & \\
+$T_\text{oven}$ & oven temperature & 478.15 K (205\,$^\circ$C) & \\
+$v$      & mean beam speed & 600.510 m/s & Eq.~\eqref{eq:speed}\\
+$L_1$    & effective length of the SG1 magnet & 0.070 m & assumed\\
+$L_2$    & drift distance, magnet exit to detector & \textbf{0.39525 m} & this report\\
+\midrule
+$T_1 = L_1/v$ & time spent inside the magnet & $1.1657\times10^{-4}$ s & \\
+$T_2 = L_2/v$ & drift time & $6.5819\times10^{-4}$ s & \\
+$r = L_2/L_1$ & drift-to-magnet length ratio & 5.6464 & \\
+$\kappa = \gamma L_1/v = \gamma T_1$ & Larmor phase per tesla & $2.05259\times10^{7}$ T$^{-1}$ & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Beam speed.} An effusive oven emits atoms with the flux-weighted speed distribution
+\begin{equation}
+f(v') = 2a^2 v'^3 e^{-a v'^2}, \qquad a = \frac{M}{2k_B T_\text{oven}} .
+\end{equation}
+Its mean is
+\begin{equation}
+v = \int_0^\infty v' f(v')\,dv' = \frac{3\sqrt{\pi}}{4}\sqrt{\frac{2k_B T_\text{oven}}{M}} = 600.51\ \text{m/s}.
+\label{eq:speed}
+\end{equation}
+Like the reference analysis, all calculations use this single speed and do not average over the speed distribution.
+
+%=====================================================================
+\section{The physical model, step by step}
+%=====================================================================
+
+The model has three ingredients:
+\begin{enumerate}
+\item \textbf{Mechanics} (Sec.~\ref{sec:mech}): how a magnetic moment that changes in time inside the magnet produces a displacement at the detector.
+\item \textbf{Spin dynamics} (Sec.~\ref{sec:spin}): how CQD says the electron moment aligns with the field during the transit.
+\item \textbf{Averaging over atoms} (Secs.~\ref{sec:branch}--\ref{sec:R}): an average over the initial spin directions of the atoms that end up in the upper peak.
+\end{enumerate}
+The result is a single dimensionless \emph{response function} $R(u)$, where $u$ is a dimensionless ``dose'' proportional to $k_i B$.
+
+\subsection{Mechanics: displacement from a time-dependent moment}
+\label{sec:mech}
+Let $c(t) = \cos\theta(t)$ be the projection of the electron moment on the field direction, so $-1\le c\le 1$. In a gradient $G$ the transverse force is
+\begin{equation}
+F_z(t) = \mu\, G\, c(t).
+\end{equation}
+The atom enters the magnet at $t=0$, leaves it at $t=T_1$, and reaches the detector at $t = T_1+T_2$. A force applied at time $t$ produces a velocity kick $F_z\,dt/M$. That kick then acts as a displacement lever for the remaining flight time $T_1 + T_2 - t$. Summing all kicks gives
+\begin{equation}
+z = \frac{\mu G}{M}\int_0^{T_1} c(t)\,\big(T_1+T_2-t\big)\,dt .
+\label{eq:zint}
+\end{equation}
+
+\paragraph{Fully aligned moment.} If $c=1$ throughout,
+\begin{equation}
+z_\text{aligned} = \frac{\mu G}{M}\left(\frac{T_1^2}{2} + T_1T_2\right)
+= \underbrace{\frac{\mu\, L_1\,(L_2 + L_1/2)}{M v^2}}_{\displaystyle s}\; G .
+\label{eq:smech}
+\end{equation}
+The constant $s$ is the \emph{displacement per unit gradient} of a fully aligned atom. It is the only place where $\mu$, $M$ and $v^2$ enter. For our geometry, Eq.~\eqref{eq:smech} gives $s_\text{mech} = 0.011985$~mm/(T/m), or $0.012201$ for $L_2 = 0.403$~m.
+
+\paragraph{Partly aligned moment.} Substitute the dimensionless time $\tau = t/T_1 \in [0,1]$ in Eq.~\eqref{eq:zint} and divide by Eq.~\eqref{eq:smech}. The result is
+\begin{equation}
+\boxed{\;z = s\,G\,R, \qquad R = \frac{1}{r + \tfrac12}\int_0^1 (r + 1 - \tau)\,\langle c(\tau)\rangle\, d\tau\;}
+\label{eq:Rdef}
+\end{equation}
+where $\langle c\rangle$ is the average over the atoms that form the measured peak. $R$ is a \emph{reduction factor}: $R=1$ for a fully aligned moment and $R<1$ otherwise. The weight $(r+1-\tau)$ is the lever arm: alignment that occurs early in the magnet contributes more to the final displacement than alignment that occurs late.
+
+\subsection{Spin dynamics in CQD}
+\label{sec:spin}
+In the CQD model of the reference manuscript, the electron moment of an atom in the upper branch relaxes towards the field direction. The \emph{rapidity} $\artanh c$ of the moment grows linearly in time:
+\begin{equation}
+\artanh c(\tau) = \artanh c_0 + u\,\tau
+\quad\Longrightarrow\quad
+c(\tau) = \tanh\!\big[\artanh c_0 + u\,\tau\big],
+\label{eq:tanh}
+\end{equation}
+where $c_0$ is the value at the magnet entrance. The growth rate per unit $\tau$ is the dimensionless \textbf{dose}
+\begin{equation}
+\boxed{\;u = k_i\,\gamma\,B\,T_1 = k_i\,\kappa\,B, \qquad \kappa = \frac{\gamma L_1}{v} = 2.05259\times10^{7}\ \text{T}^{-1}\;}
+\label{eq:dose}
+\end{equation}
+\noindent This has a simple interpretation. $\gamma B T_1$ is the Larmor phase in radians that the electron accumulates during the transit, and $k_i$ is the fraction of that phase converted into alignment. Since $B$ is uniform inside the magnet in this model, $u$ is the same for all atoms at a given current. Note that $c(\tau)\to 1$ for large $u\tau$, whatever the starting value $c_0$.
+
+\subsection{Initial distribution for the upper branch}
+\label{sec:branch}
+At the entrance, the electron direction cosine $c_0$ and the nuclear direction cosine $c_n$ are independent and isotropic. Their joint density on the square $[-1,1]^2$ is therefore $1/4$. In CQD, the atom joins the upper branch when $c_n < c_0$, which happens with probability $1/2$. The distribution of $c_0$ for the upper branch is then
+\begin{equation}
+P(c_0 \mid \text{up}) = \frac{1}{1/2}\int_{-1}^{c_0}\frac14\,dc_n = \frac{1+c_0}{2},
+\qquad -1\le c_0\le 1 .
+\label{eq:heart}
+\end{equation}
+This is the ``heart-shaped'' weighting: the upper branch favours electrons that already point roughly along the field. It is fixed by the model and has no free parameter. Its mean is already $\langle c_0\rangle = 1/3$.
+
+\subsection{Average alignment after a dose $x$: the function $p(x)$}
+\label{sec:p}
+Combining Eqs.~\eqref{eq:tanh} and \eqref{eq:heart}, the average alignment after a dose $x$ (with $x=u\tau$) is
+\begin{equation}
+p(x) \equiv \langle c\rangle = \frac12\int_{-1}^{1}(1+c_0)\,\tanh\!\big[\artanh c_0 + x\big]\,dc_0 .
+\label{eq:pint}
+\end{equation}
+
+\paragraph{Closed form.} Set $t = \tanh x$. The addition formula for $\tanh$ gives
+\[
+\tanh[\artanh c_0 + x] = \frac{c_0 + t}{1 + c_0 t} = \frac1t + \frac{t - 1/t}{1 + c_0 t}.
+\]
+The first term integrates to $\tfrac12\int(1+c_0)\,dc_0 / t = 1/t$. For the second term, write $1+c_0 = \tfrac1t(1+c_0t) + (1-\tfrac1t)$. This gives
+\[
+\int_{-1}^{1}\frac{1+c_0}{1+c_0t}\,dc_0 = \frac2t + \frac{t-1}{t^2}\ln\frac{1+t}{1-t} = \frac2t + \frac{2x(t-1)}{t^2},
+\]
+using $\ln\frac{1+t}{1-t} = 2\artanh t = 2x$. Putting the pieces together,
+\begin{equation}
+\boxed{\;p(x) = \frac1t + 1 - \frac{1}{t^2} + \frac{x\,(t-1)(t^2-1)}{t^3},\qquad t=\tanh x\;}
+\label{eq:pclosed}
+\end{equation}
+In hyperbolic functions this reads $p(x) = \coth x - \csch^2 x + x(\coth x - 1)\csch^2 x$.
+
+\paragraph{Limits.} $p(0) = 1/3$, which is the mean of the heart-shaped distribution, and $p(x)\to 1$ for $x\to\infty$, which is full alignment. For small $x$,
+\begin{equation}
+p(x) = \tfrac13 + \tfrac23 x - \tfrac{2}{15}x^2 + O(x^3).
+\label{eq:pseries}
+\end{equation}
+This expansion follows from $\tanh(\artanh c + x) = c + (1-c^2)x - c(1-c^2)x^2 + O(x^3)$ averaged over Eq.~\eqref{eq:heart}.
+
+\subsection{The response function $R(u)$}
+\label{sec:R}
+Inserting $\langle c(\tau)\rangle = p(u\tau)$ into Eq.~\eqref{eq:Rdef} gives the central result:
+\begin{equation}
+\boxed{\;R(u; r) = \frac{1}{r+\tfrac12}\int_0^1 (r + 1 - \tau)\; p(u\tau)\; d\tau\;}
+\label{eq:R}
+\end{equation}
+Figure~\ref{fig:response} shows $p(u)$ and $R(u)$. Both rise from $1/3$ to $1$. $R$ lags behind $p$ because it averages over the transit, during which the dose grows from $0$ to $u$. Integrating the series~\eqref{eq:pseries} term by term gives
+\begin{equation}
+R(u;r) = \frac13 + \frac{3r+1}{9(r+\frac12)}\,u - \frac{4r+1}{90(r+\frac12)}\,u^2 + O(u^3),
+\label{eq:Rseries}
+\end{equation}
+where we used $\int_0^1(r+1-\tau)\tau\,d\tau = \frac{3r+1}{6}$ and $\int_0^1(r+1-\tau)\tau^2 d\tau = \frac{4r+1}{12}$.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.62\textwidth]{figs/fig_response.pdf}
+\caption{Average alignment $p(u)$ after dose $u$ (Eq.~\ref{eq:pclosed}), and the time-averaged response $R(u)$ that sets the displacement (Eq.~\ref{eq:R}), for $r = 5.646$. Dotted lines mark the limits $1/3$ and $1$.}
+\label{fig:response}
+\end{figure}
+
+\subsection{Why the drift distance matters so little}
+\label{sec:drift}
+Using $\frac{r+1-\tau}{r+1/2} = 1 + \frac{1/2-\tau}{r+1/2}$, Eq.~\eqref{eq:R} splits into two terms:
+\begin{equation}
+R(u;r) = \underbrace{\int_0^1 p(u\tau)\,d\tau}_{\text{independent of } r}
+\;+\; \frac{1}{r+\frac12}\underbrace{\int_0^1\big(\tfrac12-\tau\big)\,p(u\tau)\,d\tau}_{\text{small}} .
+\end{equation}
+The drift distance enters only through a correction proportional to $1/(r+\frac12)\approx 0.16$. Changing $L_2$ from 0.403 to 0.39525~m changes $r$ from 5.757 to 5.646, so this correction changes by less than 2\%. The fitted $k_i$ therefore moves by only about $0.1$--$0.2\%$.
+
+%=====================================================================
+\section{Two fitting models}
+%=====================================================================
+
+\subsection{Model L (low field): constant scale}
+Combining Eqs.~\eqref{eq:Rdef}, \eqref{eq:dose} and \eqref{eq:R} gives the low-field model
+\begin{equation}
+\boxed{\;z_j^\text{model} = s\; G_j\; R(u_j), \qquad u_j = k_i\,\kappa\,B_j\;}
+\label{eq:modelL}
+\end{equation}
+It has two free parameters: the CQD coefficient $k_i$ and the scale $s$ in mm/(T/m). The scale is left free, instead of being fixed to $s_\text{mech}$ from Eq.~\eqref{eq:smech}, because the measured peak is not exactly the single-speed branch centroid of the model. Hyperfine mixing, the speed distribution, the detector resolution and the magnification all affect the peak position.
+
+\paragraph{Why only low field?} Model L predicts that $z/G = s\,R(u)$ can only \emph{increase} with $B$, since $R$ is monotone. The data do something else: $z/G$ rises up to $I\approx 0.07$~A and then falls by about 30\% (Fig.~\ref{fig:diag}, left). At high field, the beam profile and the detector convolution dominate the peak position, which Model L does not describe. Model L is therefore applied only to the first six points, $0.020\le I\le 0.045$~A.
+
+\subsection{Model H (whole field): QM curve as a mechanical reference}
+To cover the whole range, the field-dependent mechanical behaviour is taken from the supplied QM simulation. CQD supplies only the alignment factor:
+\begin{equation}
+\boxed{\;z_j^\text{model} = A\; z_j^{\QM}\; R(u_0 + u_j), \qquad u_j = k_i\,\kappa\,B_j\;}
+\label{eq:modelH}
+\end{equation}
+It has three free parameters:
+\begin{itemize}
+\item $k_i$, the CQD coefficient;
+\item $A$, a dimensionless amplitude, close to 1;
+\item $u_0\ge 0$, a constant dose offset.
+\end{itemize}
+The offset $u_0$ is phenomenological. It lets the response start partly aligned and stands in for any alignment acquired before SG1. Without it, the factor $R$ would vary from $1/3$ to $1$ and could not stay close to the QM curve at high field.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.48\textwidth]{figs/fig_z_over_G.pdf}\hfill
+\includegraphics[width=0.48\textwidth]{figs/fig_ratio_QM.pdf}
+\caption{Left: the measured displacement per unit gradient $z/G$ is not monotone. A constant scale (Model L) cannot describe all currents. Right: ratio of the data to the QM curve, compared with the supplied CQD curve and with the fitted factor $A\,R(u_0+u)$ of Model H. The ratio dips at the two lowest currents, and a monotone factor cannot reproduce that dip.}
+\label{fig:diag}
+\end{figure}
+
+%=====================================================================
+\section{Fitting procedure}
+%=====================================================================
+
+\subsection{Objective function}
+The data file does contain a column \texttt{ErrorExperiment}, but this analysis follows the reference and does not use it. Every point gets the same weight in \emph{logarithmic} residuals:
+\begin{equation}
+e_j = \ln\frac{z_j^\text{model}}{z_j}, \qquad \chi^2 = \sum_{j} e_j^2 .
+\label{eq:chi2}
+\end{equation}
+For small residuals, $e_j \approx z_j^\text{model}/z_j - 1$, so $\chi^2$ weights every point by its \emph{fractional} error. A 0.035~mm point counts as much as a 1.8~mm point. This is exactly the maximum-likelihood objective if the noise is multiplicative with the same relative size for every point. It is a working assumption, not a measured noise model. Fit quality is reported as the relative root-mean-square error
+\begin{equation}
+\text{RMS}_\text{rel} = \sqrt{\frac1n\sum_j\left(\frac{z_j^\text{model}}{z_j}-1\right)^2}.
+\end{equation}
+
+\subsection{Eliminating the scale analytically}
+\label{sec:profile}
+In both models the scale ($s$ or $A$) is a pure multiplicative factor, so it becomes additive in logarithms. For Model L, define $\ell = \ln s$ and $d_j(k_i) = \ln\!\big[G_jR(u_j)\big] - \ln z_j$. Then
+\[
+\chi^2(\ell,k_i) = \sum_j(\ell + d_j)^2,\qquad
+\frac{\partial\chi^2}{\partial \ell} = 2\sum_j(\ell+d_j) = 0
+\;\Rightarrow\; \ell = -\bar d = -\frac1n\sum_j d_j .
+\]
+The second derivative is $2n>0$, so this is the unique minimum. Exponentiating gives the best scale for every trial $k_i$:
+\begin{equation}
+\boxed{\;\hat s(k_i) = \left[\prod_{j=1}^{n}\frac{z_j}{G_j\,R(u_j)}\right]^{1/n}\;}
+\label{eq:shat}
+\end{equation}
+This is the geometric mean of the point-by-point ratios. Substituting back gives the \emph{profiled} objective
+\begin{equation}
+\chi^2_\text{prof}(k_i) = \sum_j\big(d_j - \bar d\big)^2 ,
+\end{equation}
+which is $n$ times the variance of the log-ratios. Only the \emph{shape} of $z(B)$ constrains $k_i$, and the fit reduces to a one-dimensional search. Model H is handled the same way: $\hat A = \big[\prod_j z_j/(z^{\QM}_jR(u_0+u_j))\big]^{1/n}$, which leaves a two-dimensional search over $(k_i, u_0)$.
+
+\subsection{Numerical implementation}
+\begin{enumerate}
+\item \textbf{Function $p(x)$.} For $x\ge 0.05$, use the closed form~\eqref{eq:pclosed}, written with $e^{-2x}$ so that it does not overflow. For $x<0.05$, the closed form loses precision through cancellation, so Eq.~\eqref{eq:pint} is evaluated directly with 64-point Gauss--Legendre quadrature.
+\item \textbf{Function $R(u)$.} The time integral~\eqref{eq:R} uses 128-point Gauss--Legendre quadrature on $[0,1]$. This reproduces the reference values to all printed digits.
+\item \textbf{Model L.} Scan $\chi^2_\text{prof}$ on 600 log-spaced values $10^{-8}\le k_i\le10^{-3}$, and find every local minimum on the grid. Refine each minimum with Brent's method in $\ln k_i$. The scan matters because a single starting guess could miss one of the two minima (Sec.~\ref{sec:twominima}).
+\item \textbf{Model H.} Minimize over $\theta = (\ln k_i,\ \sqrt{u_0})$ with $u_0 = \theta_2^2$. This enforces $u_0\ge 0$ without constraints. Use Nelder--Mead from 12 starting points, $k_i\in\{0.3,1,3,10\}\times10^{-6}$ and $u_0\in\{0.1,1,2\}$, restart from each result, and keep the best.
+\item \textbf{Variants.} Model H is also fitted with $A=1$, with $k_i = 1.5\times10^{-6}$ fixed (one-dimensional Brent search in $u_0$), and with two other objectives. Those are squared relative residuals, $\sum_j(z^\text{model}_j/z_j-1)^2$, and squared residuals in millimetres, $\sum_j(z^\text{model}_j-z_j)^2$. In those two variants $A$ is fitted numerically.
+\end{enumerate}
+
+\subsection{Validation}
+With $L_2 = 0.403$~m, the code reproduces every number of the reference analysis~\cite{wang2026} to all printed digits. This covers both low-field minima and their $s$, $\chi^2$ and RMS, the window-sensitivity table, all three whole-field fits, and the alternative-objective fits. Our $\kappa = 2.0525916\times10^7$~T$^{-1}$ differs from the reference value $2.0525920\times10^7$ by $2\times10^{-7}$ relative, because of slightly different constants. The effect on the results is negligible.
+
+%=====================================================================
+\section{Results for $L_2 = 0.39525$ m}
+%=====================================================================
+
+\subsection{Low field (Model L, first six points)}
+\label{sec:res-low}
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+& Solution 1 (low dose) & Solution 2 (high dose)\\
+\midrule
+$k_i$                         & $8.8032\times10^{-7}$ & $6.7094\times10^{-6}$\\
+$\hat s$ [mm/(T/m)]           & 0.018865 & 0.010469\\
+dose range $u_j$              & 0.221--0.527 & 1.683--4.019\\
+$\chi^2$                      & $4.157\times10^{-4}$ & $1.795\times10^{-4}$\\
+Relative RMS                  & 0.834\% & 0.547\%\\
+\bottomrule
+\end{tabular}
+\end{center}
+For comparison, the mechanical estimate of Eq.~\eqref{eq:smech} is $s_\text{mech} = 0.011985$~mm/(T/m). It is closer to the scale of Solution~2, but the observed peak need not equal the model centroid exactly, so this comparison does not decide between the two solutions.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.48\textwidth]{figs/fig_lowfield_profile.pdf}\hfill
+\includegraphics[width=0.48\textwidth]{figs/fig_lowfield_fits.pdf}
+\caption{Left: low-field profiled objective $\chi^2_\text{prof}(k_i)$, with the scale optimized at each $k_i$. It has two minima. Right: the two solutions are almost indistinguishable as displacement curves.}
+\label{fig:low}
+\end{figure}
+
+\paragraph{Why there are two solutions.}
+\label{sec:twominima}
+$R(0) = 1/3$ and $R(\infty) = 1$ are both \emph{constants}. At very low and at very high dose, the model reduces to $z\propto G$, and the free scale $s$ absorbs the constant. The data show a modest rise of $z/G$ across the window. That rise can be produced either on the lower side of the steep part of $R(u)$ (small $k_i$, large $s$) or on its upper side (large $k_i$, small $s$). Restricting the fit to low currents does not remove this freedom. An independent calibration of $s$ would.
+
+\paragraph{Sensitivity to the fit window.} All windows start at 0.020~A.
+\begin{center}
+\begin{tabular}{ccccl}
+\toprule
+Points & Upper current (A) & Solution 1: $k_i/10^{-6}$ & Solution 2: $k_i/10^{-6}$ & Smaller $\chi^2$\\
+\midrule
+4  & 0.035 & 1.093 & 7.304 & solution 1\\
+5  & 0.040 & 1.004 & 6.838 & solution 1\\
+6  & 0.045 & 0.880 & 6.709 & solution 2\\
+7  & 0.050 & 0.761 & 6.709 & solution 2\\
+8  & 0.060 & 0.593 & 6.849 & solution 2\\
+9  & 0.070 & 0.443 & 7.133 & solution 2\\
+10 & 0.080 & 0.326 & 7.546 & solution 2\\
+\bottomrule
+\end{tabular}
+\end{center}
+Solution 1 drifts by a factor of 3 as the window grows. Solution 2 is more stable, varying between 6.7 and 7.5. Neither is a window-independent constant.
+
+\subsection{Whole field (Model H, all 28 points)}
+\label{sec:res-whole}
+
+\begin{center}
+\begin{tabular}{lcccccc}
+\toprule
+Fit & $k_i$ & $A$ & $u_0$ & $\chi^2$ & Relative RMS\\
+\midrule
+$A$ fitted (best)             & $1.28979\times10^{-6}$ & 1.04350 & 1.16467 & 0.024125 & 2.873\%\\
+$A = 1$ fixed                 & $1.98688\times10^{-6}$ & 1       & 1.15163 & 0.036526 & 3.531\%\\
+$k_i = 1.5\times10^{-6}$ fixed & $1.5\times10^{-6}$    & 1.03450 & 1.11671 & 0.024932 & 2.909\%\\
+\bottomrule
+\end{tabular}
+\end{center}
+At the best fit, the induced dose spans $u_j = 0.324$--$19.83$. With the offset, the argument of $R$ spans $1.49$--$20.99$, so most of the high-field range is close to saturation ($R\to 1$).
+
+\paragraph{Effect of the residual weighting.} All three fits below have $A$ free.
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Objective & $k_i/10^{-6}$ & $A$ & Relative RMS\\
+\midrule
+Squared log residuals, Eq.~\eqref{eq:chi2} & 1.290 & 1.04350 & 2.873\%\\
+Squared relative residuals & 1.322 & 1.04219 & 2.865\%\\
+Squared residuals in mm   & 2.737 & 1.01634 & 5.394\% \;(0.00865 mm abs.)\\
+\bottomrule
+\end{tabular}
+\end{center}
+The log and relative objectives agree. The millimetre objective is dominated by the large high-field displacements and gives a $k_i$ twice as large.
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.48\textwidth]{figs/fig_wholefield.pdf}\hfill
+\includegraphics[width=0.48\textwidth]{figs/fig_residuals.pdf}\\[6pt]
+\includegraphics[width=0.55\textwidth]{figs/fig_wholefield_profile.pdf}
+\caption{Top left: data, supplied QM and CQD curves, and the best Model~H fit. Top right: relative residuals $(z^\text{model}/z - 1)$, which have a clear structure. The lowest point is underpredicted by about 10\%. Bottom: whole-field objective profiled over $k_i$, with $A$ and $u_0$ optimized at each $k_i$. The minimum is broad, and $k_i = 1.5\times10^{-6}$ lies close to it.}
+\label{fig:whole}
+\end{figure}
+
+\subsection{Comparison with the reference drift distance}
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+$k_i$ & $L_2 = 0.403$ m & $L_2 = 0.39525$ m & Change\\
+\midrule
+Low field, solution 1          & $8.7983\times10^{-7}$  & $8.8032\times10^{-7}$  & $+0.06\%$\\
+Low field, solution 2          & $6.7068\times10^{-6}$  & $6.7094\times10^{-6}$  & $+0.04\%$\\
+Whole field, $A$ fitted        & $1.28854\times10^{-6}$ & $1.28979\times10^{-6}$ & $+0.10\%$\\
+Whole field, $A=1$             & $1.98459\times10^{-6}$ & $1.98688\times10^{-6}$ & $+0.12\%$\\
+Whole field, mm objective      & $2.7338\times10^{-6}$  & $2.7370\times10^{-6}$  & $+0.12\%$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%=====================================================================
+\section{Interpretation and limitations}
+%=====================================================================
+\begin{enumerate}
+\item \textbf{Scaling of $k_i$.} Only the product $u = k_i\,\gamma B L_1/v$ enters the model, so at fixed dose
+\[
+k_i \propto \frac{v}{B\,L_1}.
+\]
+A 5\% error in the beam speed, the field calibration, or the effective magnet length gives a 5\% error in $k_i$. The drift distance $L_2$ enters only through $r$, and only weakly (Sec.~\ref{sec:drift}).
+\item \textbf{Low field.} The data do not choose between $k_i\approx 0.9\times10^{-6}$ and $6.7\times10^{-6}$. An independent calibration of the scale $s$ is needed to choose.
+\item \textbf{Whole field.} $k_i\approx 1.3\times10^{-6}$, but this depends on $A$ and on the weighting. The residuals have structure (Fig.~\ref{fig:whole}). The initial dip in data/QM (Fig.~\ref{fig:diag}) cannot be reproduced by any monotone factor $A\,R(u_0+u)$. Model~H is a descriptive approximation, not the full CQD forward simulation.
+\item \textbf{No experimental uncertainties used.} The values in Sec.~6 are best-fit values under stated assumptions. They are not confidence intervals. A natural next step is to repeat the fits with weights $1/(\sigma_j/z_j)^2$ from the \texttt{ErrorExperiment} column. In log space, a measurement error $\sigma_j$ becomes $\sigma_j/z_j$.
+\end{enumerate}
+
+%=====================================================================
+\section{Reproducibility}
+%=====================================================================
+{\sloppy
+\begin{itemize}
+\item Script: \texttt{SG2026Q4\_analytic\_cqd\_fit.jl} (Julia 1.12; packages CSV, DataFrames, Optim, Plots). The list \texttt{LD\_LIST} sets the drift distances to fit. The first entry, 0.403~m, is the validation case.
+\item Input: \texttt{data\_studies/\allowbreak FIT2026\_ki\_scale\_20261007T172140485/\allowbreak model\_data.csv}.
+\item Output: \texttt{data\_studies/\allowbreak FIT2026\_analytic\_CQD\_20261007T190938/}, which contains \texttt{summary.csv}, \texttt{wholefield\_points\_Ld*.csv}, \texttt{window\_sensitivity\_Ld*.csv}, and the figures.
+\end{itemize}
+\par}
+
+\appendix
+%=====================================================================
+\section{Data and whole-field fit}
+\label{app:data}
+%=====================================================================
+$z^\text{H}$ is the best Model~H fit ($k_i = 1.28979\times10^{-6}$, $A = 1.04350$, $u_0 = 1.16467$, $L_2 = 0.39525$~m). The column $\Delta$ is $100\,(z^\text{H}/z - 1)$. Positions are in mm.
+\begin{center}
+\small
+\begin{tabular}{rcccccccr}
+\toprule
+$j$ & $I$ (A) & $B$ (T) & $G$ (T/m) & $z$ & $z^{\QM}$ & $z^\text{CQD}$ & $z^\text{H}$ & $\Delta$ (\%)\\
+\midrule
+ 1 & 0.020 & 0.012220 & 4.6084 & 0.03469 & 0.04352 & 0.03931 & 0.03117 & $-10.15$ \\
+ 2 & 0.025 & 0.015557 & 5.8667 & 0.04668 & 0.06323 & 0.05114 & 0.04613 & $-1.17$ \\
+ 3 & 0.030 & 0.018922 & 7.1357 & 0.05945 & 0.08258 & 0.06314 & 0.06129 & $+3.09$ \\
+ 4 & 0.035 & 0.022315 & 8.4154 & 0.07306 & 0.10087 & 0.07516 & 0.07606 & $+4.10$ \\
+ 5 & 0.040 & 0.025736 & 9.7055 & 0.08690 & 0.11796 & 0.08721 & 0.09028 & $+3.89$ \\
+ 6 & 0.045 & 0.029185 & 11.0061 & 0.10037 & 0.13397 & 0.09924 & 0.10397 & $+3.59$ \\
+ 7 & 0.050 & 0.032660 & 12.3168 & 0.11378 & 0.14908 & 0.11132 & 0.11720 & $+3.01$ \\
+ 8 & 0.060 & 0.039691 & 14.9684 & 0.14037 & 0.17718 & 0.13526 & 0.14258 & $+1.57$ \\
+ 9 & 0.070 & 0.046827 & 17.6592 & 0.16593 & 0.20317 & 0.15896 & 0.16688 & $+0.57$ \\
+10 & 0.080 & 0.054063 & 20.3881 & 0.19020 & 0.22763 & 0.18238 & 0.19035 & $+0.08$ \\
+11 & 0.090 & 0.061396 & 23.1538 & 0.21411 & 0.25091 & 0.20551 & 0.21317 & $-0.44$ \\
+12 & 0.100 & 0.068825 & 25.9554 & 0.23838 & 0.27330 & 0.22817 & 0.23546 & $-1.23$ \\
+13 & 0.125 & 0.087793 & 33.1084 & 0.29375 & 0.32655 & 0.28333 & 0.28950 & $-1.45$ \\
+14 & 0.150 & 0.107288 & 40.4604 & 0.35237 & 0.37709 & 0.33654 & 0.34169 & $-3.03$ \\
+15 & 0.175 & 0.127263 & 47.9935 & 0.39813 & 0.42593 & 0.38811 & 0.39260 & $-1.39$ \\
+16 & 0.201 & 0.148497 & 56.0012 & 0.45521 & 0.47560 & 0.44049 & 0.44464 & $-2.32$ \\
+17 & 0.250 & 0.189604 & 71.5034 & 0.55853 & 0.56788 & 0.53738 & 0.54159 & $-3.03$ \\
+18 & 0.300 & 0.232707 & 87.7584 & 0.66258 & 0.66239 & 0.63590 & 0.64086 & $-3.28$ \\
+19 & 0.401 & 0.321814 & 121.3625 & 0.85546 & 0.85705 & 0.83777 & 0.84491 & $-1.23$ \\
+20 & 0.501 & 0.410202 & 154.6953 & 1.05764 & 1.05305 & 1.04007 & 1.04985 & $-0.74$ \\
+21 & 0.600 & 0.494908 & 186.6396 & 1.23192 & 1.24520 & 1.23633 & 1.25047 & $+1.51$ \\
+22 & 0.700 & 0.574666 & 216.7179 & 1.42276 & 1.42972 & 1.42318 & 1.44296 & $+1.42$ \\
+23 & 0.750 & 0.611422 & 230.5796 & 1.50801 & 1.51535 & 1.51284 & 1.53228 & $+1.61$ \\
+24 & 0.803 & 0.647558 & 244.2070 & 1.60867 & 1.60035 & 1.59906 & 1.62092 & $+0.76$ \\
+25 & 0.851 & 0.677407 & 255.4639 & 1.65509 & 1.67076 & 1.67227 & 1.69434 & $+2.37$ \\
+26 & 0.901 & 0.705223 & 265.9536 & 1.76415 & 1.73596 & 1.73871 & 1.76234 & $-0.10$ \\
+27 & 0.950 & 0.728880 & 274.8751 & 1.78857 & 1.79201 & 1.79801 & 1.82079 & $+1.80$ \\
+28 & 1.000 & 0.748975 & 282.4533 & 1.84538 & 1.83996 & 1.84548 & 1.87078 & $+1.38$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%=====================================================================
+\section{Notation map to the reference analysis}
+\label{app:notation}
+%=====================================================================
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+This report & Reference~\cite{wang2026} & Meaning\\
+\midrule
+$L_1$, $L_2$            & $\ell_1^\text{eff}$, $L_d$ & magnet length, drift distance\\
+$T_1$, $T_2$            & $T_1$, $T_d$ & transit times\\
+$r$                     & DIR & $L_2/L_1$\\
+$\kappa$                & $|\gamma_e|\ell_1^\text{eff}/v_a$ & Larmor phase per tesla\\
+$u_j$                   & $\mathcal D_j$ & dose\\
+$u_0$                   & $\mathcal D_b$ & dose offset\\
+$p(x)$                  & $m(x)$ & average alignment\\
+$R(u;r)$                & $\mathcal Z(\mathcal D,\text{DIR})$ & response factor\\
+$s$                     & $S_G$ & displacement per unit gradient\\
+$A$                     & $A_z$ & amplitude of Model H\\
+$c_0$                   & $c_e^\text{in}$ & entrance electron cosine\\
+$\chi^2$                & $Q$ & sum of squared log residuals\\
+$v$, $M$                & $v_a$, $m_a$ & speed, atomic mass\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{thebibliography}{9}
+\bibitem{wang2026} L.~Wang, \emph{Fits to Kelvin's August--September 2026 SG1 Data: Low Field and Whole Field}, analysis note, October 7, 2026.
+\end{thebibliography}
+
+\end{document}
