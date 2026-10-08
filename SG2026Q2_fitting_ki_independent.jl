@@ -1595,7 +1595,6 @@ savefig(fit_figs, joinpath(OUTDIR, "fig003.$(FIG_EXT)"))
 ##################################################################################################
 #  4) CONTINUOUS CURVE — fit subset, tail-convergence study
 section("4", "CONTINUOUS CURVE — fit subset, tail-convergence study (fig008)")
-
 ##################################################################################################
 
 # -----------------------------------------------------------------------------
@@ -1764,7 +1763,6 @@ savefig(fig, joinpath(OUTDIR, "fig008_tail_convergence.$(FIG_EXT)"))
 ##################################################################################################
 #  5) FINAL FITS WITH UNCERTAINTIES (tail = last N_TAIL points)
 section("5", "FINAL FITS WITH UNCERTAINTIES — tail = last N_TAIL points")
-
 ##################################################################################################
 I_tail_start = data[end - N_TAIL + 1, 1]     # first current inside the calibration tail
 @info cstr("Calibration tail for the final fits: last ", :cyan) * cstr(N_TAIL, :yellow, :bold) *
@@ -2167,7 +2165,21 @@ end
 
 archive_keys = list_jld2_entries(archive_path)     # names-only reference of the archive layout
 
-
+df = jldopen(archive_path, "r") do f
+    I0 = f["experiment/Current_A"]
+    DataFrame(
+        Current_A   = I0,
+        B_T         = TheoreticalSimulation.BvsI.(I0),
+        G_Tm        = TheoreticalSimulation.GvsI.(I0),
+        
+        
+        Experiment      = f["experiment/zF1_mm"],
+        ErrorExperiment = f["experiment/zF1Err_mm"],
+        CQD_up_mm       = f["experiment/CQD_up_mm"],
+        QM_F1_mm        = f["experiment/QM_zF1_mm"],
+    )
+end
+CSV.write(joinpath(OUTDIR,"model_data.csv"), df)
 
 
 
