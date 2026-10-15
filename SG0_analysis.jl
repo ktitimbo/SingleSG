@@ -840,6 +840,8 @@ data_directories = [
         # "20260807/Round1",
         "20260923/Round1",
         "20260923/Round2",
+        "20261009/Round1",
+        "20261009/Round2",
 ]
 nd = length(data_directories);
 
@@ -1229,7 +1231,7 @@ function make_pair_plots(tables, data_directories; xmode = :log10)
 
     pair_indices = [(1, 2), (3, 4), (5, 6), 
                     (7, 8), (9,10), (11,12,13),
-                    (14,15)
+                    (14,15),(16,17)
                     ]
 
     fig_pairs = []
@@ -1430,7 +1432,7 @@ end
 
 
 # Reference / Baseline
-sg0_ref_indices = vcat(3:4,9:10,14:15)
+sg0_ref_indices = vcat(3:4,9:10,14:15, 16:17)
 sg0_ref = OrderedDict{Int, DataFrame}()
 for (i, idx) in enumerate(sg0_ref_indices)
 
@@ -1565,9 +1567,15 @@ sg0_colors  = palette(:darkrainbow, 8) #[:purple, :dodgerblue, :orange, :pink]
 
 # ── Configurations ────────────────────────────────────────────────────────
 AP = (name = "AP", title = "Antiparallel (↑↓) configuration",
-      ref = [3, 9, 14], sg0 = [1, 6, 8, 13], I1_tol = 1e-6)
+      ref = [3, 9, 14, 16], 
+    #   sg0 = [8], 
+      sg0 = [1, 6, 8, 13], 
+      I1_tol = 1e-6)
 PA = (name = "PA", title = "Parallel (↑↑) configuration",
-      ref = [4, 10, 15], sg0 = [2, 5, 7, 11], I1_tol = 2e-3)
+      ref = [4, 10, 15, 17],
+    #   sg0 = [7], 
+      sg0 = [2, 5, 7, 11], 
+      I1_tol = 2e-3)
 
 LOGTICKS_X = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"])
 LOGTICKS_Y = ([1e-1, 1.0, 10.0], [L"10^{-1}", L"10^{0}", L"10^{1}"])
