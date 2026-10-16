@@ -3,6 +3,8 @@
 # Run in a fresh Julia session (not one where Plots was loaded: it clashes with Makie names).
 using JLD2, CSV, DataFrames, CairoMakie
 
+set_theme!(theme_latexfonts())   # Computer Modern (New Computer Modern, bundled with Makie)
+
 # ---------- Loaders: both return a Vector of (label, I, y, yerror) ----------
 
 # JLD2: every group named "idx_N" holds one curve (fields: label, I, y, yerror)
@@ -64,11 +66,11 @@ function plot_curves(curves; fit = nothing, xlog = false)   # fit = (I_fit, dD) 
               limits = (xmin, 3.8, -2.7, 5.4),
               xminorticksvisible = true, yminorticksvisible = true,
               xminorgridvisible = true, yminorgridvisible = true,
-              xminorticks = IntervalsBetween(xlog ? 9 : 5), yminorticks = IntervalsBetween(5),
-              xgridcolor = (:black, 0.15), ygridcolor = (:black, 0.15),
-              xminorgridcolor = (:black, 0.07), yminorgridcolor = (:black, 0.07))
+              xminorticks = IntervalsBetween(xlog ? 9 : 5), yminorticks = IntervalsBetween(2),
+              xgridcolor = (:black, 0.12), ygridcolor = (:black, 0.12),
+              xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05))
 
-    hlines!(ax, 0; color = :black, linestyle = :dot, linewidth = 0.8)
+    hlines!(ax, 0; color = :black, linestyle = :dash, linewidth = 1.8)
 
     # fit curves in black (drawn first so the data sit on top)
     fit_lines = []
@@ -90,9 +92,9 @@ function plot_curves(curves; fit = nothing, xlog = false)   # fit = (I_fit, dD) 
         push!(handles, sc); push!(labels, c.label)
     end
 
-    # legend order: data first, then a single "Fit" entry last
+    # legend order: data first, then a single "Coquantum dynamics" entry last
     if !isempty(fit_lines)
-        push!(handles, fit_lines[1]); push!(labels, "Fit")
+        push!(handles, fit_lines[1]); push!(labels, "Coquantum dynamics")
     end
     axislegend(ax, handles, labels; position = :lt, framevisible = false)
     return fig
