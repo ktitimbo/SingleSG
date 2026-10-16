@@ -1,0 +1,589 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{caption}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepgfplotslibrary{groupplots}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\setlength{\emergencystretch}{3em}
+
+\newcommand{\D}{\mathcal{D}}
+\newcommand{\Z}{\mathcal{Z}}
+\newcommand{\C}{\mathcal{C}}
+\newcommand{\T}{\mathcal{T}}
+\newcommand{\pp}{{\uparrow\uparrow}}
+\newcommand{\pa}{{\uparrow\downarrow}}
+\newcommand{\cin}{c_e^{\rm in}}
+\newcommand{\DIR}{\mathrm{DIR}}
+\newcommand{\RLC}{\mathrm{RLC}}
+\newcommand{\BL}{\mathrm{BL}}
+
+\definecolor{parcol}{HTML}{A32D2D}
+\definecolor{antcol}{HTML}{2A78D6}
+
+\title{CQD analysis of the SG0--SG1 spin-resolved beam separations\\[4pt]
+\large Data set of 2026-07-06: derivation and fits}
+\author{Companion to \emph{Analytical Model and Provisional Calibration of the}\\
+\emph{Null Stern--Gerlach CQD Experiment}, Revision F (October 13, 2026)}
+\date{October 16, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+The double-stage co-quantum-dynamics (CQD) model of the source note is fitted to the spin-resolved
+beam-separation data of 2026-07-06 (\texttt{spin\_resolved\_sep\_20260706.jld2}): 15 SG0 currents
+from 0 to 3.64~A for parallel and antiparallel SG0--SG1 fields, each with its own uncertainty. The
+chain of equations from the oven ensemble to the detector separation is derived in full, using the
+notation of the source note; equation numbers in square brackets refer to it. The SG0 field is
+divided by $f=7$ (Revision~F scaling); $f$ is a fixed calibration input, not a fitting parameter.
+In the recommended reduction the parallel set alone is fitted with pure CQD, which gives
+$k_i=(2.67^{+0.60}_{-0.48})\times10^{-6}$ ($\chi^2=2.8$ for 15 points). With this $k_i$ fixed, pure
+CQD predicts the wrong sign for the antiparallel set ($\chi^2=109$); a retained-label fraction
+proportional to the SG0 dose, $w_{\rm ret}\simeq0.036~\text{A}^{-1}\times I_0$, reproduces it
+($\chi^2=0.6$). With the measured SG0 field ($f=1$) the same procedure gives
+$k_i=(1.52\pm0.09)\times10^{-7}$. The alternative fitting strategies are compared, and the
+dependence on $f$ is mapped. Fitted curves are supplied as CSV files.
+\end{abstract}
+
+\tableofcontents
+
+%==========================================================================
+\section{The data}
+\label{sec:data}
+
+The beam passes first through SG0, a uniform-field magnet with no gradient, and then through SG1, a
+gradient Stern--Gerlach magnet at the fixed current $I_1=40$~mA. The camera records the distance
+between the two beam peaks. The data file contains, for SG0 and SG1 fields parallel ($\pp$, group
+\texttt{idx\_7}) and antiparallel ($\pa$, group \texttt{idx\_8}), the change of this separation
+relative to its zero-current value, $\Delta D(I_0)$ in pixels, together with a standard uncertainty for
+every point (Table~\ref{tab:points}, Figure~\ref{fig:data}).
+
+Compared with the digitized eight-point sets used previously, the new data
+\begin{itemize}
+\item contain 15 currents per configuration, including five low currents $0\le I_0\le0.125$~A and two
+near-duplicate pairs (1.403/1.404~A and 3.598/3.642~A);
+\item carry individual uncertainties $\sigma_j=0.47$--$0.53$~px, used as weights in every fit;
+\item have small zero-current values, $-0.047$~px (parallel) and $+0.049$~px (antiparallel). Their
+difference, 0.096~px, equals the stored quantity \texttt{y0}. The model has $\Delta D(0)=0$ by
+construction; the offsets are a tenth of $\sigma$ and are kept as data.
+\end{itemize}
+The model normalizes all separations to the absolute zero-current separation, which is not stored in
+the file. The value $D_0=13$~pixels of the source note is used throughout.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.86\textwidth,height=0.48\textwidth,xlabel={SG0 current $I_0$ (A)},
+  ylabel={$\Delta D$ (px)},xmin=-0.1,xmax=3.8,ymin=-2.8,ymax=5.6,grid=major,grid style={gray!20},
+  legend pos=north west,legend style={font=\footnotesize,draw=none,fill=white,fill opacity=0.85,text opacity=1},legend cell align=left]
+\addplot[only marks,mark=diamond*,mark size=3pt,parcol,error bars/.cd,y dir=both,y explicit]
+  table[x=I0_A,y=dD_parallel_px,y error=sigma_parallel_px,col sep=comma]{spin_resolved_sep_20260706.csv};
+\addlegendentry{parallel $\pp$}
+\addplot[only marks,mark=square*,mark size=2pt,antcol,error bars/.cd,y dir=both,y explicit]
+  table[x=I0_A,y=dD_antiparallel_px,y error=sigma_antiparallel_px,col sep=comma]{spin_resolved_sep_20260706.csv};
+\addlegendentry{antiparallel $\pa$}
+\addplot[gray,dashed,forget plot] coordinates{(-0.1,0)(3.8,0)};
+\end{axis}
+\end{tikzpicture}
+\caption{The 2026-07-06 data: change of the beam separation relative to zero SG0 current.}
+\label{fig:data}
+\end{figure}
+
+\paragraph{Physical content.} A uniform field exerts no force, and standard quantum mechanics with the
+full hyperfine Hamiltonian predicts no change of the separation (section~23 of the source note). In
+CQD, SG0 \emph{rotates the electron magnetic moment} towards one pole without deflecting the atom.
+This changes how strongly each atom is pushed inside SG1, and therefore changes the separation. The
+size and sign of that change test the CQD collapse law and the electron--nuclear branching rule.
+
+%==========================================================================
+
+\section{Model derivation}
+
+\subsection{Initial ensemble and heart-shaped branching}
+
+At the oven exit the electron and nuclear moments are independent and isotropic. In the cosine
+variables $c_e=\cos\theta_e$ and $c_n=\cos\theta_n$ the measure is uniform on a square [89]:
+\begin{equation}
+dP_0=\tfrac14\,dc_e\,dc_n,\qquad -1\le c_e,c_n\le 1.
+\end{equation}
+CQD assigns the electron branch by comparing the two polar angles [90]:
+\begin{equation}
+q=\operatorname{sgn}(\theta_n-\theta_e)=\operatorname{sgn}(c_e-c_n).
+\end{equation}
+The $q=+1$ branch is the triangle $c_n<c_e$. Integrating $c_n$ over $-1<c_n<c_e$ gives the length
+$1+c_e$, so that
+\begin{equation}
+p(c_e\mid q{=}+1)=\frac{1+c_e}{2},\qquad p(c_n\mid q{=}+1)=\frac{1-c_n}{2},\qquad
+\langle c_e\rangle_+=\tfrac13 .
+\end{equation}
+The nuclear conditional density $(1-\cos\theta_n)/4\pi$ is the cardioid (``heart'') of the source
+note. In the rest of the derivation the heart shape appears only through the weight $(1+c_e)$, which
+is fixed by geometry and is not a fitting weight. It also explains why the weak-field response of a
+branch is $1/3$ rather than $0$ or $1$.
+
+\subsection{CQD collapse as a translation}
+
+The CQD collapse law [118] is
+\begin{equation}
+\tan\frac{\theta_e(t)}2=\tan\frac{\theta_e(0)}2\,e^{-q\D_c(t)},\qquad \D_c=k_i\,|\Delta\phi_e|,
+\end{equation}
+where $\D_c$, the \emph{collapse dose}, is $k_i$ times the accumulated Larmor phase. With the electron
+log-amplitude ratio
+\begin{equation}
+\C_e=\ln\frac{|A_\uparrow|}{|A_\downarrow|}=-\ln\tan\frac{\theta_e}{2}=\operatorname{artanh}c_e,
+\qquad c_e=\tanh\C_e,
+\end{equation}
+the law becomes a uniform translation [129]:
+\begin{equation}
+\boxed{\;\C_e^{\rm out}=\C_e^{\rm in}+q\,\D_c\;}
+\end{equation}
+Doses of successive stages with the same branch therefore add. For a stage with longitudinal field
+profile $B(y)$ traversed at speed $v_a$ the dose depends only on the field integral [131]:
+\begin{equation}
+\D_c=\frac{k_i|\gamma_e|}{v_a}\int|B(y)|\,dy=\frac{k_i|\gamma_e|\,\BL}{v_a}.
+\end{equation}
+Converting back to a cosine with the addition theorem for $\tanh$ gives the transfer map [145]:
+\begin{equation}
+\T_q(c;\D)=\frac{c+q\tanh\D}{1+q\,c\tanh\D}\;=\;c+q(1-c^2)\D+O(\D^2).
+\end{equation}
+The factor $1-c^2$ is a logistic flow: the moment turns fastest at the equator and stops at the poles.
+
+\subsection{Linking the SG0 and SG1 doses}
+
+The constant $k_i|\gamma_e|/v_a$ cancels in the ratio of the two doses [138--144]:
+\begin{equation}
+\frac{\D_{c,0}(I_0)}{\D_{c,1}}=\frac{\BL_0(I_0)}{\BL_1}
+\simeq\frac{\beta_0I_0\,\ell_0^{\rm eff}}{B_1\,\ell_1^{\rm eff}}
+=\frac{I_0}{I_\star},\qquad
+I_\star=\frac{B_1\ell_1^{\rm eff}}{\beta_0\ell_0^{\rm eff}} .
+\label{eq:link}
+\end{equation}
+With $\beta_0=0.031895$~T\,A$^{-1}$, $B_1=0.018931$~T, $\ell_0^{\rm eff}=0.040$~m and
+$\ell_1^{\rm eff}=0.070$~m one obtains $I_\star=1.03869$~A. Thus $\D_{c,0}=\alpha_0I_0$ with
+$\alpha_0=\D_{c,1}/I_\star$. \emph{Once $\D_{c,1}$ is chosen, the SG0 dose at every current is fixed};
+SG0 introduces no free parameter.
+
+\subsection{Interstage transfer}
+
+After SG0 each atom has $c_{e,0}^{\rm out}=\T_{q_0}(\cin;\D_{c,0})$.
+
+\paragraph{Parallel fields.} The field direction does not change, the electron keeps its branch,
+$q_1=q_0$, and enters SG1 pre-aligned towards the pole that SG1 also drives it to [155--156]:
+$c_{e,1}^{\rm in}=\T_{q_0}(\cin;\D_{c,0})$.
+
+\paragraph{Antiparallel fields.} The field reverses adiabatically; the electron follows it while the
+slow nucleus does not [157--165]:
+\begin{equation}
+\theta_e\to\pi-\theta_e\ (c_e\to-c_e),\qquad \theta_n\to\theta_n,\qquad
+q_1^\pa=-\operatorname{sgn}\!\big(c_{e,0}^{\rm out}+c_n\big).
+\end{equation}
+The SG1 branch boundary is $\theta_n+\theta_{e,0}^{\rm out}=\pi$. Each SG0 triangle is cut into two
+classes: \emph{reversed-label} atoms ($q_1=-q_0$), which continue towards the new pole and are well
+prepared, and \emph{retained-label} atoms ($q_1=q_0$), which SG1 must first drag back through the
+equator (counter-collapse) and which receive a weak, initially negative, push.
+
+\subsection{Force in SG1 and displacement at the detector}
+
+Inside SG1, $\C_e(t)=\C_{e,1}^{\rm in}+q_1r_1t$ with $r_1=k_i|\gamma_e|B_1$, and the force is
+[187--190]
+\begin{equation}
+F_z(t)=\mu_eG_1\tanh\!\big(\C_{e,1}^{\rm in}+q_1r_1t\big).
+\end{equation}
+A momentum increment at time $t$ acts for the rest of the magnet and the whole drift, so the detector
+displacement is [194]
+\begin{equation}
+z_d=\frac{\mu_eG_1}{M_a}\int_0^{T_1}(T_1+T_d-t)\,\tanh\!\big(\C_{e,1}^{\rm in}+q_1r_1t\big)\,dt,
+\qquad T_1=\frac{\ell_1^{\rm eff}}{v_a},\quad T_d=\frac{L_d}{v_a}.
+\end{equation}
+Dividing by the fully aligned value and using $\lambda=r_1t$, $\D_{c,1}=r_1T_1$ and
+$\rho=r_1T_d=\DIR\cdot\D_{c,1}$ with $\DIR=T_d/T_1$ gives the normalized per-atom response
+[204, 211]:
+\begin{equation}
+\boxed{\;
+\tilde z_{\rm ex}(c;\D_{c,1},\rho)=
+\frac{\displaystyle\int_0^{\D_{c,1}}(\D_{c,1}+\rho-\lambda)\tanh(\operatorname{artanh}c+\lambda)\,d\lambda}
+{\rho\,\D_{c,1}+\D_{c,1}^2/2}\;}
+\label{eq:zex}
+\end{equation}
+It lies between $-1$ and $+1$. In the long-drift limit it reduces to
+$\tilde z=\D_{c,1}^{-1}\ln(\cosh\D_{c,1}+c\sinh\D_{c,1})$, and for a small dose
+$\tilde z\simeq c+\tfrac12\D_{c,1}(1-c^2)$: each atom is pushed in proportion to its average
+$c_e$ during the passage. The closed form in terms of the dilogarithm [203--207] is the analytic
+evaluation of the same integral.
+
+\subsection{Ensemble responses}
+
+By inversion symmetry the normalized separation equals the $q_1=+1$ branch centroid [213--216].
+Writing $\tilde z(\cdot)\equiv\tilde z_{\rm ex}(\cdot;\D_{c,1},\DIR\,\D_{c,1})$:
+\begin{align}
+\Z^\pp&=\tfrac12\int_{-1}^{1}(1+c)\,\tilde z\big(\T_+(c;\D_{c,0})\big)\,dc
+&&\text{[217]}\label{eq:Zpar}\\
+\Z^\pa_{\rm geom}&=\tfrac12\int_{-1}^{1}\Big[L_+(c)\,\tilde z\big(-\T_+(c)\big)
++L_-(c)\,\tilde z\big(-\T_-(c)\big)\Big]dc
+&&\text{[218--221]}\\
+&\qquad L_+=1+\min[c,-\T_+(c)],\quad L_-=\max[0,-\T_-(c)-c]\nonumber\\
+\Z^\pa_{\rm ret}&=\tfrac12\int_{-1}^{1}(1+c)\,\tilde z\big(-\T_+(c)\big)\,dc
+&&\text{[251]}
+\end{align}
+$L_\pm$ are the heart-shaped weights cut by the new SG1 branch boundary. $\Z_{\rm ret}$ assumes that
+every atom keeps its label. The antiparallel response actually fitted is the mixture [252--253]
+\begin{equation}
+\Z^\pa=(1-w_{\rm ret})\,\Z^\pa_{\rm geom}+w_{\rm ret}\,\Z^\pa_{\rm ret},\qquad
+w_{\rm ret}=1-e^{-\RLC\,\D_{c,0}} .
+\end{equation}
+The retained-label term is phenomenological. It stands in for unresolved fringe-field dynamics and is
+not part of pure CQD.
+
+\subsection{Absolute scale from the 13-pixel baseline}
+
+At $I_0=0$ both configurations reduce to $\Z_0(\D_{c,1})=\Z^\pp(0,\D_{c,1})$, with
+$\Z_0\simeq\tfrac13+\tfrac13\D_{c,1}$ for a weak dose. Because $D=D_{\rm sat}\Z$ and $D(0)=13$~px,
+the mechanical scale cancels and the model curve is [240--241]
+\begin{equation}
+\boxed{\;
+\Delta D_s(I_0)=13\left[\frac{\Z_s\big(\D_{c,1}I_0/I_\star,\;\D_{c,1}\big)}{\Z_0(\D_{c,1})}-1\right],
+\qquad s=\pp,\pa .\;}
+\label{eq:model}
+\end{equation}
+The remaining geometric quantity, $\DIR$, is eliminated with a second use of the baseline [249]:
+\begin{equation}
+13=K_{\rm pix}\big(\DIR+\tfrac12\big)\,\Z_{0,\rm ex}(\D_{c,1},\DIR),\qquad
+K_{\rm pix}=\frac{2\mu_eG_1T_1^2}{M_ad_{\rm pix}}=6.47~\text{px}.
+\label{eq:dir}
+\end{equation}
+For every trial $\D_{c,1}$ the scalar equation~\eqref{eq:dir} is solved for $\DIR$. The drift length
+$L_d=\DIR\cdot\ell_1^{\rm eff}$ is therefore an \emph{inferred} quantity.
+
+%==========================================================================
+\subsection{Leading-order picture of the parallel curve}
+\label{sec:leading}
+
+Expanding to first order in both doses, $\T_+(c)\simeq c+\D_{c,0}(1-c^2)$ and
+$\tilde z\simeq c+\tfrac12\D_{c,1}(1-c^2)$. The heart-weighted integrals are
+$\tfrac12\int(1+c)c\,dc=\tfrac13$ and $\tfrac12\int(1+c)(1-c^2)\,dc=\tfrac23$, hence
+\begin{equation}
+\Z^\pp\simeq\tfrac13+\tfrac23\D_{c,0}+\tfrac13\D_{c,1}
+\quad\Longrightarrow\quad
+\frac{\Delta D^\pp}{13}\simeq2\,\D_{c,0}=2\alpha_0I_0 .
+\end{equation}
+With the $f=1$ value $\alpha_0=0.057$~A$^{-1}$ this predicts about $1.5$~px\,A$^{-1}$, against about $1.3$~px\,A$^{-1}$ in the data; the difference
+comes from the $\D_{c,1}$ term in $\Z_0$ and from the onset of saturation. \emph{The slope of the
+parallel curve measures, almost directly, how fast SG0 rotates electron moments per ampere.} This is
+why $\alpha_0$, and hence $k_i$, is robust against the SG1 calibration, while $\D_{c,1}$ is not.
+
+%==========================================================================
+\section{Calibration inputs and fitting method}
+\label{sec:method}
+
+\paragraph{SG0 field scaling.} Revision~F divides the SG0 field, and hence $\BL_0$, by $f=7$. Only the
+dose link~\eqref{eq:link} changes:
+\begin{equation}
+\D_{c,0}(I_0)=\D_{c,1}\,\frac{I_0}{f\,I_\star},\qquad fI_\star=7\times1.03869~\text{A}=7.2708~\text{A}.
+\end{equation}
+Because $\BL_0$ enters only through $B_0\ell_0^{\rm eff}$, this is equivalent to an effective SG0 length
+$\ell_0^{\rm eff}=0.040/7=0.571$~cm at the measured field. $f$ is a \emph{fixed calibration input}; the
+measured case $f=1$ is reported for comparison and Section~\ref{sec:fscan} maps the dependence on $f$.
+
+\paragraph{Fixed inputs.} $\beta_0=0.031895$~T\,A$^{-1}$, $B_1=0.018931$~T, $\ell_0^{\rm eff}=0.040$~m,
+$\ell_1^{\rm eff}=0.070$~m, $G_1=10.779$~T\,m$^{-1}$, $v_a=600.5$~m\,s$^{-1}$,
+$|\gamma_e|=1.76086\times10^{11}$~rad\,s$^{-1}$\,T$^{-1}$, $K_{\rm pix}=6.47$~px, $D_0=13$~px. Unless
+stated otherwise, $\DIR$ is solved from the baseline equation~\eqref{eq:dir}.
+
+\paragraph{Objective.} Each data set is fitted by minimizing
+\begin{equation}
+\chi^2=\sum_{j=1}^{15}\left(\frac{\Delta D_j^{\rm model}-\Delta D_j^{\rm data}}{\sigma_j}\right)^2
+\end{equation}
+with the per-point uncertainties of the data file. Uncertainties on fitted parameters are profile
+$\Delta\chi^2=1$ intervals (one-parameter fits) or curvature errors $\sqrt{2/\chi''}$. The model is
+evaluated with Gauss--Legendre quadrature of \eqref{eq:zex}--\eqref{eq:Zpar}, and $\DIR$ by bisection
+of~\eqref{eq:dir}.
+
+\paragraph{Free parameters.} The parallel model has one free parameter, $\D_{c,1}$, equivalent to
+$k_i=\D_{c,1}v_a/(|\gamma_e|\BL_1)$. Pure CQD adds none for the antiparallel set, so its antiparallel
+curve is a prediction once $k_i$ is fixed. The phenomenological retained-label term adds one
+parameter, $\kappa$ or $\RLC$.
+
+%==========================================================================
+\section{Recommended fit at \texorpdfstring{$f=7$}{f=7}: parallel set first, then \texorpdfstring{$k_i$}{ki} borrowed}
+\label{sec:recommended}
+
+\paragraph{Step 1: parallel set, pure CQD.} Minimizing $\chi^2_\pp(\D_{c,1})$ gives
+\begin{equation}
+\D_{c,1}=1.037,\qquad k_i=\frac{\D_{c,1}v_a}{|\gamma_e|\BL_1}=(2.67^{+0.60}_{-0.48})\times10^{-6},\qquad
+\chi^2_\pp=2.83~(15~\text{points}),
+\end{equation}
+with $\alpha_0=\D_{c,1}/(fI_\star)=0.143$~A$^{-1}$, $\D_{c,0}(3.64~\text{A})=0.52$, $\Z_{0,\rm ex}=0.603$
+and $\DIR=2.83$ ($L_d=0.198$~m, inferred). Fixing instead the reported $L_d=0.403$~m ($\DIR=5.757$)
+gives $k_i=(2.59^{+0.51}_{-0.43})\times10^{-6}$ with $\chi^2_\pp=4.10$.
+
+\paragraph{Step 2: antiparallel set with $k_i$ fixed.} Pure CQD now has no free parameter. Its strict
+mirror-and-rebranch prediction rises to $+0.82$~px at 3.64~A, whereas the data fall to $-2.01$~px:
+$\chi^2_\pa=109$. Fitting only the retained-label weight,
+\begin{equation}
+\Z^\pa=(1-w_{\rm ret})\Z^\pa_{\rm geom}+w_{\rm ret}\Z^\pa_{\rm ret},\qquad
+w_{\rm ret}=\kappa\,\D_{c,0}\quad\text{or}\quad w_{\rm ret}=1-e^{-\RLC\,\D_{c,0}},
+\end{equation}
+gives $\kappa=0.249\pm0.024$ ($\chi^2_\pa=0.62$) or $\RLC=0.264\pm0.027$ ($\chi^2_\pa=0.80$). Both
+forms vanish at $\D_{c,0}=0$ and so preserve the common baseline.
+
+\begin{center}
+\fbox{\parbox{0.92\textwidth}{\centering\textbf{Key result ($f=7$ fixed, $\DIR$ from the 13-px baseline, 2026-07-06 data)}\\[4pt]
+Parallel, pure CQD: $\;k_i=(2.67^{+0.60}_{-0.48})\times10^{-6}$ ($\D_{c,1}=1.037$), $\;\chi^2=2.83$ for 15 points.\\[2pt]
+Antiparallel, $k_i$ fixed: pure CQD $\chi^2=109$; with $w_{\rm ret}=\kappa\D_{c,0}$,
+$\kappa=0.249\pm0.024$, $\chi^2=0.62$ for 15 points.\\[2pt]
+Retained fraction: $w_{\rm ret}=\kappa\alpha_0I_0\approx0.036~\text{A}^{-1}\times I_0$, i.e.\ 13\% at 3.64~A.}}
+\end{center}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.86\textwidth,height=0.52\textwidth,xlabel={SG0 current $I_0$ (A)},
+  ylabel={$\Delta D$ (px)},xmin=-0.1,xmax=3.8,ymin=-3.0,ymax=6.6,grid=major,grid style={gray!20},
+  legend pos=north west,legend style={font=\footnotesize,draw=none,fill=white,fill opacity=0.85,text opacity=1},legend cell align=left]
+\addplot[parcol,thick] table[x=I0_A,y=dD_parallel_px,col sep=comma]{fit_curves_f7_20260706.csv};
+\addlegendentry{parallel: pure CQD fit, $k_i=2.67\times10^{-6}$}
+\addplot[antcol,thick] table[x=I0_A,y=dD_antiparallel_px,col sep=comma]{fit_curves_f7_20260706.csv};
+\addlegendentry{antiparallel: same $k_i$, $w_{\rm ret}=\kappa\D_{c,0}$}
+\addplot[gray,densely dotted,thick] table[x=I0_A,y=dD_antiparallel_pureCQD_px,col sep=comma]{fit_curves_f7_20260706.csv};
+\addlegendentry{antiparallel: same $k_i$, pure CQD}
+\addplot[only marks,mark=diamond*,mark size=3pt,parcol,error bars/.cd,y dir=both,y explicit]
+  table[x=I0_A,y=dD_parallel_px,y error=sigma_parallel_px,col sep=comma]{spin_resolved_sep_20260706.csv};
+\addlegendentry{parallel data}
+\addplot[only marks,mark=square*,mark size=2pt,antcol,error bars/.cd,y dir=both,y explicit]
+  table[x=I0_A,y=dD_antiparallel_px,y error=sigma_antiparallel_px,col sep=comma]{spin_resolved_sep_20260706.csv};
+\addlegendentry{antiparallel data}
+\addplot[gray,dashed,forget plot] coordinates{(-0.1,0)(3.8,0)};
+\end{axis}
+\end{tikzpicture}
+\caption{Recommended reduction at $f=7$. The parallel curve is a one-parameter pure CQD fit; its $k_i$
+is used unchanged for the antiparallel set, where only the retained-label weight is fitted. Curves are
+tabulated in \texttt{fit\_curves\_f7\_20260706.csv}.}
+\label{fig:recommended}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Data and fit values at the measured currents ($\Delta D$ in px). ``$f=7$'' is the recommended
+fit; ``$f=1$'' is the parallel fit with the measured SG0 field. The last column is the pure CQD
+antiparallel prediction at the $f=7$ value of $k_i$.}
+\label{tab:points}
+\footnotesize\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{parallel} & \multicolumn{3}{c}{antiparallel}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+$I_0$ (A) & data & fit $f=7$ & fit $f=1$ & data & fit $f=7$ & pure CQD\\
+\midrule
+0.000 & $-0.047\pm0.50$ & 0.000 & 0.000 & $0.049\pm0.48$ & 0.000 & 0.000 \\
+0.005 & $-0.045\pm0.50$ & 0.007 & 0.007 & $0.050\pm0.48$ & $-$0.002 & 0.000 \\
+0.012 & $-0.043\pm0.50$ & 0.018 & 0.017 & $0.052\pm0.48$ & $-$0.005 & 0.000 \\
+0.043 & $-0.030\pm0.51$ & 0.064 & 0.060 & $0.058\pm0.49$ & $-$0.019 & 0.000 \\
+0.125 & $0.028\pm0.51$ & 0.185 & 0.173 & $0.063\pm0.50$ & $-$0.057 & 0.001 \\
+0.431 & $0.442\pm0.50$ & 0.628 & 0.594 & $-0.016\pm0.52$ & $-$0.197 & 0.012 \\
+0.937 & $1.343\pm0.47$ & 1.325 & 1.282 & $-0.293\pm0.51$ & $-$0.436 & 0.056 \\
+1.404 & $2.034\pm0.47$ & 1.930 & 1.909 & $-0.551\pm0.50$ & $-$0.664 & 0.126 \\
+1.403 & $2.033\pm0.47$ & 1.929 & 1.908 & $-0.551\pm0.50$ & $-$0.664 & 0.126 \\
+1.867 & $2.539\pm0.50$ & 2.493 & 2.522 & $-0.780\pm0.51$ & $-$0.900 & 0.222 \\
+2.327 & $3.014\pm0.53$ & 3.018 & 3.124 & $-1.033\pm0.52$ & $-$1.146 & 0.343 \\
+2.780 & $3.608\pm0.52$ & 3.500 & 3.707 & $-1.357\pm0.53$ & $-$1.399 & 0.485 \\
+3.221 & $4.296\pm0.49$ & 3.939 & 4.267 & $-1.729\pm0.52$ & $-$1.659 & 0.645 \\
+3.642 & $4.775\pm0.47$ & 4.329 & 4.793 & $-2.011\pm0.51$ & $-$1.920 & 0.815 \\
+3.598 & $4.748\pm0.47$ & 4.290 & 4.738 & $-1.991\pm0.51$ & $-$1.892 & 0.797 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Residuals.} With $f=7$ the parallel curve bends over: the model lies 0.45~px below the
+3.64~A point (about $1\sigma$) and 0.15--0.19~px above the data at 0.125 and 0.431~A. With $f=1$ the
+parallel curve is nearly straight and all residuals are below 0.16~px ($\chi^2=0.48$). The
+low-current points lie systematically below both models (the data start more slowly than linearly);
+the effect is a third of $\sigma$ and is not significant with the present uncertainties.
+
+\paragraph{Goodness of fit.} All $\chi^2$ values are well below the number of points (reduced
+$\chi^2\approx0.04$--0.2). The quoted uncertainties are therefore conservative relative to the scatter,
+or the points are correlated (for example through a common baseline subtraction, or if the closely
+spaced low-current points are not independent measurements). The $\Delta\chi^2=1$ intervals should be
+read with this in mind.
+
+\subsection{Interpretation}
+\begin{itemize}
+\item \emph{$k_i$ is set by the slope of the parallel curve.} To leading order
+$\Delta D^\pp/13\simeq2\D_{c,0}=2\alpha_0I_0$ (Section~\ref{sec:leading}), so the parallel data measure
+$\alpha_0$, the SG0 dose per ampere. Converting $\alpha_0$ into $k_i$ uses the calibration, above all
+$f$.
+\item \emph{The factor 7 does not propagate as a factor 7.} With $f=7$ one needs $\D_{c,1}\approx1$,
+where SG1 alone already aligns most of the branch ($\Z_0$ rises from 0.35 to 0.60). The relative effect
+of a given SG0 pre-alignment is then smaller, and a larger SG0 dose is needed: $\alpha_0$ rises from
+0.057 to 0.143~A$^{-1}$, and $k_i$ by a factor 17.5 rather than 7.
+\item \emph{A small retained fraction explains the antiparallel decrease.} Retained-label atoms enter
+SG1 counter-aligned and push strongly in the wrong direction, so 13\% at 3.64~A suffices. This is a
+one-parameter phenomenological description, not a CQD prediction; whether it is physical must come
+from a model of the field-reversal region (transit time $t_f$, adiabaticity, nuclear-angle motion).
+\end{itemize}
+
+\subsection{Results with the measured SG0 field (\texorpdfstring{$f=1$}{f=1})}
+The same two-step procedure with $f=1$ gives $\D_{c,1}=0.0592$, $k_i=(1.52\pm0.09)\times10^{-7}$
+($\chi^2_\pp=0.48$), $\DIR=5.20$ ($L_d=0.364$~m). For the antiparallel set the strict rule gives
+$\chi^2=128$, and the retained-label weight gives $\kappa=0.452\pm0.040$ ($\chi^2=0.80$) or
+$\RLC=0.470\pm0.044$ ($\chi^2=0.98$), i.e.\ $w_{\rm ret}(3.64~\text{A})=0.094$. Fixing $L_d=0.403$~m
+leaves $k_i$ unchanged to four digits. These values agree with the digitized-data analysis
+($1.53\times10^{-7}$, $\RLC=0.466$).
+
+%==========================================================================
+\section{Comparison of fitting strategies}
+\label{sec:strategies}
+
+\begin{table}[h]
+\centering
+\caption{Fitting strategies applied to the 2026-07-06 data. $\chi^2$ is for 15 points per set.}
+\label{tab:strategies}
+\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{p{3.5cm}p{2.0cm}p{3.6cm}p{5.2cm}}
+\toprule
+Strategy & Free & $k_i$ ($f=1$ / $f=7$) & Verdict\\
+\midrule
+1. Both sets together (Figure-12 method) & $\D_{c,1}$, $\RLC$ & $1.52\times10^{-7}$ / $2.68\times10^{-6}$ ($\chi^2=1.46$ / 3.63, 30 pts) &
+Works, but the non-CQD term $\RLC$ takes part in the fit that defines $k_i$. Gives the same $k_i$ as
+strategy~2 within 0.5\%.\\[3pt]
+2. Parallel only, then $k_i$ borrowed & $\D_{c,1}$; then $\kappa$ (or $\RLC$) & $1.52\times10^{-7}$ / $2.67\times10^{-6}$ ($\chi^2_\pp=0.48$ / 2.83) &
+\textbf{Recommended.} $k_i$ comes from pure CQD on the data pure CQD can fit; the antiparallel set
+then tests the reversal physics.\\[3pt]
+3a. Antiparallel only, pure CQD & $\D_{c,1}$ & none &
+Fails: the best it can do is $k_i\to0$, i.e.\ no change ($\chi^2\approx58$--60).\\[3pt]
+3b. Antiparallel only, with retained label & $\D_{c,1}$, $\RLC$ & undetermined &
+$\RLC$ compensates any $k_i$; $\chi^2$ stays near 1 (Figure~\ref{fig:strategies}, left).\\[3pt]
+4. $f$ free as well & $\D_{c,1}$, ($\RLC$), $f$ & undetermined in $1.5\times10^{-7}$--$3\times10^{-6}$ &
+Only $\alpha_0$ is measured; $\chi^2$ is flat for $f\lesssim6$ (Section~\ref{sec:fscan}).\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.62\textwidth,height=0.4\textwidth,xlabel={$k_i$},ylabel={$\chi^2_\pa$ (15 points)},
+  xmode=log,ymode=log,xmin=5e-9,xmax=1e-5,ymin=0.1,ymax=4000,grid=major,grid style={gray!20},
+  legend pos=north west,legend style={font=\scriptsize,draw=none,fill=white,fill opacity=0.85,text opacity=1},legend cell align=left]
+\addplot[black,thick,densely dotted,mark=*,mark size=1.2pt] table[x=ki,y=chi2_f1_pure,col sep=comma]{plot_strategy3.csv};
+\addlegendentry{$f=1$, pure CQD}
+\addplot[black,thick,mark=*,mark size=1.2pt] table[x=ki,y=chi2_f1_rlc,col sep=comma]{plot_strategy3.csv};
+\addlegendentry{$f=1$, with $\RLC$}
+\addplot[parcol,thick,densely dotted,mark=square*,mark size=1.2pt] table[x=ki,y=chi2_f7_pure,col sep=comma]{plot_strategy3.csv};
+\addlegendentry{$f=7$, pure CQD}
+\addplot[parcol,thick,mark=square*,mark size=1.2pt] table[x=ki,y=chi2_f7_rlc,col sep=comma]{plot_strategy3.csv};
+\addlegendentry{$f=7$, with $\RLC$}
+\end{axis}
+\end{tikzpicture}
+\caption{Strategy 3: antiparallel set alone. Pure CQD never fits ($\chi^2\ge58$). With the retained-label
+coefficient re-optimized at each $k_i$, $\chi^2$ stays near 1 over three decades for $f=7$, and for
+$f=1$ it only bounds $k_i\lesssim1.5\times10^{-6}$.}
+\label{fig:strategies}
+\end{figure}
+
+\paragraph{Why strategy 2 is preferred.} The parallel set is fitted by pure CQD with one parameter, so
+$k_i$ is not influenced by any phenomenological term. Strategies 1 and 2 give the same $k_i$ within
+0.5\%, which shows that the antiparallel data carry no independent information on $k_i$. Separating
+the steps turns the antiparallel set into a clean test: with $k_i$ fixed, pure CQD has no freedom left
+and fails ($\chi^2=109$), and the size of the retained-label fraction becomes a quantity to be
+explained by a model of the field-reversal region.
+
+%==========================================================================
+\section{Dependence on the SG0 scaling \texorpdfstring{$f$}{f}}
+\label{sec:fscan}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=2cm},width=0.45\textwidth,height=0.37\textwidth,
+  xlabel={SG0 field divisor $f$},grid=major,grid style={gray!20},xmin=0.5,xmax=10.5]
+\nextgroupplot[ylabel={$k_i$},ymode=log,ymin=1e-7,ymax=1e-5]
+\addplot[parcol,thick,mark=*,mark size=1.4pt] table[x=f,y=ki_par,col sep=comma]{plot_fscan.csv};
+\nextgroupplot[ylabel={$\chi^2_\pp$ (15 points)},ymode=log,ymin=0.2,ymax=60]
+\addplot[black,thick,mark=*,mark size=1.4pt] table[x=f,y=chi2_par,col sep=comma]{plot_fscan.csv};
+\addplot[gray,dashed] coordinates{(0.5,23.7)(10.5,23.7)};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Parallel-only pure CQD fits as a function of the SG0 field divisor. Left: $k_i$. Right:
+$\chi^2$; the dashed line is the 95\% limit for 14 degrees of freedom.}
+\label{fig:fscan}
+\end{figure}
+
+The parallel fit is equally good for every $f\lesssim6$ ($\chi^2=0.46$--0.61), while $k_i$ grows from
+$1.5\times10^{-7}$ to $1.8\times10^{-6}$. Beyond $f\approx6.5$ the fit degrades quickly:
+$\chi^2=2.8$ at $f=7$, 11.9 at $f=8$ and 40 at $f=10$; the 95\% limit is crossed near $f\approx8.9$.
+The data alone therefore measure $\alpha_0$, not $f$ and $k_i$ separately, and they cap $k_i$ at about
+$3\times10^{-6}$ for any SG0 calibration. Between $f=6$ and $f=8$, $k_i$ changes from $1.8$ to
+$2.9\times10^{-6}$, so the uncertainty of the factor 7 itself dominates the error on $k_i$.
+
+\paragraph{Origin of the ceiling.} The initial slope of the parallel curve is
+\begin{equation}
+\frac{d\Delta D^\pp}{dI_0}\bigg|_0=\frac{13}{fI_\star}\;
+\underbrace{\D_{c,1}\,\frac{\partial\Z^\pp/\partial\D_{c,0}}{\Z_0}}_{\equiv\,g(\D_{c,1})}.
+\end{equation}
+The capacity $g$ grows with $\D_{c,1}$ only until saturation sets in and peaks at $g\approx0.91$ near
+$\D_{c,1}\approx2$ (Table~\ref{tab:g}). A measured slope therefore implies an upper bound on $f$.
+
+\begin{table}[h]
+\centering
+\caption{Slope capacity $g(\D_{c,1})$ with $\DIR$ from the baseline.}
+\label{tab:g}
+\small\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccccccccc}
+\toprule
+$\D_{c,1}$ & 0.05 & 0.1 & 0.2 & 0.4 & 0.6 & 0.8 & 1.0 & 1.5 & 2.0 & 3.0\\
+$\Z_0$ & 0.349 & 0.365 & 0.396 & 0.454 & 0.506 & 0.554 & 0.596 & 0.680 & 0.740 & 0.815\\
+$g$ & 0.094 & 0.179 & 0.322 & 0.532 & 0.672 & 0.765 & 0.826 & 0.896 & 0.910 & 0.897\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Absolute geometry at $f=7$.} Solving $\DIR$ from the baseline gives $L_d=0.198$~m, which
+contradicts both reported distances (0.320 and 0.403~m). Fixing $L_d=0.403$~m instead, the model
+predicts a zero-current separation of 24.4~px rather than 13~px, which would require
+$G_1\approx5.7$~T\,m$^{-1}$ instead of 10.8~T\,m$^{-1}$. The $f=7$ scaling brings $k_i$ close to the
+numerical single-stage value ($2.51\times10^{-6}$) at the cost of moving the discrepancy into the
+mechanical scale.
+
+%==========================================================================
+\section{Main caveats}
+\begin{enumerate}
+\item $f$, $\ell_0^{\rm eff}$ and $\ell_1^{\rm eff}$ are calibration inputs, not measured field integrals;
+$k_i$ depends strongly on $f$ near $f=7$.
+\item The absolute zero-current separation is taken as 13~px; it sets the vertical scale of every model
+curve, since $\Delta D=13\,[\Z/\Z_0-1]$.
+\item A single speed $v_a=600.5$~m\,s$^{-1}$ is used instead of the effusive speed distribution, and the
+model computes branch centroids whereas the data are peak positions.
+\item Reduced $\chi^2$ values of 0.04--0.2 indicate conservative or correlated uncertainties; a
+generalized least-squares fit needs the covariance of the points.
+\item The antiparallel fit depends on a phenomenological retained-label term that is not part of pure
+CQD.
+\end{enumerate}
+
+%==========================================================================
+\appendix
+\section{Files}
+All files are in the folder \texttt{fit\_20260706}.
+\begin{description}
+\item[\texttt{spin\_resolved\_sep\_20260706.csv}] \mbox{}\\ The data exported from the JLD2 file.
+Columns: \texttt{I0\_A}, \texttt{dD\_parallel\_px},\\ \texttt{sigma\_parallel\_px},
+\texttt{dD\_antiparallel\_px}, \texttt{sigma\_antiparallel\_px}.
+\item[\texttt{fit\_curves\_f7\_20260706.csv}] \mbox{}\\ Recommended fit, $I_0=0$ to 3.70~A in steps of 0.01~A.
+Columns: \texttt{I0\_A}, \texttt{dD\_parallel\_px}, \texttt{dD\_antiparallel\_px} (linear $w_{\rm ret}$),\\
+\texttt{dD\_antiparallel\_exp\_px}, \texttt{dD\_antiparallel\_pureCQD\_px}, \texttt{Dc0}, \texttt{w\_ret}.
+All values are changes relative to zero current (no 13-px offset).
+\item[\texttt{fit\_curves\_f1\_20260706.csv}] \mbox{}\\ The same for $f=1$.
+\item[\texttt{fit\_params\_f7\_20260706.csv}] \mbox{}\\ Parameters of the recommended fit.
+\item[\texttt{results.json}] All fit results, including strategies 1--4 and the $f$ scan.
+\item[\texttt{cqd\_model.js}, \texttt{run\_fits.js}] \mbox{}\\ Model and fits; \texttt{node run\_fits.js}
+regenerates every number and CSV file (about 20~s). \texttt{make\_table.js} and
+\texttt{build\_report.js} regenerate Table~\ref{tab:points} and this document.
+\end{description}
+
+\end{document}

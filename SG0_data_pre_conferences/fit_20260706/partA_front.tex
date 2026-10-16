@@ -1,0 +1,105 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{caption}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepgfplotslibrary{groupplots}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\setlength{\emergencystretch}{3em}
+
+\newcommand{\D}{\mathcal{D}}
+\newcommand{\Z}{\mathcal{Z}}
+\newcommand{\C}{\mathcal{C}}
+\newcommand{\T}{\mathcal{T}}
+\newcommand{\pp}{{\uparrow\uparrow}}
+\newcommand{\pa}{{\uparrow\downarrow}}
+\newcommand{\cin}{c_e^{\rm in}}
+\newcommand{\DIR}{\mathrm{DIR}}
+\newcommand{\RLC}{\mathrm{RLC}}
+\newcommand{\BL}{\mathrm{BL}}
+
+\definecolor{parcol}{HTML}{A32D2D}
+\definecolor{antcol}{HTML}{2A78D6}
+
+\title{CQD analysis of the SG0--SG1 spin-resolved beam separations\\[4pt]
+\large Data set of 2026-07-06: derivation and fits}
+\author{Companion to \emph{Analytical Model and Provisional Calibration of the}\\
+\emph{Null Stern--Gerlach CQD Experiment}, Revision F (October 13, 2026)}
+\date{October 16, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+The double-stage co-quantum-dynamics (CQD) model of the source note is fitted to the spin-resolved
+beam-separation data of 2026-07-06 (\texttt{spin\_resolved\_sep\_20260706.jld2}): 15 SG0 currents
+from 0 to 3.64~A for parallel and antiparallel SG0--SG1 fields, each with its own uncertainty. The
+chain of equations from the oven ensemble to the detector separation is derived in full, using the
+notation of the source note; equation numbers in square brackets refer to it. The SG0 field is
+divided by $f=7$ (Revision~F scaling); $f$ is a fixed calibration input, not a fitting parameter.
+In the recommended reduction the parallel set alone is fitted with pure CQD, which gives
+$k_i=(2.67^{+0.60}_{-0.48})\times10^{-6}$ ($\chi^2=2.8$ for 15 points). With this $k_i$ fixed, pure
+CQD predicts the wrong sign for the antiparallel set ($\chi^2=109$); a retained-label fraction
+proportional to the SG0 dose, $w_{\rm ret}\simeq0.036~\text{A}^{-1}\times I_0$, reproduces it
+($\chi^2=0.6$). With the measured SG0 field ($f=1$) the same procedure gives
+$k_i=(1.52\pm0.09)\times10^{-7}$. The alternative fitting strategies are compared, and the
+dependence on $f$ is mapped. Fitted curves are supplied as CSV files.
+\end{abstract}
+
+\tableofcontents
+
+%==========================================================================
+\section{The data}
+\label{sec:data}
+
+The beam passes first through SG0, a uniform-field magnet with no gradient, and then through SG1, a
+gradient Stern--Gerlach magnet at the fixed current $I_1=40$~mA. The camera records the distance
+between the two beam peaks. The data file contains, for SG0 and SG1 fields parallel ($\pp$, group
+\texttt{idx\_7}) and antiparallel ($\pa$, group \texttt{idx\_8}), the change of this separation
+relative to its zero-current value, $\Delta D(I_0)$ in pixels, together with a standard uncertainty for
+every point (Table~\ref{tab:points}, Figure~\ref{fig:data}).
+
+Compared with the digitized eight-point sets used previously, the new data
+\begin{itemize}
+\item contain 15 currents per configuration, including five low currents $0\le I_0\le0.125$~A and two
+near-duplicate pairs (1.403/1.404~A and 3.598/3.642~A);
+\item carry individual uncertainties $\sigma_j=0.47$--$0.53$~px, used as weights in every fit;
+\item have small zero-current values, $-0.047$~px (parallel) and $+0.049$~px (antiparallel). Their
+difference, 0.096~px, equals the stored quantity \texttt{y0}. The model has $\Delta D(0)=0$ by
+construction; the offsets are a tenth of $\sigma$ and are kept as data.
+\end{itemize}
+The model normalizes all separations to the absolute zero-current separation, which is not stored in
+the file. The value $D_0=13$~pixels of the source note is used throughout.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.86\textwidth,height=0.48\textwidth,xlabel={SG0 current $I_0$ (A)},
+  ylabel={$\Delta D$ (px)},xmin=-0.1,xmax=3.8,ymin=-2.8,ymax=5.6,grid=major,grid style={gray!20},
+  legend pos=north west,legend style={font=\footnotesize,draw=none,fill=white,fill opacity=0.85,text opacity=1},legend cell align=left]
+\addplot[only marks,mark=diamond*,mark size=3pt,parcol,error bars/.cd,y dir=both,y explicit]
+  table[x=I0_A,y=dD_parallel_px,y error=sigma_parallel_px,col sep=comma]{spin_resolved_sep_20260706.csv};
+\addlegendentry{parallel $\pp$}
+\addplot[only marks,mark=square*,mark size=2pt,antcol,error bars/.cd,y dir=both,y explicit]
+  table[x=I0_A,y=dD_antiparallel_px,y error=sigma_antiparallel_px,col sep=comma]{spin_resolved_sep_20260706.csv};
+\addlegendentry{antiparallel $\pa$}
+\addplot[gray,dashed,forget plot] coordinates{(-0.1,0)(3.8,0)};
+\end{axis}
+\end{tikzpicture}
+\caption{The 2026-07-06 data: change of the beam separation relative to zero SG0 current.}
+\label{fig:data}
+\end{figure}
+
+\paragraph{Physical content.} A uniform field exerts no force, and standard quantum mechanics with the
+full hyperfine Hamiltonian predicts no change of the separation (section~23 of the source note). In
+CQD, SG0 \emph{rotates the electron magnetic moment} towards one pole without deflecting the atom.
+This changes how strongly each atom is pushed inside SG1, and therefore changes the separation. The
+size and sign of that change test the CQD collapse law and the electron--nuclear branching rule.
+
+%==========================================================================
