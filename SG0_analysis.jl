@@ -4649,3 +4649,81 @@ marker=(:circle,:white,3),
 markerstrokecolor=:red,);
 plot!(xlims=(0.0,0.2))
 
+
+
+
+# Prof Wang: Oct 15th 
+
+
+using JLD2
+
+# Map each index to its pair
+pair_of_idx = Dict(idx => pair for pair in pairs for idx in pair)
+
+# Container for the data to export
+export_data = Dict{String,Any}()
+
+plt = plot(
+    xlabel = "SG0 current (A)",
+    ylabel = "Relative beam separation (pixels)",
+    yticks = -5:1:54,
+    yminorticks=2,
+    legend = :bottomleft,
+    background_color_legend = nothing,
+    foreground_color_legend = nothing,
+    size = (1920, 1080),
+    legendtitlefontsize = 32,
+    legendfontsize = 24,
+    guidefontsize = 32,
+    tickfontsize = 30,
+    left_margin = 12mm,
+    bottom_margin =12mm,
+);
+hline!([0.0], line=(:dot,1,:black), label=false);
+for (idx, color, marker_symbol, config_label, tol) in plot_list
+
+    pair = pair_of_idx[idx]
+    y0   = y0_pair_mean[pair].y0_mean
+
+    y  = split_itp[idx].(Iexp_sampled) .- y0
+    dy = errsplit_itp[idx].(Iexp_sampled)
+
+    lbl = idx == 7 ? "↑↑ (parallel)" : "↓↑ (antiparallel)"
+    ms  = idx == 7 ? 18 : 10
+
+    # ---- store for export ----
+    export_data["idx_$(idx)"] = Dict(
+        "idx"    => idx,
+        "label"  => lbl,
+        "pair"   => collect(pair),
+        "y0"     => y0,
+        "I"      => collect(Iexp_sampled),
+        "y"      => y,
+        "yerror" => dy,
+    )
+
+    plot!(
+        plt,
+        Iexp_sampled,
+        y,
+        yerror = dy,
+        label = lbl,
+        color = color,
+        line = (:solid, 2),
+        marker = (marker_symbol, ms, color, 0.6),
+        markerstrokecolor = color,
+    )
+end
+display(plt)
+savefig(plt, "spin_resolved_sep.pdf")
+savefig(plt, "spin_resolved_sep.svg")
+
+# ---- save to JLD2 ----
+jldopen("spin_resolved_sep.jld2", "w") do f
+    f["Iexp_sampled"] = collect(Iexp_sampled)   # shared x-axis
+    for (key, d) in export_data
+        for (field, val) in d
+            f["$key/$field"] = val
+        end
+    end
+end
