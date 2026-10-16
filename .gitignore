@@ -6,6 +6,9 @@
 *.jld2
 *.pdf
 *.gif
+*.aux
+*.log
+*.synctex.gz
 
 # Ignore folders
 2025*/ 
