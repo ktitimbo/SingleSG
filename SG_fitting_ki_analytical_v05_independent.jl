@@ -2160,6 +2160,237 @@ end
 archive_keys = list_jld2_entries(archive_path)     # names-only reference of the archive layout
 
 
+df = jldopen(archive_path, "r") do f
+    I0 = f["experiment/Current_A"]
+    DataFrame(
+        Current_A   = I0,
+        B_T         = TheoreticalSimulation.BvsI.(I0),
+        G_Tm        = TheoreticalSimulation.GvsI.(I0),
+        
+        
+        Experiment      = f["experiment/zF1_mm"],
+        ErrorExperiment = f["experiment/zF1Err_mm"],
+        CQD_up_mm       = f["experiment/CQD_up_mm"],
+        QM_F1_mm        = f["experiment/QM_zF1_mm"],
+    )
+end
+CSV.write(joinpath(OUTDIR,"model_data.csv"), df)
 
+
+
+include("./Modules/TheoreticalSimulation.jl");
+using .TheoreticalSimulation;
+TheoreticalSimulation.set_magnetic_field!(:manual)  # Calibration/Experimental field
+
+atom        = "39K"  ;
+## PHYSICAL CONSTANTS from NIST
+# RSU : Relative Standard Uncertainty
+const kb    = 1.380649e-23 ;       # Boltzmann constant             (J/K)
+const ħ     = 6.62607015e-34/2π ;  # Reduced Planck constant        (J s)
+const μ₀    = 1.25663706127e-6;    # Vacuum permeability            (Tm/A)
+const μB    = 9.2740100657e-24 ;   # Bohr magneton                  (J/T)
+const γₑ    = -1.76085962784e11 ;  # Electron gyromagnetic ratio    (1/sT). Relative Standard Uncertainty = 3.0e-10
+const μₑ    = 9.2847646917e-24 ;   # Electron magnetic moment       (J/T). RSU = 3.0e-10
+const Sspin = 1/2 ;                # Electron spin
+const gₑ    = -2.00231930436092 ;  # Electron g-factor
+## ATOM INFORMATION: 
+K39_params = TheoreticalSimulation.AtomParams(atom); # [R μn γn Ispin Ahfs M ] 
+# Math constants
+const TWOπ = 2π;
+const INV_E = exp(-1);
+
+# Furnace
+const TCelsius = 205
+const T_K = 273.15 + TCelsius ; # Furnace temperature (K)
+# Furnace aperture
+const X_FURNACE = 2.0e-3 ;
+const Z_FURNACE = 100e-6 ;
+# Slit : Pre SG
+const X_SLIT  = 4.0e-3 ;
+const Z_SLIT  = 300e-6 ;
+# Circular Aperture : Post SG
+const R_aper            = 5.8e-3/2 ;
+const y_SGToAperture    = 42.0e-3 ;
+# Propagation distances
+const y_FurnaceToSlit = 224.0e-3 ;
+const y_SlitToSG      = 44.0e-3 ;
+const y_SG            = 7.0e-2 ;
+const y_SGToScreen    = 32.0e-2 ;
+# Connecting pipes
+const R_tube = 35e-3/2 ; # Radius of the connecting pipe (m)
+effusion_params = TheoreticalSimulation.BeamEffusionParams(X_FURNACE,Z_FURNACE,X_SLIT,Z_SLIT,y_FurnaceToSlit,T_K,K39_params);
+println("""
+***************************************************
+SETUP FEATURES
+    Temperature             : $(T_K)
+    Furnace aperture (x,z)  : ($(1e3*X_FURNACE)mm , $(1e6*Z_FURNACE)μm)
+    Slit (x,z)              : ($(1e3*X_SLIT)mm , $(1e6*Z_SLIT)μm)
+    Post-SG aperture radius : $(1e3*R_aper)mm
+    Furnace → Slit          : $(1e3*y_FurnaceToSlit)mm
+    Slit → SG magnet        : $(1e3*y_SlitToSG)mm
+    SG magnet               : $(1e3*y_SG)mm
+    SG magnet → Screen      : $(1e3*y_SGToScreen)mm
+    SG magnet → Aperture    : $(1e3*y_SGToAperture)mm
+    Tube radius             : $(1e3*R_tube)mm
+***************************************************
+""")
+# Setting the variables for the module
+TheoreticalSimulation.DEFAULT_x_furnace         = X_FURNACE;
+TheoreticalSimulation.DEFAULT_z_furnace         = Z_FURNACE;
+TheoreticalSimulation.DEFAULT_x_slit            = X_SLIT;
+TheoreticalSimulation.DEFAULT_z_slit            = Z_SLIT;
+TheoreticalSimulation.DEFAULT_y_FurnaceToSlit   = y_FurnaceToSlit;
+TheoreticalSimulation.DEFAULT_y_SlitToSG        = y_SlitToSG;
+TheoreticalSimulation.DEFAULT_y_SG              = y_SG;
+TheoreticalSimulation.DEFAULT_y_SGToScreen      = y_SGToScreen;
+TheoreticalSimulation.DEFAULT_R_tube            = R_tube;
+TheoreticalSimulation.DEFAULT_c_aperture        = R_aper;
+TheoreticalSimulation.DEFAULT_y_SGToAperture    = y_SGToAperture;
+
+
+df = CSV.read(joinpath(OUTDIR,"model_data.csv"), DataFrame) # from here i need Current_A, Experiment, ErrorExperiment
+
+#=
+Fit of Eq. (609)–(610) for θ = (A_mech, k_i), with c and v fixed:
+
+    D_j  = k_i |γ_e| ℓ1 B_j / v
+    z_j  = A_mech μ_e G_j ℓ1 (L_d + ℓ1/2) / (M_a v²) · z̃ex(c; D_j, DIR)
+    z̃ex  = 1/(DIR+1/2) ∫₀¹ (DIR + 1 - τ) tanh[artanh c + D τ] dτ
+
+A_mech enters linearly, so for each k_i its best value is closed-form:
+    A(k_i) = Σ w S z / Σ w S²,   S_j = z_j / A_mech,   w = 1/σ²
+and χ²(k_i) is minimised in log k_i (coarse scan + Brent).
+=#
+
+# ---------------------------------------------------------------------------
+# Constants and quadrature
+# ---------------------------------------------------------------------------
+
+Base.@kwdef struct Constants
+    ℓ1::Float64   = y_SG       # ℓ1     [m]
+    Ld::Float64   = y_SGToScreen       # L_d    [m]
+    Ma::Float64   = K39_params.M       # M_a    [kg]
+    DIR::Float64  = y_SGToScreen/y_SG  # DIR    [-]
+    v::Float64    = 600.5              # v      [m s⁻¹]
+    c::Float64    = cos(3π/8)          # c      [-]
+end
+
+"Gauss–Legendre nodes/weights on [-1,1] (Golub–Welsch)."
+function gauss_legendre(n::Int)
+    β = [k / sqrt(4k^2 - 1) for k in 1:n-1]
+    F = eigen(SymTridiagonal(zeros(n), β))
+    return F.values, 2 .* F.vectors[1, :] .^ 2
+end
+
+const τn, τw = let (x, w) = gauss_legendre(64)
+    ((x .+ 1) ./ 2, w ./ 2)            # nodes/weights on τ ∈ [0,1]
+end
+
+"Eq. (610), using tanh(artanh c + x) = (c + tanh x)/(1 + c tanh x)."
+ztilde_ex(D, p::Constants) =
+    sum(τw[k] * (p.DIR + 1 - τn[k]) *
+        (t = tanh(D * τn[k]); (p.c + t) / (1 + p.c * t)) for k in eachindex(τn)) / (p.DIR + 0.5)
+
+"Eq. (609) without A_mech: S_j(k_i) for precomputed B_j, G_j."
+shape(ki, B, G, p::Constants) =
+    [μₑ * G[j] * p.ℓ1 * (p.Ld + p.ℓ1 / 2) / (p.Ma * p.v^2) *
+     ztilde_ex(ki * abs(γₑ) * p.ℓ1 * B[j] / p.v, p) for j in eachindex(B)]
+
+# ---------------------------------------------------------------------------
+# Data
+# ---------------------------------------------------------------------------
+
+idx_end = 10 # size(df,1)
+Ifit = df.Current_A[1:idx_end]
+z    = 1e-3 .* df.Experiment[1:idx_end]          # mm → m
+σz   = 1e-3 .* df.ErrorExperiment[1:idx_end]     # mm → m
+Bfit = TheoreticalSimulation.BvsI.(Ifit)          # T
+Gfit = TheoreticalSimulation.GvsI.(Ifit)          # T/m
+w    = 1 ./ σz .^ 2
+
+p = Constants()
+
+# ---------------------------------------------------------------------------
+# Fit: A_mech profiled out, χ²(log k_i) minimised
+# ---------------------------------------------------------------------------
+
+χ2_of(lk) = (S = shape(exp(lk), Bfit, Gfit, p);
+             A = sum(w .* S .* z) / sum(w .* S .^ 2);
+             sum(w .* (A .* S .- z) .^ 2))
+
+lk_grid = range(log(1e-10), log(1e-2); length = 241)   # k_i scan range
+χ2_grid = χ2_of.(lk_grid)
+i0      = argmin(χ2_grid)
+(i0 == 1 || i0 == length(lk_grid)) && @warn "χ² minimum at the edge of the k_i scan range" ki = exp(lk_grid[i0])
+opt     = optimize(χ2_of, lk_grid[max(i0 - 1, 1)], lk_grid[min(i0 + 1, end)], Brent(); abs_tol = 1e-12)
+
+ki_fit = exp(Optim.minimizer(opt))
+S      = shape(ki_fit, Bfit, Gfit, p)
+A_fit  = sum(w .* S .* z) / sum(w .* S .^ 2)
+χ2     = Optim.minimum(opt)
+dof    = length(z) - 2
+
+# 1σ errors from the 2-parameter Jacobian at the minimum
+h      = 1e-5 * ki_fit
+dSdk   = (shape(ki_fit + h, Bfit, Gfit, p) .- shape(ki_fit - h, Bfit, Gfit, p)) ./ (2h)
+J      = hcat(S ./ σz, A_fit .* dSdk ./ σz)
+covθ   = inv(J' * J)
+A_err, ki_err = sqrt.(diag(covθ))
+
+println("A_mech = $(A_fit) ± $(A_err)")
+println("k_i    = $(ki_fit) ± $(ki_err)")
+println("χ²_red = $(χ2 / dof)   corr(A_mech, k_i) = $(covθ[1,2] / (A_err * ki_err))")
+
+@info cstr("RESULT — Eq. (609)", :green, :bold) *
+      row("kᵢ",               res(1e6 * ki_fit) * cstr(" ± ", :green) * res(1e6 * ki_err, 2) * cstr(" × 10⁻⁶", :green)) *
+      row("A_mech",           res(A_fit) * cstr(" ± ", :green) * res(A_err, 2)) *
+      row("corr(kᵢ,A)",       res(covθ[1,2] / (A_err * ki_err), 2)) *
+      row("χ²_red",           res(χ2 / dof, 3)) *
+      row("fit range",        cstr("I ≤ $(fmt(Ifit[end], 3)) A, n = $(length(Ifit))", :green))
+
+# ---------------------------------------------------------------------------
+# Plot
+# ---------------------------------------------------------------------------
+
+Idense = range(minimum(df.Current_A), maximum(df.Current_A); length = 400);
+zdense = A_fit .* shape(ki_fit, TheoreticalSimulation.BvsI.(Idense), TheoreticalSimulation.GvsI.(Idense), p);
+
+
+plt = scatter(df.Current_A, df.Experiment; yerror = df.ErrorExperiment,
+              label = "Experiment", 
+              marker = (:circle, 3, :white), 
+              markerstrokecolor = :black)
+plot!(plt, Idense, 1e3 .* zdense;                      # m → mm
+      label = "Eq. (609) fit (1:$(idx_end))", lw = 4, color = :darkgreen,
+      xlabel = "Current (A)", ylabel = "z (mm)")
+plot!(plt, I_scan, m_qm_scan;  label = "Existing models", line = (:dash, :blue, 1.75))
+ki_wang_claude = 2.6 # e-6
+fit_s_fixedki = fit_cqd_scale_fixed_ki(ki_itp, data, ki_wang_claude;      # kᵢ in the itp's units (×10⁻⁶)
+                               n_tail = N_TAIL, scale_mode = TAIL_SCALE_MODE,
+                               conf = 0.95, use_Zse = false, profile = true)
+plot!(plt, I_scan, ki_itp.(I_scan, Ref(ki_wang_claude)) ./ Ref(fit_s_fixedki.scale);
+    label = L"Coquantum dynamics (wang-claude + re-scaling factor): $k_{i} \approx %$(fmt(ki_wang_claude, 2)) \times 10^{-6}$",
+    line = (:dot, :orange, 2), markerstrokewidth = 1)
+plot!(plt, I_scan, ki_itp.(I_scan, Ref(ki_wang_claude)) ./ fit_cs.scale,
+    label = L"Coquantum dynamics (wang-claude): $k_{i} \approx %$(fmt(ki_wang_claude, 2)) \times 10^{-6}$",
+    line = (:dot, :purple, 2), markerstrokewidth = 1)
+plot!(plt, I_scan, m_cqd_scan;
+    label = L"Coquantum dynamics: $k_{i} \approx %$(fmt(fit_cs.ki, 2)) \times 10^{-6}$",
+    line = (:solid, :red, 2), markerstrokewidth = 1)
+plot!(plt;
+    xlabel = "Coil Current (A)", ylabel = L"$F=1$ peak position (mm)",
+    xaxis = :log10, yaxis = :log10, xticks = log_ticks, yticks = log_ticks,
+    labelfontsize = 16, tickfontsize = 14, size = (900, 800),
+    legendfontsize = 12, left_margin = 3mm,
+    background_color_legend=nothing)
+display(plt)
+
+
+
+
+fit_cqd_scale_fixed_ki(itp, data_org, ki; kwargs...) = merge((ki = ki,), fit_qm_scale_with_error(I -> itp(I, ki), data_org; kwargs...))
+
+
+fit_s.scale, fit_s.scale_err, fit_s.scale_ci_t, fit_s.scale_ci_profile
 
 
