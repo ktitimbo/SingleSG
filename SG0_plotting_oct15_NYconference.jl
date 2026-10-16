@@ -70,26 +70,31 @@ function plot_curves(curves; fit = nothing, xlog = false)   # fit = (I_fit, dD) 
 
     hlines!(ax, 0; color = :black, linestyle = :dot, linewidth = 0.8)
 
-    # fit curves in black (drawn first so the data sit on top); only the first gets the label "fit"
+    # fit curves in black (drawn first so the data sit on top)
+    fit_lines = []
     if fit !== nothing
         I_fit, dD = fit
         m = keep(I_fit)
-        for (j, d) in enumerate(dD)
-            lines!(ax, I_fit[m], d.y[m]; color = :black, linewidth = 1.5,
-                   label = j == 1 ? "fit" : nothing)
+        for d in dD
+            push!(fit_lines, lines!(ax, I_fit[m], d.y[m]; color = :black, linewidth = 2.5))
         end
     end
 
+    handles, labels = [], String[]
     for (i, c) in enumerate(curves)
         m = keep(c.I)
         I, y, yerr = c.I[m], c.y[m], c.yerror[m]
         errorbars!(ax, I, y, yerr; color = (colors[i], 0.7), whiskerwidth = 10, linewidth = 2)
-        Makie.scatter!(ax, I, y; color = :transparent, marker = markers[i],
-                 strokecolor = colors[i], strokewidth = 2,
-                 markersize = 16, label = c.label)
+        sc = Makie.scatter!(ax, I, y; color = :transparent, marker = markers[i],
+                 strokecolor = colors[i], strokewidth = 2, markersize = 16)
+        push!(handles, sc); push!(labels, c.label)
     end
 
-    axislegend(ax; position = :lb, framevisible = false)
+    # legend order: data first, then a single "Fit" entry last
+    if !isempty(fit_lines)
+        push!(handles, fit_lines[1]); push!(labels, "Fit")
+    end
+    axislegend(ax, handles, labels; position = :lt, framevisible = false)
     return fig
 end
 
