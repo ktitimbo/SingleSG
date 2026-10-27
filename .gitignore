@@ -9,6 +9,8 @@
 *.aux
 *.log
 *.synctex.gz
+*.out
+*.toc
 
 # Ignore folders
 2025*/ 
