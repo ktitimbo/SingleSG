@@ -1,0 +1,535 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+
+\newcommand{\artanh}{\operatorname{artanh}}
+\newcommand{\csch}{\operatorname{csch}}
+\newcommand{\kan}{k_i}
+
+\title{CQD fits of the single Stern--Gerlach (SG1) peak positions\\[4pt]
+\large Version 3: analytical model and forward model of the profile peak,\\ drift distance $L_2 = 39.525$~cm}
+\author{Kelvin Titimbo}
+\date{October 27, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent This report gives a self-contained derivation of the analytical co-quantum dynamics (CQD) ``dose'' model of the SG1 peak position. It then uses that model to fit the analytical induction coefficient $\kan$ to the experimental $F=1$ peak positions of the August--September 2026 data, weighting each point by its measured uncertainty. Only the experimental column and its errors enter the fit. The numerical QM and CQD curves, the latter computed for $k_i = 1.5\times10^{-6}$, appear only as references. The model contains no QM input and no phenomenological offset. Its only free parameters are $\kan$ and a mechanical scale $s$.
+A second, forward model drops the single-speed and centroid approximations: it builds the spatial profile of the upper branch at the detector from the full speed distribution and the beam image, and fits $\kan$ to the position of its peak, with no free scale. It describes the whole field range to about 6\% and reproduces the fall of $z/G$ at high field, but not the rise of $z/G$ at low field, and it does not fit the data within their errors.
+\end{abstract}
+
+\paragraph{Changes from version 2.} Version 3 adds the forward model of the profile peak (Sec.~\ref{sec:forward}), fitted with the same error-weighted $\chi^2$ as the analytical model, and compares the two. The analytical part (Secs.~2--5) is unchanged from version 2.
+
+\paragraph{Changes from version 1.} Version 1 followed the reference analysis~\cite{wang2026}, gave every point equal weight, and used a whole-field ``hybrid'' fit $z = A\,z^{\rm QM} R(u_0+u)$ that needs the numerical QM curve and an empirical dose offset $u_0$. Version 2 drops the hybrid model altogether. All fits are purely analytical and weighted by the experimental errors. The uncertainties also make it possible to decide between the two low-field solutions that version 1 left open.
+
+\tableofcontents
+
+%=====================================================================
+\section{Summary of results}
+%=====================================================================
+
+\begin{center}
+\fbox{\begin{minipage}{0.92\textwidth}
+\vspace{4pt}
+\textbf{Preferred value} (first 6--8 points, $0.020\le I\le 0.045$--$0.060$~A, error-weighted):
+\[
+\kan = (6.4 \pm 0.7)\times10^{-6}, \qquad s = 0.0106\ \text{mm/(T/m)},\qquad \chi^2_\text{red} \approx 0.25 .
+\]
+The other low-dose solution, $\kan = (0.85^{+0.13}_{-0.11})\times10^{-6}$, fits the first six points equally well. It is rejected once the window extends past $0.05$~A ($\chi^2_\text{red}\ge 3$), whereas the high-dose solution stays consistent up to $0.08$~A.
+\vspace{4pt}
+\end{minipage}}
+\end{center}
+
+\begin{enumerate}
+\item The model $z = s\,G\,R(u)$ describes the low-field data within their errors.
+\item On the first six points, two values of $\kan$ fit equally well, because the scale $s$ is free (Sec.~\ref{sec:twominima}). The measured errors break the tie: only the high-dose solution survives as more points are added (Sec.~\ref{sec:window}).
+\item The analytical model \emph{cannot} describe the whole field range. The measured $z/G$ peaks near $0.07$~A and then falls by 30\%, whereas the model's $z/G$ can only increase (Sec.~\ref{sec:whole}).
+\item The analytical $\kan$ need not equal the $\kan$ of the full numerical simulation (1.5$\times10^{-6}$). The analytical model assumes a uniform field, a single speed, and the branch centroid rather than the peak of the profile. Fixing $\kan = 1.5\times10^{-6}$ in the analytical model gives $\chi^2 = 17.1$ for 4 degrees of freedom on the first six points.
+\item The forward model of the profile peak (Sec.~\ref{sec:forward}), with no free scale, gives $\kan = (1.07\pm0.06)\times10^{-6}$ over all 28 points with 6.0\% relative RMS, against 14.3\% for the best analytical description of the whole range. It reproduces the fall of $z/G$ at high field ($-24\%$ against $-30\%$ measured), which supports the explanation of Sec.~\ref{sec:whole}. It does not reproduce the rise of $z/G$ at low field ($+2\%$ against $+25\%$ measured), and its $\chi^2$ with the experimental errors is 1475 for 27 degrees of freedom.
+\end{enumerate}
+
+%=====================================================================
+\section{Data and fixed inputs}
+%=====================================================================
+
+\subsection{Experimental data}
+The file \texttt{model\_data.csv} has $N=28$ rows ($j = 1,\dots,N$). The fit uses:
+\begin{itemize}
+\item the coil current $I_j$, from 0.020 to 1.000 A;
+\item the magnetic field $B_j$, from 0.0122 to 0.749 T, and the gradient $G_j$, from 4.61 to 282.5 T/m;
+\item the measured $F=1$ peak position $z_j$ in mm (column \texttt{Experiment});
+\item its uncertainty $\sigma_j$ in mm (column \texttt{ErrorExperiment}). The relative error $\sigma_j/z_j$ ranges from 0.29\% to 1.88\%.
+\end{itemize}
+The columns \texttt{QM\_F1\_mm} and \texttt{CQD\_up\_mm} hold numerical simulations, the CQD one for $k_i=1.5\times10^{-6}$. They are \textbf{not used} in any fit. Field and gradient are exactly proportional, with $B_j/G_j = 2.651676\times10^{-3}$~m.
+
+\subsection{Constants and geometry}
+\begin{center}
+\small
+\begin{tabular}{llll}
+\toprule
+Symbol & Meaning & Value & Note\\
+\midrule
+$\gamma$ & electron gyromagnetic ratio $|\gamma_e|$ & $1.76086\times10^{11}$ rad\,s$^{-1}$T$^{-1}$ & CODATA\\
+$\mu$    & electron magnetic moment $|\mu_e|$ & $9.28476\times10^{-24}$ J/T & CODATA\\
+$M$      & mass of $^{39}$K & 38.9637064864 u & \\
+$T_\text{oven}$ & oven temperature & 478.15 K (205\,$^\circ$C) & \\
+$v$      & mean beam speed & 600.510 m/s & Eq.~\eqref{eq:speed}\\
+$L_1$    & effective length of the SG1 magnet & 0.070 m & assumed\\
+$L_2$    & drift distance, magnet exit to detector & \textbf{0.39525 m} & \\
+\midrule
+$T_1 = L_1/v$ & time inside the magnet & $1.1657\times10^{-4}$ s & \\
+$r = L_2/L_1$ & drift-to-magnet length ratio & 5.6464 & \\
+$\kappa = \gamma L_1/v$ & Larmor phase per tesla & $2.05259\times10^{7}$ T$^{-1}$ & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Beam speed.} The effusive flux-weighted speed distribution is $f(v') = 2a^2v'^3e^{-av'^2}$ with $a = M/(2k_BT_\text{oven})$. Its mean is
+\begin{equation}
+v = \frac{3\sqrt{\pi}}{4}\sqrt{\frac{2k_BT_\text{oven}}{M}} = 600.51\ \text{m/s}.
+\label{eq:speed}
+\end{equation}
+The analytical model uses this single speed.
+
+%=====================================================================
+\section{The analytical model, step by step}
+%=====================================================================
+
+\subsection{Mechanics: displacement from a time-dependent moment}
+\label{sec:mech}
+Let $c(t)=\cos\theta(t)$ be the projection of the electron moment on the field. In a gradient $G$ the force is $F_z = \mu G c(t)$. The atom is inside the magnet from $t=0$ to $T_1$ and reaches the detector at $T_1+T_2$, with $T_2 = L_2/v$. A force applied at time $t$ acts as a lever for the remaining flight time $T_1+T_2-t$, so
+\begin{equation}
+z = \frac{\mu G}{M}\int_0^{T_1} c(t)\,(T_1+T_2-t)\,dt .
+\label{eq:zint}
+\end{equation}
+For a fully aligned moment, $c=1$, this gives
+\begin{equation}
+z_\text{aligned} = \underbrace{\frac{\mu L_1(L_2+L_1/2)}{Mv^2}}_{s_\text{mech}}\,G,
+\qquad s_\text{mech} = 0.011985\ \text{mm/(T/m)} .
+\label{eq:smech}
+\end{equation}
+In terms of $\tau=t/T_1$, the general case is
+\begin{equation}
+\boxed{\;z = s\,G\,R,\qquad R = \frac{1}{r+\frac12}\int_0^1 (r+1-\tau)\,\langle c(\tau)\rangle\,d\tau\;}
+\label{eq:Rdef}
+\end{equation}
+Here $R\le1$ is a reduction factor and $(r+1-\tau)$ is the lever-arm weight. The scale $s$ is left free in the fits, because the measured peak is affected by the speed distribution, the beam profile and the magnification, which the single-speed formula~\eqref{eq:smech} ignores.
+
+\subsection{CQD spin dynamics and the dose}
+In CQD, the electron moment of an upper-branch atom aligns according to
+\begin{equation}
+c(\tau) = \tanh\!\big[\artanh c_0 + u\,\tau\big],
+\label{eq:tanh}
+\end{equation}
+where $c_0$ is the value at the magnet entrance. The dimensionless \textbf{dose} is
+\begin{equation}
+\boxed{\;u = \kan\,\gamma\,B\,T_1 = \kan\,\kappa\,B,\qquad \kappa = \frac{\gamma L_1}{v} = 2.05259\times10^7\ \text{T}^{-1}\;}
+\label{eq:dose}
+\end{equation}
+$\gamma BT_1$ is the Larmor phase accumulated in the magnet, and $\kan$ is the fraction of that phase converted into alignment. This $\kan$ is the parameter fitted here.
+
+\subsection{Initial distribution of the upper branch}
+The entrance cosines $c_0$ (electron) and $c_n$ (nucleus) are independent and uniform on $[-1,1]$. An atom belongs to the upper branch if $c_n<c_0$, which has probability $1/2$. Hence
+\begin{equation}
+P(c_0\mid\text{up}) = \frac{1}{1/2}\int_{-1}^{c_0}\frac14\,dc_n = \frac{1+c_0}{2}.
+\label{eq:heart}
+\end{equation}
+This is the ``heart-shaped'' weighting. It has no free parameter, and its mean is $\langle c_0\rangle = 1/3$.
+
+\subsection{Average alignment $p(x)$}
+After a dose $x$, the mean alignment is
+\begin{equation}
+p(x) = \frac12\int_{-1}^1 (1+c_0)\tanh\!\big[\artanh c_0 + x\big]\,dc_0 .
+\label{eq:pint}
+\end{equation}
+With $t=\tanh x$, write $\tanh[\artanh c_0+x] = \frac{c_0+t}{1+c_0t} = \frac1t + \frac{t-1/t}{1+c_0t}$. Then use
+\[
+\int_{-1}^1\frac{1+c_0}{1+c_0t}\,dc_0 = \frac2t + \frac{t-1}{t^2}\ln\frac{1+t}{1-t} = \frac2t + \frac{2x(t-1)}{t^2}.
+\]
+The result is
+\begin{equation}
+\boxed{\;p(x) = \frac1t + 1 - \frac1{t^2} + \frac{x(t-1)(t^2-1)}{t^3}
+= \coth x - \csch^2x + x(\coth x-1)\csch^2 x\;}
+\label{eq:pclosed}
+\end{equation}
+Its limits are $p(0)=1/3$ and $p(\infty)=1$, and for small $x$, $p(x) = \frac13 + \frac23x - \frac2{15}x^2 + O(x^3)$.
+
+\subsection{Response function $R(u)$}
+Inserting $\langle c(\tau)\rangle = p(u\tau)$ into Eq.~\eqref{eq:Rdef} gives
+\begin{equation}
+\boxed{\;R(u;r) = \frac{1}{r+\frac12}\int_0^1(r+1-\tau)\,p(u\tau)\,d\tau\;}
+\label{eq:R}
+\end{equation}
+$R$ rises monotonically from $1/3$ to $1$ (Fig.~\ref{fig:response}). For small $u$,
+\begin{equation}
+R = \frac13 + \frac{3r+1}{9(r+\frac12)}\,u - \frac{4r+1}{90(r+\frac12)}\,u^2 + O(u^3).
+\end{equation}
+The drift distance enters only through a weak correction. Write $R(u;r) = \int_0^1 p(u\tau)\,d\tau + \frac{1}{r+1/2}\int_0^1(\frac12-\tau)\,p(u\tau)\,d\tau$. The second term carries the dependence on $r$, and it is small, with $1/(r+\frac12)\approx 0.16$.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.6\textwidth]{figs_v2/fig_response.pdf}
+\caption{Average alignment $p(u)$ and the time-averaged response $R(u)$ ($r=5.646$). Both rise from $1/3$ to $1$.}
+\label{fig:response}
+\end{figure}
+
+\subsection{The fitting model}
+Combining the results above, the model fitted to the data is
+\begin{equation}
+\boxed{\;z_j^\text{model} = s\;G_j\;R(\kan\,\kappa\,B_j;\ r)\;}
+\label{eq:model}
+\end{equation}
+It has two free parameters, $\kan$ and $s$. Everything else is fixed by physics or geometry.
+
+%=====================================================================
+\section{Fitting procedure}
+%=====================================================================
+
+\subsection{Error-weighted objective}
+Residuals are taken in logarithms, so the scale $s$ enters additively:
+\begin{equation}
+\chi^2 = \sum_j \left[\frac{\ln\!\big(z^\text{model}_j/z_j\big)}{\varepsilon_j}\right]^2,
+\qquad \varepsilon_j = \frac{\sigma_j}{z_j}.
+\label{eq:chi2}
+\end{equation}
+Since $\ln(1+\delta)\approx\delta$ for small $\delta$, an absolute error $\sigma_j$ on $z_j$ corresponds to an error $\varepsilon_j=\sigma_j/z_j$ on $\ln z_j$. Equation~\eqref{eq:chi2} is therefore the usual $\chi^2$, to first order. The goodness of fit is measured by $\chi^2_\text{red} = \chi^2/\nu$, with $\nu = n-2$ degrees of freedom.
+
+\subsection{Eliminating the scale analytically}
+Write $w_j = 1/\varepsilon_j^2$, $\ell=\ln s$ and $d_j(\kan) = \ln[G_jR(u_j)] - \ln z_j$. Then $\chi^2 = \sum_j w_j(\ell+d_j)^2$. Setting $\partial\chi^2/\partial\ell = 0$ gives
+\begin{equation}
+\boxed{\;\hat s(\kan) = \exp\!\left[-\frac{\sum_j w_j d_j}{\sum_j w_j}\right]
+= \prod_j\left(\frac{z_j}{G_jR(u_j)}\right)^{w_j/\sum_k w_k}\;}
+\label{eq:shat}
+\end{equation}
+This is an error-weighted geometric mean. With equal weights it reduces to the formula of the reference analysis. Substituting $\hat s$ back leaves a one-dimensional \emph{profile} $\chi^2(\kan)$, which depends only on the shape of the data.
+
+\subsection{Uncertainty of $\kan$}
+The $1\sigma$ interval is the range where $\chi^2(\kan)\le\chi^2_\text{min}+1$, with $s$ re-optimized at each $\kan$. When $\chi^2_\text{red}>1$, the threshold is raised to $\chi^2_\text{min}+\chi^2_\text{red}$. This is equivalent to scaling all errors by $\sqrt{\chi^2_\text{red}}$. Because the profile is asymmetric, the intervals are asymmetric too.
+
+\subsection{Numerical implementation}
+\begin{enumerate}
+\item $p(x)$: closed form~\eqref{eq:pclosed} for $x\ge0.05$, written with $e^{-2x}$ to avoid overflow. For $x<0.05$, Eq.~\eqref{eq:pint} is integrated directly with 64-point Gauss--Legendre quadrature to avoid cancellation.
+\item $R(u)$: 128-point Gauss--Legendre quadrature of Eq.~\eqref{eq:R}.
+\item Minima: $\chi^2(\kan)$ is evaluated on 500 log-spaced values $10^{-8}\le\kan\le10^{-3}$. Every local minimum is refined with Brent's method in $\ln\kan$. A single starting guess would miss one of the two minima.
+\item Window scan: the fit is repeated for windows $0.020\,\text{A}\le I\le I_\text{max}$ containing 4 to 28 points.
+\end{enumerate}
+With equal weights and the reference geometry ($L_2 = 0.403$~m), this code reproduces the numbers of the reference analysis~\cite{wang2026} to all printed digits.
+
+%=====================================================================
+\section{Results}
+%=====================================================================
+
+\subsection{First six points: two solutions}
+\label{sec:twominima}
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+$0.020\le I\le0.045$ A, error-weighted & Low-dose solution & High-dose solution\\
+\midrule
+$\kan$                     & $(0.85^{+0.13}_{-0.11})\times10^{-6}$ & $(6.40^{+0.72}_{-0.64})\times10^{-6}$\\
+$\hat s$ [mm/(T/m)]        & 0.01908 & 0.01056\\
+dose range $u_j$           & 0.21--0.51 & 1.61--3.84\\
+$\chi^2/\nu$               & 2.70/4 & 1.06/4\\
+$\chi^2_\text{red}$        & 0.67 & 0.26\\
+relative RMS               & 0.92\% & 0.63\%\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Both solutions fit within the errors (Fig.~\ref{fig:profile}). They are separated by a barrier of $\chi^2\approx32$. For comparison, the mechanical estimate~\eqref{eq:smech} is $s_\text{mech}=0.0120$, closer to the high-dose solution.
+
+\paragraph{Why two solutions exist.} $R(0)=1/3$ and $R(\infty)=1$ are both constants, so at very low and very high dose the model reduces to $z\propto G$ and the free scale $s$ absorbs the constant. The data show a moderate rise of $z/G$ across the window. The model can produce that rise on the lower side of the steep part of $R(u)$, with small $\kan$ and large $s$, or on its upper side, with large $\kan$ and small $s$.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.48\textwidth]{figs_v2/fig_profile.pdf}\hfill
+\includegraphics[width=0.48\textwidth]{figs_v2/fig_zG_fits.pdf}
+\caption{Left: error-weighted profile $\chi^2(\kan)$, with $s$ re-optimized at each $\kan$, for the first six points (solid) and for all 28 points (dashed). Right: displacement per unit gradient $z/G$ with error bars, and the two six-point solutions extended to high field. The dotted line marks the edge of the six-point window.}
+\label{fig:profile}
+\end{figure}
+
+\subsection{Extending the window: the errors select the solution}
+\label{sec:window}
+
+\begin{center}
+\small
+\begin{tabular}{cc ccc ccc}
+\toprule
+ & & \multicolumn{3}{c}{Low-dose solution} & \multicolumn{3}{c}{High-dose solution}\\
+\cmidrule(lr){3-5}\cmidrule(lr){6-8}
+Points & $I_\text{max}$ (A) & $\kan/10^{-6}$ & $1\sigma$ range & $\chi^2_\text{red}$ & $\kan/10^{-6}$ & $1\sigma$ range & $\chi^2_\text{red}$\\
+\midrule
+4  & 0.035 & 1.058 & 0.86--1.31 & 0.05 & 6.85 & 5.84--8.01 & 0.34\\
+5  & 0.040 & 0.960 & 0.82--1.13 & 0.22 & 6.45 & 5.70--7.29 & 0.35\\
+6  & 0.045 & 0.850 & 0.74--0.98 & 0.67 & 6.40 & 5.76--7.12 & 0.26\\
+7  & 0.050 & 0.740 & 0.64--0.85 & 1.32 & 6.44 & 5.88--7.08 & 0.21\\
+8  & 0.060 & 0.568 & 0.46--0.69 & \textbf{3.17} & 6.62 & 6.11--7.19 & 0.24\\
+9  & 0.070 & 0.421 & 0.33--0.53 & \textbf{5.43} & 6.93 & 6.46--7.46 & 0.41\\
+10 & 0.080 & 0.282 & 0.21--0.37 & \textbf{8.59} & 7.51 & 7.04--8.02 & 1.00\\
+11 & 0.090 & 0.199 & 0.14--0.26 & 10.9 & 8.17 & 7.54--8.90 & 1.81\\
+12 & 0.100 & 0.143 & 0.10--0.19 & 12.7 & 8.94 & 8.12--9.92 & 2.76\\
+13 & 0.125 & 0.058 & 0.03--0.09 & 19.6 & 11.6 & 9.8--14.3 & 7.92\\
+14 & 0.150 & 0.035 & $<0.06$ & 20.9 & 13.3 & 10.8--17.3 & 10.1\\
+\bottomrule
+\end{tabular}
+\end{center}
+\noindent The $1\sigma$ ranges include the $\sqrt{\chi^2_\text{red}}$ inflation where $\chi^2_\text{red}>1$. For 15 points only one minimum remains ($\kan\approx 37\times10^{-6}$, $\chi^2_\text{red}=29$). Beyond that, no interior minimum exists.
+
+The two solutions behave differently (Fig.~\ref{fig:window}):
+\begin{itemize}
+\item The \textbf{low-dose solution} is not stable. Its $\kan$ falls by a factor of 4 between 6 and 10 points, and its $\chi^2_\text{red}$ exceeds 3 once the window reaches $0.06$~A. The probability of $\chi^2 \ge 19.0$ for 6 degrees of freedom is about $0.4\%$.
+\item The \textbf{high-dose solution} stays consistent with the data up to $0.08$~A, with $\chi^2_\text{red}\le1$. Over 6--9 points its $\kan$ stays within $6.4$--$6.9\times10^{-6}$, well inside its uncertainty.
+\item Beyond about $0.08$~A both solutions fail. There the data enter the region where $z/G$ decreases (Sec.~\ref{sec:whole}), which the model cannot follow.
+\end{itemize}
+The preferred value is therefore the high-dose solution, from windows of 6--8 points:
+\[
+\boxed{\;\kan = (6.4\pm0.7)\times10^{-6}\;}
+\]
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.48\textwidth]{figs_v2/fig_window_ki.pdf}\hfill
+\includegraphics[width=0.48\textwidth]{figs_v2/fig_window_chi2.pdf}
+\caption{Left: fitted $\kan$ against the upper current of the fit window, with error bars from Sec.~4.3. The dashed line marks the value $1.5\times10^{-6}$ of the numerical CQD simulation. Right: $\chi^2_\text{red}$ against the window. The low-dose solution (minimum~1) fails above 0.05~A, while the high-dose solution (minimum~2) stays acceptable up to 0.08~A.}
+\label{fig:window}
+\end{figure}
+
+\subsection{Whole field range}
+\label{sec:whole}
+The analytical model cannot fit all 28 points. In Eq.~\eqref{eq:model} the ratio $z/G = s\,R(u)$ can only increase with field, because $R$ is monotone. The measured $z/G$ rises up to $I\approx0.07$~A and then falls by about 30\% (Fig.~\ref{fig:profile}, right). Over the full range the best the model can do is its saturated limit $z = sG$ ($\kan\to\infty$). That limit leaves 14.3\% relative RMS, and with the experimental errors it gives $\chi^2 = 10201$ for $\nu = 27$.
+
+The decrease of $z/G$ at high field is most likely not a spin effect. It is expected to come from the beam profile and the speed distribution: at large deflection the peak of the profile is set by the fast atoms, while the centroid is pulled outward by the slow ones. Describing it requires a model of the spatial profile, such as the full numerical simulation. The single-speed centroid formula~\eqref{eq:zint} does not contain it. The forward model of Sec.~\ref{sec:forward} adds exactly these two ingredients and does reproduce most of the decrease.
+
+\subsection{Comparison with the numerical references}
+These comparisons are for reference only. Neither curve is used in any fit.
+\begin{itemize}
+\item In the analytical model with the same six points, $\kan = 1.5\times10^{-6}$ gives $\chi^2 = 17.1$ for 4 degrees of freedom (with $s = 0.0163$). This value lies on the barrier between the two minima.
+\item The analytical $\kan$ is an \emph{effective} parameter of a simplified model. The analytical model assumes a uniform field inside an effective length $L_1$, uses one speed, and predicts the branch centroid. The numerical simulation uses the measured field profile, the full speed distribution, and the peak of the simulated profile. A difference between the analytical and numerical $\kan$ therefore does not by itself point to an inconsistency.
+\item Since only the dose $u = \kan\gamma BL_1/v$ enters the model, $\kan\propto v/(BL_1)$ at fixed dose. A 10\% change in the assumed $L_1$ or $v$ changes $\kan$ by 10\%.
+\end{itemize}
+
+%=====================================================================
+\section{Forward model of the profile peak}
+\label{sec:forward}
+%=====================================================================
+
+The analytical model of Secs.~3--5 makes three approximations: a single speed $v$, the branch centroid instead of the measured peak, and a free scale $s$ that absorbs everything else. The forward model removes all three. For every current it builds the spatial profile of the upper branch at the detector and takes the position of its maximum as the prediction. Only the field is still taken as uniform over the effective length $L_1$, with $B_j$ and $G_j$ from \texttt{model\_data.csv}.
+
+\subsection{Ingredients}
+
+\paragraph{Deflection of one atom.} An atom of speed $v$ with entrance cosine $c_0$ spends $T_1 = L_1/v$ in the magnet. Equations~\eqref{eq:zint} and~\eqref{eq:tanh} give its displacement at the detector,
+\begin{equation}
+\Delta(v,c_0) = \frac{\mu G}{M}\left(\frac{L_1}{v}\right)^{\!2}\int_0^1 (r+1-\tau)\,\frac{c_0+\tanh(u\tau)}{1+c_0\tanh(u\tau)}\,d\tau,
+\qquad u = \kan\,\gamma B\,\frac{L_1}{v}.
+\label{eq:Delta}
+\end{equation}
+Slow atoms are deflected more, as $1/v^2$, and also receive a larger dose, as $1/v$.
+
+\paragraph{Weights.} Speeds follow the effusive flux distribution $f(v) = 2a^2v^3e^{-av^2}$ of Sec.~2.2, and entrance cosines the heart-shaped weighting~\eqref{eq:heart}. Both are fixed, with no free parameter.
+
+\paragraph{Beam image.} Without deflection, the beam at the detector is the image of the furnace aperture (height $h_F = 100~\mu$m) through the collimating slit (height $h_S = 300~\mu$m). With the furnace--slit distance $y_{FS} = 0.54175$~m and the furnace--detector distance $y_D = y_{FS} + 0.044 + L_1 + L_2 = 1.0510$~m, the magnification is $m = y_D/y_{FS} = 1.940$, and the image is the convolution of two boxes of widths
+\begin{equation}
+W_1 = h_S\,m = 0.582\ \text{mm},\qquad W_2 = h_F\,(m-1) = 0.094\ \text{mm}.
+\end{equation}
+A Gaussian of width $\sigma = 0.125$~mm is added for detector resolution and analysis smoothing, as in the Monte Carlo pipeline. The convolution of the two boxes and the Gaussian is evaluated in closed form,
+\begin{equation}
+\begin{gathered}
+K(x) = \frac{\Psi(x+a+b)-\Psi(x-a+b)-\Psi(x+a-b)+\Psi(x-a-b)}{W_1W_2},\\
+\Psi(x) = x\,\Phi(x/\sigma)+\sigma\,\phi(x/\sigma),
+\end{gathered}
+\end{equation}
+with $a = W_1/2$, $b = W_2/2$, and $\Phi$, $\phi$ the standard normal distribution and density.
+
+\paragraph{Profile and peak.} The predicted profile is $P(z) = \iint f(v)\,P(c_0\mid\text{up})\,K\big(z-\Delta(v,c_0)\big)\,dv\,dc_0$, and the prediction $z_j^\text{peak}(\kan)$ is the position of its maximum. The beam width ($\approx0.6$~mm) is much larger than the low-field deflections ($0.03$--$0.2$~mm), so the peak is not the centroid of the deflections.
+
+\subsection{Numerical implementation}
+\begin{enumerate}
+\item Speed: 400-point Gauss--Legendre quadrature on $0\le v\le 6/\sqrt a = 2710$~m/s. Entrance cosine: 160 points on $[-1,1]$. Time inside the magnet: 40 points on $[0,1]$. This gives 64\,000 weighted deflections per current.
+\item Peak: the deflections are binned on a 2~$\mu$m grid (linear sharing between neighbouring bins), convolved with $K$ by FFT, and the maximum is refined with Brent's method on the exact sum $\sum w\,K(z-\Delta)$.
+\item One evaluation of all 28 currents takes 1.5~s on 12 threads.
+\item Objective: the error-weighted $\chi^2$ of Eq.~\eqref{eq:chi2}, with $z^\text{model}_j = A\,z_j^\text{peak}$. When the magnification $A$ is free it is eliminated analytically as in Eq.~\eqref{eq:shat}, so the number of degrees of freedom is $\nu = n-2$ with $A$ free and $n-1$ with $A=1$.
+\item Minimization: $\chi^2$ is evaluated on a log-spaced grid of $\kan$ and the best grid point is refined with Brent's method in $\ln\kan$. All objectives in this section have a single minimum (Fig.~\ref{fig:forward_obj}).
+\item Uncertainty: as in Sec.~4.3, the interval where $\chi^2\le\chi^2_\text{min}+\max(1,\chi^2_\text{red})$, found by bisection on each side of the minimum. Since $\chi^2_\text{red}\gg1$ for every forward fit, all intervals include the $\sqrt{\chi^2_\text{red}}$ inflation.
+\end{enumerate}
+
+\subsection{Check against the Monte Carlo column}
+The column \texttt{CQD\_up\_mm} is a full Monte Carlo simulation of the same geometry with $\kan = 1.5\times10^{-6}$. Fitting the forward model to that column, with $\kan$ and an overall scale free and equal weights (the column has no errors), gives
+\[
+\kan = 1.28\times10^{-6},\qquad z^\text{MC} = 0.947\,z^\text{peak},\qquad \text{relative RMS} = 1.4\%.
+\]
+The two codes agree on the shape of the curve to 1.4\% over the whole field range. They do not agree on its calibration: the forward model needs a 15\% smaller $\kan$ and gives peaks 5.6\% further out than the Monte Carlo. The uniform field over an effective length is the most obvious difference between the two, but the cause is not established here. Values of $\kan$ from the forward model should therefore be compared with the Monte Carlo value $1.5\times10^{-6}$ only up to this offset.
+
+\subsection{Results}
+
+\begin{center}
+\small
+\begin{tabular}{lccccc}
+\toprule
+Fit & $\kan/10^{-6}$ & $1\sigma$ range & $A$ & $\chi^2/\nu$ ($\chi^2_\text{red}$) & rel.\ RMS\\
+\midrule
+All 28 points, $A=1$ (pure CQD)        & 1.066 & 1.007--1.129 & 1     & 1475/27 (54.6) & 6.05\%\\
+All 28 points, $A$ free                & 1.349 & 1.252--1.453 & 0.956 & 906/26 (34.8)  & 5.84\%\\
+All 28 points, $\kan$ fixed, $A$ free  & 1.5   & ---          & 0.945 & 976/27 (36.1)  & 6.53\%\\
+First 6 points, $A=1$                  & 0.887 & 0.815--0.963 & 1     & 138/5 (27.6)   & 7.01\%\\
+\midrule
+All 28 points, $A=1$, $\sigma = 0.100$ mm & 0.940 & --- & 1 & 2957/27 (109.5) & 11.2\%\\
+All 28 points, $A=1$, $\sigma = 0.150$ mm & 1.118 & --- & 1 & 1449/27 (53.7)  & 5.24\%\\
+\bottomrule
+\end{tabular}
+\end{center}
+\noindent $A$ is an overall magnification, $z_j \approx A\,z_j^\text{peak}$, profiled analytically like $s$ in Eq.~\eqref{eq:shat}. Unless stated, $\sigma = 0.125$~mm. The $1\sigma$ ranges include the $\sqrt{\chi^2_\text{red}}$ inflation; they are not computed for the fixed-$\kan$ fit or the blur variations.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.48\textwidth]{figs_forward/fig_cqd_fit.pdf}\hfill
+\includegraphics[width=0.48\textwidth]{figs_forward/fig_cqd_residuals.pdf}
+\caption{Forward model, all 28 points. Left: measured peak positions and the fits with $A=1$ and with $A$ free. Right: relative residuals $z^\text{model}/z-1$.}
+\label{fig:forward_fit}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.48\textwidth]{figs_forward/fig_cqd_zG.pdf}\hfill
+\includegraphics[width=0.48\textwidth]{figs_forward/fig_cqd_objective.pdf}
+\caption{Left: displacement per unit gradient $z/G$, data and the pure-CQD fit ($A=1$). Right: error-weighted $\chi^2$ against $\kan$, with $A=1$ and with $A$ profiled; each has a single minimum.}
+\label{fig:forward_obj}
+\end{figure}
+
+\paragraph{What the forward model gets right.} Over the whole field range the residuals stay within $\pm6.6\%$ from $0.035$~A upward (Fig.~\ref{fig:forward_fit}), compared with 14.3\% relative RMS for the best analytical description (Sec.~\ref{sec:whole}). The model's $z/G$ rises, peaks and then falls by 24\% to the highest field, against 30\% in the data (Fig.~\ref{fig:forward_obj}, left). The fall at high field therefore follows from the speed distribution and the beam image, as argued in Sec.~\ref{sec:whole}, with no change in the spin dynamics. Freeing the magnification changes $A$ by only 4\%, so the absolute scale of the model is close to the data.
+
+\paragraph{What it gets wrong.} The measured $z/G$ rises by 25\% between 0.020 and 0.070~A; the model's rises by only 2\% and peaks too early, at 0.035--0.040~A. The residuals are therefore strongly structured: $+18\%$ at 0.020~A, falling to $-5.6\%$ around 0.07--0.10~A, and rising again to $+4$ to $+6.6\%$ above 0.6~A with $A=1$ (Fig.~\ref{fig:forward_fit}, right). Freeing $A$ reduces the high-field excess to $+0.4$ to $+2.9\%$ but increases the low-field excess to $+20\%$. Restricting the fit to the first six points does not help either: with $A=1$ the best fit still has 7.0\% relative RMS and $\chi^2 = 138$ for 5 degrees of freedom. In all cases $\chi^2_\text{red}$ is between 28 and 110, so none of these fits is acceptable within the experimental errors, and the quoted $1\sigma$ ranges, inflated by $\sqrt{\chi^2_\text{red}}\approx5$--7.5, mainly reflect the misfit.
+
+\paragraph{Sensitivity to the blur.} The Gaussian width $\sigma$ is not measured independently, and the fit depends on it strongly: $\sigma = 0.100$~mm gives $\kan = 0.94\times10^{-6}$, 11.2\% relative RMS and $\chi^2 = 2957$; $\sigma = 0.150$~mm gives $\kan = 1.12\times10^{-6}$, 5.2\% and $\chi^2 = 1449$, slightly better than the 1475 of $\sigma = 0.125$~mm. The $\kan$ shifts ($-0.13$ and $+0.05$, in units of $10^{-6}$) are comparable to or larger than the quoted $1\sigma$ range of $\pm0.06$, so $\sigma$ acts as an extra free parameter that should be fixed from the measured width of the beam before the forward-model $\kan$ is quoted.
+
+\subsection{Comparison of the two models}
+\begin{center}
+\small
+\begin{tabular}{l>{\raggedright\arraybackslash}p{5.2cm}>{\raggedright\arraybackslash}p{5.6cm}}
+\toprule
+ & Analytical (Secs.~3--5) & Forward (this section)\\
+\midrule
+Speed                 & single mean speed & full flux distribution\\
+Prediction            & centroid           & peak of the profile\\
+Beam image and blur   & no                 & yes\\
+Free scale            & $s$ (always)       & none, or $A$\\
+Objective             & error-weighted $\chi^2$ & error-weighted $\chi^2$\\
+First 6 points        & $\chi^2/\nu = 1.06/4$, $\kan = 6.4\times10^{-6}$ & $\chi^2/\nu = 138/5$, $\kan = 0.89\times10^{-6}$ ($A=1$)\\
+All 28 points         & $\chi^2/\nu = 10201/27$, 14.3\% RMS (saturated limit) & $\chi^2/\nu = 1475/27$, 6.0\% RMS, $\kan = 1.07\times10^{-6}$ ($A=1$)\\
+\bottomrule
+\end{tabular}
+\end{center}
+The analytical model fits the low-field data within their errors only because its scale $s$ is free; its preferred $s = 0.0106$~mm/(T/m) is 12\% below the mechanical value $s_\text{mech} = 0.0120$. The forward model fixes the scale from the geometry and the speed distribution, and with that constraint it cannot reproduce the size of the low-field rise. The two $\kan$ values are not directly comparable, since they come from different observables (centroid with a free scale, against peak with a fixed scale) and different ranges.
+
+\paragraph{Open questions.}
+\begin{itemize}
+\item The low-field rise of $z/G$ (+25\%) is larger than either model predicts with a fixed scale. A model of the low-field profile that includes the measured field profile along the beam would test whether the uniform-field approximation is responsible.
+\item The 15\% offset in $\kan$ between the forward model and the Monte Carlo column should be understood before the forward-model $\kan$ is compared with $1.5\times10^{-6}$.
+\item The blur $\sigma$ should be fixed from the measured beam width at zero current.
+\end{itemize}
+
+%=====================================================================
+\section{Limitations}
+%=====================================================================
+\begin{enumerate}
+\item The analytical model applies only at low field, up to about 0.06--0.08~A, where the deflection is small compared with the beam width.
+\item The errors $\sigma_j$ are treated as independent. Correlated errors from common background subtraction, peak fitting or magnification calibration would change the weights and the intervals.
+\item The quoted intervals are statistical only. Systematic uncertainties from $L_1$, $v$ and the absolute field calibration enter $\kan$ linearly and are not included.
+\item The choice between the two solutions rests on how the fit behaves over $0.045$--$0.08$~A. That range lies close to where the model starts to fail. An independent calibration of the scale $s$ would settle the choice directly: the low-dose solution has $s = 0.019$ and the high-dose solution $s = 0.0106$, which differ by almost a factor of 2.
+\end{enumerate}
+
+%=====================================================================
+\section{Reproducibility}
+%=====================================================================
+{\sloppy
+\begin{itemize}
+\item Both scripts are in the same folder as this report, \texttt{reports/\allowbreak SG1\_analytic\_CQD\_fit/} (Julia 1.12). Both write only to that folder and overwrite their outputs on every run.
+\item Input: \texttt{data\_studies/\allowbreak FIT2026\_ki\_scale\_20261007T172140485/\allowbreak model\_data.csv}, using the columns \texttt{Current\_A}, \texttt{B\_T}, \texttt{G\_Tm}, \texttt{Experiment} and \texttt{ErrorExperiment}. The forward script also reads \texttt{CQD\_up\_mm} for the check against the Monte Carlo.
+\item Analytical model, Secs.~3--5: \texttt{SG2026Q4\_analytic\_ki\_weighted.jl} (CSV, DataFrames, Optim, Plots). Output: \texttt{window\_scan\_weighted.csv} (all windows, both minima, intervals) and the five figures in \texttt{figs\_v2/}. The script also prints the equal-weight check at $L_2 = 0.403$~m against the reference analysis.
+\item Forward model, Sec.~\ref{sec:forward}: \texttt{SG2026Q4\_cqd\_forward\_fit.jl} (also Distributions, FFTW), run with threads, \texttt{julia -t auto}. Output: \texttt{forward\_summary.csv} (all fits and the Monte Carlo check), \texttt{forward\_points.csv} (predictions and residuals per current) and the four figures in \texttt{figs\_forward/}.
+\end{itemize}
+\par}
+
+\appendix
+%=====================================================================
+\section{Data and six-point model predictions}
+\label{app:data}
+%=====================================================================
+$z^{(1)}$ and $z^{(2)}$ are the predictions of the low-dose ($\kan = 0.850\times10^{-6}$, $s = 0.01908$) and high-dose ($\kan = 6.40\times10^{-6}$, $s = 0.01056$) six-point fits. The pull is $(z^\text{model}-z)/\sigma$. Rows 7--12 are extrapolations beyond the fit window. Positions are in mm.
+
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{rcccccc rr rr}
+\toprule
+$j$ & $I$ (A) & $B$ (T) & $G$ (T/m) & $z$ & $\sigma$ & $\sigma/z$ (\%) & $z^{(1)}$ & pull & $z^{(2)}$ & pull\\
+\midrule
+ 1 & 0.020 & 0.012220 & 4.6084 & 0.03469 & 0.00065 & 1.88 & 0.03521 & $+0.78$ & 0.03422 & $-0.73$ \\
+ 2 & 0.025 & 0.015557 & 5.8667 & 0.04668 & 0.00055 & 1.19 & 0.04677 & $+0.17$ & 0.04676 & $+0.14$ \\
+ 3 & 0.030 & 0.018922 & 7.1357 & 0.05945 & 0.00054 & 0.91 & 0.05924 & $-0.39$ & 0.05978 & $+0.60$ \\
+ 4 & 0.035 & 0.022315 & 8.4154 & 0.07306 & 0.00062 & 0.85 & 0.07259 & $-0.76$ & 0.07309 & $+0.04$ \\
+ 5 & 0.040 & 0.025736 & 9.7055 & 0.08690 & 0.00086 & 0.99 & 0.08681 & $-0.10$ & 0.08659 & $-0.36$ \\
+ 6 & 0.045 & 0.029185 & 11.0061 & 0.10037 & 0.00131 & 1.30 & 0.10188 & $+1.16$ & 0.10025 & $-0.09$ \\
+\midrule
+ 7 & 0.050 & 0.032660 & 12.3168 & 0.11378 & 0.00166 & 1.46 & 0.11778 & $+2.41$ & 0.11404 & $+0.15$ \\
+ 8 & 0.060 & 0.039691 & 14.9684 & 0.14037 & 0.00205 & 1.46 & 0.15198 & $+5.65$ & 0.14196 & $+0.77$ \\
+ 9 & 0.070 & 0.046827 & 17.6592 & 0.16593 & 0.00252 & 1.52 & 0.18920 & $+9.22$ & 0.17032 & $+1.74$ \\
+10 & 0.080 & 0.054063 & 20.3881 & 0.19020 & 0.00239 & 1.26 & 0.22923 & $+16.3$ & 0.19910 & $+3.72$ \\
+11 & 0.090 & 0.061396 & 23.1538 & 0.21411 & 0.00259 & 1.21 & 0.27183 & $+22.3$ & 0.22827 & $+5.48$ \\
+12 & 0.100 & 0.068825 & 25.9554 & 0.23838 & 0.00259 & 1.09 & 0.31675 & $+30.2$ & 0.25783 & $+7.51$ \\
+\midrule
+13 & 0.125 & 0.087793 & 33.1084 & 0.29375 & 0.00227 & 0.77 & & & & \\
+14 & 0.150 & 0.107288 & 40.4604 & 0.35237 & 0.00385 & 1.09 & & & & \\
+15 & 0.175 & 0.127263 & 47.9935 & 0.39813 & 0.00199 & 0.50 & & & & \\
+16 & 0.201 & 0.148497 & 56.0012 & 0.45521 & 0.00140 & 0.31 & & & & \\
+17 & 0.250 & 0.189604 & 71.5034 & 0.55853 & 0.00248 & 0.44 & & & & \\
+18 & 0.300 & 0.232707 & 87.7584 & 0.66258 & 0.00328 & 0.49 & & & & \\
+19 & 0.401 & 0.321814 & 121.3625 & 0.85546 & 0.00750 & 0.88 & & & & \\
+20 & 0.501 & 0.410202 & 154.6953 & 1.05764 & 0.01349 & 1.28 & & & & \\
+21 & 0.600 & 0.494908 & 186.6396 & 1.23192 & 0.01052 & 0.85 & & & & \\
+22 & 0.700 & 0.574666 & 216.7179 & 1.42276 & 0.01159 & 0.81 & & & & \\
+23 & 0.750 & 0.611422 & 230.5796 & 1.50801 & 0.00434 & 0.29 & & & & \\
+24 & 0.803 & 0.647558 & 244.2070 & 1.60867 & 0.01031 & 0.64 & & & & \\
+25 & 0.851 & 0.677407 & 255.4639 & 1.65509 & 0.01070 & 0.65 & & & & \\
+26 & 0.901 & 0.705223 & 265.9536 & 1.76415 & 0.01250 & 0.71 & & & & \\
+27 & 0.950 & 0.728880 & 274.8751 & 1.78857 & 0.01284 & 0.72 & & & & \\
+28 & 1.000 & 0.748975 & 282.4533 & 1.84538 & 0.00663 & 0.36 & & & & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%=====================================================================
+\section{Notation map to the reference analysis}
+%=====================================================================
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+This report & Reference~\cite{wang2026} & Meaning\\
+\midrule
+$L_1$, $L_2$  & $\ell_1^\text{eff}$, $L_d$ & magnet length, drift distance\\
+$r$           & DIR & $L_2/L_1$\\
+$\kappa$      & $|\gamma_e|\ell_1^\text{eff}/v_a$ & Larmor phase per tesla\\
+$u_j$         & $\mathcal D_j$ & dose\\
+$p(x)$        & $m(x)$ & average alignment\\
+$R(u;r)$      & $\mathcal Z(\mathcal D,\text{DIR})$ & response factor\\
+$s$           & $S_G$ & displacement per unit gradient\\
+$c_0$         & $c_e^\text{in}$ & entrance electron cosine\\
+$\chi^2$      & $Q$ (unweighted) & objective\\
+$v$, $M$      & $v_a$, $m_a$ & speed, atomic mass\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{thebibliography}{9}
+\bibitem{wang2026} L.~Wang, \emph{Fits to Kelvin's August--September 2026 SG1 Data: Low Field and Whole Field}, analysis note, October 7, 2026.
+\end{thebibliography}
+
+\end{document}
