@@ -1234,7 +1234,7 @@ function make_pair_plots(tables, data_directories; xmode = :log10)
 
     pair_indices = [(1, 2), (3, 4), (5, 6), 
                     (7, 8), (9,10), (11,12,13),
-                    (14,15),(16,17)
+                    # (14,15),(16,17)
                     ]
 
     fig_pairs = []
@@ -1416,9 +1416,8 @@ scale_factor = 6.5e-3;
 
 load_tables = Vector{DataFrame}(undef, nd)
 for (i,data_directory) in enumerate(data_directories)
-    # load_path = joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", dirname(data_directory), "data_analysis_20260706T145140446.jld2")
-    # load_path = joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", dirname(data_directory), "data_analysis_20260710T104323826.jld2")
-    load_path = joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", dirname(data_directory), "data_analysis_20260713T133206688.jld2")
+    load_path = joinpath(BASE_PATH, "SG0_EXPDATA_ANALYSIS", 
+        dirname(data_directory), "data_analysis_20261023T150533853.jld2")
     
     load_data = load(load_path)
     load_tables[i] = load_data[data_directory]
@@ -1435,7 +1434,9 @@ end
 
 
 # Reference / Baseline
-sg0_ref_indices = vcat(3:4,9:10,14:15, 16:17)
+sg0_ref_indices = vcat(3:4,9:10,
+                    # 14:15, 16:17
+                )
 sg0_ref = OrderedDict{Int, DataFrame}()
 for (i, idx) in enumerate(sg0_ref_indices)
 
@@ -1570,12 +1571,16 @@ sg0_colors  = palette(:darkrainbow, 8) #[:purple, :dodgerblue, :orange, :pink]
 
 # ── Configurations ────────────────────────────────────────────────────────
 AP = (name = "AP", title = "Antiparallel (↑↓) configuration",
-      ref = [3, 9, 14, 16], 
+      ref = [3, 9, 
+        # 14, 16
+        ], 
     #   sg0 = [8], 
       sg0 = [1, 6, 8, 13], 
       I1_tol = 1e-6)
 PA = (name = "PA", title = "Parallel (↑↑) configuration",
-      ref = [4, 10, 15, 17],
+      ref = [4, 10, 
+        # 15, 17
+        ],
     #   sg0 = [7], 
       sg0 = [2, 5, 7, 11], 
       I1_tol = 2e-3)
@@ -1668,7 +1673,9 @@ foreach(display, values(figs))
 ## SPLITTING
 #linear plots
 tol = 1e-6
-ref_idx = [3, 9, 14]
+ref_idx = [3, 9, 
+    # 14
+    ]
 sg0_indices = [1, 6, 8, 13]
 fig_linlin_1 = plot(
     # title  = "Antiparallel (↑↓) configuration",
@@ -1709,6 +1716,8 @@ for (idx, color) in zip(sg0_indices, sg0_colors)
         df = df[Not(14), :]
     end
 
+    println("$(data_directories[idx]): $(df[1, :split]/scale_factor)")
+
     # Subtract first point as reference
     df[!, :split] = df[!, :split] .- df[1, :split]
     df[!, :errsplit] = sqrt.(df[!, :errsplit].^2 .+ df[1, :errsplit].^2)
@@ -1738,7 +1747,9 @@ display(fig_linlin_1)
 
 
 tol = 1.5e-3
-ref_idx = [4, 10, 15]
+ref_idx = [4, 10, 
+    # 15
+    ]
 sg0_indices = [2, 5, 7, 11]
 fig_linlin_2 = plot(
     # title  = "Parallel (↑↑) configuration",
@@ -1773,6 +1784,8 @@ for (idx, color) in zip(sg0_indices, sg0_colors)
 
     # Keep only rows with nonzero I1
     df = df[abs.(df.I1) .> tol, :]
+
+    println("$(data_directories[idx]): $(df[1, :split]/scale_factor)")
 
     # Subtract first point as reference
     df[!, :split] = df[!, :split] .- df[1, :split]
@@ -2273,7 +2286,6 @@ pair_of_idx = Dict(idx => pair for pair in pairs for idx in pair)
 
 plt = plot(
     xlabel = "SG0 current (A)",
-    # ylabel = "Spin-resolved beam separation (pixels)",
     ylabel = "Relative beam separation (pixels)",
     yticks = -5:1:54,
     yminorticks=2,
@@ -2294,40 +2306,48 @@ for (idx, color, marker_symbol, config_label, tol) in plot_list
     pair = pair_of_idx[idx]
     y0   = y0_pair_mean[pair].y0_mean
 
-    y = split_itp[idx].(Iexp_sampled) .- y0
+    y  = split_itp[idx].(Iexp_sampled) .- y0
     dy = errsplit_itp[idx].(Iexp_sampled)
 
-    if idx == 7
-    plot!(
-        plt,
-        Iexp_sampled,
-        y,
-        yerror = dy,
-        label = "↑↑ (parallel)",
-        color = color,
-        line = (:solid, 2),
-        marker = (marker_symbol, 18, color, 0.6),
-        markerstrokecolor = color,
-    )
-    else
-    plot!(
-        plt,
-        Iexp_sampled,
-        y,
-        yerror = dy,
-        label = "↓↑ (antiparallel)",
-        color = color,
-        line = (:solid, 2),
-        marker = (marker_symbol, 10, color, 0.6),
-        markerstrokecolor = color,
-    )
-    end
+    lbl = idx == 7 ? "↑↑ (parallel)" : "↓↑ (antiparallel)"
+    ms  = idx == 7 ? 18 : 10
 
+    # ---- store for export ----
+    export_data["idx_$(idx)"] = Dict(
+        "idx"    => idx,
+        "label"  => lbl,
+        "pair"   => collect(pair),
+        "y0"     => y0,
+        "I"      => collect(Iexp_sampled),
+        "y"      => y,
+        "yerror" => dy,
+    )
+
+    plot!(
+        plt,
+        Iexp_sampled,
+        y,
+        yerror = dy,
+        label = lbl,
+        color = color,
+        line = (:solid, 2),
+        marker = (marker_symbol, ms, color, 0.6),
+        markerstrokecolor = color,
+    )
 end
 display(plt)
 savefig(plt, "spin_resolved_sep.pdf")
 savefig(plt, "spin_resolved_sep.svg")
 
+# ---- save to JLD2 ----
+jldopen("spin_resolved_sep.jld2", "w") do f
+    f["Iexp_sampled"] = collect(Iexp_sampled)   # shared x-axis
+    for (key, d) in export_data
+        for (field, val) in d
+            f["$key/$field"] = val
+        end
+    end
+end
 
 
 # P value
