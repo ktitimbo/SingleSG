@@ -23,8 +23,9 @@
 # Section 7  Separation data: import the spin-resolved separations and plot them vs.
 #            SG0 current (linear and log scale).
 # Section 8  Current to field: B(x = 0) at every separation current from the CALIBFILE
-#            calibration; linear and quadratic calibrations compared (B vs. I);
-#            separations plotted vs. the center field.
+#            fits of Section 2 (linear and quadratic, I > 0 readings); checked against the
+#            profile-run centers; calibrations plotted (B vs. I); separations plotted vs.
+#            the center field.
 #
 # CHAPTER 3 - CQD fit with the measured SG0 field
 #
@@ -102,7 +103,6 @@
 #   figures/SG0_fig10_cqd_fit.{pdf,png}              Section 9
 #
 # Packages: ] add CSV DataFrames CairoMakie LaTeXStrings LsqFit PrettyTables
-# Run in a fresh Julia session (not one where Plots was loaded: it clashes with Makie names).
 using CSV, DataFrames, CairoMakie
 using LaTeXStrings, LinearAlgebra, LsqFit, Printf, PrettyTables
 # Set the working directory to the current location
@@ -118,12 +118,21 @@ set_theme!(merge(Theme(Axis = (xminorticksvisible = true, yminorticksvisible = t
                                xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05))),
                  theme_latexfonts()))
 
-# ---------- Constants and shared helpers ----------
+# ---------- Atom ----------
+atom = "39K"
+K39_params = TheoreticalSimulation.AtomParams(atom); # [R μn γn Ispin Ahfs M ]
+CQD_Bn = 12.4e-6 # Teslas
 
+# ---------- Constants and shared helpers ----------
 const DATAFILE  = "SG0_raw_data_field_profile_2026-10-28_29.csv"
 const CALIBFILE = "SG0_calibration_center_BI_2026-10-29.csv"
 const SEPFILE   = "spin_resolved_sep_20260706.csv"      # Chapter 2
 const FIGDIR    = "figures"
+
+# SG0 field divisor f of the CQD fit (Chapter 3): the SG0 field integral is BL0(I) / f, as in
+# the NY script and the fit note (f = 1: the measured field as is; f = 7: Revision F, the
+# note's recommended reduction, k_i = 2.67e-6 there). For tests; it is not fitted.
+const F_DIV = 7.0
 
 # One-hue ordinal ramp (light -> dark = low -> high current), validated for a light surface
 const COLORS   = [colorant"#86b6ef", colorant"#4a8fe0", colorant"#2a6bc0", colorant"#104281"]
@@ -132,6 +141,17 @@ const INK2     = colorant"#5f5e5a"                     # secondary ink: fit line
 
 const XLABEL_MM = L"x\ \mathrm{(mm)}"
 const POLE_RADIUS_MM = 20.0                            # shaded band x = 0-20 mm in the B(x) plots
+
+# Header tag naming the script figure, taken from the file name ("SG0_fig0b_..." -> "Fig. 0b"),
+# in a new top row above the figure, so the display and each exported file say which figure
+# it is. Applied once per figure, before display (savefig then exports it with the tag).
+function figtag!(fig, name)
+    m = match(r"fig(\d+[a-z]?)_", name)
+    m === nothing && return fig
+    Label(fig[0, :], "Fig. " * m[1]; halign = :left, font = :bold, fontsize = 16,
+          color = INK2, tellwidth = false)
+    fig
+end
 
 savefig(fig, name) = (mkpath(FIGDIR);
                       save(joinpath(FIGDIR, name * ".pdf"), fig);
@@ -254,7 +274,7 @@ for z in Z0
 end
 
 fig0 = plot_zero_current(Z0)
-display(fig0)
+display(figtag!(fig0, "SG0_fig0_zero_current"))
 savefig(fig0, "SG0_fig0_zero_current")
 
 
@@ -270,24 +290,28 @@ savefig(fig0, "SG0_fig0_zero_current")
 # describes each day.
 
 # Readings of every run (markers) with the global curve (line) on top; relative residuals
-# (data - fit)/data (%) of each run below
+# (data - fit)/data (%) of each run below. The curve is zero_current_calib(x) over
+# -xmax..xmax (both sides of the center); the readings exist only on the x >= 0 side, so the
+# x < 0 half is the mirror image, not a measurement.
 function plot_zero_current_fit(Z, G0, Gz)
-    fig  = Figure(size = (720, 700))
+    fig  = Figure(size = (900, 700))
     xmax = x_axis_max(Z)
-    ax1  = Axis(fig[1, 1]; ylabel = L"B_r\ \mathrm{(G)}", xticks = 0:10:xmax,
-                title = "Remanent field at 0 A: global half-sigmoid fit  y = A / [1 + (x/x₅₀)ⁿ]")
-    ax2  = Axis(fig[2, 1]; ylabel = L"(\mathrm{data - fit})/\mathrm{data}\ (\%)", xticks = 0:10:xmax,
-                xlabel = XLABEL_MM)
+    ax1  = Axis(fig[1, 1]; ylabel = L"B_r\ \mathrm{(G)}", xticks = -xmax:10:xmax,
+                title = "Remanent field at 0 A: global half-sigmoid fit  y = A / [1 + (|x|/x₅₀)ⁿ]")
+    ax2  = Axis(fig[2, 1]; ylabel = L"(\mathrm{data - fit})/\mathrm{data}\ (\%)",
+                xticks = -xmax:10:xmax, xlabel = XLABEL_MM)
     rowsize!(fig.layout, 2, Relative(0.3))
     linkxaxes!(ax1, ax2)
     hidexdecorations!(ax1; grid = false, ticks = false, minorgrid = false, minorticks = false)
 
     for ax in (ax1, ax2)
-        pole_band!(ax)
+        vspan!(ax, -POLE_RADIUS_MM, POLE_RADIUS_MM; color = (:gray, 0.15))   # pole face
+        vlines!(ax, 0; color = INK2, linewidth = 1)
     end
+    text!(ax1, -xmax + 2, 0.3; text = "mirrored (not measured)", color = INK2, fontsize = 13)
     hlines!(ax2, 0; color = INK2, linewidth = 1)
-    xf = range(0, xmax; length = 300)
-    lines!(ax1, xf, halfsigmoid(xf, G0.p); color = :black, linewidth = 2,
+    xf = range(-xmax, xmax; length = 600)
+    lines!(ax1, xf, zero_current_calib(xf); color = :black, linewidth = 2,
            label = @sprintf("A = %.2f G,  x₅₀ = %.1f mm,  n = %.2f,  R² = %.4f",
                             G0.p[1], G0.p[2], G0.p[3], G0.r2))
     for (i, (z, g)) in enumerate(zip(Z, Gz))
@@ -296,9 +320,10 @@ function plot_zero_current_fit(Z, G0, Gz)
         scatterlines!(ax2, z.x, 100 .* (z.B .- halfsigmoid(z.x, G0.p)) ./ z.B; color = COLORS[2i],
                       marker = MARKERS[i], markersize = 7, linewidth = 1)
     end
-    axislegend(ax1; position = :rt, framevisible = false)
-    xlims!(ax2, 0, xmax)
-    ylims!(ax1, 0, nothing)
+    # upper left, above the mirrored half; the headroom (25 % above A) keeps it off the curve
+    axislegend(ax1; position = :lt, framevisible = false, labelsize = 13)
+    xlims!(ax2, -xmax, xmax)
+    ylims!(ax1, 0, 1.25 * G0.p[1])
     fig
 end
 
@@ -325,7 +350,7 @@ end
         zero_current_calib(0.0), zero_current_calib(20.0), zero_current_calib(50.0))
 
 fig0b =plot_zero_current_fit(Z0, G0, Gz)
-display(fig0b)
+display(figtag!(fig0b, "SG0_fig0b_zero_current_fit"))
 savefig(fig0b, "SG0_fig0b_zero_current_fit")
 
 
@@ -402,7 +427,7 @@ for s in S
 end
 
 fig1 = plot_raw(S)
-display(fig1)
+display(figtag!(fig1, "SG0_fig1_raw"))
 savefig(fig1, "SG0_fig1_raw")
 
 # Readings minus the zero-current field: B(x) - B_r(x), with B_r = zero_current_calib
@@ -420,7 +445,7 @@ end
 
 fig1b = plot_raw(S_sub; title = "Readings minus the zero-current field",
                  ylabel = L"B - B_r\ \mathrm{(G)}")
-display(fig1b)
+display(figtag!(fig1b, "SG0_fig1b_raw_minus_zero_current"))
 savefig(fig1b, "SG0_fig1b_raw_minus_zero_current")
 
 # From here on (Sections 2-6, and through them Chapter 3) the profiles are the coil field,
@@ -525,12 +550,12 @@ function plot_center(Ic, Bc, lin, quad, B0c, date0, cal, cal_lin, cal_quad, cald
     ax2   = Axis(fig[2, 1]; xticks = 0:0.5:Imax2, xlabel = L"I\ \mathrm{(A)}", ylabel,
                  title = "Center calibration file ($caldate), raw")
     fit_lines!(ax2, cal_lin, cal_quad, Imax2)
-    f = cal.I .> 0                                      # the 0 A reading is not fitted
+    f = calfit                                          # readings used in the fits
     scatter!(ax2, cal.I[f], cal.B[f]; marker = :star5, color = :black, markersize = 13,
              label = "CALIBFILE readings (fitted)")
-    scatter!(ax2, cal.I[.!f], cal.B[.!f]; marker = :star5, markersize = 13,
-             color = :transparent, strokecolor = :black, strokewidth = 1.5,
-             label = "0 A reading (not fitted)")
+    any(.!f) && scatter!(ax2, cal.I[.!f], cal.B[.!f]; marker = :star5, markersize = 13,
+                         color = :transparent, strokecolor = :black, strokewidth = 1.5,
+                         label = "0 A reading (not fitted)")
     axislegend(ax2; position = :lt, framevisible = false)
     xlims!(ax2, -0.1, Imax2)
     fig
@@ -561,19 +586,25 @@ end
 @printf("             B(0 A) = %.1f G\n", quad.c[1])
 
 # Independent calibration from CALIBFILE: center readings at 0-3.83 A (2026-10-29), raw
-# (B_r not subtracted), linear and quadratic fits to the readings at I > 0. The 0 A reading
-# is left out: it is the field left in the iron, not a point of the coil response, and
-# with the coil on that remanent part need not be the same. It is still listed and plotted.
-# These are the fits Section 8 and Chapter 3 use: they cover every separation current.
+# (B_r not subtracted), linear and quadratic fits. These are the fits Section 8 and
+# Chapter 3 use: they cover every separation current.
+# Whether the 0 A reading (+8 G, the remanence) is fitted is a switch:
+#   true  - all readings, the 0 A one included: the fit is anchored by the measured
+#           zero-current field;
+#   false - I > 0 only: the 0 A reading is the field left in the iron, not a point of the
+#           coil response, and with the coil on that remanent part need not be the same.
+#           It is still listed and plotted (open star, "not fitted").
+const CALIB_FIT_ZERO = true
+
 cal      = load_calibration()
 caldate  = something(match(r"\d{4}-\d{2}-\d{2}", CALIBFILE), (match = "",)).match
-calfit   = cal.I .> 0                                # readings used in the fits
+calfit   = CALIB_FIT_ZERO ? trues(length(cal.I)) : cal.I .> 0   # readings used in the fits
 cal_lin  = polyfit(cal.I[calfit], cal.B[calfit], 1)
 cal_quad = polyfit(cal.I[calfit], cal.B[calfit], 2)
 
 println("  calibration file ", CALIBFILE, ": ", length(cal.I), " readings, I = ",
-        @sprintf("%.3f-%.3f A", extrema(cal.I)...), " (raw); fitted: the ",
-        count(calfit), " at I > 0")
+        @sprintf("%.3f-%.3f A", extrema(cal.I)...), " (raw); fitted: ",
+        CALIB_FIT_ZERO ? "all $(count(calfit)), 0 A included" : "the $(count(calfit)) at I > 0")
 @printf("  linear:    B = %.1f ± %.1f + (%.1f ± %.1f) I (G),  R² = %.6f (dof = %d)\n",
         cal_lin.c[1], cal_lin.se[1], cal_lin.c[2], cal_lin.se[2], cal_lin.r2, cal_lin.dof)
 @printf("  quadratic: B = %.1f + %.1f I %+.2f I² (G),  se = (%.1f, %.1f, %.2f),  R² = %.6f (dof = %d)\n",
@@ -585,7 +616,7 @@ for (I, B, used) in zip(cal.I, cal.B, calfit)
 end
 
 fig2 =plot_center(Ic, Bc, lin, quad, B0c, z0c.label, cal, cal_lin, cal_quad, caldate)
-display(fig2)
+display(figtag!(fig2, "SG0_fig2_center_vs_current"))
 savefig(fig2, "SG0_fig2_center_vs_current")
 
 
@@ -644,7 +675,7 @@ for (s, r) in zip(S, R)
 end
 
 fig3 = plot_relative(S, R)
-display(fig3)
+display(figtag!(fig3, "SG0_fig3_relative"))
 savefig(fig3, "SG0_fig3_relative")
 
 
@@ -698,7 +729,7 @@ for (s, f) in zip(S, F)
 end
 
 fig4 = plot_relative_fit(S, R, F)
-display(fig4)
+display(figtag!(fig4, "SG0_fig4_relative_fit"))
 savefig(fig4, "SG0_fig4_relative_fit")
 
 
@@ -761,7 +792,7 @@ for (s, g, f) in zip(S, Gset, F)
 end
 
 fig5 = plot_global_fit(S, R, G, Gset)
-display(fig5)
+display(figtag!(fig5, "SG0_fig5_global_fit"))
 savefig(fig5, "SG0_fig5_global_fit")
 
 # Normalized coil-field profile h(x) from the global fit G, with A = 1 (so h(0) = 1):
@@ -790,8 +821,14 @@ println("  field_to_current_calibration(x) = 1 / (1 + (|x|/x50)^n)")
 # Full symmetric profile from a half-sigmoid fit
 fullprofile(x, p) = halfsigmoid(abs.(x), p)
 
-# Per-current fits (Section 4, colored) and the global fit (Section 5, black dashed)
-# over -xmax..xmax, with the measured points on the x >= 0 side
+# Full normalized SG0 field profile with the global-fit parameters of Section 5:
+#     B0_field(x) = A / (1 + (|x|/x50)^n),    x in mm, relative to the center (peak ~ 1).
+# A is fitted or fixed at 1 according to GLOBAL_FIT_FREE_A. Works on a number or a vector.
+B0_field(x) = fullprofile(x, G.p)
+
+# Global fit (Section 5, solid red) over -xmax..xmax, with the measured points of every
+# current on the x >= 0 side. The per-current fits (Section 4) are not drawn; `F` is kept in
+# the signature for their FWHM in the printout.
 function plot_full_profile(S, R, F, G)
     fig  = Figure(size = (1024, 768))
     # Half-width of the plotted range: 1.5x the measured range, rounded to 10 mm.
@@ -799,7 +836,7 @@ function plot_full_profile(S, R, F, G)
     xlim = 10 * ceil(1.5 * x_axis_max(S) / 10)
     ax   = Axis(fig[1, 1]; xticks = -xlim:10:xlim, yticks = 0:0.2:1, xlabel = XLABEL_MM,
                 ylabel = L"(B - B_r)/(B - B_r)(0)",
-                title = "Full field profile: half-sigmoid fits mirrored about x = 0")
+                title = "Full field profile: global half-sigmoid fit mirrored about x = 0")
     vspan!(ax, -POLE_RADIUS_MM, POLE_RADIUS_MM; color = (:gray, 0.15))   # pole face
     hlines!(ax, 0.5; color = INK2, linewidth = 1, linestyle = :dash)
     vlines!(ax, 0; color = INK2, linewidth = 1)
@@ -808,12 +845,11 @@ function plot_full_profile(S, R, F, G)
     text!(ax, xlim - 2, 0.3; text = "measured", color = INK2, fontsize = 13, align = (:right, :bottom))
 
     xf = range(-xlim, xlim; length = 600)
-    for (i, (s, r, f)) in enumerate(zip(S, R, F))
-        lines!(ax, xf, fullprofile(xf, f.p); color = COLORS[i], linewidth = 2,
-               label = @sprintf("%s fit:  x₅₀ = %.1f mm,  n = %.2f", s.label, f.p[2], f.p[3]))
-        scatter!(ax, s.x, r; color = COLORS[i], marker = MARKERS[i], markersize = 9)
+    for (i, (s, r)) in enumerate(zip(S, R))
+        scatter!(ax, s.x, r; color = COLORS[i], marker = MARKERS[i], markersize = 9,
+                 label = s.label)
     end
-    lines!(ax, xf, fullprofile(xf, G.p); color = :red, linewidth = 1.5, linestyle = :dash,
+    lines!(ax, xf, fullprofile(xf, G.p); color = :red, linewidth = 2,
            label = @sprintf("global fit:  x₅₀ = %.1f mm,  n = %.2f", G.p[2], G.p[3]))
     axislegend(ax; position = :lt, framevisible = false, labelsize = 13)
     xlims!(ax, -xlim, xlim)
@@ -827,17 +863,20 @@ for (s, f) in zip(S, F)
     @printf("  %s fit:   FWHM = %.1f mm\n", s.label, 2 * f.x50pct)
 end
 @printf("  global fit:    FWHM = %.1f mm\n", 2 * G.x50pct)
+println("  B0_field(x) = A / (1 + (|x|/x50)^n)")
+@printf("    A = %.4f%s,  x50 = %.2f mm,  n = %.3f  (Section 5)\n",
+        G.p[1], G.freeA ? "" : " (fixed)", G.p[2], G.p[3])
+@printf("    %.3f at 0 mm,  %.3f at ±20 mm,  %.3f at ±x50,  %.3f at ±50 mm\n",
+        B0_field(0.0), B0_field(20.0), B0_field(G.p[2]), B0_field(50.0))
 
 fig6 = plot_full_profile(S, R, F, G)
-display(fig6)
+display(figtag!(fig6, "SG0_fig6_full_profile"))
 savefig(fig6, "SG0_fig6_full_profile")
 
 
 # =============================================================================
 # CHAPTER 2 - Spin-resolved beam separation with the measured SG0 field
 # =============================================================================
-
-
 # #############################################################################
 # Section 7 - Separation data: import
 # #############################################################################
@@ -912,7 +951,7 @@ function plot_sep_vs_current(curves)
 end
 
 fig7 = plot_sep_vs_current(curves)
-display(fig7)
+display(figtag!(fig7, "SG0_fig7_separation_vs_current"))
 savefig(fig7, "SG0_fig7_separation_vs_current")
 
 
@@ -920,17 +959,40 @@ savefig(fig7, "SG0_fig7_separation_vs_current")
 # Section 8 - Current to field: B(x = 0) at the separation currents
 # #############################################################################
 #
-# Center-field calibration from CALIBFILE: Hall-probe readings at x = 0 for currents of
-# 0-3.83 A (2026-10-29), covering every separation current (0-3.64 A), so the field is
-# interpolated, not extrapolated. Linear B = Br + k I and quadratic fits to all its points,
-# the 0 A reading included; their spread is a systematic range, not a statistical error.
-# The raw x = 0 readings of the profile runs (Section 1, 0.129-1.202 A; not B - B_r, since
-# CALIBFILE is raw too) are compared with it.
+# Converts every separation current of Section 7 into a center field B(x = 0), the field
+# axis of the separation data. No new fit is made here: it evaluates the two CALIBFILE fits
+# of Section 2 (cal_lin, cal_quad).
+#
+# What it does:
+# 1. Center field at the separation currents: Blin = cal_lin(I), Bquad = cal_quad(I). The
+#    spread between them is a systematic range of the calibration, not a statistical error.
+# 2. Check against Chapter 1: the raw x = 0 readings of the profile runs (Section 1,
+#    0.129-1.202 A; raw, not B - B_r, because CALIBFILE is raw too) are printed with their
+#    residuals from both fits. They were not used in the fits, so this is an independent check.
+# 3. Table of B lin, B quad and quad/lin at each separation current, with a note where the
+#    field is extrapolated or the linear field is negative.
+# 4. Fig. 8: both calibrations vs. current (linear and log axis) with the CALIBFILE readings,
+#    the separation currents and the profile-run centers.
+#    Fig. 9: the separations of Section 7 plotted vs. the center field.
+#
+# The calibration (Section 2):
+# - CALIBFILE, 2026-10-29: Hall-probe readings at x = 0 from 0 to 3.83 A. The readings
+#   used in the fits are `calfit`, set by CALIB_FIT_ZERO (Section 2):
+#     true  - all 8, the 0 A reading (+8 G, the remanence) included: fitted range 0-3.83 A,
+#             every separation current is interpolated; the intercept (≈ 3.7 G linear)
+#             is pulled toward the remanence;
+#     false - the 7 at I > 0: fitted range 0.129-3.83 A; the 5 separation currents below
+#             0.129 A are extrapolated toward I = 0, where the linear fit gives ≈ 0.7 G
+#             instead of the measured +8 G. The 0 A reading is an open star in Fig. 8.
+# - Between 0.129 and 1.445 A there are no CALIBFILE readings; the profile-run centers
+#   (step 2) fall in this gap and test it.
 # Caveat:
 # - remanence: the zero-current center field was +8 G on 2026-10-29 (Chapter 0) but
 #   -20 G on 2026-10-22: it follows the magnetic history, which is not recorded for the
 #   separation runs. Below ~50 mA (B < 25 G) the remanence is a large fraction of the
 #   field, and its size and sign there are uncertain.
+# - Chapter 3 uses only the coil part of these fits (the intercept is dropped), so the
+#   remanence does not enter the CQD fit; Blin and Bquad here keep the intercept.
 
 
 # Shaded band of the field range covered by the calibration, labeled at the bottom
@@ -958,19 +1020,22 @@ function plot_sep_vs_field(curves, Blin, Bquad, Bcal)
     fig
 end
 
-# cal, cal_lin, cal_quad: the CALIBFILE readings and fits of Section 2
-Isep  = curves[1].I
-Blin  = polyval(cal_lin.c, Isep)
-Bquad = polyval(cal_quad.c, Isep)
-Bcal  = polyval(cal_lin.c, collect(extrema(cal.I)))     # calibrated field range (G)
+# cal, cal_lin, cal_quad: the CALIBFILE readings and fits of Section 2 (I > 0 readings only)
+Isep  = curves[1].I                                     # separation currents (A), Section 7
+Blin  = polyval(cal_lin.c, Isep)                        # center field, linear calibration (G)
+Bquad = polyval(cal_quad.c, Isep)                       # center field, quadratic calibration (G)
+Ifit  = extrema(cal.I[calfit])                          # current range of the fitted readings (A)
+Bcal  = polyval(cal_lin.c, collect(Ifit))               # calibrated field range (G), Fig. 9 band
 
 println("\nSection 8 - center-field calibration (", CALIBFILE, ")")
-@printf("  %d readings, I = %.3f-%.3f A;  %d of %d separation currents lie above %.3f A\n",
-        length(cal.I), extrema(cal.I)..., count(>(maximum(cal.I)), Isep), length(Isep),
-        maximum(cal.I))
-println("  fits: Section 2 (linear and quadratic, raw CALIBFILE)")
+@printf("  %d readings, %d fitted (I = %.3f-%.3f A);  separation currents: %d below, %d above the fitted range\n",
+        length(cal.I), count(calfit), Ifit..., count(<(Ifit[1]), Isep),
+        count(>(Ifit[2]), Isep))
+@printf("  fits (Section 2, raw CALIBFILE, %s):  linear %.1f + %.1f I,  quadratic %.1f + %.1f I %+.2f I²\n",
+        CALIB_FIT_ZERO ? "0 A included" : "I > 0", cal_lin.c..., cal_quad.c...)
+# Independent check: the profile-run centers were not fitted, and they fill the CALIBFILE gap
 Bc_raw = [s.B[1] for s in S_raw]                     # raw center readings of the profile runs
-println("  profile runs at x = 0 (raw, Section 1) vs. the calibration:")
+println("  profile runs at x = 0 (raw, Section 1; not fitted) vs. the calibration:")
 @printf("  %8s  %8s  %13s  %13s\n", "I (A)", "B (G)", "lin res (G)", "quad res (G)")
 for (I, B) in zip(Ic, Bc_raw)
     @printf("  %8.3f  %8.1f  %+13.2f  %+13.2f\n", I, B,
@@ -980,8 +1045,10 @@ end
 println("\nSection 8 - center field at the separation currents")
 @printf("  %8s  %10s  %10s  %9s  %s\n", "I (A)", "B lin (G)", "B quad (G)", "quad/lin", "note")
 for (I, bl, bq) in zip(Isep, Blin, Bquad)
+    # flags: negative linear field, or a current outside the fitted calibration range
     note = bl < 0 ? "B < 0 (remanence dominates)" :
-           I > maximum(cal.I) ? "extrapolated" : ""
+           I < Ifit[1] ? "extrapolated (below the lowest fitted reading)" :
+           I > Ifit[2] ? "extrapolated (above the highest fitted reading)" : ""
     ratio = bl > 0 ? @sprintf("%9.3f", bq / bl) : @sprintf("%9s", "-")   # no ratio across B = 0
     @printf("  %8.3f  %10.1f  %10.1f  %s  %s\n", I, bl, bq, ratio, note)
 end
@@ -992,12 +1059,12 @@ I_top = Isep[end]
 
 # Both calibrations into `ax` along the current grid `If`: linear (solid) and quadratic
 # (dashed), each evaluated at the separation currents (open circles), the CALIBFILE readings
-# they were fitted to (black stars), the x = 0 readings of the profile runs (colored, not
-# fitted) and the shaded calibration region `region` labeled at `xtext`. `keep` selects
-# the currents drawn (I > 0 on a log axis).
+# they were fitted to (filled stars; `fitted` selects them, the 0 A reading is an open star),
+# the x = 0 readings of the profile runs (colored, not fitted) and the shaded calibration
+# region `region` labeled at `xtext`. `keep` selects the currents drawn (I > 0 on a log axis).
 function calibration!(ax, If, Isep, Blin, Bquad, cal, Ic, Bc, lin, quad;
-                      keep = I -> true, region = extrema(cal.I),
-                      xtext = sum(region) / 2)
+                      keep = I -> true, fitted = calfit,
+                      region = extrema(cal.I[fitted]), xtext = sum(region) / 2)
     vspan!(ax, region...; color = (:gray, 0.15))
     text!(ax, xtext, 0.97 * maximum(Blin); text = "calibration\nregion", color = INK2,
           fontsize = 13, align = (:center, :top))
@@ -1010,11 +1077,15 @@ function calibration!(ax, If, Isep, Blin, Bquad, cal, Ic, Bc, lin, quad;
     for B in (Blin, Bquad)
         scatter!(ax, Isep[m], B[m]; color = :transparent, strokecolor = :black,
                  strokewidth = 1.5, markersize = 9,
-                 label = B === Blin ? "separation currents" : nothing)
+                 label = B === Blin ? "SG0 experiment currents" : nothing)
     end
-    k = keep.(cal.I)
+    k = keep.(cal.I) .& fitted
     scatter!(ax, cal.I[k], cal.B[k]; marker = :star5, color = INK2, markersize = 15,
              label = "calibration, x = 0 (fitted)")
+    u = keep.(cal.I) .& .!fitted                       # empty on the log axis (I = 0)
+    any(u) && scatter!(ax, cal.I[u], cal.B[u]; marker = :star5, color = :transparent,
+                       strokecolor = INK2, strokewidth = 1.5, markersize = 15,
+                       label = "calibration, 0 A (not fitted)")
     for i in eachindex(Ic)
         scatter!(ax, [Ic[i]], [Bc[i]]; color = COLORS[i], marker = MARKERS[i], markersize = 11,
                  label = @sprintf("profile run, %.3f A", Ic[i]))
@@ -1024,7 +1095,7 @@ end
 # Center field vs. current from the two calibrations over the whole range of the separation
 # data: linear current axis (top) and log axis (bottom, I > 0 only), which spreads out the
 # separation currents below 50 mA where the remanence is a large part of B(0). Shaded: the
-# current range of the calibration readings.
+# current range of the fitted calibration readings (I > 0).
 function plot_calibrations(Isep, Blin, Bquad, cal, Ic, Bc, lin, quad)
     fig  = Figure(size = (900, 900))
     xmax = 4.0
@@ -1053,11 +1124,11 @@ function plot_calibrations(Isep, Blin, Bquad, cal, Ic, Bc, lin, quad)
 end
 
 fig8 = plot_calibrations(Isep, Blin, Bquad, cal, Ic, Bc_raw, cal_lin, cal_quad)
-display(fig8)
+display(figtag!(fig8, "SG0_fig8_calibrations"))
 savefig(fig8, "SG0_fig8_calibrations")
 
 fig9 = plot_sep_vs_field(curves, Blin, Bquad, Bcal)
-display(fig9)
+display(figtag!(fig9, "SG0_fig9_separation_vs_field"))
 savefig(fig9, "SG0_fig9_separation_vs_field")
 
 
@@ -1083,15 +1154,19 @@ savefig(fig9, "SG0_fig9_separation_vs_field")
 #
 # with the SG0 field from Chapter 1, B0(y, I) = Bc(I) h(y):
 # - h(y) = B(y)/B(0), the Section 5 global half-sigmoid mirrored about y = 0 (Section 6);
-# - Bc(I), the center field per current: the CALIBFILE calibration of Section 8 (linear or
-#   quadratic), or, for comparison, the slope β0 of the direct SG0 scans quoted in the note.
+# - Bc(I), the center field per current: the linear CALIBFILE calibration of Section 8, or,
+#   for comparison, the slope β0 of the direct SG0 scans quoted in the note.
 # Since h >= 0, BL0(I) = |Bc(I)| L_eff with L_eff = ∫ h(y) dy over the whole beam axis.
-# No top hat and no divisor f: the SG0 scale is fixed by the measurement.
+# Three SG0 field models are fitted (9.5): Hall map with the measured profile, β0 with the
+# measured profile, and β0 with the note's 40 mm top hat (the note's own SG0 model, as a
+# reference). The divisor f (F_DIV, top of the script) divides all three; f = 1 is the field
+# as measured.
 # Assumptions:
 # - the profile shape does not depend on the current (Section 5), including above 1.202 A
-#   where the calibration is extrapolated, and it is symmetric about y = 0 (Section 6);
-# - Bc(I) is the coil part of the center field: the intercept b0 (3.7 G in the linear fit,
-#   0.2 % of the field at 3.64 A) is neglected, as in [140]; the separations are referenced to I = 0 and
+#   where no profile was measured, and it is symmetric about y = 0 (Section 6);
+# - Bc(I) is the coil part of the center field: the intercept b0 (3.7 G in the linear fit
+#   with the 0 A reading, 0.7 G without; at most 0.2 % of the field at 3.64 A) is neglected,
+#   as in [140]; the separations are referenced to I = 0 and
 #   the model to Dc0 = 0.
 # SG0 is a uniform field: standard QM ("Existing models") predicts ΔD = 0 (source note, Sec. 23).
 
@@ -1109,10 +1184,6 @@ const γₑ    = -1.76085962784e11 ;  # Electron gyromagnetic ratio  (1/sT). Rel
 const μₑ    = 9.2847646917e-24 ;   # Electron magnetic moment (J/T). RSU = 3.0e-10
 const Sspin = 1/2 ;                # Electron spin
 const gₑ    = -2.00231930436092 ;  # Electron g-factor
-
-# ---------- Atom ----------
-atom = "39K"
-K39_params = TheoreticalSimulation.AtomParams(atom); # [R μn γn Ispin Ahfs M ]
 
 # ---------- Camera ----------
 CAM_PIXELSIZE = 6.5e-6 ;               # Physical pixel size of camera [m]
@@ -1826,32 +1897,41 @@ L_num  = let y = -2000:0.05:2000              # Riemann sum of h0 over ±2 m: cl
 end
 
 """
-    BL0_lin(I), BL0_quad(I), BL0_β0(I) -> BL0 (T m)
+    BL0_lin(I), BL0_β0(I), BL0_β0_tophat(I) -> BL0 (T m)
 
-SG0 field integral BL0(I) = |Bc(I)| L_eff at SG0 coil current `I` (A), for three models of the
-center field Bc(I):
+SG0 field integral BL0(I) = |Bc(I)| L at SG0 coil current `I` (A), for three models of the
+center field Bc(I) and the length L:
 
-    BL0_lin    Hall map, linear fit (Section 8):      Bc = k I,          k = cal_lin.c[2] (G/A)
-    BL0_quad   Hall map, quadratic fit (Section 8):   Bc = c1 I + c2 I², c1, c2 = cal_quad.c[2:3]
-    BL0_β0     direct SG0 scans (note, [19]):          Bc = β0 I,         β0 = 0.031895 T/A
+    BL0_lin         Hall map, linear fit (Section 8):  Bc = k I,   k = cal_lin.c[2] (G/A),  L = L_eff
+    BL0_β0          direct SG0 scans (note, [19]):      Bc = β0 I,  β0 = 0.031895 T/A,       L = L_eff
+    BL0_β0_tophat   the note's SG0 model:               Bc = β0 I,  top hat of length        L = L0_TOPHAT = 40 mm
 
-Only the coil part of the center field is kept: the intercept (≈ 3.7 G, the field the fit
-extrapolates to I = 0) is dropped, as in [140], so that BL0(0) = 0 and Dc0(0) = 0, matching the
+L_eff (≈ 80 mm) is the integral of the measured profile; the top hat is the note's estimate
+(l0 = B1 l1 / (β0 I*) = 40 mm), so with f equal to the note's it reproduces the note's SG0 dose.
+
+Only the coil part of the center field is kept: the intercept (the field the fit
+extrapolates to I = 0; 3.7 G with the 0 A reading fitted, 0.7 G without, CALIB_FIT_ZERO in
+Section 2) is dropped, as in [140], so that BL0(0) = 0 and Dc0(0) = 0, matching the
 data, which are referenced to I0 = 0.
 Units: L_eff is in mm, so 1 G mm = 1e-7 T m (Hall map in G) and 1 T mm = 1e-3 T m (β0 in T/A).
 The absolute value makes BL0 ≥ 0, as in the definition ∫ |B0| dy.
+Every model is divided by the SG0 field divisor F_DIV (top of the script; f = 1: the field
+as measured).
 
-The Hall-map slope (431.6 G/A) and the direct-scan slope (318.9 G/A) differ by 35 %. This is
-the dominant systematic of k_i, which is why all three models are fitted.
+The Hall-map slope (431.6 G/A with the 0 A reading, 432.6 G/A without) and the direct-scan
+slope (318.9 G/A) differ by 35-36 %, and L_eff is twice the top hat. These are the dominant
+systematics of k_i, which is why the three models are fitted.
 """
-BL0_lin(I)  = 1e-7 * L_eff * abs(cal_lin.c[2] * I)
-BL0_quad(I) = 1e-7 * L_eff * abs(cal_quad.c[2] * I + cal_quad.c[3] * I^2)
-BL0_β0(I)   = 1e-3 * L_eff * abs(β0 * I)
+const L0_TOPHAT = 40.0                             # note's top-hat SG0 length (mm)
+
+BL0_lin(I)       = 1e-7 * L_eff * abs(cal_lin.c[2] * I) / F_DIV
+BL0_β0(I)        = 1e-3 * L_eff * abs(β0 * I) / F_DIV
+BL0_β0_tophat(I) = 1e-3 * L0_TOPHAT * abs(β0 * I) / F_DIV
 
 # The SG0 field models fitted in 9.6, each with its label for the table and Fig. 10
-FIELD_MODELS = [(name = "Hall map, linear cal.",    BL0 = BL0_lin),
-                (name = "Hall map, quadratic cal.", BL0 = BL0_quad),
-                (name = "direct-scan slope β0",     BL0 = BL0_β0)]
+FIELD_MODELS = [(name = "Hall map, profile",  BL0 = BL0_lin),
+                (name = "β0, profile",        BL0 = BL0_β0),
+                (name = "β0, 40 mm top hat",  BL0 = BL0_β0_tophat)]
 
 # =============================================================================
 # 9.6  Fits and summary
@@ -1882,13 +1962,15 @@ println("  CQD inputs")
 @printf("    Kz = %.3f µm    KΔ_pix = 2 Kz / d_pix = %.4f px\n", 1e6 * CQD.Kz, CQD.KΔ_pix)
 @printf("    geometric DIR = y_SGToScreen / y_SG = %.4f  ->  z_max = Kz (DIR + 1/2) = %.1f µm = %.2f px\n",
         CQD.DIR_geom, 1e6 * CQD.zmax_geom, CQD.zmax_geom / CAM_PIXELSIZE)
-println("  SG0 field integral")
+println("  SG0 field integral  (divisor f = ", F_DIV, F_DIV == 1 ? ": the field as measured)" : ": BL0 = measured / f)")
 @printf("    L_eff = ∫ h dy = %.2f mm    (numerical %.2f mm;  per-current fits %.1f-%.1f mm)\n",
         L_eff, L_num, extrema(L_sets)...)
-@printf("    BL0 per ampere:  Hall map %.4e T m/A (k = %.1f G/A),  direct scans %.4e T m/A (β0 = %.1f G/A)\n",
-        BL0_lin(1.0), cal_lin.c[2], BL0_β0(1.0), 1e4 * β0)
-@printf("    Dc0/Dc1 = BL0/BL1 at 1 A:  Hall map %.3f,  direct scans %.3f\n",
-        BL0_lin(1.0) / CQD.BL1, BL0_β0(1.0) / CQD.BL1)
+@printf("    slopes: Hall map k = %.1f G/A,  direct scans β0 = %.1f G/A;  top hat %.0f mm\n",
+        cal_lin.c[2], 1e4 * β0, L0_TOPHAT)
+for m in FIELD_MODELS
+    @printf("    %-20s BL0 per ampere (after f) = %.4e T m/A,  Dc0/Dc1 = BL0/BL1 at 1 A = %.4f\n",
+            m.name, m.BL0(1.0), m.BL0(1.0) / CQD.BL1)
+end
 
 # One two-step fit per SG0 field model (the slow part of the script)
 cqd_results = [fit_cqd(curves, m.BL0) for m in FIELD_MODELS]
@@ -1904,6 +1986,28 @@ for (m, r) in zip(FIELD_MODELS, cqd_results)
             r.Dc1_at_edge ? "   (Dc1 at the scan edge)" : "")
 end
 
+# Check against the fit note at the same f (fit_20260706/results.json): top-hat SG0,
+# BL0 = β0 l0 / f per ampere with l0 = 40 mm, gave k_i = 1.523e-7 (f = 1) and 2.668e-6 (f = 7).
+# - "β0, 40 mm top hat" is the note's own SG0 model (BL0/BL0_note = 1): with the note's SG1
+#   inputs (B1 = 18.931 mT) it should reproduce the note's k_i, ratio ≈ 1.
+# - The other models are rescaled by k_i ∝ 1/BL0(1 A) (the data fix the SG0 dose per ampere).
+#   This holds while the doses are small (f = 1: Dc1 ≈ 0.03-0.06); at f = 7 the note sits at
+#   Dc1 ≈ 1, where the response is no longer linear in the dose, so expect a ratio well below
+#   1 there (≈ 0.5), not a unit error.
+const KI_NOTE  = Dict(1.0 => 1.5226e-7, 7.0 => 2.6681e-6)   # note's k_i per divisor f (dimensionless)
+const BL0_NOTE = β0 * 1e-3 * L0_TOPHAT / F_DIV              # note's top-hat SG0 field integral per ampere (T m/A)
+if haskey(KI_NOTE, F_DIV)
+    println("  Check against the fit note, f = $(F_DIV) (k_i = $(KI_NOTE[F_DIV]), BL0 = ",
+            @sprintf("%.4e", BL0_NOTE), " T m/A, 40 mm top hat):")
+    for (m, r) in zip(FIELD_MODELS, cqd_results)
+        ki_exp = KI_NOTE[F_DIV] * BL0_NOTE / m.BL0(1.0)
+        @printf("    %-25s BL0/BL0_note = %.3f  ->  expected k_i ≈ %.3g,  fitted %.3g  (ratio %.3f)\n",
+                m.name, m.BL0(1.0) / BL0_NOTE, ki_exp, r.ki, r.ki / ki_exp)
+    end
+else
+    println("  (no fit-note value for f = $(F_DIV): check against the note skipped)")
+end
+
 # =============================================================================
 # 9.7  Figure: data with the fitted CQD curves
 # =============================================================================
@@ -1917,7 +2021,8 @@ Fig. 10: the measured separation changes vs. SG0 current with the fitted CQD cur
   blue squares, with 1σ error bars and the dashed zero line).
 - Model: for each field model in `models` (with its fit in `results`, same order), one line
   style for both its curves, the parallel one (rising) and the antiparallel one (falling):
-  solid black = Hall map linear, dashed black = Hall map quadratic, dotted gray = direct-scan β0.
+  solid black = Hall map with the profile, dashed black = β0 with the profile, dotted gray =
+  β0 with the 40 mm top hat.
   The legend therefore lists line styles (field models), merged so that each appears once,
   next to the two data sets.
 - Axes: current 0-3.8 A, separation range SEP_YLIMS with 1-px ticks.
@@ -1942,7 +2047,8 @@ function plot_cqd_fits(curves, models, results)
 end
 
 fig10 = plot_cqd_fits(curves, FIELD_MODELS, cqd_results)
-display(fig10)
+display(figtag!(fig10, "SG0_fig10_cqd_fit"))
 savefig(fig10, "SG0_fig10_cqd_fit")                     # figures/SG0_fig10_cqd_fit.{pdf,png}
 
 println("\nFigures written to ", abspath(FIGDIR))
+
