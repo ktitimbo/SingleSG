@@ -118,10 +118,24 @@ set_theme!(merge(Theme(Axis = (xminorticksvisible = true, yminorticksvisible = t
                                xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05))),
                  theme_latexfonts()))
 
+# ---------- Physical constants (NIST, CODATA 2022) ----------
+# RSU : Relative Standard Uncertainty
+const kb    = 1.380649e-23 ;       # Boltzmann constant (J/K)
+const ħ     = 6.62607015e-34/2π ;  # Reduced Planck constant (J s)
+const μ₀    = 1.25663706127e-6;    # Vacuum permeability (Tm/A)
+const μB    = 9.2740100657e-24 ;   # Bohr magneton (J/T)
+const γₑ    = -1.76085962784e11 ;  # Electron gyromagnetic ratio  (1/sT). Relative Standard Uncertainty = 3.0e-10
+const μₑ    = 9.2847646917e-24 ;   # Electron magnetic moment (J/T). RSU = 3.0e-10
+const Sspin = 1/2 ;                # Electron spin
+const gₑ    = -2.00231930436092 ;  # Electron g-factor
+
 # ---------- Atom ----------
 atom = "39K"
 K39_params = TheoreticalSimulation.AtomParams(atom); # [R μn γn Ispin Ahfs M ]
 CQD_Bn = 12.4e-6 # Teslas
+
+
+2π*ħ*(462.31e6)/(2μₑ)
 
 # ---------- Constants and shared helpers ----------
 const DATAFILE  = "SG0_raw_data_field_profile_2026-10-28_29.csv"
@@ -133,6 +147,11 @@ const FIGDIR    = "figures"
 # the NY script and the fit note (f = 1: the measured field as is; f = 7: Revision F, the
 # note's recommended reduction, k_i = 2.67e-6 there). For tests; it is not fitted.
 const F_DIV = 7.0
+
+# SG0 field threshold of the CQD fit (Chapter 3), in units of the nuclear field CQD_Bn: BL0(I)
+# integrates |B0(y, I)| / f only where it exceeds N_BN * CQD_Bn, so the effective SG0 length
+# depends on the current (N_BN = 0: the whole profile, the current-independent L_eff).
+const N_BN = 1.0
 
 # One-hue ordinal ramp (light -> dark = low -> high current), validated for a light surface
 const COLORS   = [colorant"#86b6ef", colorant"#4a8fe0", colorant"#2a6bc0", colorant"#104281"]
@@ -1156,8 +1175,9 @@ savefig(fig9, "SG0_fig9_separation_vs_field")
 # - h(y) = B(y)/B(0), the Section 5 global half-sigmoid mirrored about y = 0 (Section 6);
 # - Bc(I), the center field per current: the linear CALIBFILE calibration of Section 8, or,
 #   for comparison, the slope β0 of the direct SG0 scans quoted in the note.
-# Since h >= 0, BL0(I) = |Bc(I)| L_eff with L_eff = ∫ h(y) dy over the whole beam axis.
-# Three SG0 field models are fitted (9.5): Hall map with the measured profile, β0 with the
+# Since h >= 0, BL0(I) = |Bc(I)| L(I), with L(I) = ∫ h(y) dy over the region where the field
+# exceeds N_BN CQD_Bn (top of the script); N_BN = 0 gives the fixed L_eff over the whole axis.
+# Three SG0 field models are fitted (9.5): magnetometer data with the measured profile, β0 with the
 # measured profile, and β0 with the note's 40 mm top hat (the note's own SG0 model, as a
 # reference). The divisor f (F_DIV, top of the script) divides all three; f = 1 is the field
 # as measured.
@@ -1174,16 +1194,6 @@ savefig(fig9, "SG0_fig9_separation_vs_field")
 # Setup: physical constants, atom, apparatus geometry, magnets
 # =============================================================================
 
-# ---------- Physical constants (NIST, CODATA 2022) ----------
-# RSU : Relative Standard Uncertainty
-const kb    = 1.380649e-23 ;       # Boltzmann constant (J/K)
-const ħ     = 6.62607015e-34/2π ;  # Reduced Planck constant (J s)
-const μ₀    = 1.25663706127e-6;    # Vacuum permeability (Tm/A)
-const μB    = 9.2740100657e-24 ;   # Bohr magneton (J/T)
-const γₑ    = -1.76085962784e11 ;  # Electron gyromagnetic ratio  (1/sT). Relative Standard Uncertainty = 3.0e-10
-const μₑ    = 9.2847646917e-24 ;   # Electron magnetic moment (J/T). RSU = 3.0e-10
-const Sspin = 1/2 ;                # Electron spin
-const gₑ    = -2.00231930436092 ;  # Electron g-factor
 
 # ---------- Camera ----------
 CAM_PIXELSIZE = 6.5e-6 ;               # Physical pixel size of camera [m]
@@ -1235,7 +1245,7 @@ TheoreticalSimulation.DEFAULT_y_SGToAperture    = y_SGToAperture;
 const I1 = 0.040                                   # SG1 coil current (A)
 const G1 = TheoreticalSimulation.GvsI(I1)          # SG1 gradient (T/m)
 const B1 = TheoreticalSimulation.BvsI(I1)          # SG1 field (T)
-# SG0: field profile and Hall-map slope from Chapter 1; for comparison, the center-field
+# SG0: field profile and magnetometer slope from Chapter 1; for comparison, the center-field
 # slope of the direct SG0 scans quoted in the note ([19])
 const β0 = 0.031895                                # SG0 local slope, direct scans (T/A)
 
@@ -1259,7 +1269,7 @@ SETUP FEATURES
 ***************************************************
 MAGNETS (field mode: $(TheoreticalSimulation.magnetic_field_mode()))
     SG1 at $(1e3*I1) mA        : G1 = $(round(G1; digits = 3)) T/m,  B1 = $(round(1e3*B1; digits = 3)) mT
-    SG0 direct-scan slope   : β0 = $(β0) T/A   (Hall map: Chapter 1)
+    SG0 direct-scan slope   : β0 = $(β0) T/A   (magnetometer: Chapter 1)
 ***************************************************
 """)
 
@@ -1857,7 +1867,9 @@ end
 #     BL0(I) = |Bc(I)| L_eff,       L_eff = ∫ h(y) dy.
 #
 # So the profile enters only through one number, L_eff (≈ 80 mm), and the current dependence
-# only through Bc(I).
+# only through Bc(I). With the threshold N_BN > 0 only the field above N_BN CQD_Bn is
+# integrated: the length L(I) = ∫_{|Bc h| > N_BN CQD_Bn} h dy then grows with the current
+# toward L_eff, and BL0 is no longer linear in I (lcut_mm below).
 
 """
     h0(y) -> h
@@ -1897,41 +1909,84 @@ L_num  = let y = -2000:0.05:2000              # Riemann sum of h0 over ±2 m: cl
 end
 
 """
+    lcut_mm(Bc, p; Bth = N_BN * CQD_Bn) -> L (mm)
+
+Effective length of the SG0 field above a threshold: the integral of h(y) over the region
+where the field |Bc h(y)| exceeds `Bth` (T), for the mirrored half-sigmoid p = [A, y50 (mm), n]
+and center field `Bc` (T, after the divisor f). With r = Bth / |Bc|, the field crosses the
+threshold at |y| = y_c = y50 (A/r - 1)^(1/n), and
+
+    L(Bc) = ∫_{-y_c}^{y_c} h dy = 2 A y50 ∫_0^{u_c} du / (1 + u^n),     u_c = y_c / y50,
+
+so L = 0 when the peak A |Bc| is below Bth, and L -> L_eff as Bth / |Bc| -> 0 (Bth = 0: L_eff,
+for every current). The u integral is computed by Simpson's rule for u_c ≤ 2, and for u_c > 2
+as L_eff minus the tail ∫_{u_c}^∞ du / (1 + u^n) = Σ_k (-1)^k u_c^(1-(k+1)n) / ((k+1)n - 1)
+(alternating series, term ratio ≤ 2^-n).
+"""
+function lcut_mm(Bc, p; Bth = N_BN * CQD_Bn)
+    A, y50, n = p
+    Bth <= 0 && return leff_mm(p)
+    r = Bth / abs(Bc)
+    r >= A && return 0.0
+    uc = (A / r - 1)^(1 / n)
+    if uc <= 2
+        m = 400                                        # Simpson intervals (even)
+        u = range(0, uc; length = m + 1)
+        g = @. 1 / (1 + u^n)
+        I_u = step(u) / 3 * (g[1] + g[end] + 4 * sum(g[2:2:end-1]) + 2 * sum(g[3:2:end-2]))
+        return 2 * A * y50 * I_u
+    end
+    tail = sum((-1)^k * uc^(1 - (k + 1) * n) / ((k + 1) * n - 1) for k in 0:60)
+    return leff_mm(p) - 2 * A * y50 * tail
+end
+
+"""
     BL0_lin(I), BL0_β0(I), BL0_β0_tophat(I) -> BL0 (T m)
 
-SG0 field integral BL0(I) = |Bc(I)| L at SG0 coil current `I` (A), for three models of the
-center field Bc(I) and the length L:
+SG0 field integral BL0(I) = |Bc(I)| L(I) at SG0 coil current `I` (A), for three models of the
+center field Bc(I) and the length L(I):
 
-    BL0_lin         Hall map, linear fit (Section 8):  Bc = k I,   k = cal_lin.c[2] (G/A),  L = L_eff
-    BL0_β0          direct SG0 scans (note, [19]):      Bc = β0 I,  β0 = 0.031895 T/A,       L = L_eff
-    BL0_β0_tophat   the note's SG0 model:               Bc = β0 I,  top hat of length        L = L0_TOPHAT = 40 mm
+    BL0_lin         magnetometer data, linear fit (Section 8):  Bc = k I / f,   k = cal_lin.c[2] (G/A),  L = lcut_mm(Bc, G.p)
+    BL0_β0          direct SG0 scans (note, [19]):      Bc = β0 I / f,  β0 = 0.031895 T/A,       L = lcut_mm(Bc, G.p)
+    BL0_β0_tophat   the note's SG0 model:               Bc = β0 I / f,  top hat: L = L0_TOPHAT = 40 mm if |Bc| > Bth, else 0
 
-L_eff (≈ 80 mm) is the integral of the measured profile; the top hat is the note's estimate
-(l0 = B1 l1 / (β0 I*) = 40 mm), so with f equal to the note's it reproduces the note's SG0 dose.
+Only the field above Bth = N_BN * CQD_Bn is integrated (N_BN at the top of the script), so the
+effective length grows with the current; with N_BN = 0 it is the fixed L_eff (≈ 80 mm, the
+integral of the measured profile) and BL0 is linear in I. The top hat is the note's estimate
+(l0 = B1 l1 / (β0 I*) = 40 mm), so with f equal to the note's and N_BN = 0 it reproduces the
+note's SG0 dose. The threshold is applied to the field after the divisor f.
 
 Only the coil part of the center field is kept: the intercept (the field the fit
 extrapolates to I = 0; 3.7 G with the 0 A reading fitted, 0.7 G without, CALIB_FIT_ZERO in
 Section 2) is dropped, as in [140], so that BL0(0) = 0 and Dc0(0) = 0, matching the
 data, which are referenced to I0 = 0.
-Units: L_eff is in mm, so 1 G mm = 1e-7 T m (Hall map in G) and 1 T mm = 1e-3 T m (β0 in T/A).
+Units: Bc is converted to T (magnetometer: 1 G = 1e-4 T) and L is in mm, so BL0 = 1e-3 |Bc| L T m.
 The absolute value makes BL0 ≥ 0, as in the definition ∫ |B0| dy.
 Every model is divided by the SG0 field divisor F_DIV (top of the script; f = 1: the field
 as measured).
 
-The Hall-map slope (431.6 G/A with the 0 A reading, 432.6 G/A without) and the direct-scan
+The magnetometer slope (431.6 G/A with the 0 A reading, 432.6 G/A without) and the direct-scan
 slope (318.9 G/A) differ by 35-36 %, and L_eff is twice the top hat. These are the dominant
 systematics of k_i, which is why the three models are fitted.
 """
 const L0_TOPHAT = 40.0                             # note's top-hat SG0 length (mm)
 
-BL0_lin(I)       = 1e-7 * L_eff * abs(cal_lin.c[2] * I) / F_DIV
-BL0_β0(I)        = 1e-3 * L_eff * abs(β0 * I) / F_DIV
-BL0_β0_tophat(I) = 1e-3 * L0_TOPHAT * abs(β0 * I) / F_DIV
+const BTH = N_BN * CQD_Bn                          # SG0 field threshold (T)
+
+Bc_lin(I) = 1e-4 * cal_lin.c[2] * I / F_DIV        # center field after f (T), magnetometer
+Bc_β0(I)  = β0 * I / F_DIV                         # center field after f (T), direct scans
+
+BL0_lin(I)       = 1e-3 * abs(Bc_lin(I)) * lcut_mm(Bc_lin(I), G.p; Bth = BTH)
+BL0_β0(I)        = 1e-3 * abs(Bc_β0(I)) * lcut_mm(Bc_β0(I), G.p; Bth = BTH)
+BL0_β0_tophat(I) = 1e-3 * abs(Bc_β0(I)) * (abs(Bc_β0(I)) > BTH ? L0_TOPHAT : 0.0)
+
+# Effective SG0 length L(I) = BL0(I) / |Bc(I)| (mm) of each model, for the printout
+leff_of(BL0, Bc, I) = Bc(I) == 0 ? 0.0 : 1e3 * BL0(I) / abs(Bc(I))
 
 # The SG0 field models fitted in 9.6, each with its label for the table and Fig. 10
-FIELD_MODELS = [(name = "Hall map, profile",  BL0 = BL0_lin),
-                (name = "β0, profile",        BL0 = BL0_β0),
-                (name = "β0, 40 mm top hat",  BL0 = BL0_β0_tophat)]
+FIELD_MODELS = [(name = "Magnetometer data, profile",  BL0 = BL0_lin,       Bc = Bc_lin),
+                (name = "β0, profile",        BL0 = BL0_β0,        Bc = Bc_β0),
+                (name = "β0, 40 mm top hat",  BL0 = BL0_β0_tophat, Bc = Bc_β0)]
 
 # =============================================================================
 # 9.6  Fits and summary
@@ -1941,7 +1996,7 @@ FIELD_MODELS = [(name = "Hall map, profile",  BL0 = BL0_lin),
 # - CQD inputs: the derived constants of 9.1, and the geometric DIR with the deflection z_max
 #   that a fully aligned atom would reach on the camera;
 # - SG0 field integral: L_eff (closed form, numerical check, per-current spread), BL0 per ampere
-#   for the Hall map and the direct scans, and the dose ratio Dc0/Dc1 = BL0/BL1 at 1 A;
+#   for the magnetometer and the direct scans, and the dose ratio Dc0/Dc1 = BL0/BL1 at 1 A;
 # - fit results, one row per field model in FIELD_MODELS (all with wform = :lin):
 #     Dc1            best SG1 dose (step 1)
 #     k_i            best value and its Δχ² = 1 interval
@@ -1965,11 +2020,19 @@ println("  CQD inputs")
 println("  SG0 field integral  (divisor f = ", F_DIV, F_DIV == 1 ? ": the field as measured)" : ": BL0 = measured / f)")
 @printf("    L_eff = ∫ h dy = %.2f mm    (numerical %.2f mm;  per-current fits %.1f-%.1f mm)\n",
         L_eff, L_num, extrema(L_sets)...)
-@printf("    slopes: Hall map k = %.1f G/A,  direct scans β0 = %.1f G/A;  top hat %.0f mm\n",
+@printf("    slopes: magnetometer k = %.1f G/A,  direct scans β0 = %.1f G/A;  top hat %.0f mm\n",
         cal_lin.c[2], 1e4 * β0, L0_TOPHAT)
 for m in FIELD_MODELS
-    @printf("    %-20s BL0 per ampere (after f) = %.4e T m/A,  Dc0/Dc1 = BL0/BL1 at 1 A = %.4f\n",
+    @printf("    %-27s BL0 per ampere (after f) = %.4e T m/A,  Dc0/Dc1 = BL0/BL1 at 1 A = %.4f\n",
             m.name, m.BL0(1.0), m.BL0(1.0) / CQD.BL1)
+end
+@printf("    threshold: |B0|/f > N_BN CQD_Bn = %g × %.3g µT = %.4g µT;  effective length L(I) (mm):\n",
+        N_BN, 1e6 * CQD_Bn, 1e6 * BTH)
+let Is = [minimum(curves[1].I[curves[1].I .> 0]), 0.5, 1.0, maximum(curves[1].I)]
+    @printf("    %-27s%s\n", "I (A) =", join([@sprintf("%9.3f", I) for I in Is]))
+    for m in FIELD_MODELS
+        @printf("    %-27s%s\n", m.name, join([@sprintf("%9.2f", leff_of(m.BL0, m.Bc, I)) for I in Is]))
+    end
 end
 
 # One two-step fit per SG0 field model (the slow part of the script)
@@ -1977,10 +2040,10 @@ cqd_results = [fit_cqd(curves, m.BL0) for m in FIELD_MODELS]
 
 println("  Fit results  (DIR: solved from the $(Int(CQD.Dsep0_px))-px baseline; geometric value ",
         round(CQD.DIR_geom; digits = 3), ")")
-@printf("    %-25s %7s %22s %9s %6s %7s %17s %9s %13s\n", "Bc(I)", "Dc1", "k_i (Δχ² = 1)",
+@printf("    %-27s %7s %22s %9s %6s %7s %17s %9s %13s\n", "Bc(I)", "Dc1", "k_i (Δχ² = 1)",
         "χ² par", "DIR", "Dc0 max", "κ", "χ² anti", "χ² pure CQD")
 for (m, r) in zip(FIELD_MODELS, cqd_results)
-    @printf("    %-25s %7.4f %8.3g (%.3g-%.3g) %5.2f/%2d %6.3f %7.3f %8.4f ± %.4f %6.2f/%2d %13.1f%s\n",
+    @printf("    %-27s %7.4f %8.3g (%.3g-%.3g) %5.2f/%2d %6.3f %7.3f %8.4f ± %.4f %6.2f/%2d %13.1f%s\n",
             m.name, r.Dc1, r.ki, r.ki_lo, r.ki_hi, r.chi2_par, r.n_par, r.DIR, r.Dc0_max,
             r.p, r.p_err, r.chi2_anti, r.n_anti, r.chi2_anti_pure,
             r.Dc1_at_edge ? "   (Dc1 at the scan edge)" : "")
@@ -2001,7 +2064,7 @@ if haskey(KI_NOTE, F_DIV)
             @sprintf("%.4e", BL0_NOTE), " T m/A, 40 mm top hat):")
     for (m, r) in zip(FIELD_MODELS, cqd_results)
         ki_exp = KI_NOTE[F_DIV] * BL0_NOTE / m.BL0(1.0)
-        @printf("    %-25s BL0/BL0_note = %.3f  ->  expected k_i ≈ %.3g,  fitted %.3g  (ratio %.3f)\n",
+        @printf("    %-27s BL0/BL0_note = %.3f  ->  expected k_i ≈ %.3g,  fitted %.3g  (ratio %.3f)\n",
                 m.name, m.BL0(1.0) / BL0_NOTE, ki_exp, r.ki, r.ki / ki_exp)
     end
 else
@@ -2021,7 +2084,7 @@ Fig. 10: the measured separation changes vs. SG0 current with the fitted CQD cur
   blue squares, with 1σ error bars and the dashed zero line).
 - Model: for each field model in `models` (with its fit in `results`, same order), one line
   style for both its curves, the parallel one (rising) and the antiparallel one (falling):
-  solid black = Hall map with the profile, dashed black = β0 with the profile, dotted gray =
+  solid black = magnetometer data with the profile, dashed black = β0 with the profile, dotted gray =
   β0 with the 40 mm top hat.
   The legend therefore lists line styles (field models), merged so that each appears once,
   next to the two data sets.
