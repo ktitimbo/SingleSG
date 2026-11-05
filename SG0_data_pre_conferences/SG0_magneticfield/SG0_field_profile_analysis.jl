@@ -101,6 +101,8 @@
 #   figures/SG0_fig8_calibrations.{pdf,png}          Section 8
 #   figures/SG0_fig9_separation_vs_field.{pdf,png}   Section 8
 #   figures/SG0_fig10_cqd_fit.{pdf,png}              Section 9
+#   figures/SG0_fig11_BL0_from_data.{pdf,png}        Section 10
+#   figures/SG0_fig12_length_from_data.{pdf,png}     Section 11
 #
 # Packages: ] add CSV DataFrames CairoMakie LaTeXStrings LsqFit PrettyTables
 using CSV, DataFrames, CairoMakie
@@ -146,19 +148,41 @@ const FIGDIR    = "figures"
 # SG0 field divisor f of the CQD fit (Chapter 3): the SG0 field integral is BL0(I) / f, as in
 # the NY script and the fit note (f = 1: the measured field as is; f = 7: Revision F, the
 # note's recommended reduction, k_i = 2.67e-6 there). For tests; it is not fitted.
-const F_DIV = 7.0
+const F_DIV = 1.0
 
 # SG0 field threshold of the CQD fit (Chapter 3), in units of the nuclear field CQD_Bn: BL0(I)
 # integrates |B0(y, I)| / f only where it exceeds N_BN * CQD_Bn, so the effective SG0 length
 # depends on the current (N_BN = 0: the whole profile, the current-independent L_eff).
-const N_BN = 1.0
+const N_BN = 0.0
+
+# Drift-to-interaction ratio DIR = T_d / T1 of the CQD model (Chapters 3-5):
+#   :baseline  solved at every trial Dc1 from the measured zero-current separation (13 px),
+#              as in the fit note: an effective value that absorbs any error in the absolute
+#              deflection scale KΔ_pix, and so changes with Dc1 (`solve_DIR`);
+#   :geom      fixed at the geometric value y_SGToScreen / y_SG for every Dc1; the model
+#              baseline then differs from 13 px, and only the ratio Z / Z0 is used.
+const DIR_MODE = :geom
+
+# Inputs of Chapter 4 (SG0 field integral from the separation data at a given k_i): the
+# coupling k_i is held fixed and BL0 is fitted. N and f set the shape of the magnetometer-data
+# BL0(I) that is scaled in the global fit (by default the Chapter 3 values).
+const C4_KI    = 2.0e-6          # given k_i (dimensionless); 1.5226e-7 = fit note, f = 1
+const C4_N_BN  = N_BN               # threshold N (units of CQD_Bn) of the model BL0(I) shape
+const C4_F_DIV = F_DIV              # divisor f of the model BL0(I) shape
+
+# Inputs of Chapter 5 (SG0 effective length from the separation data): the center field Bc(I)
+# is the magnetometer calibration divided by f, and the SG0 length ℓ (a top hat, on where
+# |Bc| > N CQD_Bn) is fitted, first at the given k_i, then jointly with k_i.
+const C5_KI    = C4_KI              # given k_i of the fixed-k_i fit
+const C5_N_BN  = N_BN               # threshold N (units of CQD_Bn)
+const C5_F_DIV = F_DIV              # divisor f of the center field
 
 # One-hue ordinal ramp (light -> dark = low -> high current), validated for a light surface
 const COLORS   = [colorant"#86b6ef", colorant"#4a8fe0", colorant"#2a6bc0", colorant"#104281"]
 const MARKERS  = [:circle, :rect, :utriangle, :diamond]
 const INK2     = colorant"#5f5e5a"                     # secondary ink: fit lines, reference lines
 
-const XLABEL_MM = L"x\ \mathrm{(mm)}"
+const XLABEL_MM = L"y\ \mathrm{(mm)}"
 const POLE_RADIUS_MM = 20.0                            # shaded band x = 0-20 mm in the B(x) plots
 
 # Header tag naming the script figure, taken from the file name ("SG0_fig0b_..." -> "Fig. 0b"),
@@ -1650,8 +1674,14 @@ KΔ_pix < 13 / (0.51 Z0) (about 74 px here), and g(200) > 0. 80 halvings shrink 
 says which half holds the root: one evaluation of Z_par per step. If there were no sign change
 the result would silently stick to an edge.
 For this fit (Dc1 = 0.0305): DIR = 6.005 (residual 2e-15 px) vs geometric 5.646.
+
+With DIR_MODE = :geom (top of the script) no equation is solved: the geometric value
+CQD.DIR_geom is returned for every Dc1, and `baseline_px` gives the model's zero-current
+separation, which then differs from 13 px.
 """
 function solve_DIR(Dc1)
+    DIR_MODE === :geom && return CQD.DIR_geom
+    DIR_MODE === :baseline || error("DIR_MODE must be :baseline or :geom, got $(DIR_MODE)")
     g(DIR) = CQD.KΔ_pix * (DIR + 0.5) * Z_par(0.0, Dc1, DIR * Dc1) - CQD.Dsep0_px
     a, b = 0.01, 200.0                                    # bracket: g(a) < 0 < g(b)
     for _ in 1:80
@@ -1659,6 +1689,18 @@ function solve_DIR(Dc1)
         g(m) < 0 ? (a = m) : (b = m)                      # g increasing: root above m if g(m) < 0
     end
     return (a + b) / 2
+end
+
+"""
+    baseline_px(Dc1) -> D_sep(0) (px)
+
+Model zero-current separation KΔ_pix (DIR + 1/2) Z_par(0; Dc1, DIR Dc1) with DIR = solve_DIR(Dc1):
+13 px by construction for DIR_MODE = :baseline; for :geom the mismatch to the measured 13 px
+shows the error of the absolute deflection scale.
+"""
+function baseline_px(Dc1)
+    DIR = solve_DIR(Dc1)
+    return CQD.KΔ_pix * (DIR + 0.5) * Z_par(0.0, Dc1, DIR * Dc1)
 end
 
 """
@@ -2038,7 +2080,9 @@ end
 # One two-step fit per SG0 field model (the slow part of the script)
 cqd_results = [fit_cqd(curves, m.BL0) for m in FIELD_MODELS]
 
-println("  Fit results  (DIR: solved from the $(Int(CQD.Dsep0_px))-px baseline; geometric value ",
+println("  Fit results  (DIR_MODE = :$(DIR_MODE): ",
+        DIR_MODE === :geom ? "DIR fixed at the geometric value " :
+                             "DIR solved from the $(Int(CQD.Dsep0_px))-px baseline; geometric value ",
         round(CQD.DIR_geom; digits = 3), ")")
 @printf("    %-27s %7s %22s %9s %6s %7s %17s %9s %13s\n", "Bc(I)", "Dc1", "k_i (Δχ² = 1)",
         "χ² par", "DIR", "Dc0 max", "κ", "χ² anti", "χ² pure CQD")
@@ -2048,6 +2092,9 @@ for (m, r) in zip(FIELD_MODELS, cqd_results)
             r.p, r.p_err, r.chi2_anti, r.n_anti, r.chi2_anti_pure,
             r.Dc1_at_edge ? "   (Dc1 at the scan edge)" : "")
 end
+println("    model zero-current separation KΔ_pix (DIR + 1/2) Z0 at the fitted Dc1 (measured ",
+        CQD.Dsep0_px, " px): ",
+        join([@sprintf("%s %.3f px", m.name, baseline_px(r.Dc1)) for (m, r) in zip(FIELD_MODELS, cqd_results)], ";  "))
 
 # Check against the fit note at the same f (fit_20260706/results.json): top-hat SG0,
 # BL0 = β0 l0 / f per ampere with l0 = 40 mm, gave k_i = 1.523e-7 (f = 1) and 2.668e-6 (f = 7).
@@ -2086,32 +2133,544 @@ Fig. 10: the measured separation changes vs. SG0 current with the fitted CQD cur
   style for both its curves, the parallel one (rising) and the antiparallel one (falling):
   solid black = magnetometer data with the profile, dashed black = β0 with the profile, dotted gray =
   β0 with the 40 mm top hat.
-  The legend therefore lists line styles (field models), merged so that each appears once,
-  next to the two data sets.
+  The legend, below the axis, lists the line styles (field models), merged so that each
+  appears once, each with its fit results on two lines: k_i with its Δχ² = 1 interval, Dc1,
+  DIR and χ²_par (step 1); κ (or RLC) with its curvature error, χ²_anti and χ² of pure CQD
+  (w = 0) (step 2). Then the two data sets. The title gives the divisor f and threshold N.
 - Axes: current 0-3.8 A, separation range SEP_YLIMS with 1-px ticks.
 Only three line styles are defined: a fourth model would be dropped silently by `zip`.
 """
 function plot_cqd_fits(curves, models, results)
-    fig = Figure(size = (900, 600))
+    fig = Figure(size = (900, 820))
     ax  = Axis(fig[1, 1]; xlabel = L"I\ \mathrm{(A)}", ylabel = SEP_YLABEL, xticks = 0:0.5:4,
                yticks = SEP_YLIMS[1]:SEP_YLIMS[2],
-               title = "CQD fit with the measured SG0 field integral")
+               title = @sprintf("CQD fit with the measured SG0 field integral  (f = %g, N = %g, DIR: %s)",
+                                F_DIV, N_BN, DIR_MODE === :geom ? "geometric" : "from the baseline"))
+    # Δχ² = 1 interval of k_i; an unbracketed side (NaN) is shown as a one-sided bound
+    kint(lo, hi) = isnan(lo) && isnan(hi) ? "not bracketed" :
+                   isnan(lo) ? @sprintf("< %.3g", hi) : isnan(hi) ? @sprintf("> %.3g", lo) :
+                   @sprintf("%.3g–%.3g", lo, hi)
     styles = [(color = :black, linestyle = :solid),
               (color = :black, linestyle = :dash),
               (color = INK2,   linestyle = :dot)]
     for (m, r, st) in zip(models, results, styles)
-        lines!(ax, r.I_fit, r.dD.par;  st..., linewidth = 2, label = m.name)   # labelled once
+        lab = @sprintf("%s:  kᵢ = %.4g (%s),  Dc1 = %.4f,  DIR = %.3f,  χ²_par = %.2f/%d\n%s = %.4f ± %.4f,  χ²_anti = %.2f/%d,  pure CQD χ²_anti = %.1f%s",
+                       m.name, r.ki, kint(r.ki_lo, r.ki_hi), r.Dc1, r.DIR, r.chi2_par, r.n_par,
+                       r.wform === :lin ? "κ" : "RLC", r.p, r.p_err, r.chi2_anti, r.n_anti,
+                       r.chi2_anti_pure, r.Dc1_at_edge ? "   [Dc1 at the scan edge]" : "")
+        lines!(ax, r.I_fit, r.dD.par;  st..., linewidth = 2, label = lab)    # labelled once
         lines!(ax, r.I_fit, r.dD.anti; st..., linewidth = 2)
     end
     separation!(ax, curves, curves[1].I)                # data on top of the model lines
-    axislegend(ax; position = :lt, framevisible = false, merge = true)
     xlims!(ax, -0.1, 3.8)
+    Legend(fig[2, 1], ax; framevisible = false, merge = true, tellheight = true, tellwidth = false,
+           halign = :left, labelsize = 13, rowgap = 6)
+    rowgap!(fig.layout, 6)
     return fig
 end
 
 fig10 = plot_cqd_fits(curves, FIELD_MODELS, cqd_results)
 display(figtag!(fig10, "SG0_fig10_cqd_fit"))
 savefig(fig10, "SG0_fig10_cqd_fit")                     # figures/SG0_fig10_cqd_fit.{pdf,png}
+
+
+# =============================================================================
+# CHAPTER 4 - SG0 field integral from the separation data at a given k_i
+# =============================================================================
+
+
+# #############################################################################
+# Section 10 - BL0 fitted to the parallel separations, k_i held fixed
+# #############################################################################
+#
+# Chapter 3 takes BL0(I) from the magnetometer data and fits k_i. Here the roles are swapped:
+# k_i is given (C4_KI, top of the script) and the SG0 field integral is fitted to the
+# parallel separations, the pure-CQD set (no retained-label weight). With k_i fixed, both
+# doses follow from their field integrals, [136]-[137]:
+#
+#     Dc1 = k_i |γe| BL1 / v_a          (fixed: BL1 from the SG1 calibration)
+#     Dc0 = k_i |γe| BL0 / v_a          (fitted through BL0)
+#
+# DIR is solved from the 13-px baseline at that Dc1, exactly as in Chapter 3, so the model
+# separation change ΔD_par is a function of Dc0 alone (`dDpar_of_Dc0`). Two fits:
+#
+# 10.2  point by point: at each current, the Dc0 (hence BL0) whose ΔD_par equals the measured
+#       value, with the 1σ range from y ± σ. No assumption on the shape of BL0(I).
+# 10.3  global: BL0(I) = s BL0_mag(I; N, f), the magnetometer-data shape of Chapter 3 with
+#       threshold N = C4_N_BN and divisor f = C4_F_DIV, scaled by one fitted factor s
+#       (Δχ² = 1 interval). s = 1: the data agree with the magnetometer field at this k_i.
+# 10.3b antiparallel set, after the global fit: Dc1 and Dc0 = Dc1 s BL0_mag / BL1 fixed, only
+#       the retained-label weight κ fitted (step 2 of Chapter 3).
+#
+# Since Dc0 = k_i |γe| BL0 / v_a, the data fix the dose Dc0, so the fitted BL0 scales as 1/k_i,
+# and the scale s absorbs f: only the shape of the model, through N, is tested. The implied
+# effective length is L(I) = BL0(I) / |Bc(I)|, with Bc the magnetometer center field after f.
+
+# =============================================================================
+# 10.1  Model at fixed k_i
+# =============================================================================
+
+"""
+    dose_from_ki(ki, BL) -> Dc
+
+CQD dose of a stage with field integral `BL` (T m) for coupling `ki`, [136]-[137]:
+Dc = k_i |γe| BL / v_a. The inverse of `ki_from_dose` for SG1.
+"""
+dose_from_ki(ki, BL) = ki * CQD.γe * BL / CQD.v_a
+
+"""
+    BL0_mag(I; N = C4_N_BN, f = C4_F_DIV) -> BL0 (T m)
+
+SG0 field integral from the magnetometer data (as `BL0_lin`, Section 9.5) with the threshold
+N (units of CQD_Bn) and the divisor f as arguments instead of the script-wide N_BN and F_DIV:
+BL0 = |Bc| L(Bc), Bc = k I / f, L = lcut_mm(Bc, G.p; Bth = N CQD_Bn).
+"""
+function BL0_mag(I; N = C4_N_BN, f = C4_F_DIV)
+    Bc = 1e-4 * cal_lin.c[2] * I / f                    # center field after f (T)
+    return 1e-3 * abs(Bc) * lcut_mm(Bc, G.p; Bth = N * CQD_Bn)
+end
+
+"""
+    dDpar_of_Dc0(Dc1) -> (g, DIR)
+
+Parallel model at a fixed SG1 dose: DIR from the 13-px baseline (`solve_DIR`), ρ = DIR Dc1,
+and the function g(Dc0) = Dsep0 [Z_par(Dc0) / Z0 - 1] (px), as `dD_par`. g increases
+monotonically with Dc0, which `invert_Dc0` relies on.
+"""
+function dDpar_of_Dc0(Dc1)
+    DIR = solve_DIR(Dc1); ρ = DIR * Dc1
+    Z0  = Z_par(0.0, Dc1, ρ)
+    g(Dc0) = CQD.Dsep0_px * (Z_par(Dc0, Dc1, ρ) / Z0 - 1)
+    return g, DIR
+end
+
+"""
+    invert_Dc0(y, g; dmax = 10.0) -> Dc0
+
+SG0 dose at which the parallel model `g` gives the separation change `y` (px), by bisection on
+[0, dmax] (80 halvings). y ≤ 0 returns 0, since the model never goes below ΔD = 0 for Dc0 ≥ 0;
+y above g(dmax) (beyond saturation) returns NaN.
+"""
+function invert_Dc0(y, g; dmax = 10.0)
+    y <= 0 && return 0.0
+    y >= g(dmax) && return NaN
+    a, b = 0.0, dmax
+    for _ in 1:80
+        m = (a + b) / 2
+        g(m) < y ? (a = m) : (b = m)
+    end
+    return (a + b) / 2
+end
+
+# =============================================================================
+# 10.2  Point-by-point BL0
+# =============================================================================
+
+"""
+    BL0_points(par, ki, g) -> NamedTuple of vectors
+
+Per-current inversion of the parallel set `par` at coupling `ki`: Dc0 from y (best) and from
+y ∓ σ (1σ range), then BL0 = Dc0 v_a / (k_i |γe|) for each.
+"""
+function BL0_points(par, ki, g)
+    Dc0    = [invert_Dc0(y, g) for y in par.y]
+    Dc0_lo = [invert_Dc0(y - s, g) for (y, s) in zip(par.y, par.yerror)]
+    Dc0_hi = [invert_Dc0(y + s, g) for (y, s) in zip(par.y, par.yerror)]
+    toBL(d) = d * CQD.v_a / (ki * CQD.γe)
+    return (; Dc0, Dc0_lo, Dc0_hi, BL0 = toBL.(Dc0), BL0_lo = toBL.(Dc0_lo), BL0_hi = toBL.(Dc0_hi))
+end
+
+# =============================================================================
+# 10.3  Global scale of the magnetometer-data BL0(I)
+# =============================================================================
+
+"""
+    fit_BL0_scale(par, Dc1, g, BL0m) -> (; s, s_lo, s_hi, chi2, chi2_s1)
+
+One-parameter fit BL0(I) = s BL0m(I) to the parallel set `par`, with `BL0m` the model field
+integrals at the data currents and `g` the parallel model at the fixed `Dc1`:
+χ²(s) = Σ [(g(s Dc0m_j) - y_j) / σ_j]²,  Dc0m = Dc1 BL0m / BL1.
+Same algorithm as step 1 of `fit_cqd`: a log scan of s on [1e-3, 1e3] (61 points), golden
+section between the neighbours of the best point, and the Δχ² = 1 bounds by bisection in log(s)
+within 4× (NaN if not bracketed). `chi2_s1` is χ² at s = 1 (the magnetometer field as is).
+"""
+function fit_BL0_scale(par, Dc1, g, BL0m)
+    Dc0m  = Dc1 .* BL0m ./ CQD.BL1
+    χ²(s) = chi2(g.(s .* Dc0m), par.y, par.yerror)
+    logs  = range(log(1e-3), log(1e3); length = 61)
+    ib    = argmin([χ²(exp(x)) for x in logs])
+    x, χ²min = golden(x -> χ²(exp(x)), logs[max(1, ib - 1)], logs[min(end, ib + 1)]; n = 50)
+    s = exp(x)
+    function bound(up)
+        a, b = s, up ? 4s : s / 4
+        χ²(b) - χ²min < 1 && return NaN
+        for _ in 1:50
+            m = sqrt(a * b); χ²(m) - χ²min < 1 ? (a = m) : (b = m)
+        end
+        return sqrt(a * b)
+    end
+    return (; s, s_lo = bound(false), s_hi = bound(true), chi2 = χ²min, chi2_s1 = χ²(1.0),
+              at_edge = ib in (1, length(logs)))
+end
+
+# =============================================================================
+# 10.3b  Antiparallel set, after the parallel fit
+# =============================================================================
+#
+# Step 2 of `fit_cqd`, with the doses of the parallel fit: Dc1 (from the given k_i) and the
+# fitted SG0 field integrals fix Dc0 at every antiparallel current, and only the weight of the
+# retained-label term, p = κ (w = κ Dc0), is fitted. Used by Chapters 4 and 5.
+
+"""
+    fit_anti_weight(anti, Dc1, BL0v; wform = :lin) -> NamedTuple
+
+Retained-label weight fitted to the antiparallel set `anti`, with the SG1 dose `Dc1` and the
+SG0 field integrals `BL0v` (T m, one per antiparallel current) held fixed: χ²_anti(p) by
+golden section on p ∈ [0, 5], σ_p = √(2/χ'') from a central second difference, as step 2 of
+`fit_cqd`. Returns (; p, p_err, chi2, chi2_pure, n), with `chi2_pure` the χ² of pure CQD
+(w = 0). The error is conditional on the fixed doses.
+"""
+function fit_anti_weight(anti, Dc1, BL0v; wform = :lin)
+    r = cqd_responses(Dc1, BL0v)
+    χ²(p) = chi2(dD_anti(r, w_ret(r.Dc0, p, wform)), anti.y, anti.yerror)
+    p, χ²a = golden(χ², 0.0, 5.0)
+    h      = max(1e-4, 1e-3 * p)
+    p_err  = sqrt(2 / ((χ²(p + h) - 2χ²(p) + χ²(p - h)) / h^2))
+    χ²pure = chi2(dD_anti(r, zeros(length(anti.I))), anti.y, anti.yerror)
+    return (; p, p_err, chi2 = χ²a, chi2_pure = χ²pure, n = length(anti.I), wform)
+end
+
+"""
+    dDanti_curve(Dc1, BL0g, aw) -> Vector (px)
+
+Antiparallel model curve at the field integrals `BL0g` (T m, e.g. on a plotting grid) for the
+SG1 dose `Dc1` and the weight fit `aw` (`fit_anti_weight`).
+"""
+function dDanti_curve(Dc1, BL0g, aw)
+    r = cqd_responses(Dc1, BL0g)
+    return dD_anti(r, w_ret(r.Dc0, aw.p, aw.wform))
+end
+
+# =============================================================================
+# 10.4  Fits and summary
+# =============================================================================
+#
+# Printout: the inputs (k_i, both doses per unit field integral, DIR), the global scale s with
+# the fitted BL0 per ampere, and a per-current table:
+#     I, y ± σ            measured parallel separation change (px)
+#     Dc0 (range)         SG0 dose that reproduces y (y ∓ σ)
+#     BL0 data (range)    the same as a field integral (T m)
+#     BL0 mag             magnetometer-data model with N, f
+#     data/mag            ratio (compare with s)
+#     L data              implied effective length BL0 / |Bc| (mm), Bc after f
+
+par4  = curves[findfirst(c -> !occursin("antiparallel", c.label), curves)]
+Dc1_4 = dose_from_ki(C4_KI, CQD.BL1)                    # SG1 dose at the given k_i
+g4, DIR4 = dDpar_of_Dc0(Dc1_4)
+pts4  = BL0_points(par4, C4_KI, g4)
+BL0m4 = BL0_mag.(par4.I)
+sfit4 = any(>(0), BL0m4) ? fit_BL0_scale(par4, Dc1_4, g4, BL0m4) : nothing
+anti4 = curves[findfirst(c -> occursin("antiparallel", c.label), curves)]
+aw4   = sfit4 === nothing ? nothing :                   # antiparallel, at the fitted s
+        fit_anti_weight(anti4, Dc1_4, sfit4.s .* BL0_mag.(anti4.I))
+
+println("\nSection 10 - SG0 field integral from the separation data at a given k_i")
+@printf("  inputs: k_i = %.4e,  model shape N = %g (threshold %.4g µT),  f = %g\n",
+        C4_KI, C4_N_BN, 1e6 * C4_N_BN * CQD_Bn, C4_F_DIV)
+@printf("  Dc1 = k_i |γe| BL1 / v_a = %.5f  (BL1 = %.4e T m);  Dc0 per T m of BL0 = %.3f;  DIR = %.4f\n",
+        Dc1_4, CQD.BL1, dose_from_ki(C4_KI, 1.0), DIR4)
+if sfit4 === nothing
+    println("  global fit skipped: the model BL0 is zero at every data current (threshold too high)")
+else
+    @printf("  global fit BL0 = s BL0_mag(I; N, f):  s = %.4f (%.4f-%.4f),  χ² = %.2f/%d  (s = 1: χ² = %.2f)%s\n",
+            sfit4.s, sfit4.s_lo, sfit4.s_hi, sfit4.chi2, length(par4.I), sfit4.chi2_s1,
+            sfit4.at_edge ? "   (s at the scan edge)" : "")
+    @printf("    fitted BL0 per ampere (no cut) = %.4e T m/A;  magnetometer data = %.4e T m/A\n",
+            sfit4.s * BL0_mag(1.0; N = 0), BL0_mag(1.0; N = 0))
+    @printf("  antiparallel at the fitted s:  κ = %.4f ± %.4f,  χ² = %.2f/%d  (pure CQD, w = 0: χ² = %.2f)\n",
+            aw4.p, aw4.p_err, aw4.chi2, aw4.n, aw4.chi2_pure)
+end
+@printf("  %7s %15s %22s %32s %11s %9s %8s\n", "I (A)", "y ± σ (px)", "Dc0 (range)",
+        "BL0 data (T m, range)", "BL0 mag", "data/mag", "L (mm)")
+for j in eachindex(par4.I)
+    I, BLd, BLm = par4.I[j], pts4.BL0[j], BL0m4[j]
+    Bcj = 1e-4 * cal_lin.c[2] * I / C4_F_DIV             # center field after f (T)
+    @printf("  %7.3f %7.3f ± %5.3f %8.5f (%.5f-%.5f) %10.3e (%.3e-%.3e) %11.3e %9s %8s\n",
+            I, par4.y[j], par4.yerror[j], pts4.Dc0[j], pts4.Dc0_lo[j], pts4.Dc0_hi[j],
+            BLd, pts4.BL0_lo[j], pts4.BL0_hi[j], BLm,
+            BLm > 0 ? @sprintf("%.3f", BLd / BLm) : "-",
+            Bcj > 0 ? @sprintf("%.2f", 1e3 * BLd / Bcj) : "-")
+end
+
+# =============================================================================
+# 10.5  Figure: separations with the fitted scale s
+# =============================================================================
+
+"""
+    plot_BL0_from_data(sfit, g, Dc1, aw, curves) -> Figure
+
+Fig. 11, one panel: both separation sets (`curves`) with the models at the given k_i, the
+parallel one at s = 1 (the magnetometer BL0 as is, dashed gray) and at the fitted s (solid
+red), and the antiparallel one at the fitted s with the weight fit `aw` (solid blue). The
+legend, below the axis, carries the fit results: s with its Δχ² = 1 interval and χ²_par,
+κ with its error and χ²_anti.
+"""
+function plot_BL0_from_data(sfit, g, Dc1, aw, curves)
+    fig = Figure(size = (900, 700))
+    ax  = Axis(fig[1, 1]; xlabel = L"I\ \mathrm{(A)}", ylabel = SEP_YLABEL, xticks = 0:0.5:4,
+               yticks = SEP_YLIMS[1]:SEP_YLIMS[2],
+               title = @sprintf("CQD fit with BL0 = s BL0_mag fitted at kᵢ = %.3g  (N = %g, f = %g)",
+                                C4_KI, C4_N_BN, C4_F_DIV))
+    Ig   = collect(0:0.02:3.8)
+    BLg  = BL0_mag.(Ig)
+    Dc0g = Dc1 .* BLg ./ CQD.BL1
+    npar = length(curves[1].I)
+    lines!(ax, Ig, g.(Dc0g); color = INK2, linestyle = :dash, linewidth = 2,
+           label = sfit === nothing ? "parallel, s = 1" :
+                   @sprintf("parallel, s = 1 (magnetometer BL0):  χ² = %.2f/%d", sfit.chi2_s1, npar))
+    if sfit !== nothing
+        lines!(ax, Ig, g.(sfit.s .* Dc0g); color = :red, linewidth = 2,
+               label = @sprintf("parallel:  s = %.4f (%.4f–%.4f),  χ² = %.2f/%d",
+                                sfit.s, sfit.s_lo, sfit.s_hi, sfit.chi2, npar))
+        lines!(ax, Ig, dDanti_curve(Dc1, sfit.s .* BLg, aw); color = :blue, linewidth = 2,
+               label = @sprintf("antiparallel at the fitted s:  κ = %.4f ± %.4f,  χ² = %.2f/%d",
+                                aw.p, aw.p_err, aw.chi2, aw.n))
+    end
+    separation!(ax, curves, curves[1].I)
+    xlims!(ax, -0.1, 3.8)
+    Legend(fig[2, 1], ax; framevisible = false, nbanks = 1, tellheight = true, tellwidth = false,
+           halign = :left)
+    rowgap!(fig.layout, 6)
+    return fig
+end
+
+fig11 = plot_BL0_from_data(sfit4, g4, Dc1_4, aw4, curves)
+display(figtag!(fig11, "SG0_fig11_BL0_from_data"))
+savefig(fig11, "SG0_fig11_BL0_from_data")              # figures/SG0_fig11_BL0_from_data.{pdf,png}
+
+
+# =============================================================================
+# CHAPTER 5 - SG0 effective length from the separation data
+# =============================================================================
+
+
+# #############################################################################
+# Section 11 - Effective length fitted, center field from the magnetometer calibration
+# #############################################################################
+#
+# Chapter 4 fits the whole SG0 field integral. Here the center field keeps its measured value,
+# Bc(I) = k I / f (magnetometer calibration, Section 8, divisor f = C5_F_DIV), and only the
+# length is free: SG0 is a top hat of length ℓ, on where the field exceeds the threshold,
+#
+#     BL0(I; ℓ) = |Bc(I)| ℓ Θ(|Bc(I)| - N CQD_Bn),        N = C5_N_BN.
+#
+# ℓ replaces the profile integral L(I) of Chapter 3 (≈ 80 mm for N = 0) by one current-
+# independent number; the threshold only switches SG0 on. Two fits of the parallel set:
+#
+# 11.2  k_i fixed (C5_KI): Dc1 fixed, ℓ fitted (Δχ² = 1 interval), and ℓ per current
+#       ℓ_j = BL0_j / |Bc_j|, from the point-by-point inversion of Section 10.2.
+# 11.3  k_i and ℓ jointly: Dc1 = k_i |γe| BL1 / v_a and Dc0 = k_i |γe| |Bc| ℓ / v_a. The
+#       separations fix Dc0, i.e. the product k_i ℓ, at each current; k_i is separated from ℓ
+#       only through Dc1 (DIR and the shape of the response). χ² is profiled over ℓ, giving
+#       k_i with its Δχ² = 1 interval; ℓ is quoted with its interval at the best k_i.
+# After each parallel fit the antiparallel set is fitted with its doses fixed (10.3b): only
+# the retained-label weight κ is free, as step 2 of Chapter 3.
+#
+# With N = 0, ℓ at fixed k_i is the Chapter 4 scale times L_eff (ℓ = s L_eff); the two
+# differ for N > 0, where the profile length L(I) grows with the current and ℓ does not.
+
+# =============================================================================
+# 11.1  Model
+# =============================================================================
+
+"""
+    Bc_mag(I; f = C5_F_DIV) -> Bc (T)
+
+Center field of SG0 from the magnetometer calibration (linear fit, Section 8), coil part
+only, divided by f: Bc = 1e-4 k I / f, k = cal_lin.c[2] (G/A).
+"""
+Bc_mag(I; f = C5_F_DIV) = 1e-4 * cal_lin.c[2] * I / f
+
+"""
+    BL0_per_mm(I; N = C5_N_BN, f = C5_F_DIV) -> BL0 per mm of ℓ (T m / mm)
+
+SG0 field integral of a 1 mm top hat at current `I`: 1e-3 |Bc| if |Bc| > N CQD_Bn, else 0.
+BL0(I; ℓ) = ℓ BL0_per_mm(I), with ℓ in mm, so ℓ is the scale fitted by `fit_BL0_scale`.
+"""
+function BL0_per_mm(I; N = C5_N_BN, f = C5_F_DIV)
+    Bc = Bc_mag(I; f)
+    return abs(Bc) > N * CQD_Bn ? 1e-3 * abs(Bc) : 0.0
+end
+
+# =============================================================================
+# 11.2  ℓ at fixed k_i
+# =============================================================================
+
+par5   = par4                                            # parallel set (pure CQD)
+Dc1_5  = dose_from_ki(C5_KI, CQD.BL1)
+g5, DIR5 = C5_KI == C4_KI ? (g4, DIR4) : dDpar_of_Dc0(Dc1_5)
+pts5   = C5_KI == C4_KI ? pts4 : BL0_points(par5, C5_KI, g5)
+BLmm5  = BL0_per_mm.(par5.I)
+Bc5    = Bc_mag.(par5.I)
+lfit5  = any(>(0), BLmm5) ? fit_BL0_scale(par5, Dc1_5, g5, BLmm5) : nothing   # s = ℓ (mm)
+ℓpts5  = [b > 0 ? 1e3 * x / abs(b) : NaN for (x, b) in zip(pts5.BL0, Bc5)]          # ℓ_j (mm)
+ℓlo5   = [b > 0 ? 1e3 * x / abs(b) : NaN for (x, b) in zip(pts5.BL0_lo, Bc5)]
+ℓhi5   = [b > 0 ? 1e3 * x / abs(b) : NaN for (x, b) in zip(pts5.BL0_hi, Bc5)]
+
+# =============================================================================
+# 11.3  k_i and ℓ jointly
+# =============================================================================
+
+"""
+    best_length(par, Dc1, BLmm) -> (ℓ, χ²)
+
+Minimum over ℓ of χ²_par at a fixed SG1 dose `Dc1` (DIR re-solved at that Dc1), for the
+top hat with field integral ℓ BLmm(I): a log scan of ℓ on [1e-2, 1e4] mm (41 points) and
+golden section between the neighbours of the best point.
+"""
+function best_length(par, Dc1, BLmm)
+    g, _ = dDpar_of_Dc0(Dc1)
+    Dc0m = Dc1 .* BLmm ./ CQD.BL1
+    χ²(ℓ) = chi2(g.(ℓ .* Dc0m), par.y, par.yerror)
+    xs = range(log(1e-2), log(1e4); length = 41)
+    ib = argmin([χ²(exp(x)) for x in xs])
+    x, c = golden(x -> χ²(exp(x)), xs[max(1, ib - 1)], xs[min(end, ib + 1)]; n = 40)
+    return exp(x), c
+end
+
+"""
+    fit_ki_length(par, BLmm) -> NamedTuple
+
+Joint fit of k_i and ℓ to the parallel set. The profile χ²_p(Dc1) = min_ℓ χ²(Dc1, ℓ)
+(`best_length`) is minimized as in step 1 of `fit_cqd`: log scan of Dc1 on [1e-3, 5]
+(31 points), golden section, and the Δχ² = 1 bounds by bisection within 20× (capped at
+Dc1 = 5; NaN if not bracketed: k_i is then not separated from ℓ on that side); k_i follows from Dc1. ℓ is then fitted at the best Dc1 with its conditional
+Δχ² = 1 interval (`fit_BL0_scale`), and `kl` = k_i ℓ (mm) is the product the doses fix.
+"""
+function fit_ki_length(par, BLmm)
+    χ²p(Dc1) = best_length(par, Dc1, BLmm)[2]
+    xs = range(log(1e-3), log(5.0); length = 31)
+    ib = argmin([χ²p(exp(x)) for x in xs])
+    x, χ²min = golden(x -> χ²p(exp(x)), xs[max(1, ib - 1)], xs[min(end, ib + 1)]; n = 40)
+    Dc1 = exp(x)
+    function bound(up)
+        a, b = Dc1, up ? min(5.0, 20Dc1) : Dc1 / 20
+        χ²p(b) - χ²min < 1 && return NaN
+        for _ in 1:30
+            m = sqrt(a * b); χ²p(m) - χ²min < 1 ? (a = m) : (b = m)
+        end
+        return sqrt(a * b)
+    end
+    Dc1_lo, Dc1_hi = bound(false), bound(true)
+    g, DIR = dDpar_of_Dc0(Dc1)
+    lf = fit_BL0_scale(par, Dc1, g, BLmm)
+    ki = ki_from_dose(Dc1)
+    return (; Dc1, ki, ki_lo = ki_from_dose(Dc1_lo), ki_hi = ki_from_dose(Dc1_hi), DIR, g,
+              ℓ = lf.s, ℓ_lo = lf.s_lo, ℓ_hi = lf.s_hi, chi2 = χ²min, kl = ki * lf.s,
+              at_edge = ib in (1, length(xs)))
+end
+
+jfit5 = any(>(0), BLmm5) ? fit_ki_length(par5, BLmm5) : nothing
+
+# Antiparallel set after each parallel fit: doses fixed, only the weight κ fitted (10.3b)
+anti5   = anti4
+BLmm5a  = BL0_per_mm.(anti5.I)
+aw5     = lfit5 === nothing ? nothing : fit_anti_weight(anti5, Dc1_5, lfit5.s .* BLmm5a)
+aw5j    = jfit5 === nothing ? nothing : fit_anti_weight(anti5, jfit5.Dc1, jfit5.ℓ .* BLmm5a)
+
+# =============================================================================
+# 11.4  Summary
+# =============================================================================
+#
+# Printout: the inputs, the ℓ fit at the given k_i, the joint fit, and a per-current table:
+#     I, y ± σ          measured parallel separation change (px)
+#     Bc                magnetometer center field after f (mT)
+#     ℓ data (range)    length that reproduces y (y ∓ σ) at the given k_i (mm)
+#     L profile         profile length of Chapter 3, lcut_mm(Bc) with the same N (mm)
+
+println("\nSection 11 - SG0 effective length from the separation data (center field from the magnetometer)")
+@printf("  inputs: Bc = %.2f G/A × I / f,  f = %g,  threshold N = %g (%.4g µT),  BL1 = %.4e T m\n",
+        cal_lin.c[2], C5_F_DIV, C5_N_BN, 1e6 * C5_N_BN * CQD_Bn, CQD.BL1)
+@printf("  profile length for comparison: L_eff = %.2f mm (N = 0)\n", L_eff)
+if lfit5 === nothing
+    println("  fits skipped: SG0 is below the threshold at every data current")
+else
+    @printf("  k_i fixed = %.4e (Dc1 = %.5f, DIR = %.4f):  ℓ = %.2f mm (%.2f-%.2f),  χ² = %.2f/%d%s\n",
+            C5_KI, Dc1_5, DIR5, lfit5.s, lfit5.s_lo, lfit5.s_hi, lfit5.chi2, length(par5.I),
+            lfit5.at_edge ? "   (ℓ at the scan edge)" : "")
+    @printf("    at ℓ = L_eff: χ² = %.2f\n",
+            chi2(g5.(L_eff .* Dc1_5 .* BLmm5 ./ CQD.BL1), par5.y, par5.yerror))
+    @printf("  joint fit:  k_i = %.4e (%.4e-%.4e),  ℓ = %.2f mm (%.2f-%.2f at that k_i),  χ² = %.2f/%d\n",
+            jfit5.ki, jfit5.ki_lo, jfit5.ki_hi, jfit5.ℓ, jfit5.ℓ_lo, jfit5.ℓ_hi, jfit5.chi2, length(par5.I))
+    @printf("    Dc1 = %.5f,  DIR = %.4f,  k_i ℓ = %.4e mm%s\n", jfit5.Dc1, jfit5.DIR, jfit5.kl,
+            jfit5.at_edge ? "   (Dc1 at the scan edge)" : "")
+    for (lab, aw) in (("k_i fixed", aw5), ("joint fit", aw5j))
+        @printf("  antiparallel, %-9s:  κ = %.4f ± %.4f,  χ² = %.2f/%d  (pure CQD, w = 0: χ² = %.2f)\n",
+                lab, aw.p, aw.p_err, aw.chi2, aw.n, aw.chi2_pure)
+    end
+end
+@printf("  %7s %15s %9s %26s %11s\n", "I (A)", "y ± σ (px)", "Bc (mT)", "ℓ data (mm, range)", "L profile")
+for j in eachindex(par5.I)
+    @printf("  %7.3f %7.3f ± %5.3f %9.3f %9s (%7s-%7s) %11.2f\n",
+            par5.I[j], par5.y[j], par5.yerror[j], 1e3 * Bc5[j],
+            isnan(ℓpts5[j]) ? "-" : @sprintf("%.2f", ℓpts5[j]),
+            isnan(ℓlo5[j]) ? "-" : @sprintf("%.2f", ℓlo5[j]),
+            isnan(ℓhi5[j]) ? "-" : @sprintf("%.2f", ℓhi5[j]),
+            lcut_mm(Bc5[j], G.p; Bth = C5_N_BN * CQD_Bn))
+end
+
+# =============================================================================
+# 11.5  Figure: separations with the fitted length ℓ
+# =============================================================================
+
+"""
+    plot_length_from_data(lfit, jfit, g, Dc1, aw, awj, curves) -> Figure
+
+Fig. 12, one panel: both separation sets (`curves`) with the model of the fixed-k_i fit
+(solid black) and of the joint fit (dash-dot blue); each has a parallel curve (rising) and an
+antiparallel curve (falling) with its weight fit (`aw`, `awj`). The legend, below the axis,
+carries the fit results: k_i, ℓ with its Δχ² = 1 interval and χ²_par, κ with its error and
+χ²_anti, and the profile length L_eff for comparison.
+"""
+function plot_length_from_data(lfit, jfit, g, Dc1, aw, awj, curves)
+    fig = Figure(size = (900, 720))
+    ax  = Axis(fig[1, 1]; xlabel = L"I\ \mathrm{(A)}", ylabel = SEP_YLABEL, xticks = 0:0.5:4,
+               yticks = SEP_YLIMS[1]:SEP_YLIMS[2],
+               title = @sprintf("CQD fit with the SG0 length ℓ fitted  (Bc from the magnetometer, N = %g, f = %g)",
+                                C5_N_BN, C5_F_DIV),
+               subtitle = @sprintf("top hat BL0 = |Bc| ℓ;  for comparison, the profile length L_eff = %.2f mm", L_eff))
+    Ig   = collect(0:0.02:3.8)
+    BLg  = BL0_per_mm.(Ig)
+    npar = length(curves[1].I)
+    # k_i interval; an unbracketed side (NaN) is shown as a one-sided bound
+    kint(lo, hi) = isnan(lo) && isnan(hi) ? "not bracketed" :
+                   isnan(lo) ? @sprintf("< %.3g", hi) : isnan(hi) ? @sprintf("> %.3g", lo) :
+                   @sprintf("%.3g–%.3g", lo, hi)
+    if lfit !== nothing
+        lines!(ax, Ig, g.(lfit.s .* Dc1 .* BLg ./ CQD.BL1); color = :black, linewidth = 2,
+               label = @sprintf("kᵢ = %.4g fixed:  ℓ = %.2f mm (%.2f–%.2f),  χ²_par = %.2f/%d;  κ = %.4f ± %.4f,  χ²_anti = %.2f/%d",
+                                C5_KI, lfit.s, lfit.s_lo, lfit.s_hi, lfit.chi2, npar,
+                                aw.p, aw.p_err, aw.chi2, aw.n))
+        lines!(ax, Ig, dDanti_curve(Dc1, lfit.s .* BLg, aw); color = :black, linewidth = 2)
+        lines!(ax, Ig, jfit.g.(jfit.ℓ .* jfit.Dc1 .* BLg ./ CQD.BL1); color = :steelblue,
+               linestyle = :dashdot, linewidth = 2,
+               label = @sprintf("joint:  kᵢ = %.4g (%s),  ℓ = %.2f mm (%.2f–%.2f),  χ²_par = %.2f/%d;  κ = %.4f ± %.4f,  χ²_anti = %.2f/%d",
+                                jfit.ki, kint(jfit.ki_lo, jfit.ki_hi), jfit.ℓ, jfit.ℓ_lo, jfit.ℓ_hi,
+                                jfit.chi2, npar, awj.p, awj.p_err, awj.chi2, awj.n))
+        lines!(ax, Ig, dDanti_curve(jfit.Dc1, jfit.ℓ .* BLg, awj); color = :steelblue,
+               linestyle = :dashdot, linewidth = 2)
+    end
+    separation!(ax, curves, curves[1].I)
+    xlims!(ax, -0.1, 3.8)
+    Legend(fig[2, 1], ax; framevisible = false, nbanks = 1, tellheight = true, tellwidth = false,
+           halign = :left, merge = true, labelsize = 13)
+    rowgap!(fig.layout, 6)
+    return fig
+end
+
+fig12 = plot_length_from_data(lfit5, jfit5, g5, Dc1_5, aw5, aw5j, curves)
+display(figtag!(fig12, "SG0_fig12_length_from_data"))
+savefig(fig12, "SG0_fig12_length_from_data")          # figures/SG0_fig12_length_from_data.{pdf,png}
 
 println("\nFigures written to ", abspath(FIGDIR))
 
