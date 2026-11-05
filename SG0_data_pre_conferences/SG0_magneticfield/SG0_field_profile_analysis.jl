@@ -4,25 +4,25 @@
 #
 # CHAPTER 0 - Calibration
 #
-# Section 0  Zero-current readings: the remanent field B_r(x) of the 0 mA runs of DATAFILE
+# Section 0  Zero-current readings: the remanent field B_r(y) of the 0 mA runs of DATAFILE
 #            (2026-10-28 and 2026-10-29), linear and log scale.
-# Section 0.1  Global half-sigmoid fit B_r = A / (1 + (x/x50)^n) of both 0 A runs (in G).
+# Section 0.1  Global half-sigmoid fit B_r = A / (1 + (y/y50)^n) of both 0 A runs (in G).
 #
 # CHAPTER 1 - SG0 magnetic field profile
 #
-# Section 1  Raw data: read the Hall-probe readings and plot B(x) for the four
+# Section 1  Raw data: read the Hall-probe readings and plot B(y) for the four
 #            nonzero coil currents (linear and log scale).
-# Section 2  Fitting: center field B(x = 0) vs. coil current, linear and quadratic fits.
-# Section 3  Relative intensity: B(x)/B(0) (1 at the center) for each current.
+# Section 2  Fitting: center field B(y = 0) vs. coil current, linear and quadratic fits.
+# Section 3  Relative intensity: B(y)/B(0) (1 at the center) for each current.
 # Section 4  Half-sigmoid fit of the relative intensity.
 # Section 5  Global half-sigmoid fit: one set of parameters for all currents.
-# Section 6  Full profile: the fitted functions on both sides of the center (-x and +x).
+# Section 6  Full profile: the fitted functions on both sides of the center (-y and +y).
 #
 # CHAPTER 2 - Spin-resolved beam separation with the measured SG0 field
 #
 # Section 7  Separation data: import the spin-resolved separations and plot them vs.
 #            SG0 current (linear and log scale).
-# Section 8  Current to field: B(x = 0) at every separation current from the CALIBFILE
+# Section 8  Current to field: B(y = 0) at every separation current from the CALIBFILE
 #            fits of Section 2 (linear and quadratic, I > 0 readings); checked against the
 #            profile-run centers; calibrations plotted (B vs. I); separations plotted vs.
 #            the center field.
@@ -37,7 +37,8 @@
 # File: SG0_raw_data_field_profile_2026-10-28_29.csv (DATAFILE, same folder as this script)
 #
 # One column pair per run, each with its own positions:
-#   x_<n>mA_<yyyymmdd>_mm   position along the beam (mm)
+#   x_<n>mA_<yyyymmdd>_mm   position y along the beam (mm); the column names keep the
+#                           x of the data file, but the coordinate is y here
 #   B_<n>mA_<yyyymmdd>      reading (gauss) at coil current n mA, measured on that date
 #
 # Runs: 0 mA (2026-10-28, 2026-10-29; Chapter 0), 129 mA (2026-10-29), 443, 735 and
@@ -47,7 +48,7 @@
 # Section 8: SG0_calibration_center_BI_2026-10-29.csv (CALIBFILE, same folder)
 #
 #   I_A   SG0 coil current (A), 0-3.83 A (8 readings, 0 A included)
-#   B_G   Hall-probe reading at the field center x = 0 (gauss)
+#   B_G   Hall-probe reading at the field center y = 0 (gauss)
 #
 # The earlier scan, SG0_field_profile_2026-10-22.{pdf,csv} (0.129, 0.443, 0.963 A, out to
 # 55.88 mm), is no longer read; its quoted values are kept below for comparison.
@@ -71,19 +72,19 @@
 #          2026-10-28/29: not recorded here. The 0 A center field is +8 G (Chapter 0),
 #          opposite in sign to the -20 G of 2026-10-22.
 #
-# Coordinates: x is the propagation direction, from SG0 toward SG1; x = 0 is the
-# field center and only the exit half (x >= 0) was scanned. The horizontal center
+# Coordinates: y is the propagation direction, from SG0 toward SG1; y = 0 is the
+# field center and only the exit half (y >= 0) was scanned. The horizontal center
 # was found in horizontal scans by (1) the geometric center between the pole faces
 # and (2) the field minimum / dB/dz ~ 0 (vertex of a parabola fitted to each scan).
-# Beyond x ~ 33 mm the horizontal profile is flat and the geometric center was used.
+# Beyond y ~ 33 mm the horizontal profile is flat and the geometric center was used.
 #
 # ---------- Values quoted in the 2026-10-22 PDF (for comparison) ----------
 #
-# Remanence, fit B = Br + k I at x = 0 to the 0.129 A and 0.963 A sets:
+# Remanence, fit B = Br + k I at y = 0 to the 0.129 A and 0.963 A sets:
 #   k  = 438 G/A,  Br = -21 G  (measured directly at the center at 0 A: -20 G)
-#   |Br| / (k I) = 37 % at 0.129 A and 5 % at 0.963 A; Br falls along x more slowly than k I
+#   |Br| / (k I) = 37 % at 0.129 A and 5 % at 0.963 A; Br falls along y more slowly than k I
 # Normalized field B/B(0) at 45.72 mm: 20.9 % (0.129 A), 24.7 % (0.443 A), 25.7 % (0.963 A)
-# Field falls to 50 % of B(0) at x ~ 30.5 mm (0.443 A and 0.963 A).
+# Field falls to 50 % of B(0) at y ~ 30.5 mm (0.443 A and 0.963 A).
 # The remanent field depends on the direction of the last current applied.
 #
 # ---------- Output ----------
@@ -183,7 +184,7 @@ const MARKERS  = [:circle, :rect, :utriangle, :diamond]
 const INK2     = colorant"#5f5e5a"                     # secondary ink: fit lines, reference lines
 
 const XLABEL_MM = L"y\ \mathrm{(mm)}"
-const POLE_RADIUS_MM = 20.0                            # shaded band x = 0-20 mm in the B(x) plots
+const POLE_RADIUS_MM = 20.0                            # shaded band y = 0-20 mm in the B(y) plots
 
 # Header tag naming the script figure, taken from the file name ("SG0_fig0b_..." -> "Fig. 0b"),
 # in a new top row above the figure, so the display and each exported file say which figure
@@ -200,8 +201,8 @@ savefig(fig, name) = (mkpath(FIGDIR);
                       save(joinpath(FIGDIR, name * ".pdf"), fig);
                       save(joinpath(FIGDIR, name * ".png"), fig; px_per_unit = 3))
 
-# x range rounded up to the next 10 mm, shared by the B(x) plots
-x_axis_max(S) = 10 * ceil(maximum(s.x[end] for s in S) / 10)
+# y range rounded up to the next 10 mm, shared by the B(y) plots
+y_axis_max(S) = 10 * ceil(maximum(s.y[end] for s in S) / 10)
 
 # Shaded band under the pole face, drawn first so it sits behind the data
 pole_band!(ax) = vspan!(ax, 0, POLE_RADIUS_MM; color = (:gray, 0.15))
@@ -209,38 +210,38 @@ pole_band!(ax) = vspan!(ax, 0, POLE_RADIUS_MM; color = (:gray, 0.15))
 # Decade tick label: 10^-1, 1, 10, 10^2, 10^3, ...
 decade_label(k) = k == 0 ? L"1" : k == 1 ? L"10" : latexstring("10^{$k}")
 
-# Half-sigmoid y = A / (1 + (x/x50)^n), the profile model of Chapters 0 and 1 (Section 4
-# explains the choice); p = [A, x50 (mm), n], y in the units of A
-halfsigmoid(x, p) = p[1] ./ (1 .+ (x ./ p[2]) .^ p[3])
+# Half-sigmoid h = A / (1 + (y/y50)^n), the profile model of Chapters 0 and 1 (Section 4
+# explains the choice); p = [A, y50 (mm), n], y the position (mm), h in the units of A
+halfsigmoid(y, p) = p[1] ./ (1 .+ (y ./ p[2]) .^ p[3])
 
 # Least-squares half-sigmoid fit (all points weighted equally). The defaults suit a relative
-# profile (peak 1); pass p0, lower, upper for other units. A = nothing fits A with x50 and n;
-# a number fixes A there and fits only x50 and n (its standard error is then 0).
-# Returns parameters [A, x50, n], standard errors, R², rms residual (units of y), whether
+# profile (peak 1); pass p0, lower, upper for other units. A = nothing fits A with y50 and n;
+# a number fixes A there and fits only y50 and n (its standard error is then 0).
+# Returns parameters [A, y50, n], standard errors, R², rms residual (units of h), whether
 # A was fitted and, for a relative profile (A > 0.5), the position where the fitted curve
 # crosses 0.5 (NaN otherwise).
-function fit_halfsigmoid(x, y; p0 = [1.0, 30.0, 2.5],
+function fit_halfsigmoid(y, h; p0 = [1.0, 30.0, 2.5],
                          lower = [0.5, 1.0, 1.01], upper = [1.5, 200.0, 10.0], A = nothing)
     if A === nothing
-        f  = curve_fit(halfsigmoid, x, y, p0; lower, upper)
+        f  = curve_fit(halfsigmoid, y, h, p0; lower, upper)
         p  = coef(f)
         se = stderror(f)
-    else                                                 # A fixed: fit (x50, n) only
-        f  = curve_fit((x, q) -> halfsigmoid(x, [A, q[1], q[2]]), x, y, p0[2:3];
+    else                                                 # A fixed: fit (y50, n) only
+        f  = curve_fit((y, q) -> halfsigmoid(y, [A, q[1], q[2]]), y, h, p0[2:3];
                        lower = lower[2:3], upper = upper[2:3])
         p  = [A; coef(f)]
         se = [0.0; stderror(f)]
     end
-    r2  = 1 - sum(abs2, f.resid) / sum(abs2, y .- sum(y) / length(y))
+    r2  = 1 - sum(abs2, f.resid) / sum(abs2, h .- sum(h) / length(h))
     rms = sqrt(sum(abs2, f.resid) / length(f.resid))
-    x50pct = p[1] > 0.5 ? p[2] * (2 * p[1] - 1)^(1 / p[3]) : NaN     # where y = 0.5
-    (p = p, se = se, r2 = r2, rms = rms, freeA = A === nothing, x50pct = x50pct)
+    y50pct = p[1] > 0.5 ? p[2] * (2 * p[1] - 1)^(1 / p[3]) : NaN     # where h = 0.5
+    (p = p, se = se, r2 = r2, rms = rms, freeA = A === nothing, y50pct = y50pct)
 end
 
-# Goodness of a given curve on one data set: R² and rms residual (units of y)
-function goodness(x, y, p)
-    res = y .- halfsigmoid(x, p)
-    (r2 = 1 - sum(abs2, res) / sum(abs2, y .- sum(y) / length(y)),
+# Goodness of a given curve on one data set: R² and rms residual (units of h)
+function goodness(y, h, p)
+    res = h .- halfsigmoid(y, p)
+    (r2 = 1 - sum(abs2, res) / sum(abs2, h .- sum(h) / length(h)),
      rms = sqrt(sum(abs2, res) / length(res)))
 end
 
@@ -250,17 +251,17 @@ end
 # =============================================================================
 
 # #############################################################################
-# Section 0 - Zero-current readings: the remanent field B_r(x)
+# Section 0 - Zero-current readings: the remanent field B_r(y)
 # #############################################################################
 #
-# DATAFILE holds one (x, B) column pair per run, each with its own positions:
-#     x_<n>mA_<yyyymmdd>_mm,  B_<n>mA_<yyyymmdd>     (mm, G)
+# DATAFILE holds one (y, B) column pair per run, each with its own positions:
+#     x_<n>mA_<yyyymmdd>_mm,  B_<n>mA_<yyyymmdd>     (mm, G); the x_ column holds y
 # The runs at 0 mA give the field left in the yoke with the coil off, the offset under
 # every profile at nonzero current. Two of them, 2026-10-28 (every 2.54 mm) and
-# 2026-10-29 (every 0.635-2.54 mm), both from x = 0.
+# 2026-10-29 (every 0.635-2.54 mm), both from y = 0.
 
-# Every (x, B) pair at coil current `mA` in `df`, empty cells dropped and sorted by date:
-# (date, label, x (mm), B (G))
+# Every (y, B) pair at coil current `mA` in `df`, empty cells dropped and sorted by date:
+# (date, label, y (mm), B (G))
 function runs_at_current(df, mA)
     R = []
     for name in names(df)
@@ -271,7 +272,7 @@ function runs_at_current(df, mA)
         xcol in names(df) || error("$name has no position column $xcol")
         keep = .!ismissing.(df[!, name]) .& .!ismissing.(df[!, xcol])
         push!(R, (date = d, label = "$(d[1:4])-$(d[5:6])-$(d[7:8])",
-                  x = Float64.(df[keep, xcol]), B = Float64.(df[keep, name])))
+                  y = Float64.(df[keep, xcol]), B = Float64.(df[keep, name])))
     end
     isempty(R) && error("no B_$(mA)mA_<date> columns in the data file")
     sort!(R; by = r -> r.date)
@@ -281,7 +282,7 @@ end
 function plot_zero_current(Z)
     fig    = Figure(size = (720, 760))
     ylabel = L"B_r\ \mathrm{(G)}"
-    xmax   = x_axis_max(Z)
+    xmax   = y_axis_max(Z)
     xticks = 0:10:xmax
     kmin   = floor(Int, log10(minimum(minimum(z.B) for z in Z)))
     kmax   = ceil(Int, log10(maximum(maximum(z.B) for z in Z)))
@@ -300,7 +301,7 @@ function plot_zero_current(Z)
         pole_band!(ax)
     end
     for (i, z) in enumerate(Z), ax in (ax1, ax2)
-        scatterlines!(ax, z.x, z.B; color = COLORS[2i], marker = MARKERS[i],
+        scatterlines!(ax, z.y, z.B; color = COLORS[2i], marker = MARKERS[i],
                       markersize = 9, linewidth = 2, label = "0 A, " * z.label)
     end
     axislegend(ax1; position = :rt, framevisible = false)
@@ -312,8 +313,8 @@ Z0     = runs_at_current(df_raw, 0)
 
 println("Section 0 - zero-current readings (", DATAFILE, ")")
 for z in Z0
-    @printf("  %s: %2d readings, x = %.2f-%.2f mm, B = %.1f G at x = %.2f mm, %.1f G at x = %.2f mm\n",
-            z.label, length(z.x), z.x[1], z.x[end], z.B[1], z.x[1], z.B[end], z.x[end])
+    @printf("  %s: %2d readings, y = %.2f-%.2f mm, B = %.1f G at y = %.2f mm, %.1f G at y = %.2f mm\n",
+            z.label, length(z.y), z.y[1], z.y[end], z.B[1], z.y[1], z.B[end], z.y[end])
 end
 
 fig0 = plot_zero_current(Z0)
@@ -325,22 +326,22 @@ savefig(fig0, "SG0_fig0_zero_current")
 # Section 0.1 - Global half-sigmoid fit of the zero-current readings
 # #############################################################################
 #
-# One function for both 0 A runs: y = A / (1 + (x/x50)^n), the model of Section 4,
+# One function for both 0 A runs: B_r = A / (1 + (y/y50)^n), the model of Section 4,
 # fitted to the pooled readings in gauss (every point weighted equally). The fit is done
 # on B itself, not on B/B(0), so no single reading sets the normalization. A is then the
-# remanent center field (G); x50 and n describe the shape and compare directly with the
+# remanent center field (G); y50 and n describe the shape and compare directly with the
 # coil-field profile of Section 5. The per-run R² and rms show how well the common curve
 # describes each day.
 
 # Readings of every run (markers) with the global curve (line) on top; relative residuals
-# (data - fit)/data (%) of each run below. The curve is zero_current_calib(x) over
-# -xmax..xmax (both sides of the center); the readings exist only on the x >= 0 side, so the
-# x < 0 half is the mirror image, not a measurement.
+# (data - fit)/data (%) of each run below. The curve is zero_current_calib(y) over
+# -xmax..xmax (both sides of the center); the readings exist only on the y >= 0 side, so the
+# y < 0 half is the mirror image, not a measurement.
 function plot_zero_current_fit(Z, G0, Gz)
     fig  = Figure(size = (900, 700))
-    xmax = x_axis_max(Z)
+    xmax = y_axis_max(Z)
     ax1  = Axis(fig[1, 1]; ylabel = L"B_r\ \mathrm{(G)}", xticks = -xmax:10:xmax,
-                title = "Remanent field at 0 A: global half-sigmoid fit  y = A / [1 + (|x|/x₅₀)ⁿ]")
+                title = "Remanent field at 0 A: global half-sigmoid fit  B_r = A / [1 + (|y|/y₅₀)ⁿ]")
     ax2  = Axis(fig[2, 1]; ylabel = L"(\mathrm{data - fit})/\mathrm{data}\ (\%)",
                 xticks = -xmax:10:xmax, xlabel = XLABEL_MM)
     rowsize!(fig.layout, 2, Relative(0.3))
@@ -355,12 +356,12 @@ function plot_zero_current_fit(Z, G0, Gz)
     hlines!(ax2, 0; color = INK2, linewidth = 1)
     xf = range(-xmax, xmax; length = 600)
     lines!(ax1, xf, zero_current_calib(xf); color = :black, linewidth = 2,
-           label = @sprintf("A = %.2f G,  x₅₀ = %.1f mm,  n = %.2f,  R² = %.4f",
+           label = @sprintf("A = %.2f G,  y₅₀ = %.1f mm,  n = %.2f,  R² = %.4f",
                             G0.p[1], G0.p[2], G0.p[3], G0.r2))
     for (i, (z, g)) in enumerate(zip(Z, Gz))
-        scatter!(ax1, z.x, z.B; color = COLORS[2i], marker = MARKERS[i], markersize = 9,
+        scatter!(ax1, z.y, z.B; color = COLORS[2i], marker = MARKERS[i], markersize = 9,
                  label = @sprintf("0 A, %s:  rms = %.2f G", z.label, g.rms))
-        scatterlines!(ax2, z.x, 100 .* (z.B .- halfsigmoid(z.x, G0.p)) ./ z.B; color = COLORS[2i],
+        scatterlines!(ax2, z.y, 100 .* (z.B .- halfsigmoid(z.y, G0.p)) ./ z.B; color = COLORS[2i],
                       marker = MARKERS[i], markersize = 7, linewidth = 1)
     end
     # upper left, above the mirrored half; the headroom (25 % above A) keeps it off the curve
@@ -371,25 +372,25 @@ function plot_zero_current_fit(Z, G0, Gz)
 end
 
 # Bounds in gauss: A up to 100 G (the readings are ~8 G at the center)
-G0 = fit_halfsigmoid(vcat((z.x for z in Z0)...), vcat((z.B for z in Z0)...);
+G0 = fit_halfsigmoid(vcat((z.y for z in Z0)...), vcat((z.B for z in Z0)...);
                      p0 = [8.0, 30.0, 2.5], lower = [0.0, 1.0, 1.01], upper = [100.0, 200.0, 10.0])
-Gz = [goodness(z.x, z.B, G0.p) for z in Z0]
+Gz = [goodness(z.y, z.B, G0.p) for z in Z0]
 
-# Zero-current (remanent) field B_r(x) in gauss at position x (mm), from the global fit G0.
-# Evaluated at |x|: symmetric about the center, like the coil profile (Section 6); the
-# entrance half x < 0 is the mirror image, not a measurement. Works on a number or a vector.
-zero_current_calib(x) = halfsigmoid(abs.(x), G0.p)
+# Zero-current (remanent) field B_r(y) in gauss at position y (mm), from the global fit G0.
+# Evaluated at |y|: symmetric about the center, like the coil profile (Section 6); the
+# entrance half y < 0 is the mirror image, not a measurement. Works on a number or a vector.
+zero_current_calib(y) = halfsigmoid(abs.(y), G0.p)
 
 println("\nSection 0.1 - global half-sigmoid fit of the zero-current readings")
-println("  B(x) = A / (1 + (|x|/x50)^n)")
-@printf("  A = %.3f ± %.3f G,  x50 = %.2f ± %.2f mm,  n = %.3f ± %.3f\n",
+println("  B(y) = A / (1 + (|y|/y50)^n)")
+@printf("  A = %.3f ± %.3f G,  y50 = %.2f ± %.2f mm,  n = %.3f ± %.3f\n",
         G0.p[1], G0.se[1], G0.p[2], G0.se[2], G0.p[3], G0.se[3])
 @printf("  pooled: R² = %.5f,  rms = %.3f G (%d points)\n",
-        G0.r2, G0.rms, sum(length(z.x) for z in Z0))
+        G0.r2, G0.rms, sum(length(z.y) for z in Z0))
 for (z, g) in zip(Z0, Gz)
     @printf("  %s:  R² = %.5f,  rms = %.3f G\n", z.label, g.r2, g.rms)
 end
-@printf("  zero_current_calib(x):  %.2f G at 0 mm,  %.2f G at ±20 mm,  %.2f G at ±50 mm\n",
+@printf("  zero_current_calib(y):  %.2f G at 0 mm,  %.2f G at ±20 mm,  %.2f G at ±50 mm\n",
         zero_current_calib(0.0), zero_current_calib(20.0), zero_current_calib(50.0))
 
 fig0b =plot_zero_current_fit(Z0, G0, Gz)
@@ -416,14 +417,14 @@ function profile_currents(df)
     mA
 end
 
-# One profile per nonzero current: (I (A), label, date, x (mm), B (G)), empty cells dropped.
+# One profile per nonzero current: (I (A), label, date, y (mm), B (G)), empty cells dropped.
 # A current measured on more than one date would need its own color and label: refused here.
 function load_profiles(df)
     S = map(profile_currents(df)) do mA
         R = runs_at_current(df, mA)
         length(R) == 1 || error("$mA mA measured on $(length(R)) dates: pick one")
         I = mA / 1000
-        (I = I, label = @sprintf("%.3f A", I), date = R[1].label, x = R[1].x, B = R[1].B)
+        (I = I, label = @sprintf("%.3f A", I), date = R[1].label, y = R[1].y, B = R[1].B)
     end
     length(S) > length(COLORS) &&
         error("$(length(S)) currents but only $(length(COLORS)) colors: extend COLORS and MARKERS")
@@ -435,7 +436,7 @@ end
 # y range spans the whole decades that contain the data (all B > 0).
 function plot_raw(S; title = "Raw readings", ylabel = L"B\ \mathrm{(G)}")
     fig = Figure(size = (720, 760))
-    xmax   = x_axis_max(S)
+    xmax   = y_axis_max(S)
     xticks = 0:10:xmax
     kmin   = floor(Int, log10(minimum(minimum(s.B) for s in S)))
     kmax   = ceil(Int, log10(maximum(maximum(s.B) for s in S)))
@@ -453,7 +454,7 @@ function plot_raw(S; title = "Raw readings", ylabel = L"B\ \mathrm{(G)}")
         pole_band!(ax)
     end
     for (i, s) in enumerate(S), ax in (ax1, ax2)
-        scatterlines!(ax, s.x, s.B; color = COLORS[i], marker = MARKERS[i],
+        scatterlines!(ax, s.y, s.B; color = COLORS[i], marker = MARKERS[i],
                       markersize = 9, linewidth = 2, label = "$(s.label), $(s.date)")
     end
     axislegend(ax1; position = :rt, framevisible = false)
@@ -465,25 +466,25 @@ currents = [s.I for s in S]
 
 println("\nSection 1 - raw data")
 for s in S
-    @printf("  %s (%s): %2d readings, x = %.2f-%.2f mm, B(0) = %.1f G\n",
-            s.label, s.date, length(s.x), s.x[1], s.x[end], s.B[1])
+    @printf("  %s (%s): %2d readings, y = %.2f-%.2f mm, B(0) = %.1f G\n",
+            s.label, s.date, length(s.y), s.y[1], s.y[end], s.B[1])
 end
 
 fig1 = plot_raw(S)
 display(figtag!(fig1, "SG0_fig1_raw"))
 savefig(fig1, "SG0_fig1_raw")
 
-# Readings minus the zero-current field: B(x) - B_r(x), with B_r = zero_current_calib
+# Readings minus the zero-current field: B(y) - B_r(y), with B_r = zero_current_calib
 # (Section 0.1) at each reading's position. This removes the field left at 0 A on the
 # assumption that it simply adds to the coil field; with hysteresis the remanent part at
 # nonzero current need not equal the 0 A value, so this is a first-order correction.
-S_sub = [(; s..., B = s.B .- zero_current_calib(s.x)) for s in S];
+S_sub = [(; s..., B = s.B .- zero_current_calib(s.y)) for s in S];
 
-println("  minus the zero-current field B_r(x) (Section 0.1):")
+println("  minus the zero-current field B_r(y) (Section 0.1):")
 for (s, t) in zip(S, S_sub)
-    @printf("  %s (%s): B - B_r = %.1f G at x = 0 (B_r = %.1f %% of B);  %.1f G at x = %.2f mm (%.1f %%)\n",
+    @printf("  %s (%s): B - B_r = %.1f G at y = 0 (B_r = %.1f %% of B);  %.1f G at y = %.2f mm (%.1f %%)\n",
             s.label, s.date, t.B[1], 100 * (1 - t.B[1] / s.B[1]),
-            t.B[end], s.x[end], 100 * (1 - t.B[end] / s.B[end]))
+            t.B[end], s.y[end], 100 * (1 - t.B[end] / s.B[end]))
 end
 
 fig1b = plot_raw(S_sub; title = "Readings minus the zero-current field",
@@ -498,19 +499,19 @@ S_raw = S;
 S     = S_sub;
 
 # Table of the coil field B - B_r (G) at every position read in any run, with the
-# subtracted zero-current field B_r(x) beside x; blank = no reading of that run there
+# subtracted zero-current field B_r(y) beside y; blank = no reading of that run there
 function table_minus_zero_current(S)
-    xs   = sort(unique(vcat((s.x for s in S)...)))
-    rows = map(xs) do x
+    ys   = sort(unique(vcat((s.y for s in S)...)))
+    rows = map(ys) do y
         cells = map(S) do s
-            j = findfirst(==(x), s.x)
+            j = findfirst(==(y), s.y)
             j === nothing ? "" : @sprintf("%.1f", s.B[j])
         end
-        Any[@sprintf("%.3f", x), @sprintf("%.2f", zero_current_calib(x)), cells...]
+        Any[@sprintf("%.3f", y), @sprintf("%.2f", zero_current_calib(y)), cells...]
     end
     pretty_table(permutedims(reduce(hcat, rows));
                  title = "Section 1 - field after subtracting the zero-current field, B - B_r (G)",
-                 column_labels = [["x", "B_r", (s.label for s in S)...],
+                 column_labels = [["y", "B_r", (s.label for s in S)...],
                                   ["(mm)", "(G)", (s.date for s in S)...]],
                  alignment = :r,
                  fit_table_in_display_vertically = false,     # print every row, not
@@ -522,13 +523,13 @@ table_minus_zero_current(S)
 
 
 # #############################################################################
-# Section 2 - Fitting: center field B(x = 0) vs. coil current
+# Section 2 - Fitting: center field B(y = 0) vs. coil current
 # #############################################################################
 
-# Center field B(x = 0) of each set: the maximum of the profile
+# Center field B(y = 0) of each set: the maximum of the profile
 function center_field(S)
     for s in S
-        s.x[1] == 0 || error("$(s.label): no reading at x = 0")
+        s.y[1] == 0 || error("$(s.label): no reading at y = 0")
     end
     [s.I for s in S], [s.B[1] for s in S]
 end
@@ -572,11 +573,11 @@ end
 #          quadratic fits. Each panel spans its own current range.
 function plot_center(Ic, Bc, lin, quad, B0c, date0, cal, cal_lin, cal_quad, caldate)
     fig = Figure(size = (720, 900))
-    ylabel = L"B(x = 0)\ \mathrm{(G)}"
+    ylabel = L"B(y = 0)\ \mathrm{(G)}"
 
     Imax1 = 0.1 * ceil(10 * maximum(Ic))
     ax1   = Axis(fig[1, 1]; xticks = 0:0.1:Imax1, xlabel = L"I\ \mathrm{(A)}",
-                 ylabel = L"(B - B_r)(x = 0)\ \mathrm{(G)}",
+                 ylabel = L"(B - B_r)(y = 0)\ \mathrm{(G)}",
                  title = "Profile runs, zero-current field subtracted")
     fit_lines!(ax1, lin, quad, Imax1)
     scatter!(ax1, [0.0], [B0c]; marker = :star5, markersize = 13,
@@ -613,10 +614,10 @@ end
 Ic, Bc = center_field(S)
 lin    = polyfit(Ic, Bc, 1)
 quad   = polyfit(Ic, Bc, 2)
-z0c    = Z0[findfirst(z -> z.x[1] == 0, Z0)]     # zero-current run with a reading at x = 0
+z0c    = Z0[findfirst(z -> z.y[1] == 0, Z0)]     # zero-current run with a reading at y = 0
 B0c    = z0c.B[1] - zero_current_calib(0.0)
 
-println("\nSection 2 - center field B(x = 0) vs. current")
+println("\nSection 2 - center field B(y = 0) vs. current")
 for (I, B, r) in zip(Ic, Bc, lin.res)
     @printf("  I = %.3f A   B = %6.1f G   linear residual = %+5.2f G\n", I, B, r)
 end
@@ -664,10 +665,10 @@ savefig(fig2, "SG0_fig2_center_vs_current")
 
 
 # #############################################################################
-# Section 3 - Relative intensity B(x)/B(0)
+# Section 3 - Relative intensity B(y)/B(0)
 # #############################################################################
 
-# Relative intensity B(x)/B(x = 0) (1 at the center), per current, with B the coil field
+# Relative intensity B(y)/B(y = 0) (1 at the center), per current, with B the coil field
 # B - B_r of Section 1 (S holds the subtracted profiles from there on).
 # Each set is normalized to its own center reading, so the profile shapes can be
 # compared across currents (as in the PDF table "Normalized field B/B(0) vs. position").
@@ -675,23 +676,23 @@ relative(s) = s.B ./ s.B[1]
 
 # Position where the relative profile first drops to `level` (relative), by linear
 # interpolation between neighboring readings; NaN if it never gets there.
-function crossing(x, y, level)
-    i = findfirst(j -> y[j] >= level > y[j+1], 1:length(y)-1)
+function crossing(y, h, level)
+    i = findfirst(j -> h[j] >= level > h[j+1], 1:length(h)-1)
     i === nothing && return NaN
-    x[i] + (level - y[i]) * (x[i+1] - x[i]) / (y[i+1] - y[i])
+    y[i] + (level - h[i]) * (y[i+1] - y[i]) / (h[i+1] - h[i])
 end
 
-# Relative intensity vs. x, one curve per current, with the 0.5 level marked.
+# Relative intensity vs. y, one curve per current, with the 0.5 level marked.
 function plot_relative(S, R)
     fig  = Figure(size = (720, 480))
-    xmax = x_axis_max(S)
+    xmax = y_axis_max(S)
     ax   = Axis(fig[1, 1]; xticks = 0:10:xmax, yticks = 0:0.2:1, xlabel = XLABEL_MM,
                 ylabel = L"(B - B_r)/(B - B_r)(0)",
                 title = "Relative intensity along the beam axis (zero-current field subtracted)")
     pole_band!(ax)
     hlines!(ax, 0.5; color = INK2, linewidth = 1, linestyle = :dash)
     for (i, (s, r)) in enumerate(zip(S, R))
-        scatterlines!(ax, s.x, r; color = COLORS[i], marker = MARKERS[i],
+        scatterlines!(ax, s.y, r; color = COLORS[i], marker = MARKERS[i],
                       markersize = 9, linewidth = 2, label = s.label)
     end
     axislegend(ax; position = :rt, framevisible = false)
@@ -704,17 +705,17 @@ R = [relative(s) for s in S]
 
 # Table in the layout of the PDF: one row per position, blank where there is no reading
 println("\nSection 3 - relative intensity (B - B_r)/(B - B_r)(0), zero-current field subtracted")
-@printf("  %7s", "x (mm)"); foreach(s -> @printf("  %9s", s.label), S); println()
-for x in sort(unique(vcat((s.x for s in S)...)))     # every position read in any set
-    @printf("  %7.2f", x)
+@printf("  %7s", "y (mm)"); foreach(s -> @printf("  %9s", s.label), S); println()
+for y in sort(unique(vcat((s.y for s in S)...)))     # every position read in any set
+    @printf("  %7.2f", y)
     for (s, r) in zip(S, R)
-        j = findfirst(==(x), s.x)
+        j = findfirst(==(y), s.y)
         j === nothing ? @printf("  %9s", "") : @printf("  %9.4f", r[j])
     end
     println()
 end
 for (s, r) in zip(S, R)
-    @printf("  %s: (B - B_r)/(B - B_r)(0) = 0.5 at x = %.2f mm\n", s.label, crossing(s.x, r, 0.5))
+    @printf("  %s: (B - B_r)/(B - B_r)(0) = 0.5 at y = %.2f mm\n", s.label, crossing(s.y, r, 0.5))
 end
 
 fig3 = plot_relative(S, R)
@@ -726,36 +727,36 @@ savefig(fig3, "SG0_fig3_relative")
 # Section 4 - Half-sigmoid fit of the relative intensity
 # #############################################################################
 #
-# Model (log-logistic / Hill form, a sigmoid in ln x):
+# Model (log-logistic / Hill form, a sigmoid in ln y):
 #
-#     y(x) = A / (1 + (x/x50)^n)        y relative (1 at the center), x in mm, x >= 0
+#     h(y) = A / (1 + (y/y50)^n)        h relative (1 at the center), y in mm, y >= 0
 #
-# - read as a function of |x| it is the right half of a symmetric bell: even in x,
-#   flat at the center (dy/dx = 0 at x = 0 for n > 1), as the field of a symmetric
+# - read as a function of |y| it is the right half of a symmetric bell: even in y,
+#   flat at the center (dh/dy = 0 at y = 0 for n > 1), as the field of a symmetric
 #   magnet must be
-# - y(x50) = A/2: x50 is the half-amplitude point; n sets the steepness of the edge
-# - tail ~ x^-n at large x (n -> 3 would be the far field of a magnetic dipole)
+# - h(y50) = A/2: y50 is the half-amplitude point; n sets the steepness of the edge
+# - tail ~ y^-n at large y (n -> 3 would be the far field of a magnetic dipole)
 # - A is left free (close to 1) so the center reading alone does not pin the fit
 #
-# The plain logistic 1/(1 + exp((x - x0)/w)) was also tried: it needs A ~ 1.15 and has
-# a nonzero slope at x = 0, and fits worse (rms 0.012-0.017), so it is not used.
+# The plain logistic 1/(1 + exp((y - y0)/w)) was also tried: it needs A ~ 1.15 and has
+# a nonzero slope at y = 0, and fits worse (rms 0.012-0.017), so it is not used.
 
 # `halfsigmoid` and `fit_halfsigmoid` are defined with the shared helpers (also used in Chapter 0).
 
 # Relative intensity (markers) with the fitted half-sigmoids (lines)
 function plot_relative_fit(S, R, F)
     fig  = Figure(size = (720, 480))
-    xmax = x_axis_max(S)
+    xmax = y_axis_max(S)
     ax   = Axis(fig[1, 1]; xticks = 0:10:xmax, yticks = 0:0.2:1, xlabel = XLABEL_MM,
                 ylabel = L"(B - B_r)/(B - B_r)(0)",
-                title = "Half-sigmoid fit:  y = A / [1 + (x/x₅₀)ⁿ]")
+                title = "Half-sigmoid fit:  h = A / [1 + (y/y₅₀)ⁿ]")
     pole_band!(ax)
     hlines!(ax, 0.5; color = INK2, linewidth = 1, linestyle = :dash)
     xf = range(0, xmax; length = 300)
     for (i, (s, r, f)) in enumerate(zip(S, R, F))
         lines!(ax, xf, halfsigmoid(xf, f.p); color = COLORS[i], linewidth = 2,
-               label = @sprintf("%s:  x₅₀ = %.1f mm,  n = %.2f,  R² = %.4f", s.label, f.p[2], f.p[3], f.r2))
-        scatter!(ax, s.x, r; color = COLORS[i], marker = MARKERS[i], markersize = 9)
+               label = @sprintf("%s:  y₅₀ = %.1f mm,  n = %.2f,  R² = %.4f", s.label, f.p[2], f.p[3], f.r2))
+        scatter!(ax, s.y, r; color = COLORS[i], marker = MARKERS[i], markersize = 9)
     end
     axislegend(ax; position = :rt, framevisible = false)
     xlims!(ax, 0, xmax)
@@ -763,12 +764,12 @@ function plot_relative_fit(S, R, F)
     fig
 end
 
-F = [fit_halfsigmoid(s.x, r) for (s, r) in zip(S, R)]
+F = [fit_halfsigmoid(s.y, r) for (s, r) in zip(S, R)]
 
-println("\nSection 4 - half-sigmoid fit  y = A / (1 + (x/x50)^n)")
+println("\nSection 4 - half-sigmoid fit  h = A / (1 + (y/y50)^n)")
 for (s, f) in zip(S, F)
-    @printf("  %s:  A = %.4f ± %.4f,  x50 = %.2f ± %.2f mm,  n = %.3f ± %.3f,  R² = %.5f,  rms = %.4f,  fit = 0.5 at x = %.2f mm\n",
-            s.label, f.p[1], f.se[1], f.p[2], f.se[2], f.p[3], f.se[3], f.r2, f.rms, f.x50pct)
+    @printf("  %s:  A = %.4f ± %.4f,  y50 = %.2f ± %.2f mm,  n = %.3f ± %.3f,  R² = %.5f,  rms = %.4f,  fit = 0.5 at y = %.2f mm\n",
+            s.label, f.p[1], f.se[1], f.p[2], f.se[2], f.p[3], f.se[3], f.r2, f.rms, f.y50pct)
 end
 
 fig4 = plot_relative_fit(S, R, F)
@@ -780,7 +781,7 @@ savefig(fig4, "SG0_fig4_relative_fit")
 # Section 5 - Global half-sigmoid fit: one function for all currents
 # #############################################################################
 #
-# Same model as Section 4, y = A / (1 + (x/x50)^n), but a single (A, x50, n) fitted to
+# Same model as Section 4, h = A / (1 + (y/y50)^n), but a single (A, y50, n) fitted to
 # the relative intensity of all currents at once: least squares on the pooled points,
 # every reading weighted equally (so sets with more readings count more: 0.129 A has 68,
 # the others 55-56). The per-set R² and rms show how well the common curve describes
@@ -789,18 +790,18 @@ savefig(fig4, "SG0_fig4_relative_fit")
 # Relative intensity of every current (markers) with the single global curve (line)
 function plot_global_fit(S, R, G, Gset)
     fig  = Figure(size = (720, 480))
-    xmax = x_axis_max(S)
+    xmax = y_axis_max(S)
     ax   = Axis(fig[1, 1]; xticks = 0:10:xmax, yticks = 0:0.2:1, xlabel = XLABEL_MM,
                 ylabel = L"(B - B_r)/(B - B_r)(0)",
-                title = "Global half-sigmoid fit (all currents):  y = A / [1 + (x/x₅₀)ⁿ]")
+                title = "Global half-sigmoid fit (all currents):  h = A / [1 + (y/y₅₀)ⁿ]")
     pole_band!(ax)
     hlines!(ax, 0.5; color = INK2, linewidth = 1, linestyle = :dash)
     xf = range(0, xmax; length = 300)
     lines!(ax, xf, halfsigmoid(xf, G.p); color = :black, linewidth = 2,
-           label = @sprintf("A = %.3f,  x₅₀ = %.2f mm,  n = %.3f,  R² = %.4f",
+           label = @sprintf("A = %.3f,  y₅₀ = %.2f mm,  n = %.3f,  R² = %.4f",
                             G.p[1], G.p[2], G.p[3], G.r2))
     for (i, (s, r, g)) in enumerate(zip(S, R, Gset))
-        scatter!(ax, s.x, r; color = COLORS[i], marker = MARKERS[i], markersize = 9,
+        scatter!(ax, s.y, r; color = COLORS[i], marker = MARKERS[i], markersize = 9,
                  label = @sprintf("%s:  R² = %.4f,  rms = %.4f", s.label, g.r2, g.rms))
     end
     axislegend(ax; position = :rt, framevisible = false)
@@ -810,24 +811,24 @@ function plot_global_fit(S, R, G, Gset)
 end
 
 # Switch for the amplitude of the global fit:
-#   true  - A is a free parameter (fitted with x50 and n)
-#   false - A fixed at 1: the curve is exactly 1 at x = 0, as the normalization
-#           y = B/B(0) demands; only x50 and n are fitted
+#   true  - A is a free parameter (fitted with y50 and n)
+#   false - A fixed at 1: the curve is exactly 1 at y = 0, as the normalization
+#           h = B/B(0) demands; only y50 and n are fitted
 # Everything downstream (Section 6, L_eff and the CQD fit of Chapter 3) uses this fit.
 const GLOBAL_FIT_FREE_A = false
 
-G    = fit_halfsigmoid(vcat((s.x for s in S)...), vcat(R...);
+G    = fit_halfsigmoid(vcat((s.y for s in S)...), vcat(R...);
                        A = GLOBAL_FIT_FREE_A ? nothing : 1.0)
-Gset = [goodness(s.x, r, G.p) for (s, r) in zip(S, R)]
+Gset = [goodness(s.y, r, G.p) for (s, r) in zip(S, R)]
 
 println("\nSection 5 - global half-sigmoid fit (all currents together), A ",
         G.freeA ? "fitted" : "fixed at 1")
-println("  y = A / (1 + (x/x50)^n)")
-@printf("  A = %.4f ± %.4f%s,  x50 = %.2f ± %.2f mm,  n = %.3f ± %.3f\n",
+println("  h = A / (1 + (y/y50)^n)")
+@printf("  A = %.4f ± %.4f%s,  y50 = %.2f ± %.2f mm,  n = %.3f ± %.3f\n",
         G.p[1], G.se[1], G.freeA ? "" : " (fixed)", G.p[2], G.se[2], G.p[3], G.se[3])
-@printf("  pooled: R² = %.5f,  rms = %.4f (%d points);  fit = 0.5 at x = %.2f mm\n",
-        G.r2, G.rms, sum(length(s.x) for s in S), G.x50pct)
-@printf("  shape vs. the remanent field at 0 A (Section 0.1):  x50 = %.2f vs. %.2f mm,  n = %.3f vs. %.3f\n",
+@printf("  pooled: R² = %.5f,  rms = %.4f (%d points);  fit = 0.5 at y = %.2f mm\n",
+        G.r2, G.rms, sum(length(s.y) for s in S), G.y50pct)
+@printf("  shape vs. the remanent field at 0 A (Section 0.1):  y50 = %.2f vs. %.2f mm,  n = %.3f vs. %.3f\n",
         G.p[2], G0.p[2], G.p[3], G0.p[3])
 for (s, g, f) in zip(S, Gset, F)
     @printf("  %s:  R² = %.5f,  rms = %.4f   (own fit, Section 4: rms = %.4f)\n",
@@ -838,16 +839,16 @@ fig5 = plot_global_fit(S, R, G, Gset)
 display(figtag!(fig5, "SG0_fig5_global_fit"))
 savefig(fig5, "SG0_fig5_global_fit")
 
-# Normalized coil-field profile h(x) from the global fit G, with A = 1 (so h(0) = 1):
-#     h(x) = 1 / (1 + (|x|/x50)^n),    x in mm, x50 and n from Section 5.
+# Normalized coil-field profile h(y) from the global fit G, with A = 1 (so h(0) = 1):
+#     h(y) = 1 / (1 + (|y|/y50)^n),    y in mm, y50 and n from Section 5.
 # Multiplied by the center field Bc(I) it gives the coil field along the beam axis,
-# B(x, I) = Bc(I) h(x). Evaluated at |x|: symmetric about the center (Section 6); the
-# entrance half x < 0 is the mirror image, not a measurement. Works on a number or a vector.
-field_to_current_calibration(x) = halfsigmoid(abs.(x), [1.0, G.p[2], G.p[3]])
+# B(y, I) = Bc(I) h(y). Evaluated at |y|: symmetric about the center (Section 6); the
+# entrance half y < 0 is the mirror image, not a measurement. Works on a number or a vector.
+field_to_current_calibration(y) = halfsigmoid(abs.(y), [1.0, G.p[2], G.p[3]])
 
-println("  field_to_current_calibration(x) = 1 / (1 + (|x|/x50)^n)")
-@printf("    x50 = %.2f mm,  n = %.3f  (Section 5; A set to 1)\n", G.p[2], G.p[3])
-@printf("    %.3f at 0 mm,  %.3f at ±20 mm,  %.3f at ±x50,  %.3f at ±50 mm\n",
+println("  field_to_current_calibration(y) = 1 / (1 + (|y|/y50)^n)")
+@printf("    y50 = %.2f mm,  n = %.3f  (Section 5; A set to 1)\n", G.p[2], G.p[3])
+@printf("    %.3f at 0 mm,  %.3f at ±20 mm,  %.3f at ±y50,  %.3f at ±50 mm\n",
         field_to_current_calibration(0.0), field_to_current_calibration(20.0),
         field_to_current_calibration(G.p[2]), field_to_current_calibration(50.0))
 
@@ -856,30 +857,30 @@ println("  field_to_current_calibration(x) = 1 / (1 + (|x|/x50)^n)")
 # Section 6 - Full profile: fitted functions on both sides of the center
 # #############################################################################
 #
-# Only the exit half (x >= 0) was measured. Assuming the field is symmetric about the
-# center, the half-sigmoid evaluated at |x| gives the whole profile, entrance (x < 0)
-# and exit (x > 0). The experimental points are shown where they were taken (x >= 0);
-# the curves on the x < 0 side are the mirror image, not a measurement.
+# Only the exit half (y >= 0) was measured. Assuming the field is symmetric about the
+# center, the half-sigmoid evaluated at |y| gives the whole profile, entrance (y < 0)
+# and exit (y > 0). The experimental points are shown where they were taken (y >= 0);
+# the curves on the y < 0 side are the mirror image, not a measurement.
 
 # Full symmetric profile from a half-sigmoid fit
-fullprofile(x, p) = halfsigmoid(abs.(x), p)
+fullprofile(y, p) = halfsigmoid(abs.(y), p)
 
 # Full normalized SG0 field profile with the global-fit parameters of Section 5:
-#     B0_field(x) = A / (1 + (|x|/x50)^n),    x in mm, relative to the center (peak ~ 1).
+#     B0_field(y) = A / (1 + (|y|/y50)^n),    y in mm, relative to the center (peak ~ 1).
 # A is fitted or fixed at 1 according to GLOBAL_FIT_FREE_A. Works on a number or a vector.
-B0_field(x) = fullprofile(x, G.p)
+B0_field(y) = fullprofile(y, G.p)
 
 # Global fit (Section 5, solid red) over -xmax..xmax, with the measured points of every
-# current on the x >= 0 side. The per-current fits (Section 4) are not drawn; `F` is kept in
+# current on the y >= 0 side. The per-current fits (Section 4) are not drawn; `F` is kept in
 # the signature for their FWHM in the printout.
 function plot_full_profile(S, R, F, G)
     fig  = Figure(size = (1024, 768))
     # Half-width of the plotted range: 1.5x the measured range, rounded to 10 mm.
     # Ticks, curves, limits and labels all follow it.
-    xlim = 10 * ceil(1.5 * x_axis_max(S) / 10)
+    xlim = 10 * ceil(1.5 * y_axis_max(S) / 10)
     ax   = Axis(fig[1, 1]; xticks = -xlim:10:xlim, yticks = 0:0.2:1, xlabel = XLABEL_MM,
                 ylabel = L"(B - B_r)/(B - B_r)(0)",
-                title = "Full field profile: global half-sigmoid fit mirrored about x = 0")
+                title = "Full field profile: global half-sigmoid fit mirrored about y = 0")
     vspan!(ax, -POLE_RADIUS_MM, POLE_RADIUS_MM; color = (:gray, 0.15))   # pole face
     hlines!(ax, 0.5; color = INK2, linewidth = 1, linestyle = :dash)
     vlines!(ax, 0; color = INK2, linewidth = 1)
@@ -889,11 +890,11 @@ function plot_full_profile(S, R, F, G)
 
     xf = range(-xlim, xlim; length = 600)
     for (i, (s, r)) in enumerate(zip(S, R))
-        scatter!(ax, s.x, r; color = COLORS[i], marker = MARKERS[i], markersize = 9,
+        scatter!(ax, s.y, r; color = COLORS[i], marker = MARKERS[i], markersize = 9,
                  label = s.label)
     end
     lines!(ax, xf, fullprofile(xf, G.p); color = :red, linewidth = 2,
-           label = @sprintf("global fit:  x₅₀ = %.1f mm,  n = %.2f", G.p[2], G.p[3]))
+           label = @sprintf("global fit:  y₅₀ = %.1f mm,  n = %.2f", G.p[2], G.p[3]))
     axislegend(ax; position = :lt, framevisible = false, labelsize = 13)
     xlims!(ax, -xlim, xlim)
     ylims!(ax, 0, 1.05)
@@ -901,15 +902,15 @@ function plot_full_profile(S, R, F, G)
 end
 
 # Full width at half maximum of each fitted profile: twice the 0.5 crossing
-println("\nSection 6 - full profile (symmetric about x = 0)")
+println("\nSection 6 - full profile (symmetric about y = 0)")
 for (s, f) in zip(S, F)
-    @printf("  %s fit:   FWHM = %.1f mm\n", s.label, 2 * f.x50pct)
+    @printf("  %s fit:   FWHM = %.1f mm\n", s.label, 2 * f.y50pct)
 end
-@printf("  global fit:    FWHM = %.1f mm\n", 2 * G.x50pct)
-println("  B0_field(x) = A / (1 + (|x|/x50)^n)")
-@printf("    A = %.4f%s,  x50 = %.2f mm,  n = %.3f  (Section 5)\n",
+@printf("  global fit:    FWHM = %.1f mm\n", 2 * G.y50pct)
+println("  B0_field(y) = A / (1 + (|y|/y50)^n)")
+@printf("    A = %.4f%s,  y50 = %.2f mm,  n = %.3f  (Section 5)\n",
         G.p[1], G.freeA ? "" : " (fixed)", G.p[2], G.p[3])
-@printf("    %.3f at 0 mm,  %.3f at ±20 mm,  %.3f at ±x50,  %.3f at ±50 mm\n",
+@printf("    %.3f at 0 mm,  %.3f at ±20 mm,  %.3f at ±y50,  %.3f at ±50 mm\n",
         B0_field(0.0), B0_field(20.0), B0_field(G.p[2]), B0_field(50.0))
 
 fig6 = plot_full_profile(S, R, F, G)
@@ -999,17 +1000,17 @@ savefig(fig7, "SG0_fig7_separation_vs_current")
 
 
 # #############################################################################
-# Section 8 - Current to field: B(x = 0) at the separation currents
+# Section 8 - Current to field: B(y = 0) at the separation currents
 # #############################################################################
 #
-# Converts every separation current of Section 7 into a center field B(x = 0), the field
+# Converts every separation current of Section 7 into a center field B(y = 0), the field
 # axis of the separation data. No new fit is made here: it evaluates the two CALIBFILE fits
 # of Section 2 (cal_lin, cal_quad).
 #
 # What it does:
 # 1. Center field at the separation currents: Blin = cal_lin(I), Bquad = cal_quad(I). The
 #    spread between them is a systematic range of the calibration, not a statistical error.
-# 2. Check against Chapter 1: the raw x = 0 readings of the profile runs (Section 1,
+# 2. Check against Chapter 1: the raw y = 0 readings of the profile runs (Section 1,
 #    0.129-1.202 A; raw, not B - B_r, because CALIBFILE is raw too) are printed with their
 #    residuals from both fits. They were not used in the fits, so this is an independent check.
 # 3. Table of B lin, B quad and quad/lin at each separation current, with a note where the
@@ -1019,7 +1020,7 @@ savefig(fig7, "SG0_fig7_separation_vs_current")
 #    Fig. 9: the separations of Section 7 plotted vs. the center field.
 #
 # The calibration (Section 2):
-# - CALIBFILE, 2026-10-29: Hall-probe readings at x = 0 from 0 to 3.83 A. The readings
+# - CALIBFILE, 2026-10-29: Hall-probe readings at y = 0 from 0 to 3.83 A. The readings
 #   used in the fits are `calfit`, set by CALIB_FIT_ZERO (Section 2):
 #     true  - all 8, the 0 A reading (+8 G, the remanence) included: fitted range 0-3.83 A,
 #             every separation current is interpolated; the intercept (≈ 3.7 G linear)
@@ -1051,7 +1052,7 @@ end
 # errors of the separation). The shaded band is the field range covered by the calibration.
 function plot_sep_vs_field(curves, Blin, Bquad, Bcal)
     fig = Figure(size = (900, 560))
-    ax  = Axis(fig[1, 1]; xlabel = L"B(x = 0)\ \mathrm{(G)}", ylabel = SEP_YLABEL,
+    ax  = Axis(fig[1, 1]; xlabel = L"B(y = 0)\ \mathrm{(G)}", ylabel = SEP_YLABEL,
                title = "Spin-resolved separation vs. SG0 center field")
     mapped_band!(ax, Bcal...)
     hl = separation!(ax, curves, Blin; marker = :circle)
@@ -1078,7 +1079,7 @@ println("\nSection 8 - center-field calibration (", CALIBFILE, ")")
         CALIB_FIT_ZERO ? "0 A included" : "I > 0", cal_lin.c..., cal_quad.c...)
 # Independent check: the profile-run centers were not fitted, and they fill the CALIBFILE gap
 Bc_raw = [s.B[1] for s in S_raw]                     # raw center readings of the profile runs
-println("  profile runs at x = 0 (raw, Section 1; not fitted) vs. the calibration:")
+println("  profile runs at y = 0 (raw, Section 1; not fitted) vs. the calibration:")
 @printf("  %8s  %8s  %13s  %13s\n", "I (A)", "B (G)", "lin res (G)", "quad res (G)")
 for (I, B) in zip(Ic, Bc_raw)
     @printf("  %8.3f  %8.1f  %+13.2f  %+13.2f\n", I, B,
@@ -1103,7 +1104,7 @@ I_top = Isep[end]
 # Both calibrations into `ax` along the current grid `If`: linear (solid) and quadratic
 # (dashed), each evaluated at the separation currents (open circles), the CALIBFILE readings
 # they were fitted to (filled stars; `fitted` selects them, the 0 A reading is an open star),
-# the x = 0 readings of the profile runs (colored, not fitted) and the shaded calibration
+# the y = 0 readings of the profile runs (colored, not fitted) and the shaded calibration
 # region `region` labeled at `xtext`. `keep` selects the currents drawn (I > 0 on a log axis).
 function calibration!(ax, If, Isep, Blin, Bquad, cal, Ic, Bc, lin, quad;
                       keep = I -> true, fitted = calfit,
@@ -1124,7 +1125,7 @@ function calibration!(ax, If, Isep, Blin, Bquad, cal, Ic, Bc, lin, quad;
     end
     k = keep.(cal.I) .& fitted
     scatter!(ax, cal.I[k], cal.B[k]; marker = :star5, color = INK2, markersize = 15,
-             label = "calibration, x = 0 (fitted)")
+             label = "calibration, y = 0 (fitted)")
     u = keep.(cal.I) .& .!fitted                       # empty on the log axis (I = 0)
     any(u) && scatter!(ax, cal.I[u], cal.B[u]; marker = :star5, color = :transparent,
                        strokecolor = INK2, strokewidth = 1.5, markersize = 15,
@@ -1147,7 +1148,7 @@ function plot_calibrations(Isep, Blin, Bquad, cal, Ic, Bc, lin, quad)
     kmax = ceil(Int, log10(xmax))
     args = (Isep, Blin, Bquad, cal, Ic, Bc, lin, quad)
 
-    ax1 = Axis(fig[1, 1]; ylabel = L"B(x = 0)\ \mathrm{(G)}", xlabel = L"I\ \mathrm{(A)}",
+    ax1 = Axis(fig[1, 1]; ylabel = L"B(y = 0)\ \mathrm{(G)}", xlabel = L"I\ \mathrm{(A)}",
                xticks = 0:0.5:4,
                title = "Center field vs. SG0 current: linear and quadratic calibration")
     calibration!(ax1, range(0, xmax; length = 300), args...)
@@ -1157,7 +1158,7 @@ function plot_calibrations(Isep, Blin, Bquad, cal, Ic, Bc, lin, quad)
 
     # log axis: the calibration region starts at the lowest nonzero calibration current
     lo = minimum(filter(>(0), cal.I))
-    ax2 = Axis(fig[2, 1]; ylabel = L"B(x = 0)\ \mathrm{(G)}", xlabel = L"I\ \mathrm{(A)}",
+    ax2 = Axis(fig[2, 1]; ylabel = L"B(y = 0)\ \mathrm{(G)}", xlabel = L"I\ \mathrm{(A)}",
                xscale = log10, xticks = (10.0 .^ (kmin:kmax), decade_label.(kmin:kmax)),
                xminorticks = IntervalsBetween(9))
     calibration!(ax2, 10 .^ range(kmin, log10(xmax); length = 300), args...;
