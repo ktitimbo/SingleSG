@@ -273,7 +273,8 @@ const DIR_LIST = [
     "20260827",
     "20260831",
     "20260902",
-    "20260903"
+    "20260903",
+    "20261105",
 ]
 
 # ── PrettyTables header construction ──────────────────────────────────────────
@@ -323,7 +324,11 @@ Returns
 Side effects
 - Displays (does not save) many diagnostic plots per dataset via `display(...)`.
 - Emits `@info` logs and prints PrettyTables summaries to stdout.
-- When `save_results=true`, writes two JLD2 files and one text report to `OUTDIR`.
+- When `save_results=true`, writes two JLD2 files and one text report to `OUTDIR`:
+  `baseline_results_P$(P_DEGREE).jld2` (fit results, `results`),
+  `blur_conv_$(P_DEGREE).jld2` (per-directory summary, `results_dict`), and
+  `convolution_report_$(P_DEGREE).txt`. `blur_conv_$(P_DEGREE).jld2` is the file
+  read downstream by `SG2026Q2_experiment_summary.jl` (single-shot blur widths).
 """
 function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_results::Bool=false)
     @info "Parameter-sweep run" zbinning=wanted_zbinning smoothing=wanted_smooth save_results
@@ -1041,16 +1046,21 @@ Arguments
 Returns
 - `OrderedDict{Any, NamedTuple}` keyed by directory name. Each value is
   `(current_A, blurrGwidth_um, blurrGwidth_um_std, blurrGwidth_um_sem,
-  zmax_mm, n_repeats)`:
+  zmax_mm, zmax_mm_std, zmax_mm_sem, n_repeats)`:
   - `current_A`          — mean of the selected repeats' currents [A]
   - `blurrGwidth_um`      — mean Gaussian blur width across repeats [μm]
-  - `blurrGwidth_um_std`  — repeat-to-repeat spread (population std) [μm];
-                            what a single new measurement's scatter looks like
+  - `blurrGwidth_um_std`  — repeat-to-repeat spread (sample std, n−1) [μm];
+                            what a single new measurement's scatter looks like.
+                            `NaN` when `n_repeats == 1`.
   - `blurrGwidth_um_sem`  — `std / sqrt(n_repeats)` [μm]; the uncertainty ON
                             the mean itself — this is what "mean ± error"
                             conventionally refers to. `NaN` when
                             `n_repeats == 1` (undefined with a single sample).
   - `zmax_mm`             — mean forward-model peak position across repeats [mm]
+  - `zmax_mm_std`         — repeat-to-repeat spread of zmax [mm]; `NaN` when
+                            `n_repeats == 1`
+  - `zmax_mm_sem`         — `zmax_mm_std / sqrt(n_repeats)` [mm]; `NaN` when
+                            `n_repeats == 1`
   - `n_repeats`           — how many repeats were averaged for this directory
 
 Side effects
@@ -1059,8 +1069,10 @@ Side effects
   prints PrettyTables summaries to stdout.
 - When `save_results=true`, writes two JLD2 files and one text report to
   `OUTDIR`:
-  `baseline_results_P$(P_DEGREE).jld2` (per-repeat detail, `results`) and
-  `blur_conv_$(P_DEGREE).jld2` (per-directory summary, `results_dict`).
+  `baseline_results_P$(P_DEGREE)_per_repetition.jld2` (per-repeat detail, `results`),
+  `blur_conv_$(P_DEGREE)_per_repetition.jld2` (per-directory summary, `results_dict`),
+  and `convolution_report_$(P_DEGREE)_per_repetition.txt`. The `_per_repetition`
+  suffix keeps them from overwriting the single-shot files of `run_analysis`.
 """
 function run_analysis_per_repetition(wanted_zbinning::Integer, wanted_smooth::Real; save_results::Bool=false)
     @info "Parameter-sweep run" zbinning=wanted_zbinning smoothing=wanted_smooth save_results
@@ -1698,14 +1710,23 @@ function run_analysis_per_repetition(wanted_zbinning::Integer, wanted_smooth::Re
         blur_std  = std(blur_width_reps)
         blur_sem  = rl_dim > 1 ? blur_std / sqrt(rl_dim) : NaN
 
+        # Same reduction for the forward-model peak position. std/sem are NaN
+        # (not an error) when rl_dim == 1: a single shot carries no scatter info.
+        zmax_mean = mean(zmax_reps)
+        zmax_std  = rl_dim > 1 ? std(zmax_reps) : NaN
+        zmax_sem  = rl_dim > 1 ? zmax_std / sqrt(rl_dim) : NaN
+
         @info "\e[1;91mDirectory $(dir_chosen)\e[0m  →  \e[1;92mblur width\e[0m = \e[1;93m$(round(blur_mean; sigdigits=5)) ± $(round(blur_std; sigdigits=3)) μm\e[0m  (SEM \e[1;93m$(round(blur_sem; sigdigits=3)) μm\e[0m, n=\e[1;96m$(rl_dim)\e[0m repeats)"
+        @info "\e[1;91mDirectory $(dir_chosen)\e[0m  →  \e[1;92mzₘₐₓ\e[0m = \e[1;93m$(round(zmax_mean; sigdigits=5)) ± $(round(zmax_std; sigdigits=3)) mm\e[0m  (SEM \e[1;93m$(round(zmax_sem; sigdigits=3)) mm\e[0m)"
 
         results_dict[dir_chosen] = (
             current_A          = mean(data[1]),
             blurrGwidth_um     = blur_mean,
             blurrGwidth_um_std = blur_std,
             blurrGwidth_um_sem = blur_sem,
-            zmax_mm            = mean(zmax_reps),
+            zmax_mm            = zmax_mean,
+            zmax_mm_std        = zmax_std,
+            zmax_mm_sem        = zmax_sem,
             n_repeats          = rl_dim,
         )
     end # for dir_chosen in DIR_LIST
@@ -1737,23 +1758,13 @@ function run_analysis_per_repetition(wanted_zbinning::Integer, wanted_smooth::Re
     formatters = [
         (v, i, j) -> begin
             if j == 3
-                @sprintf("%.0f", v)
-            elseif j == 4
-                @sprintf("%.3f", v)
-            else
-                v
-            end
-        end,
-    ]
-
-    formatters = [
-        (v, i, j) -> begin
-            if j == 3
                 @sprintf("%.1f", v)      # blur width mean (μm)
             elseif j == 4 || j == 5
                 @sprintf("%.2f", v)      # blur width std / sem (μm)
             elseif j == 6
-                @sprintf("%.3f", v)      # zmax (mm)
+                @sprintf("%.3f", v)      # zmax mean (mm)
+            elseif j == 7 || j == 8
+                @sprintf("%.4f", v)      # zmax std / sem (mm)
             else
                 v
             end
@@ -1770,11 +1781,13 @@ function run_analysis_per_repetition(wanted_zbinning::Integer, wanted_smooth::Re
             "Blur Width mean (μm)",
             "Blur Width std (μm)",
             "Blur Width SEM (μm)",
-            "zₘₐₓ (mm)",
+            "zₘₐₓ mean (mm)",
+            "zₘₐₓ std (mm)",
+            "zₘₐₓ SEM (mm)",
             "n repeats",
         ],
 
-        alignment = fill(:c, 7),
+        alignment = fill(:c, 9),
         column_label_alignment = :c,
         title_alignment = :c,
 
@@ -1901,7 +1914,7 @@ for (zbinning, smoothing) in Iterators.product(ZBINNING_LIST, SMOOTH_LIST)
     )
 end # parameter sweep
 
-@info "Parameter sweep complete" combinations=length(inspection_results) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
+@info "Parameter sweep complete" combinations=length(inspection_results_per_repetition) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
 
 
 
