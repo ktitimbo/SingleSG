@@ -4,9 +4,9 @@
 #
 # CHAPTER 0 - Calibration
 #
-# Section 0  Zero-current readings: the remanent field B_r(y) of the 0 mA runs of DATAFILE
-#            (2026-10-28 and 2026-10-29), linear and log scale.
-# Section 0.1  Global half-sigmoid fit B_r = A / (1 + (y/y50)^n) of both 0 A runs (in G).
+# Section 0  Zero-current readings: the remanent field B_r(y) of the 0 A run of DATAFILE
+#            (2026-10-30), linear scale, in mT.
+# Section 0.1  Global super-Gaussian fit B_r = A exp(-(|y|/w)^p) of the 0 A readings (in G).
 #
 # CHAPTER 1 - SG0 magnetic field profile
 #
@@ -34,21 +34,21 @@
 #
 # ---------- Data ----------
 #
-# File: SG0_raw_data_field_profile_2026-10-28_29.csv (DATAFILE, same folder as this script)
+# File: SG0_raw_data_noushape_2026-10-30.csv (DATAFILE, same folder as this script),
+# measured without the horseshoe yoke on 2026-10-30 (the date is taken from the file name)
 #
 # One column pair per run, each with its own positions:
-#   x_<n>mA_<yyyymmdd>_mm   position y along the beam (mm); the column names keep the
-#                           x of the data file, but the coordinate is y here
-#   B_<n>mA_<yyyymmdd>      reading (gauss) at coil current n mA, measured on that date
+#   y_mm_<I>A   position y along the beam (mm), y = 0 at the field maximum
+#   B_G_<I>A    raw reading (gauss) at coil current I (A); not degaussed, not normalized
 #
-# Runs: 0 mA (2026-10-28, 2026-10-29; Chapter 0), 129 mA (2026-10-29), 443, 735 and
-# 1202 mA (2026-10-28; Chapter 1). Steps of 0.635-2.54 mm out to ~77 mm. Empty cell =
-# the run has ended. 1 G = 1e-4 T.
+# Runs: 0 A (Chapter 0), 0.108, 0.417, 0.802 and 1.202 A (Chapter 1). Steps of
+# 0.635-2.54 mm out to ~78 mm. Empty cell = the run has ended. 1 G = 1e-4 T.
 #
-# Section 8: SG0_calibration_center_BI_2026-10-29.csv (CALIBFILE, same folder)
+# Section 8: SG0_calibration_center_noushape_BI_2026-10-30.csv (CALIBFILE, same folder)
 #
-#   I_A   SG0 coil current (A), 0-3.83 A (8 readings, 0 A included)
-#   B_G   Hall-probe reading at the field center y = 0 (gauss)
+#   I   SG0 coil current (A), 1.50-3.70 A (6 readings)
+#   B   Hall-probe reading at the field center y = 0 (gauss)
+# (the older column names I_A, B_G are read as well)
 #
 # The earlier scan, SG0_field_profile_2026-10-22.{pdf,csv} (0.129, 0.443, 0.963 A, out to
 # 55.88 mm), is no longer read; its quoted values are kept below for comparison.
@@ -135,8 +135,7 @@ const gₑ    = -2.00231930436092 ;  # Electron g-factor
 # ---------- Atom ----------
 atom = "39K"
 K39_params = TheoreticalSimulation.AtomParams(atom); # [R μn γn Ispin Ahfs M ]
-CQD_Bn = 12.4e-6 # Teslas
-
+CQD_Bn = 11.88e-6 # Teslas
 
 2π*ħ*(462.31e6)/(2μₑ)
 
@@ -167,7 +166,7 @@ const DIR_MODE = :geom
 # Inputs of Chapter 4 (SG0 field integral from the separation data at a given k_i): the
 # coupling k_i is held fixed and BL0 is fitted. N and f set the shape of the magnetometer-data
 # BL0(I) that is scaled in the global fit (by default the Chapter 3 values).
-const C4_KI    = 2.0e-6          # given k_i (dimensionless); 1.5226e-7 = fit note, f = 1
+const C4_KI    = 1.8e-6          # given k_i (dimensionless); 1.5226e-7 = fit note, f = 1
 const C4_N_BN  = N_BN               # threshold N (units of CQD_Bn) of the model BL0(I) shape
 const C4_F_DIV = F_DIV              # divisor f of the model BL0(I) shape
 
@@ -210,7 +209,7 @@ pole_band!(ax) = vspan!(ax, 0, POLE_RADIUS_MM; color = (:gray, 0.15))
 # Decade tick label: 10^-1, 1, 10, 10^2, 10^3, ...
 decade_label(k) = k == 0 ? L"1" : k == 1 ? L"10" : latexstring("10^{$k}")
 
-# Half-sigmoid h = A / (1 + (y/y50)^n), the profile model of Chapters 0 and 1 (Section 4
+# Half-sigmoid h = A / (1 + (y/y50)^n), the profile model of Chapter 1 (Section 4
 # explains the choice); p = [A, y50 (mm), n], y the position (mm), h in the units of A
 halfsigmoid(y, p) = p[1] ./ (1 .+ (y ./ p[2]) .^ p[3])
 
@@ -238,9 +237,65 @@ function fit_halfsigmoid(y, h; p0 = [1.0, 30.0, 2.5],
     (p = p, se = se, r2 = r2, rms = rms, freeA = A === nothing, y50pct = y50pct)
 end
 
-# Goodness of a given curve on one data set: R² and rms residual (units of h)
-function goodness(y, h, p)
-    res = h .- halfsigmoid(y, p)
+# Super-Gaussian h = A exp(-(|y|/w)^p), the remanent-field model of Section 0.1 (it fits
+# the 0 A readings better than the half-sigmoid: flat center, fast approach to 0);
+# p = [A, w (mm), p], y the position (mm), h in the units of A. Even in y.
+supergauss(y, p) = p[1] .* exp.(-(abs.(y) ./ p[2]) .^ p[3])
+
+# Least-squares super-Gaussian fit (all points weighted equally), A of either sign.
+# Returns parameters [A, w, p], standard errors, R², rms residual (units of h) and the
+# half-width at half maximum yhalf = w (ln 2)^(1/p), where h = A/2.
+function fit_supergauss(y, h; p0, lower = [-100.0, 1.0, 0.5], upper = [100.0, 200.0, 10.0])
+    f   = curve_fit(supergauss, y, h, p0; lower, upper)
+    p   = coef(f)
+    r2  = 1 - sum(abs2, f.resid) / sum(abs2, h .- sum(h) / length(h))
+    rms = sqrt(sum(abs2, f.resid) / length(f.resid))
+    (p = p, se = stderror(f), r2 = r2, rms = rms, yhalf = p[2] * log(2)^(1 / p[3]))
+end
+
+# tanh-edge profile, the global coil-field model of Section 5:
+#     h = A [tanh((y0+y)/w) + tanh((y0-y)/w)] / (2 tanh(y0/w))
+#       = A [1 + cosh(2y0/w)] / [cosh(2y/w) + cosh(2y0/w)]
+# p = [A, y0 (mm), w (mm)], y the position (mm). Even in y, h(0) = A exactly and flat at the
+# center: a top hat of half-width y0 whose two edges are tanh steps of width w (each pole
+# edge a smooth step). Far out h falls as exp(-2|y|/w) (decay length w/2). The cosh form is
+# used: no cancellation between the two tanh terms in the tail.
+tanhedge(y, p) = p[1] .* (1 + cosh(2p[2] / p[3])) ./ (cosh.(2 .* y ./ p[3]) .+ cosh(2p[2] / p[3]))
+
+# Least-squares tanh-edge fit (all points weighted equally). A = nothing fits A with
+# (y0, w); a number fixes A there and fits only (y0, w) (its standard error is then 0).
+# Returns parameters [A, y0, w], standard errors, R², rms residual (units of h), whether A
+# was fitted, and the position y50pct where the curve crosses 0.5 (NaN if A <= 0.5).
+function fit_tanhedge(y, h; p0 = [1.0, 22.0, 30.0],
+                      lower = [0.5, 0.1, 0.1], upper = [1.5, 200.0, 200.0], A = nothing)
+    if A === nothing
+        f  = curve_fit(tanhedge, y, h, p0; lower, upper)
+        p  = coef(f)
+        se = stderror(f)
+    else                                                 # A fixed: fit (y0, w) only
+        f  = curve_fit((y, q) -> tanhedge(y, [A; q]), y, h, p0[2:3];
+                       lower = lower[2:3], upper = upper[2:3])
+        p  = [A; coef(f)]
+        se = [0.0; stderror(f)]
+    end
+    r2  = 1 - sum(abs2, f.resid) / sum(abs2, h .- sum(h) / length(h))
+    rms = sqrt(sum(abs2, f.resid) / length(f.resid))
+    y50pct = p[1] > 0.5 ? profile_crossing(p, 0.5) : NaN
+    (p = p, se = se, r2 = r2, rms = rms, freeA = A === nothing, y50pct = y50pct)
+end
+
+# Position |y| (mm) where the tanh-edge profile p falls to level r (0 < r < A), in closed
+# form: from h = r,  cosh(2y/w) = (A/r) [1 + cosh(2y0/w)] - cosh(2y0/w)
+function profile_crossing(p, r)
+    A, y0, w = p
+    c = cosh(2y0 / w)
+    (w / 2) * acosh((A / r) * (1 + c) - c)
+end
+
+# Goodness of a given curve on one data set: R² and rms residual (units of h).
+# `model` is the profile function (halfsigmoid by default, supergauss for Section 0.1).
+function goodness(y, h, p; model = halfsigmoid)
+    res = h .- model(y, p)
     (r2 = 1 - sum(abs2, res) / sum(abs2, h .- sum(h) / length(h)),
      rms = sqrt(sum(abs2, res) / length(res)))
 end
@@ -255,56 +310,59 @@ end
 # #############################################################################
 #
 # DATAFILE holds one (y, B) column pair per run, each with its own positions:
-#     x_<n>mA_<yyyymmdd>_mm,  B_<n>mA_<yyyymmdd>     (mm, G); the x_ column holds y
-# The runs at 0 mA give the field left in the yoke with the coil off, the offset under
-# every profile at nonzero current. Two of them, 2026-10-28 (every 2.54 mm) and
-# 2026-10-29 (every 0.635-2.54 mm), both from y = 0.
+#     y_mm_<I>A,  B_G_<I>A     (mm, G), I = coil current in A (e.g. y_mm_0.417A)
+# The column names carry no date; every run is dated by the file name (DATA_DATE).
+# The run at 0 A gives the field left in the magnet with the coil off (not degaussed),
+# the offset under every profile at nonzero current: one run, every 2.54 mm from y = 0.
 
-# Every (y, B) pair at coil current `mA` in `df`, empty cells dropped and sorted by date:
-# (date, label, y (mm), B (G))
+# Measurement date (yyyy-mm-dd) from the DATAFILE name
+const DATA_DATE = let m = match(r"\d{4}-\d{2}-\d{2}", DATAFILE)
+    m === nothing ? "undated" : m.match
+end
+
+# Coil current in mA of a field column "B_G_<I>A" (I in A), or nothing for any other column
+function column_mA(name)
+    m = match(r"^B_G_(\d+(?:\.\d+)?)A$", name)
+    m === nothing ? nothing : round(Int, 1000 * parse(Float64, m[1]))
+end
+
+# Every (y, B) pair at coil current `mA` (integer mA) in `df`, empty cells dropped:
+# (date, label, y (mm), B (G)). The position column y_mm_<I>A is matched without regard
+# to case (the 0 A column of DATAFILE is spelled Y_mm_0A).
 function runs_at_current(df, mA)
     R = []
     for name in names(df)
-        m = match(Regex("^B_$(mA)mA_(\\d{8})\$"), name)
-        m === nothing && continue
-        d    = m[1]
-        xcol = "y_mm_$(mA)mA_$(d)_mm"
-        xcol in names(df) || error("$name has no position column $xcol")
+        column_mA(name) == mA || continue
+        tag  = lowercase("y_mm_" * name[length("B_G_")+1:end])
+        k    = findfirst(n -> lowercase(n) == tag, names(df))
+        k === nothing && error("$name has no position column y_mm_$(name[5:end])")
+        xcol = names(df)[k]
         keep = .!ismissing.(df[!, name]) .& .!ismissing.(df[!, xcol])
-        push!(R, (date = d, label = "$(d[1:4])-$(d[5:6])-$(d[7:8])",
+        push!(R, (date = replace(DATA_DATE, "-" => ""), label = DATA_DATE,
                   y = Float64.(df[keep, xcol]), B = Float64.(df[keep, name])))
     end
-    isempty(R) && error("no B_$(mA)mA_<date> columns in the data file")
+    isempty(R) && error(@sprintf("no B_G_<I>A column at %.3f A in the data file", mA / 1000))
     sort!(R; by = r -> r.date)
 end
 
-# Zero-current readings, linear (top) and log (bottom) scale, sharing the x axis
+# Zero-current readings on a linear scale. Without the yoke the remanent field is
+# negative near the center (-1.9 G at y = 0) and reaches 0 G by ~52 mm, so a log scale
+# cannot show it; the dashed line marks B_r = 0. Plotted in mT (1 G = 0.1 mT); the
+# readings in Z stay in gauss.
 function plot_zero_current(Z)
-    fig    = Figure(size = (720, 760))
-    ylabel = L"B_r\ \mathrm{(G)}"
-    xmax   = y_axis_max(Z)
-    xticks = 0:10:xmax
-    kmin   = floor(Int, log10(minimum(minimum(z.B) for z in Z)))
-    kmax   = ceil(Int, log10(maximum(maximum(z.B) for z in Z)))
+    fig  = Figure(size = (720, 420))
+    xmax = y_axis_max(Z)
+    ax   = Axis(fig[1, 1]; xlabel = XLABEL_MM, ylabel = L"B_r\ \mathrm{(\mu T)}",
+                xticks = 0:10:xmax, title = "Remanent field: Hall-probe readings at 0 A")
+    xlims!(ax, 0, xmax)
 
-    ax1 = Axis(fig[1, 1]; ylabel, xticks, title = "Remanent field: Hall-probe readings at 0 A")
-    ax2 = Axis(fig[2, 1]; ylabel, xticks, xlabel = XLABEL_MM, yscale = log10,
-               yticks = (10.0 .^ (kmin:kmax), decade_label.(kmin:kmax)),
-               yminorticks = IntervalsBetween(9))
-    linkxaxes!(ax1, ax2)
-    hidexdecorations!(ax1; grid = false, ticks = false, minorgrid = false, minorticks = false)
-    xlims!(ax2, 0, xmax)
-    ylims!(ax1, 0, nothing)
-    ylims!(ax2, 10.0^kmin, 10.0^kmax)
-
-    for ax in (ax1, ax2)
-        pole_band!(ax)
-    end
-    for (i, z) in enumerate(Z), ax in (ax1, ax2)
-        scatterlines!(ax, z.y, z.B; color = COLORS[2i], marker = MARKERS[i],
+    pole_band!(ax)
+    hlines!(ax, 0; color = INK2, linewidth = 1, linestyle = :dash)
+    for (i, z) in enumerate(Z)
+        scatterlines!(ax, z.y, z.B .* 1e-4 .* 1e6 ; color = COLORS[2i], marker = MARKERS[i],
                       markersize = 9, linewidth = 2, label = "0 A, " * z.label)
     end
-    axislegend(ax1; position = :rt, framevisible = false)
+    axislegend(ax; position = :rb, framevisible = false)
     fig
 end
 
@@ -323,25 +381,44 @@ savefig(fig0, "SG0_fig0_zero_current")
 
 
 # #############################################################################
-# Section 0.1 - Global half-sigmoid fit of the zero-current readings
+# Section 0.1 - Global super-Gaussian fit of the zero-current readings
 # #############################################################################
 #
-# One function for both 0 A runs: B_r = A / (1 + (y/y50)^n), the model of Section 4,
-# fitted to the pooled readings in gauss (every point weighted equally). The fit is done
-# on B itself, not on B/B(0), so no single reading sets the normalization. A is then the
-# remanent center field (G); y50 and n describe the shape and compare directly with the
-# coil-field profile of Section 5. The per-run R² and rms show how well the common curve
-# describes each day.
+# One function for every 0 A run: the super-Gaussian B_r = A exp(-(|y|/w)^p), fitted to
+# the pooled readings in gauss (every point weighted equally). The fit is done on B
+# itself, not on B/B(0), so no single reading sets the normalization. A is then the
+# remanent center field (G) and carries its sign: the magnet is not degaussed, and
+# without the yoke the remanent field is negative (about -1.9 G at y = 0) and decays to
+# 0 G. w sets the width and p the shape (p = 2: Gaussian; larger p: flatter center,
+# steeper edges). The half-width at half maximum yhalf = w (ln 2)^(1/p) compares with
+# the 50 % point of the coil-field profile of Section 5. The per-run R² and rms show
+# how well the common curve describes each run.
+#
+# Model choice (2026-11-05, 0 A run of 2026-10-30, 32 readings): nine even models were
+# compared. The half-sigmoid of Section 4, A/(1+(|y|/y50)^n), gave rms 0.062 G
+# (AICc +57.7 relative to the best); the super-Gaussian gives rms 0.027 G (AICc +4.3),
+# at the 0.029 G floor of the 0.1 G display. erf edges (+0.0) and a 4-parameter Enge
+# function (+1.1) were marginally better; Fermi, tanh, Gaussian, Pearson VII and atan
+# were worse (+10 to +73).
+#
+# The residuals are relative, (data - fit)/data in %. Readings of exactly 0 G (from
+# ~52 mm on) have no relative residual and are left out of the bottom panel; the
+# printout says how many. Fig. 0b is in mT like Fig. 0 (1 G = 0.1 mT); the fit, the
+# printout and zero_current_calib stay in gauss.
 
 # Readings of every run (markers) with the global curve (line) on top; relative residuals
-# (data - fit)/data (%) of each run below. The curve is zero_current_calib(y) over
-# -xmax..xmax (both sides of the center); the readings exist only on the y >= 0 side, so the
-# y < 0 half is the mirror image, not a measurement.
+# (data - fit)/data (%) of each run below, readings of 0 G left out. The curve is
+# zero_current_calib(y) over -xmax..xmax
+# (both sides of the center); the readings exist only on the y >= 0 side, so the y < 0
+# half is the mirror image, not a measurement. Works for A of either sign: the y range
+# runs from 0 to 1.25 A (plus a small margin past 0), and the legend sits in the corner
+# on the far side of the curve from the zero line.
 function plot_zero_current_fit(Z, G0, Gz)
     fig  = Figure(size = (900, 700))
     xmax = y_axis_max(Z)
-    ax1  = Axis(fig[1, 1]; ylabel = L"B_r\ \mathrm{(G)}", xticks = -xmax:10:xmax,
-                title = "Remanent field at 0 A: global half-sigmoid fit  B_r = A / [1 + (|y|/y₅₀)ⁿ]")
+    A    = G0.p[1] / 10                                  # center field (mT)
+    ax1  = Axis(fig[1, 1]; ylabel = L"B_r\ \mathrm{(mT)}", xticks = -xmax:10:xmax,
+                title = L"Remanent field at 0 A: global super-Gaussian fit  $B_r = A\, \exp[-(|y|/w)^{p}]$")
     ax2  = Axis(fig[2, 1]; ylabel = L"(\mathrm{data - fit})/\mathrm{data}\ (\%)",
                 xticks = -xmax:10:xmax, xlabel = XLABEL_MM)
     rowsize!(fig.layout, 2, Relative(0.3))
@@ -351,44 +428,54 @@ function plot_zero_current_fit(Z, G0, Gz)
     for ax in (ax1, ax2)
         vspan!(ax, -POLE_RADIUS_MM, POLE_RADIUS_MM; color = (:gray, 0.15))   # pole face
         vlines!(ax, 0; color = INK2, linewidth = 1)
+        hlines!(ax, 0; color = INK2, linewidth = 1, linestyle = ax === ax1 ? :dash : :solid)
     end
-    text!(ax1, -xmax + 2, 0.3; text = "mirrored (not measured)", color = INK2, fontsize = 13)
-    hlines!(ax2, 0; color = INK2, linewidth = 1)
+    text!(ax1, -xmax + 2, 0.5 * A; text = "mirrored (not measured)", color = INK2,
+          fontsize = 13, align = (:left, :center))
     xf = range(-xmax, xmax; length = 600)
-    lines!(ax1, xf, zero_current_calib(xf); color = :black, linewidth = 2,
-           label = @sprintf("A = %.2f G,  y₅₀ = %.1f mm,  n = %.2f,  R² = %.4f",
-                            G0.p[1], G0.p[2], G0.p[3], G0.r2))
+    lines!(ax1, xf, zero_current_calib(xf) ./ 10; color = :black, linewidth = 2,
+           label = @sprintf("A = %.3f mT,  w = %.1f mm,  p = %.2f,  R² = %.4f",
+                            A, G0.p[2], G0.p[3], G0.r2))
     for (i, (z, g)) in enumerate(zip(Z, Gz))
-        scatter!(ax1, z.y, z.B; color = COLORS[2i], marker = MARKERS[i], markersize = 9,
-                 label = @sprintf("0 A, %s:  rms = %.2f G", z.label, g.rms))
-        scatterlines!(ax2, z.y, 100 .* (z.B .- halfsigmoid(z.y, G0.p)) ./ z.B; color = COLORS[2i],
-                      marker = MARKERS[i], markersize = 7, linewidth = 1)
+        scatter!(ax1, z.y, z.B ./ 10; color = COLORS[2i], marker = MARKERS[i], markersize = 9,
+                 label = @sprintf("0 A, %s:  rms = %.4f mT", z.label, g.rms / 10))
+        nz = z.B .!= 0                                   # relative residual undefined at 0 G
+        scatterlines!(ax2, z.y[nz], 100 .* (z.B[nz] .- supergauss(z.y[nz], G0.p)) ./ z.B[nz];
+                      color = COLORS[2i], marker = MARKERS[i], markersize = 7, linewidth = 1)
     end
-    # upper left, above the mirrored half; the headroom (25 % above A) keeps it off the curve
-    axislegend(ax1; position = :lt, framevisible = false, labelsize = 13)
+    # The curve runs from A at the center to 0 far out, so the corner on the A side, away
+    # from the center, is empty: bottom left for A < 0, top left for A > 0. The 25 %
+    # headroom past A keeps the legend off the curve.
+    axislegend(ax1; position = A < 0 ? :lb : :lt, framevisible = false, labelsize = 13)
     xlims!(ax2, -xmax, xmax)
-    ylims!(ax1, 0, 1.25 * G0.p[1])
+    pad = 0.1 * abs(A)
+    A < 0 ? ylims!(ax1, 1.25 * A, pad) : ylims!(ax1, -pad, 1.25 * A)
     fig
 end
 
-# Bounds in gauss: A up to 100 G (the readings are ~8 G at the center)
-G0 = fit_halfsigmoid(vcat((z.y for z in Z0)...), vcat((z.B for z in Z0)...);
-                     p0 = [8.0, 30.0, 2.5], lower = [0.0, 1.0, 1.01], upper = [100.0, 200.0, 10.0])
-Gz = [goodness(z.y, z.B, G0.p) for z in Z0]
+# Bounds in gauss: A of either sign, |A| up to 100 G. The start value of A is the mean
+# of the readings within 2 mm of the center, so the fit starts on the right side of 0.
+let y = vcat((z.y for z in Z0)...), B = vcat((z.B for z in Z0)...)
+    A0 = sum(B[y .<= 2.0]) / count(y .<= 2.0)
+    global G0 = fit_supergauss(y, B; p0 = [A0, 30.0, 2.0])
+end
+Gz = [goodness(z.y, z.B, G0.p; model = supergauss) for z in Z0]
 
-# Zero-current (remanent) field B_r(y) in gauss at position y (mm), from the global fit G0.
-# Evaluated at |y|: symmetric about the center, like the coil profile (Section 6); the
-# entrance half y < 0 is the mirror image, not a measurement. Works on a number or a vector.
-zero_current_calib(y) = halfsigmoid(abs.(y), G0.p)
+# Zero-current (remanent) field B_r(y) in gauss at position y (mm), from the global fit G0,
+# with its sign (negative for this magnet without the yoke). Evaluated at |y|: symmetric
+# about the center, like the coil profile (Section 6); the entrance half y < 0 is the
+# mirror image, not a measurement. Works on a number or a vector.
+zero_current_calib(y) = supergauss(y, G0.p)
 
-println("\nSection 0.1 - global half-sigmoid fit of the zero-current readings")
-println("  B(y) = A / (1 + (|y|/y50)^n)")
-@printf("  A = %.3f ± %.3f G,  y50 = %.2f ± %.2f mm,  n = %.3f ± %.3f\n",
-        G0.p[1], G0.se[1], G0.p[2], G0.se[2], G0.p[3], G0.se[3])
+println("\nSection 0.1 - global super-Gaussian fit of the zero-current readings")
+println("  B(y) = A exp(-(|y|/w)^p)")
+@printf("  A = %.3f ± %.3f G,  w = %.2f ± %.2f mm,  p = %.3f ± %.3f;  half-width at A/2 = %.2f mm\n",
+        G0.p[1], G0.se[1], G0.p[2], G0.se[2], G0.p[3], G0.se[3], G0.yhalf)
 @printf("  pooled: R² = %.5f,  rms = %.3f G (%d points)\n",
         G0.r2, G0.rms, sum(length(z.y) for z in Z0))
 for (z, g) in zip(Z0, Gz)
-    @printf("  %s:  R² = %.5f,  rms = %.3f G\n", z.label, g.r2, g.rms)
+    @printf("  %s:  R² = %.5f,  rms = %.3f G  (%d readings of 0 G left out of the relative residuals)\n",
+            z.label, g.r2, g.rms, count(==(0), z.B))
 end
 @printf("  zero_current_calib(y):  %.2f G at 0 mm,  %.2f G at ±20 mm,  %.2f G at ±50 mm\n",
         zero_current_calib(0.0), zero_current_calib(20.0), zero_current_calib(50.0))
@@ -408,12 +495,11 @@ savefig(fig0b, "SG0_fig0b_zero_current_fit")
 # #############################################################################
 
 # Coil currents (mA) of the nonzero-current runs in the CSV header (columns
-# "B_<n>mA_<yyyymmdd>", n > 0; the 0 mA runs are Chapter 0), low to high
+# "B_G_<I>A", I > 0; the 0 A run is Chapter 0), low to high
 function profile_currents(df)
-    mA = sort(unique(parse(Int, m[1]) for name in names(df)
-                     for m in (match(r"^B_(\d+)mA_\d{8}$", name),) if m !== nothing))
+    mA = sort(unique(filter(!isnothing, column_mA.(names(df)))))
     filter!(>(0), mA)
-    isempty(mA) && error("no B_<n>mA_<date> columns with n > 0 in the data file")
+    isempty(mA) && error("no B_G_<I>A columns with I > 0 in the data file")
     mA
 end
 
@@ -550,9 +636,15 @@ end
 polyval(c, I) = sum(c[p+1] .* I .^ p for p in 0:length(c)-1)
 
 # Center-field calibration readings: (I (A), B (G)), low to high current
+# Columns I, B (A, G); the older names I_A, B_G are accepted too
 function load_calibration(file = CALIBFILE)
-    df = sort(CSV.read(file, DataFrame), :I_A)
-    (I = Float64.(df.I_A), B = Float64.(df.B_G))
+    df = CSV.read(file, DataFrame)
+    Icol = "I" in names(df) ? "I" : "I_A"
+    Bcol = "B" in names(df) ? "B" : "B_G"
+    (Icol in names(df) && Bcol in names(df)) ||
+        error("$file needs columns I, B (or I_A, B_G); found $(names(df))")
+    sort!(df, Icol)
+    (I = Float64.(df[!, Icol]), B = Float64.(df[!, Bcol]))
 end
 
 # Linear (solid) and quadratic (dashed) fit lines into `ax` over 0..Imax, labeled with
@@ -778,14 +870,29 @@ savefig(fig4, "SG0_fig4_relative_fit")
 
 
 # #############################################################################
-# Section 5 - Global half-sigmoid fit: one function for all currents
+# Section 5 - Global tanh-edge fit: one function for all currents
 # #############################################################################
 #
-# Same model as Section 4, h = A / (1 + (y/y50)^n), but a single (A, y50, n) fitted to
-# the relative intensity of all currents at once: least squares on the pooled points,
-# every reading weighted equally (so sets with more readings count more: 0.129 A has 68,
-# the others 55-56). The per-set R² and rms show how well the common curve describes
+# One profile for the relative intensity of all currents at once,
+#     h = A [tanh((y0+y)/w) + tanh((y0-y)/w)] / (2 tanh(y0/w))      (tanhedge),
+# a top hat of half-width y0 with tanh edges of width w, least squares on the pooled
+# points, every reading weighted equally (so sets with more readings count more: 0.108 A
+# has 69, the others 68). The per-set R² and rms show how well the common curve describes
 # each current.
+#
+# Model choice (2026-11-05, this DATAFILE, A fixed at 1, 273 points): of nine 2-parameter
+# profiles, tanh edges fitted best (rms 0.0102); the half-sigmoid of Section 4 gave 0.0107
+# and an L_eff of 76.9 mm, its slow y^-n tail overshooting the readings beyond ~60 mm.
+# Both leave a common wave of about ±0.015 in the residuals. A third shape parameter
+# (e.g. raising the tanh edges to a power m, rms 0.0034 at m = 0.35) removes most of it
+# but has no physical interpretation in this model, so it is not used.
+
+# Title of Fig. 5 with the fitted function (the factor A only when it is fitted)
+function global_fit_title(G)
+    amp = G.freeA ? raw"A\," : ""
+    latexstring("Global fit (all currents):  \$h = " * amp *
+                raw"[\tanh((y_0+y)/w)+\tanh((y_0-y)/w)]\,/\,[2\tanh(y_0/w)]" * "\$")
+end
 
 # Relative intensity of every current (markers) with the single global curve (line)
 function plot_global_fit(S, R, G, Gset)
@@ -793,12 +900,12 @@ function plot_global_fit(S, R, G, Gset)
     xmax = y_axis_max(S)
     ax   = Axis(fig[1, 1]; xticks = 0:10:xmax, yticks = 0:0.2:1, xlabel = XLABEL_MM,
                 ylabel = L"(B - B_r)/(B - B_r)(0)",
-                title = "Global half-sigmoid fit (all currents):  h = A / [1 + (y/y₅₀)ⁿ]")
+                title = global_fit_title(G))
     pole_band!(ax)
     hlines!(ax, 0.5; color = INK2, linewidth = 1, linestyle = :dash)
     xf = range(0, xmax; length = 300)
-    lines!(ax, xf, halfsigmoid(xf, G.p); color = :black, linewidth = 2,
-           label = @sprintf("A = %.3f,  y₅₀ = %.2f mm,  n = %.3f,  R² = %.4f",
+    lines!(ax, xf, tanhedge(xf, G.p); color = :black, linewidth = 2,
+           label = @sprintf("A = %.3f,  y₀ = %.2f mm,  w = %.2f mm,  R² = %.5f",
                             G.p[1], G.p[2], G.p[3], G.r2))
     for (i, (s, r, g)) in enumerate(zip(S, R, Gset))
         scatter!(ax, s.y, r; color = COLORS[i], marker = MARKERS[i], markersize = 9,
@@ -811,27 +918,29 @@ function plot_global_fit(S, R, G, Gset)
 end
 
 # Switch for the amplitude of the global fit:
-#   true  - A is a free parameter (fitted with y50 and n)
+#   true  - A is a free parameter (fitted with y0 and w)
 #   false - A fixed at 1: the curve is exactly 1 at y = 0, as the normalization
-#           h = B/B(0) demands; only y50 and n are fitted
+#           h = B/B(0) demands; only y0 and w are fitted
 # Everything downstream (Section 6, L_eff and the CQD fit of Chapter 3) uses this fit.
 const GLOBAL_FIT_FREE_A = false
 
-G    = fit_halfsigmoid(vcat((s.y for s in S)...), vcat(R...);
-                       A = GLOBAL_FIT_FREE_A ? nothing : 1.0)
-Gset = [goodness(s.y, r, G.p) for (s, r) in zip(S, R)]
+G    = fit_tanhedge(vcat((s.y for s in S)...), vcat(R...);
+                    A = GLOBAL_FIT_FREE_A ? nothing : 1.0)
+Gset = [goodness(s.y, r, G.p; model = tanhedge) for (s, r) in zip(S, R)]
 
-println("\nSection 5 - global half-sigmoid fit (all currents together), A ",
+println("\nSection 5 - global tanh-edge fit (all currents together), A ",
         G.freeA ? "fitted" : "fixed at 1")
-println("  h = A / (1 + (y/y50)^n)")
-@printf("  A = %.4f ± %.4f%s,  y50 = %.2f ± %.2f mm,  n = %.3f ± %.3f\n",
+println("  h = A [tanh((y0+y)/w) + tanh((y0-y)/w)] / (2 tanh(y0/w))")
+@printf("  A = %.4f ± %.4f%s,  y0 = %.2f ± %.2f mm,  w = %.2f ± %.2f mm\n",
         G.p[1], G.se[1], G.freeA ? "" : " (fixed)", G.p[2], G.se[2], G.p[3], G.se[3])
-@printf("  pooled: R² = %.5f,  rms = %.4f (%d points);  fit = 0.5 at y = %.2f mm\n",
-        G.r2, G.rms, sum(length(s.y) for s in S), G.y50pct)
-@printf("  shape vs. the remanent field at 0 A (Section 0.1):  y50 = %.2f vs. %.2f mm,  n = %.3f vs. %.3f\n",
-        G.p[2], G0.p[2], G.p[3], G0.p[3])
+@printf("  pooled: R² = %.5f,  rms = %.4f (%d points);  fit = 0.5 at y = %.2f mm;  tail decay length w/2 = %.1f mm\n",
+        G.r2, G.rms, sum(length(s.y) for s in S), G.y50pct, G.p[3] / 2)
+# Section 0.1 uses a super-Gaussian, so the shapes are compared by their half-widths
+# (where each profile falls to half its center value)
+@printf("  half-width vs. the remanent field at 0 A (Section 0.1):  %.2f vs. %.2f mm\n",
+        G.y50pct, G0.yhalf)
 for (s, g, f) in zip(S, Gset, F)
-    @printf("  %s:  R² = %.5f,  rms = %.4f   (own fit, Section 4: rms = %.4f)\n",
+    @printf("  %s:  R² = %.5f,  rms = %.4f   (own half-sigmoid fit, Section 4: rms = %.4f)\n",
             s.label, g.r2, g.rms, f.rms)
 end
 
@@ -840,17 +949,17 @@ display(figtag!(fig5, "SG0_fig5_global_fit"))
 savefig(fig5, "SG0_fig5_global_fit")
 
 # Normalized coil-field profile h(y) from the global fit G, with A = 1 (so h(0) = 1):
-#     h(y) = 1 / (1 + (|y|/y50)^n),    y in mm, y50 and n from Section 5.
+#     h(y) = tanhedge(y, [1, y0, w]),    y in mm, y0 and w from Section 5.
 # Multiplied by the center field Bc(I) it gives the coil field along the beam axis,
-# B(y, I) = Bc(I) h(y). Evaluated at |y|: symmetric about the center (Section 6); the
-# entrance half y < 0 is the mirror image, not a measurement. Works on a number or a vector.
-field_to_current_calibration(y) = halfsigmoid(abs.(y), [1.0, G.p[2], G.p[3]])
+# B(y, I) = Bc(I) h(y). Even in y: symmetric about the center (Section 6); the entrance
+# half y < 0 is the mirror image, not a measurement. Works on a number or a vector.
+field_to_current_calibration(y) = tanhedge(y, [1.0, G.p[2], G.p[3]])
 
-println("  field_to_current_calibration(y) = 1 / (1 + (|y|/y50)^n)")
-@printf("    y50 = %.2f mm,  n = %.3f  (Section 5; A set to 1)\n", G.p[2], G.p[3])
-@printf("    %.3f at 0 mm,  %.3f at ±20 mm,  %.3f at ±y50,  %.3f at ±50 mm\n",
+println("  field_to_current_calibration(y) = tanhedge(y, [1, y0, w])")
+@printf("    y0 = %.2f mm,  w = %.2f mm  (Section 5; A set to 1)\n", G.p[2], G.p[3])
+@printf("    %.3f at 0 mm,  %.3f at ±20 mm,  %.3f at ±%.2f mm (h = 0.5),  %.3f at ±50 mm\n",
         field_to_current_calibration(0.0), field_to_current_calibration(20.0),
-        field_to_current_calibration(G.p[2]), field_to_current_calibration(50.0))
+        field_to_current_calibration(G.y50pct), G.y50pct, field_to_current_calibration(50.0))
 
 
 # #############################################################################
@@ -858,15 +967,15 @@ println("  field_to_current_calibration(y) = 1 / (1 + (|y|/y50)^n)")
 # #############################################################################
 #
 # Only the exit half (y >= 0) was measured. Assuming the field is symmetric about the
-# center, the half-sigmoid evaluated at |y| gives the whole profile, entrance (y < 0)
-# and exit (y > 0). The experimental points are shown where they were taken (y >= 0);
-# the curves on the y < 0 side are the mirror image, not a measurement.
+# center, the global tanh-edge profile (even in y) gives the whole profile, entrance
+# (y < 0) and exit (y > 0). The experimental points are shown where they were taken
+# (y >= 0); the curves on the y < 0 side are the mirror image, not a measurement.
 
-# Full symmetric profile from a half-sigmoid fit
-fullprofile(y, p) = halfsigmoid(abs.(y), p)
+# Full symmetric profile from a tanh-edge fit, p = [A, y0, w] (Section 5)
+fullprofile(y, p) = tanhedge(y, p)
 
 # Full normalized SG0 field profile with the global-fit parameters of Section 5:
-#     B0_field(y) = A / (1 + (|y|/y50)^n),    y in mm, relative to the center (peak ~ 1).
+#     B0_field(y) = tanhedge(y, G.p),    y in mm, relative to the center (peak ~ 1).
 # A is fitted or fixed at 1 according to GLOBAL_FIT_FREE_A. Works on a number or a vector.
 B0_field(y) = fullprofile(y, G.p)
 
@@ -880,7 +989,7 @@ function plot_full_profile(S, R, F, G)
     xlim = 10 * ceil(1.5 * y_axis_max(S) / 10)
     ax   = Axis(fig[1, 1]; xticks = -xlim:10:xlim, yticks = 0:0.2:1, xlabel = XLABEL_MM,
                 ylabel = L"(B - B_r)/(B - B_r)(0)",
-                title = "Full field profile: global half-sigmoid fit mirrored about y = 0")
+                title = "Full field profile: global tanh-edge fit, symmetric about y = 0")
     vspan!(ax, -POLE_RADIUS_MM, POLE_RADIUS_MM; color = (:gray, 0.15))   # pole face
     hlines!(ax, 0.5; color = INK2, linewidth = 1, linestyle = :dash)
     vlines!(ax, 0; color = INK2, linewidth = 1)
@@ -894,7 +1003,7 @@ function plot_full_profile(S, R, F, G)
                  label = s.label)
     end
     lines!(ax, xf, fullprofile(xf, G.p); color = :red, linewidth = 2,
-           label = @sprintf("global fit:  y₅₀ = %.1f mm,  n = %.2f", G.p[2], G.p[3]))
+           label = @sprintf("global fit:  y₀ = %.1f mm,  w = %.1f mm", G.p[2], G.p[3]))
     axislegend(ax; position = :lt, framevisible = false, labelsize = 13)
     xlims!(ax, -xlim, xlim)
     ylims!(ax, 0, 1.05)
@@ -904,14 +1013,14 @@ end
 # Full width at half maximum of each fitted profile: twice the 0.5 crossing
 println("\nSection 6 - full profile (symmetric about y = 0)")
 for (s, f) in zip(S, F)
-    @printf("  %s fit:   FWHM = %.1f mm\n", s.label, 2 * f.y50pct)
+    @printf("  %s half-sigmoid fit (Section 4):   FWHM = %.1f mm\n", s.label, 2 * f.y50pct)
 end
-@printf("  global fit:    FWHM = %.1f mm\n", 2 * G.y50pct)
-println("  B0_field(y) = A / (1 + (|y|/y50)^n)")
-@printf("    A = %.4f%s,  y50 = %.2f mm,  n = %.3f  (Section 5)\n",
+@printf("  global tanh-edge fit (Section 5):  FWHM = %.1f mm\n", 2 * G.y50pct)
+println("  B0_field(y) = tanhedge(y, G.p)")
+@printf("    A = %.4f%s,  y0 = %.2f mm,  w = %.2f mm  (Section 5)\n",
         G.p[1], G.freeA ? "" : " (fixed)", G.p[2], G.p[3])
-@printf("    %.3f at 0 mm,  %.3f at ±20 mm,  %.3f at ±y50,  %.3f at ±50 mm\n",
-        B0_field(0.0), B0_field(20.0), B0_field(G.p[2]), B0_field(50.0))
+@printf("    %.3f at 0 mm,  %.3f at ±20 mm,  %.3f at ±%.2f mm (h = 0.5),  %.3f at ±50 mm\n",
+        B0_field(0.0), B0_field(20.0), B0_field(G.y50pct), G.y50pct, B0_field(50.0))
 
 fig6 = plot_full_profile(S, R, F, G)
 display(figtag!(fig6, "SG0_fig6_full_profile"))
@@ -1197,7 +1306,7 @@ savefig(fig9, "SG0_fig9_separation_vs_field")
 #     Dc0(I0) / Dc1 = BL0(I0) / BL1                                             [138]
 #
 # with the SG0 field from Chapter 1, B0(y, I) = Bc(I) h(y):
-# - h(y) = B(y)/B(0), the Section 5 global half-sigmoid mirrored about y = 0 (Section 6);
+# - h(y) = B(y)/B(0), the Section 5 global tanh-edge profile, even in y (Section 6);
 # - Bc(I), the center field per current: the linear CALIBFILE calibration of Section 8, or,
 #   for comparison, the slope β0 of the direct SG0 scans quoted in the note.
 # Since h >= 0, BL0(I) = |Bc(I)| L(I), with L(I) = ∫ h(y) dy over the region where the field
@@ -1918,69 +2027,85 @@ end
     h0(y) -> h
 
 Normalized SG0 field profile along the beam axis, h(y) = B0(y) / B0(0), with y in mm measured
-from the magnet center: the Section 5 global half-sigmoid (parameters `G.p`), mirrored about
-y = 0 as in Section 6:
+from the magnet center: the Section 5 global tanh-edge profile (parameters
+`G.p = [A, y0, w]`), even in y as in Section 6:
 
-    h(y) = A / (1 + (|y| / y50)^n),     A = 0.9929, y50 = 31.93 mm, n = 2.759.
+    h(y) = A [1 + cosh(2y0/w)] / [cosh(2y/w) + cosh(2y0/w)].
 
-Note that h(0) = A = 0.9929, not exactly 1 (the fit leaves a 0.7 % offset at the center).
-Used here for the numerical check of L_eff.
+h(0) = A (exactly 1 with GLOBAL_FIT_FREE_A = false). Used here for the numerical check of L_eff.
 """
 h0(y) = fullprofile(y, G.p)
 
 """
-    leff_mm(p) -> L_eff (mm)
+    leff_halfsigmoid_mm(p) -> L_eff (mm)
 
-Effective length of the SG0 field, L_eff = ∫_{-∞}^{∞} h(y) dy, in closed form for the mirrored
-half-sigmoid with parameters p = [A (relative), y50 (mm), n]:
+Effective length ∫_{-∞}^{∞} h dy in closed form for a mirrored half-sigmoid
+p = [A (relative), y50 (mm), n], the per-current fits of Section 4:
 
     L_eff = 2 A y50 (π/n) / sin(π/n)        (n > 1).
 
 Derivation: the substitution t = (y/y50)^n turns ∫_0^∞ dy / (1 + (y/y50)^n) into a Beta
 function, y50 Γ(1 + 1/n) Γ(1 - 1/n) = y50 (π/n) / sin(π/n). The factor 2 adds the mirrored
 entrance side. The integral converges only for n > 1, since the tail falls as y^-n.
-
-Caveats: about 10 % of L_eff comes from the fitted tail beyond the last Hall reading (77.47 mm),
-and the entrance half is the mirror image, not a measurement.
 """
-leff_mm(p) = 2 * p[1] * p[2] * (π / p[3]) / sin(π / p[3])
+leff_halfsigmoid_mm(p) = 2 * p[1] * p[2] * (π / p[3]) / sin(π / p[3])
+
+# log cosh x without overflow for large |x|
+logcosh(x) = abs(x) + log1p(exp(-2abs(x))) - log(2)
+
+# ∫_0^b h dy for the tanh-edge profile p = [A, y0, w], in closed form: ∫ tanh(u) du = log cosh u,
+#     ∫_0^b h dy = A w [log cosh((y0+b)/w) - log cosh((y0-b)/w)] / (2 tanh(y0/w))
+tanhedge_integral(p, b) = p[1] * p[3] * (logcosh((p[2] + b) / p[3]) - logcosh((p[2] - b) / p[3])) /
+                          (2 * tanh(p[2] / p[3]))
+
+"""
+    leff_mm(p) -> L_eff (mm)
+
+Effective length of the SG0 field, L_eff = ∫_{-∞}^{∞} h(y) dy, for the global tanh-edge
+profile p = [A, y0 (mm), w (mm)] of Section 5, in closed form:
+
+    L_eff = 2 A y0 / tanh(y0/w).
+
+Derivation: tanh((y0+y)/w) + tanh((y0-y)/w) is the difference of two unit steps 2 y0 apart
+(each going from -1 to +1), so its integral over the whole axis is 2 * 2 y0 = 4 y0; divided
+by 2 tanh(y0/w) and multiplied by A this gives the result. For w << y0 it is the top hat
+2 A y0; the tanh edges add the factor 1/tanh(y0/w).
+
+Caveats: a few percent of L_eff (about 1 mm) comes from the fitted tail beyond the last
+Hall reading (~78 mm), and the entrance half is the mirror image, not a measurement.
+"""
+leff_mm(p) = 2 * p[1] * p[2] / tanh(p[2] / p[3])
 
 L_eff  = leff_mm(G.p)                         # global fit (Section 5), mm: the value used
-L_sets = [leff_mm(f.p) for f in F]            # per-current fits (Section 4): spread, 79.2-79.9 mm
-L_num  = let y = -2000:0.05:2000              # Riemann sum of h0 over ±2 m: closed-form check
-    step(y) * sum(h0, y)                      # (short by the tail beyond ±2 m, ≈ 0.02 mm)
+L_sets = [leff_halfsigmoid_mm(f.p) for f in F]   # per-current half-sigmoid fits (Section 4): spread
+L_num  = let y = -2000:0.05:2000              # Riemann sum of h0 over ±2 m: check of the
+    step(y) * sum(h0, y)                      # closed form of leff_mm
 end
 
 """
     lcut_mm(Bc, p; Bth = N_BN * CQD_Bn) -> L (mm)
 
 Effective length of the SG0 field above a threshold: the integral of h(y) over the region
-where the field |Bc h(y)| exceeds `Bth` (T), for the mirrored half-sigmoid p = [A, y50 (mm), n]
-and center field `Bc` (T, after the divisor f). With r = Bth / |Bc|, the field crosses the
-threshold at |y| = y_c = y50 (A/r - 1)^(1/n), and
+where the field |Bc h(y)| exceeds `Bth` (T), for the global tanh-edge profile
+p = [A, y0 (mm), w (mm)] and center field `Bc` (T, after the divisor f). With r = Bth / |Bc|,
+the field crosses the threshold at |y| = y_c with h(y_c) = r, in closed form
+(profile_crossing):
 
-    L(Bc) = ∫_{-y_c}^{y_c} h dy = 2 A y50 ∫_0^{u_c} du / (1 + u^n),     u_c = y_c / y50,
+    cosh(2 y_c/w) = (A/r) [1 + cosh(2y0/w)] - cosh(2y0/w),
+
+and
+
+    L(Bc) = ∫_{-y_c}^{y_c} h dy = A w [log cosh((y0+y_c)/w) - log cosh((y0-y_c)/w)] / tanh(y0/w),
 
 so L = 0 when the peak A |Bc| is below Bth, and L -> L_eff as Bth / |Bc| -> 0 (Bth = 0: L_eff,
-for every current). The u integral is computed by Simpson's rule for u_c ≤ 2, and for u_c > 2
-as L_eff minus the tail ∫_{u_c}^∞ du / (1 + u^n) = Σ_k (-1)^k u_c^(1-(k+1)n) / ((k+1)n - 1)
-(alternating series, term ratio ≤ 2^-n).
+for every current).
 """
 function lcut_mm(Bc, p; Bth = N_BN * CQD_Bn)
-    A, y50, n = p
+    A = p[1]
     Bth <= 0 && return leff_mm(p)
     r = Bth / abs(Bc)
     r >= A && return 0.0
-    uc = (A / r - 1)^(1 / n)
-    if uc <= 2
-        m = 400                                        # Simpson intervals (even)
-        u = range(0, uc; length = m + 1)
-        g = @. 1 / (1 + u^n)
-        I_u = step(u) / 3 * (g[1] + g[end] + 4 * sum(g[2:2:end-1]) + 2 * sum(g[3:2:end-2]))
-        return 2 * A * y50 * I_u
-    end
-    tail = sum((-1)^k * uc^(1 - (k + 1) * n) / ((k + 1) * n - 1) for k in 0:60)
-    return leff_mm(p) - 2 * A * y50 * tail
+    return 2 * tanhedge_integral(p, profile_crossing(p, r))
 end
 
 """
@@ -2061,7 +2186,7 @@ println("  CQD inputs")
 @printf("    geometric DIR = y_SGToScreen / y_SG = %.4f  ->  z_max = Kz (DIR + 1/2) = %.1f µm = %.2f px\n",
         CQD.DIR_geom, 1e6 * CQD.zmax_geom, CQD.zmax_geom / CAM_PIXELSIZE)
 println("  SG0 field integral  (divisor f = ", F_DIV, F_DIV == 1 ? ": the field as measured)" : ": BL0 = measured / f)")
-@printf("    L_eff = ∫ h dy = %.2f mm    (numerical %.2f mm;  per-current fits %.1f-%.1f mm)\n",
+@printf("    L_eff = ∫ h dy = %.2f mm    (Riemann check %.2f mm;  per-current half-sigmoid fits %.1f-%.1f mm)\n",
         L_eff, L_num, extrema(L_sets)...)
 @printf("    slopes: magnetometer k = %.1f G/A,  direct scans β0 = %.1f G/A;  top hat %.0f mm\n",
         cal_lin.c[2], 1e4 * β0, L0_TOPHAT)
@@ -2173,6 +2298,42 @@ end
 fig10 = plot_cqd_fits(curves, FIELD_MODELS, cqd_results)
 display(figtag!(fig10, "SG0_fig10_cqd_fit"))
 savefig(fig10, "SG0_fig10_cqd_fit")                     # figures/SG0_fig10_cqd_fit.{pdf,png}
+
+# -----------------------------------------------------------------------------
+# Summary of Chapter 3 for the REPL: the fit with the SG0 field from the magnetometer data
+# (FIELD_MODELS[1]). The β0 models in the table above are only references for comparison.
+# Dc0 = Dc1 BL0(I) / BL1 ([138]) is quoted at 1 A and at the highest current of the data.
+# -----------------------------------------------------------------------------
+let m = FIELD_MODELS[1], r = cqd_results[1], Iall = curves[1].I
+    Imin, Imax = minimum(Iall[Iall .> 0]), maximum(Iall)
+    bar = "═"^74
+    hdr(s)                    = printstyled(s, "\n"; color = :cyan, bold = true)
+    row(k, v; c = :light_green) = (printstyled("  ", rpad(k, 24); color = :light_black);
+                                   printstyled(v, "\n"; color = c, bold = true))
+    println()
+    hdr(bar)
+    hdr("  CHAPTER 3 SUMMARY - CQD fit, SG0 field from the magnetometer data")
+    hdr(@sprintf("  (Bc = %.1f G/A × I / f,  f = %g;  DIR_MODE = :%s;  N_BN = %g)",
+                 cal_lin.c[2], F_DIV, DIR_MODE, N_BN))
+    hdr(bar)
+    row("k_i", @sprintf("%.4g    (Δχ² = 1: %.4g - %.4g)", r.ki, r.ki_lo, r.ki_hi))
+    row("Dc1   (SG1 dose)", @sprintf("%.5f", r.Dc1) *
+                            (r.Dc1_at_edge ? "    WARNING: at the edge of the scan" : "");
+        c = r.Dc1_at_edge ? :light_red : :light_green)
+    row("Dc0   (SG0 dose)", @sprintf("%.5f at 1 A,   %.5f at %.3f A (max)",
+                                     r.Dc1 * m.BL0(1.0) / CQD.BL1, r.Dc0_max, Imax))
+    row("DIR", @sprintf("%.4f    (%s)", r.DIR,
+                        DIR_MODE === :geom ? "fixed at the geometric value" : "solved from the baseline"))
+    row("κ", @sprintf("%.4f ± %.4f", r.p, r.p_err))
+    row("L_eff (SG0)", N_BN == 0 ? @sprintf("%.2f mm", L_eff) :
+                       @sprintf("%.2f mm without threshold;  L(I) = %.2f-%.2f mm (%.3f-%.3f A)",
+                                L_eff, leff_of(m.BL0, m.Bc, Imin), leff_of(m.BL0, m.Bc, Imax), Imin, Imax))
+    row("BL0 per ampere (SG0)", @sprintf("%.4e T m/A    (BL1 = %.4e T m)", m.BL0(1.0), CQD.BL1))
+    row("χ² parallel", @sprintf("%.2f / %d", r.chi2_par, r.n_par); c = :yellow)
+    row("χ² antiparallel", @sprintf("%.2f / %d    (pure CQD, w = 0: %.1f)",
+                                    r.chi2_anti, r.n_anti, r.chi2_anti_pure); c = :yellow)
+    hdr(bar)
+end
 
 
 # =============================================================================
@@ -2449,6 +2610,56 @@ fig11 = plot_BL0_from_data(sfit4, g4, Dc1_4, aw4, curves)
 display(figtag!(fig11, "SG0_fig11_BL0_from_data"))
 savefig(fig11, "SG0_fig11_BL0_from_data")              # figures/SG0_fig11_BL0_from_data.{pdf,png}
 
+# -----------------------------------------------------------------------------
+# Summary of Chapter 4 for the REPL: k_i given (C4_KI), BL0(I) = s BL0_mag(I; N, f) fitted to
+# the parallel set, then κ to the antiparallel set. Dc0 = k_i |γe| s BL0_mag / v_a and the
+# implied effective length L = s BL0_mag / |Bc| (Bc after f) are quoted at 1 A and at the
+# highest current of the parallel data.
+# -----------------------------------------------------------------------------
+let Imax = maximum(par4.I)
+    bar = "═"^74
+    hdr(s)                    = printstyled(s, "\n"; color = :cyan, bold = true)
+    row(k, v; c = :light_green) = (printstyled("  ", rpad(k, 24); color = :light_black);
+                                   printstyled(v, "\n"; color = c, bold = true))
+    Bc(I)   = 1e-4 * cal_lin.c[2] * I / C4_F_DIV        # center field after f (T)
+    println()
+    hdr(bar)
+    hdr("  CHAPTER 4 SUMMARY - SG0 field integral fitted to the separations, k_i given")
+    hdr(@sprintf("  (BL0 = s BL0_mag(I; N, f),  N = %g,  f = %g;  DIR_MODE = :%s)",
+                 C4_N_BN, C4_F_DIV, DIR_MODE))
+    hdr(bar)
+    row("k_i   (given)", @sprintf("%.4g", C4_KI); c = :white)
+    row("Dc1   (SG1 dose)", @sprintf("%.5f", Dc1_4))
+    row("DIR", @sprintf("%.4f    (%s)", DIR4, DIR_MODE === :geom ? "fixed at the geometric value" :
+                                               "solved from the baseline at this Dc1"))
+    if sfit4 === nothing
+        row("s", "global fit skipped: model BL0 = 0 at every current (threshold too high)";
+            c = :light_red)
+    else
+        s = sfit4.s
+        row("s     (BL0 scale)", @sprintf("%.4f    (Δχ² = 1: %.4f - %.4f)", s, sfit4.s_lo, sfit4.s_hi) *
+                                 (sfit4.at_edge ? "    WARNING: at the edge of the scan" : "");
+            c = sfit4.at_edge ? :light_red : :light_green)
+        row("BL0 per ampere (SG0)", @sprintf("%.4e T m/A    (magnetometer: %.4e T m/A)",
+                                             s * BL0_mag(1.0; N = 0), BL0_mag(1.0; N = 0)))
+        row("Dc0   (SG0 dose)", @sprintf("%.5f at 1 A,   %.5f at %.3f A (max)",
+                                         dose_from_ki(C4_KI, s * BL0_mag(1.0)),
+                                         dose_from_ki(C4_KI, s * BL0_mag(Imax)), Imax))
+        Lf(I) = 1e3 * s * BL0_mag(I) / abs(Bc(I))         # implied effective length (mm)
+        # not fitted: the magnetometer length scaled by the fitted s (L = s BL0_mag / |Bc|)
+        row("s × L_eff (SG0)", C4_N_BN == 0 ?
+                @sprintf("%.2f mm = s × %.2f mm    (derived from s, not fitted)", Lf(1.0), L_eff) :
+                @sprintf("%.2f mm at 1 A,   %.2f mm at %.3f A    (s × L(I) with the cut; derived from s, not fitted)",
+                         Lf(1.0), Lf(Imax), Imax))
+        row("κ", @sprintf("%.4f ± %.4f", aw4.p, aw4.p_err))
+        row("χ² parallel", @sprintf("%.2f / %d    (s = 1, magnetometer BL0: %.2f)",
+                                    sfit4.chi2, length(par4.I), sfit4.chi2_s1); c = :yellow)
+        row("χ² antiparallel", @sprintf("%.2f / %d    (pure CQD, w = 0: %.1f)",
+                                        aw4.chi2, aw4.n, aw4.chi2_pure); c = :yellow)
+    end
+    hdr(bar)
+end
+
 
 # =============================================================================
 # CHAPTER 5 - SG0 effective length from the separation data
@@ -2672,6 +2883,68 @@ end
 fig12 = plot_length_from_data(lfit5, jfit5, g5, Dc1_5, aw5, aw5j, curves)
 display(figtag!(fig12, "SG0_fig12_length_from_data"))
 savefig(fig12, "SG0_fig12_length_from_data")          # figures/SG0_fig12_length_from_data.{pdf,png}
+
+# -----------------------------------------------------------------------------
+# Summary of Chapter 5 for the REPL: the two fits of Section 11, with Bc from the magnetometer
+# and SG0 a top hat of length ℓ. (A) k_i given (C5_KI): ℓ fitted to the parallel set, then κ.
+# (B) k_i and ℓ fitted jointly to the parallel set, then κ. Fitted values in green, given
+# inputs in white, values derived from them in gray-blue. Dc0 = Dc1 ℓ BL0_per_mm / BL1 is
+# quoted at 1 A and at the highest current of the parallel data.
+# -----------------------------------------------------------------------------
+let Imax = maximum(par5.I)
+    bar = "═"^74
+    hdr(s)                    = printstyled(s, "\n"; color = :cyan, bold = true)
+    sub(s)                    = printstyled(s, "\n"; color = :magenta, bold = true)
+    row(k, v; c = :light_green) = (printstyled("  ", rpad(k, 24); color = :light_black);
+                                   printstyled(v, "\n"; color = c, bold = true))
+    der = :light_blue                                     # derived, not fitted
+    # Δχ² = 1 interval; an unbracketed side (NaN) is shown as a one-sided bound
+    ival(lo, hi, fmt) = isnan(lo) && isnan(hi) ? "not bracketed" :
+                        isnan(lo) ? "< " * fmt(hi) : isnan(hi) ? "> " * fmt(lo) : fmt(lo) * " - " * fmt(hi)
+    e4(x) = @sprintf("%.4g", x); f2(x) = @sprintf("%.2f", x)
+    dose0(Dc1, ℓ, I) = Dc1 * ℓ * BL0_per_mm(I) / CQD.BL1
+    dirnote = DIR_MODE === :geom ? "fixed at the geometric value" : "solved from the baseline at this Dc1"
+    println()
+    hdr(bar)
+    hdr("  CHAPTER 5 SUMMARY - SG0 length ℓ fitted to the separations (top hat)")
+    hdr(@sprintf("  (BL0 = |Bc| ℓ,  Bc = %.1f G/A × I / f,  f = %g,  N = %g;  DIR_MODE = :%s)",
+                 cal_lin.c[2], C5_F_DIV, C5_N_BN, DIR_MODE))
+    hdr(bar)
+    if lfit5 === nothing
+        row("fits", "skipped: SG0 is below the threshold at every data current"; c = :light_red)
+    else
+        sub("  (A) k_i given, ℓ fitted")
+        row("k_i   (given)", e4(C5_KI); c = :white)
+        row("Dc1   (SG1 dose)", @sprintf("%.5f", Dc1_5); c = der)
+        row("DIR", @sprintf("%.4f    (%s)", DIR5, dirnote); c = der)
+        row("ℓ     (SG0 length)", @sprintf("%.2f mm    (Δχ² = 1: %s)", lfit5.s, ival(lfit5.s_lo, lfit5.s_hi, f2)) *
+                                  (lfit5.at_edge ? "    WARNING: at the edge of the scan" : "");
+            c = lfit5.at_edge ? :light_red : :light_green)
+        row("Dc0   (SG0 dose)", @sprintf("%.5f at 1 A,   %.5f at %.3f A (max)",
+                                         dose0(Dc1_5, lfit5.s, 1.0), dose0(Dc1_5, lfit5.s, Imax), Imax); c = der)
+        row("κ", @sprintf("%.4f ± %.4f", aw5.p, aw5.p_err))
+        row("χ² parallel", @sprintf("%.2f / %d    (ℓ = L_eff = %.2f mm: %.2f)", lfit5.chi2, length(par5.I), L_eff,
+                                    chi2(g5.(L_eff .* Dc1_5 .* BLmm5 ./ CQD.BL1), par5.y, par5.yerror)); c = :yellow)
+        row("χ² antiparallel", @sprintf("%.2f / %d    (pure CQD, w = 0: %.1f)", aw5.chi2, aw5.n, aw5.chi2_pure); c = :yellow)
+
+        sub("  (B) k_i and ℓ fitted jointly")
+        row("k_i", @sprintf("%.4g    (Δχ² = 1: %s)", jfit5.ki, ival(jfit5.ki_lo, jfit5.ki_hi, e4)) *
+                   (jfit5.at_edge ? "    WARNING: Dc1 at the edge of the scan" : "");
+            c = jfit5.at_edge ? :light_red : :light_green)
+        row("Dc1   (SG1 dose)", @sprintf("%.5f", jfit5.Dc1); c = der)
+        row("DIR", @sprintf("%.4f    (%s)", jfit5.DIR, dirnote); c = der)
+        row("ℓ     (SG0 length)", @sprintf("%.2f mm    (Δχ² = 1 at the best k_i: %s)",
+                                           jfit5.ℓ, ival(jfit5.ℓ_lo, jfit5.ℓ_hi, f2)))
+        row("k_i ℓ", @sprintf("%.4e mm    (the product the doses fix)", jfit5.kl); c = der)
+        row("Dc0   (SG0 dose)", @sprintf("%.5f at 1 A,   %.5f at %.3f A (max)",
+                                         dose0(jfit5.Dc1, jfit5.ℓ, 1.0), dose0(jfit5.Dc1, jfit5.ℓ, Imax), Imax); c = der)
+        row("κ", @sprintf("%.4f ± %.4f", aw5j.p, aw5j.p_err))
+        row("χ² parallel", @sprintf("%.2f / %d", jfit5.chi2, length(par5.I)); c = :yellow)
+        row("χ² antiparallel", @sprintf("%.2f / %d    (pure CQD, w = 0: %.1f)", aw5j.chi2, aw5j.n, aw5j.chi2_pure); c = :yellow)
+        row("L_eff (profile, Ch. 3)", @sprintf("%.2f mm    (magnetometer profile, for comparison with ℓ)", L_eff); c = :white)
+    end
+    hdr(bar)
+end
 
 println("\nFigures written to ", abspath(FIGDIR))
 
