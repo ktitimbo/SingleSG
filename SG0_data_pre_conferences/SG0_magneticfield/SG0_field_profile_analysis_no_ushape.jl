@@ -87,23 +87,23 @@
 # Field falls to 50 % of B(0) at y ~ 30.5 mm (0.443 A and 0.963 A).
 # The remanent field depends on the direction of the last current applied.
 #
-# ---------- Output ----------
+# ---------- Output ----------  (FIGDIR = figures/without_ushape)
 #
-#   figures/SG0_fig0_zero_current.{pdf,png}         Section 0
-#   figures/SG0_fig0b_zero_current_fit.{pdf,png}    Section 0.1
-#   figures/SG0_fig1_raw.{pdf,png}                  Section 1
-#   figures/SG0_fig1b_raw_minus_zero_current.{pdf,png} Section 1
-#   figures/SG0_fig2_center_vs_current.{pdf,png}    Section 2
-#   figures/SG0_fig3_relative.{pdf,png}             Section 3
-#   figures/SG0_fig4_relative_fit.{pdf,png}         Section 4
-#   figures/SG0_fig5_global_fit.{pdf,png}           Section 5
-#   figures/SG0_fig6_full_profile.{pdf,png}         Section 6
-#   figures/SG0_fig7_separation_vs_current.{pdf,png} Section 7
-#   figures/SG0_fig8_calibrations.{pdf,png}          Section 8
-#   figures/SG0_fig9_separation_vs_field.{pdf,png}   Section 8
-#   figures/SG0_fig10_cqd_fit.{pdf,png}              Section 9
-#   figures/SG0_fig11_BL0_from_data.{pdf,png}        Section 10
-#   figures/SG0_fig12_length_from_data.{pdf,png}     Section 11
+#   figures/without_ushape/SG0_fig0_zero_current.{pdf,png}         Section 0
+#   figures/without_ushape/SG0_fig0b_zero_current_fit.{pdf,png}    Section 0.1
+#   figures/without_ushape/SG0_fig1_raw.{pdf,png}                  Section 1
+#   figures/without_ushape/SG0_fig1b_raw_minus_zero_current.{pdf,png} Section 1
+#   figures/without_ushape/SG0_fig2_center_vs_current.{pdf,png}    Section 2
+#   figures/without_ushape/SG0_fig3_relative.{pdf,png}             Section 3
+#   figures/without_ushape/SG0_fig4_relative_fit.{pdf,png}         Section 4
+#   figures/without_ushape/SG0_fig5_global_fit.{pdf,png}           Section 5
+#   figures/without_ushape/SG0_fig6_full_profile.{pdf,png}         Section 6
+#   figures/without_ushape/SG0_fig7_separation_vs_current.{pdf,png} Section 7
+#   figures/without_ushape/SG0_fig8_calibrations.{pdf,png}          Section 8
+#   figures/without_ushape/SG0_fig9_separation_vs_field.{pdf,png}   Section 8
+#   figures/without_ushape/SG0_fig10_cqd_fit.{pdf,png}              Section 9
+#   figures/without_ushape/SG0_fig11_BL0_from_data.{pdf,png}        Section 10
+#   figures/without_ushape/SG0_fig12_length_from_data.{pdf,png}     Section 11
 #
 # Packages: ] add CSV DataFrames CairoMakie LaTeXStrings LsqFit PrettyTables
 using CSV, DataFrames, CairoMakie
@@ -143,7 +143,7 @@ CQD_Bn = 11.88e-6 # Teslas
 const DATAFILE  = "SG0_raw_data_noushape_2026-10-30.csv"
 const CALIBFILE = "SG0_calibration_center_noushape_BI_2026-10-30.csv"
 const SEPFILE   = "spin_resolved_sep_20260706.csv"      # Chapter 2
-const FIGDIR    = "figures"
+const FIGDIR    = joinpath("figures", "without_ushape")  # figures of this script
 
 # SG0 field divisor f of the CQD fit (Chapter 3): the SG0 field integral is BL0(I) / f, as in
 # the NY script and the fit note (f = 1: the measured field as is; f = 7: Revision F, the
@@ -2297,7 +2297,7 @@ end
 
 fig10 = plot_cqd_fits(curves, FIELD_MODELS, cqd_results)
 display(figtag!(fig10, "SG0_fig10_cqd_fit"))
-savefig(fig10, "SG0_fig10_cqd_fit")                     # figures/SG0_fig10_cqd_fit.{pdf,png}
+savefig(fig10, "SG0_fig10_cqd_fit")                     # figures/without_ushape/SG0_fig10_cqd_fit.{pdf,png}
 
 # -----------------------------------------------------------------------------
 # Summary of Chapter 3 for the REPL: the fit with the SG0 field from the magnetometer data
@@ -2608,7 +2608,7 @@ end
 
 fig11 = plot_BL0_from_data(sfit4, g4, Dc1_4, aw4, curves)
 display(figtag!(fig11, "SG0_fig11_BL0_from_data"))
-savefig(fig11, "SG0_fig11_BL0_from_data")              # figures/SG0_fig11_BL0_from_data.{pdf,png}
+savefig(fig11, "SG0_fig11_BL0_from_data")              # figures/without_ushape/SG0_fig11_BL0_from_data.{pdf,png}
 
 # -----------------------------------------------------------------------------
 # Summary of Chapter 4 for the REPL: k_i given (C4_KI), BL0(I) = s BL0_mag(I; N, f) fitted to
@@ -2882,7 +2882,7 @@ end
 
 fig12 = plot_length_from_data(lfit5, jfit5, g5, Dc1_5, aw5, aw5j, curves)
 display(figtag!(fig12, "SG0_fig12_length_from_data"))
-savefig(fig12, "SG0_fig12_length_from_data")          # figures/SG0_fig12_length_from_data.{pdf,png}
+savefig(fig12, "SG0_fig12_length_from_data")          # figures/without_ushape/SG0_fig12_length_from_data.{pdf,png}
 
 # -----------------------------------------------------------------------------
 # Summary of Chapter 5 for the REPL: the two fits of Section 11, with Bc from the magnetometer
