@@ -778,6 +778,104 @@ function tree_jld(path::AbstractString; maxdepth::Int=typemax(Int))
 end
 
 
+"""
+    list_keys_jld_peaks(path; show_values=true,
+                        order=("meta", "settings", "framewise", "meanprofile"))
+        -> OrderedDict{String,Vector{String}}
+
+Print every key of a peak-results file written by `save_peak_results`
+(`SG0_pattern_widths.jl`, `peaks_nz<nz>_<stamp>.jld2`), grouped by top-level
+group in the order `meta`, `settings`, `framewise`, `meanprofile`. Any other
+top-level group found in the file is listed after those; an expected group
+that is missing is reported as such.
+
+Inside a group, keys are listed in the order they were written, with a small
+sub-header for each subgroup (`StartPosition/`, `PerFrame/`, `Profile/`).
+With `show_values=true` each key is followed by a short description:
+
+* scalars and strings → their value;
+* real vectors        → `Vector{T}(n)` and the first/last values;
+* other arrays        → type and size;
+* dictionaries        → their `key => value` pairs (e.g. `meta/Units`).
+
+Returns the full key paths per group, e.g.
+`grouped["framewise"] == ["framewise/F1_mm", …, "framewise/StartPosition/F1_mm", …]`,
+which can be used directly as `jldopen(path)[key]` or `load(path)[key]`.
+
+# Example
+```julia
+keys_by_group = JLD2_MyTools.list_keys_jld_peaks(peaks_file)
+keys_by_group["meanprofile"]
+```
+"""
+function list_keys_jld_peaks(path::AbstractString; show_values::Bool = true,
+                             order = ("meta", "settings", "framewise", "meanprofile"))
+    isfile(path) || error("File not found: $path")
+
+    _fmt(x::Bool) = string(x)
+    _fmt(x::Real) = @sprintf("%.6g", x)
+    _fmt(x)       = repr(x)
+
+    function _describe(v)
+        if v isa AbstractVector{<:Real} && !(v isa AbstractVector{Bool})
+            n    = length(v)
+            body = n ≤ 6 ? join(_fmt.(v), ", ") :
+                   join(_fmt.(v[1:3]), ", ") * ", …, " * join(_fmt.(v[end-1:end]), ", ")
+            return "Vector{$(eltype(v))}($n)  [$body]"
+        elseif v isa AbstractArray
+            return "$(typeof(v))  size = $(size(v))"
+        elseif v isa AbstractDict
+            return join(("$k => $(v[k])" for k in keys(v)), ",  ")
+        else
+            return _fmt(v)
+        end
+    end
+
+    # Flatten a group into (relative key, value) pairs, keeping write order
+    function _collect!(out, g, prefix)
+        for k in keys(g)
+            obj = g[k]
+            obj isa JLD2.Group ? _collect!(out, obj, prefix * k * "/") :
+                                 push!(out, (prefix * k, obj))
+        end
+        return out
+    end
+
+    grouped = OrderedDict{String,Vector{String}}()
+
+    jldopen(path, "r") do file
+        top    = collect(keys(file))
+        groups = vcat([g for g in order if g in top], [g for g in top if g ∉ order])
+
+        println("\nJLD2 file: ", path)
+        for g in order
+            g in top || println("  (expected group `$g` not found)")
+        end
+
+        for g in groups
+            node  = file[g]
+            items = node isa JLD2.Group ? _collect!(Tuple{String,Any}[], node, "") :
+                                          Tuple{String,Any}[("", node)]
+            grouped[g] = [isempty(k) ? g : "$g/$k" for (k, _) in items]
+
+            println("\n", "="^14, " ", uppercase(g), "  (", length(items), " keys) ", "="^14)
+            w    = maximum((length(k) for (k, _) in items); init = 0) + 2
+            prev = ""
+            for (k, v) in items
+                sub = occursin('/', k) ? rsplit(k, '/'; limit = 2)[1] * "/" : ""
+                if sub != prev && !isempty(sub)
+                    println("  ── ", sub)
+                end
+                prev = sub
+                show_values ? println("  ", rpad(k, w), _describe(v)) : println("  ", k)
+            end
+        end
+        println()
+    end
+
+    return grouped
+end
+
 
 function save_script_copy(outdir::AbstractString;
                          script_path::Union{Nothing,String}=nothing,
