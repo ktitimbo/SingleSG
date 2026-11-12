@@ -2007,6 +2007,42 @@ function sweep_systematics(inspection::AbstractDict;
                             table_border            = crayon"blue bold"),
     )
 
+    # ── Legend ───────────────────────────────────────────────────────────────
+    per_rep  = any(d -> hasproperty(inspection[production][d], :blurrGwidth_um_sem), dirs)
+    pz, pλ   = production
+    legend = [
+        ("nz=…, λ₀=…",
+         "one sweep point: z-binning factor nz and spline smoothing λ₀ used upstream; " *
+         "the cell is σ_w fitted with that preprocessing [μm]"),
+        ("production (★)",
+         "σ_w at the reference preprocessing nz=$pz, λ₀=$pλ — the central value that is quoted [μm]"),
+        ("single shot" * (per_rep ? "" : "  ◀ this table"),
+         "`run_analysis`: per date, ONE zero-current profile (the closest row) is fitted; " *
+         "no repeat-to-repeat information, so per-date stat = NaN"),
+        ("per repetition" * (per_rep ? "  ◀ this table" : ""),
+         "`run_analysis_per_repetition`: per date, EVERY repeat at the zero current is fitted " *
+         "separately and σ_w is their mean"),
+        ("stat",
+         "statistical error at the production point [μm]. Date rows: SEM across repeats, " *
+         "std/√n_repeats (per repetition only; NaN for single shot or a single repeat). " *
+         "'all dates (mean)' row: between-date standard error, std(dates)/√n_dates"),
+        ("sys (std)",
+         "spread of σ_w over all sweep points: sample std across the nz × λ₀ grid [μm] — " *
+         "a typical preprocessing sensitivity"),
+        ("sys (max|Δ|)",
+         "max |σ_w(sweep point) − σ_w(production)| [μm] — worst-case preprocessing shift; " *
+         "the conservative value quoted as 'sys'"),
+        ("all dates (mean)",
+         "σ_w averaged over the dates at each sweep point; production/sys computed on that mean"),
+    ]
+    wkey = maximum(length ∘ first, legend)
+    printstyled("Legend:\n"; color = :cyan, bold = true)
+    for (k, v) in legend
+        printstyled("  ", rpad(k, wkey), "  "; color = :yellow)
+        println(v)
+    end
+    println()
+
     s = summary["all dates (mean)"]
     @info "σ_w (all dates, $label) = $(round(s.production; digits=1)) ± $(round(s.stat; digits=1)) (stat) ± $(round(s.sys_maxdev; digits=1)) (sys) μm"
 
