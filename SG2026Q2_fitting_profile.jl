@@ -253,7 +253,7 @@ const WANTED_SMOOTH   = 0.01
 # Parameter combinations to inspect. All combinations are evaluated and shown,
 # but files are written only for WANTED_ZBINNING and WANTED_SMOOTH.
 const ZBINNING_LIST = [1, 2]
-const SMOOTH_LIST   = [0.001, 0.01, 0.02]
+const SMOOTH_LIST   = [0.001, 0.01]
 
 # Polynomial background degree
 const P_DEGREE   = 5
@@ -275,6 +275,7 @@ const DIR_LIST = [
     "20260902",
     "20260903",
     "20261105",
+    "20261111",
 ]
 
 # ── PrettyTables header construction ──────────────────────────────────────────
@@ -367,7 +368,7 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
             Δz =  (data[:mean_F2_peak_pos_raw] .- data[:mean_F1_peak_pos_raw]);
 
             pretty_table(
-                hcat(Ic, Δz)[1:20, :];
+                hcat(Ic, Δz)[1:min(20, length(Ic)), :];   # first ≤20 rows; avoids BoundsError on short datasets
                 column_labels   = ["Ic [A]", "Δz [mm]"],
                 title           = "PEAK SEPARATION DIAGNOSTICS",
                 formatters      = [fmt__printf("%+.4f",[1]), fmt__printf("%+.3f",[2])],
@@ -570,8 +571,10 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
         )
 
         # Store results for downstream analysis
+        # Store the current of the row actually fitted (not row 1): the
+        # deconvolution loop rebuilds the theory PDF from this value.
         results[wanted_data_dir] = (
-            Ic_sampled[1],
+            Ic_sampled[only(chosen_currents_idx)],
             [A_fit, w_fit],
             c_poly_coeffs[1],
             hcat(z_theory, exp_list[1], model_on_z[1]),
@@ -602,7 +605,7 @@ function run_analysis(wanted_zbinning::Integer, wanted_smooth::Real; save_result
     # ==============================================================================
 
     for dir_chosen in DIR_LIST
-        @info "Processing dataset: $dir_chosen"
+        @info "\e[1;94mPROCESSING DATASET:\e[0m \e[1;93m$dir_chosen\e[0m"
 
         data       = results[dir_chosen]
         p_baseline = Polynomial(data[3])   # background polynomial P_n(z)
@@ -1119,7 +1122,7 @@ function run_analysis_per_repetition(wanted_zbinning::Integer, wanted_smooth::Re
             Δz =  (data[:mean_F2_peak_pos_raw] .- data[:mean_F1_peak_pos_raw]);
 
             pretty_table(
-                hcat(Ic, Δz)[1:20, :];
+                hcat(Ic, Δz)[1:min(20, length(Ic)), :];   # first ≤20 rows; avoids BoundsError on short datasets
                 column_labels   = ["Ic [A]", "Δz [mm]"],
                 title           = "PEAK SEPARATION DIAGNOSTICS",
                 formatters      = [fmt__printf("%+.4f",[1]), fmt__printf("%+.3f",[2])],
@@ -1387,7 +1390,7 @@ function run_analysis_per_repetition(wanted_zbinning::Integer, wanted_smooth::Re
     # ==============================================================================
 
     for dir_chosen in DIR_LIST
-        @info "Processing dataset: $dir_chosen"
+        @info "\e[1;94mPROCESSING DATASET:\e[0m \e[1;93m$dir_chosen\e[0m"
 
         data = results[dir_chosen]
         rl_dim = length(data[1])
@@ -1917,6 +1920,116 @@ end # parameter sweep
 @info "Parameter sweep complete" combinations=length(inspection_results_per_repetition) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
 
 
+# ==============================================================================
+# PREPROCESSING SYSTEMATIC FROM THE SWEEP
+# ==============================================================================
+"""
+    sweep_systematics(inspection; production, label, save=true, file_suffix="") -> summary
+
+Turn a parameter sweep (`inspection_results` or
+`inspection_results_per_repetition`) into a preprocessing systematic on the
+Gaussian blur width σ_w, so a result can be quoted as
+
+    σ_w = σ_w(production) ± stat ± sys
+
+For every directory, and for the mean over all directories (the quantity
+`SG2026Q2_experiment_summary.jl` uses as its σw target):
+- `sigma_um`   — σ_w at each sweep point (nz, λ₀), in sweep order [μm]
+- `production` — σ_w at the `production` sweep point [μm]
+- `stat`       — statistical error at the production point [μm]:
+                 per directory, `blurrGwidth_um_sem` when the sweep comes from
+                 `run_analysis_per_repetition` (`NaN` otherwise, or when a
+                 directory has a single repeat); for the all-dates row, the
+                 between-date standard error std(dates)/√n_dates
+- `sys_std`    — std of σ_w across sweep points [μm]
+- `sys_maxdev` — max |σ_w(p) − σ_w(production)| over sweep points [μm]; the
+                 conservative value, and the one quoted as `sys`
+
+The table is printed; with `save=true` the summary is also written to
+`OUTDIR/sweep_systematics_P$(P_DEGREE)<file_suffix>.jld2`.
+"""
+function sweep_systematics(inspection::AbstractDict;
+                           production::Tuple = (WANTED_ZBINNING, WANTED_SMOOTH),
+                           label::AbstractString = "",
+                           save::Bool = true,
+                           file_suffix::AbstractString = "")
+    sweep_keys = collect(keys(inspection))
+    haskey(inspection, production) ||
+        error("Production point $production is not part of the sweep $sweep_keys")
+    ip   = findfirst(==(production), sweep_keys)
+    dirs = collect(keys(inspection[production]))
+
+    # σ_w matrix: one row per directory, one column per sweep point [μm]
+    σ = [Float64(inspection[k][d].blurrGwidth_um) for d in dirs, k in sweep_keys]
+
+    # Statistical error at the production point (only per-repetition results carry a SEM)
+    stat_dir = [let nt = inspection[production][d]
+                    hasproperty(nt, :blurrGwidth_um_sem) ? Float64(nt.blurrGwidth_um_sem) : NaN
+                end for d in dirs]
+
+    # All-dates row: mean over directories at each sweep point
+    σ_all    = vec(mean(σ; dims = 1))
+    n_dates  = length(dirs)
+    stat_all = n_dates > 1 ? std(σ[:, ip]) / sqrt(n_dates) : NaN
+
+    row_stats(v, stat) = (sigma_um   = v,
+                          production = v[ip],
+                          stat       = stat,
+                          sys_std    = length(v) > 1 ? std(v) : NaN,
+                          sys_maxdev = maximum(abs.(v .- v[ip])))
+
+    summary = OrderedDict{String, NamedTuple}()
+    for (r, d) in enumerate(dirs)
+        summary[string(d)] = row_stats(σ[r, :], stat_dir[r])
+    end
+    summary["all dates (mean)"] = row_stats(σ_all, stat_all)
+
+    # ── Table ────────────────────────────────────────────────────────────────
+    np = length(sweep_keys)
+    table = reduce(vcat, [permutedims(vcat(s.sigma_um, s.production, s.stat, s.sys_std, s.sys_maxdev))
+                          for s in values(summary)])
+    sweep_labels = [(k == production ? "★ " : "") * "nz=$(k[1]), λ₀=$(k[2])" for k in sweep_keys]
+
+    pretty_table(
+        table;
+        title          = "BLUR WIDTH σ_w [μm] ACROSS PREPROCESSING SWEEP $(label)  (★ = production)",
+        column_labels  = vcat(sweep_labels, ["production", "stat", "sys (std)", "sys (max|Δ|)"]),
+        row_labels     = collect(keys(summary)),
+        stubhead_label = "Date",
+        formatters     = [fmt__printf("%.1f", 1:(np + 1)), fmt__printf("%.2f", (np + 2):(np + 4))],
+        alignment      = :c,
+        fit_table_in_display_horizontally = false,   # one column per sweep point: don't truncate
+        table_format   = TextTableFormat(borders = text_table_borders__unicode_rounded),
+        style          = TextTableStyle(
+                            title                   = crayon"cyan bold",
+                            first_line_column_label = crayon"yellow bold",
+                            column_label            = crayon"yellow",
+                            table_border            = crayon"blue bold"),
+    )
+
+    s = summary["all dates (mean)"]
+    @info "σ_w (all dates, $label) = $(round(s.production; digits=1)) ± $(round(s.stat; digits=1)) (stat) ± $(round(s.sys_maxdev; digits=1)) (sys) μm"
+
+    if save
+        jldopen(joinpath(OUTDIR, "sweep_systematics_P$(P_DEGREE)$(file_suffix).jld2"), "w") do f
+            f["summary"]          = summary
+            f["meta/sweep_keys"]  = sweep_keys
+            f["meta/production"]  = production
+            f["meta/dirs"]        = string.(dirs)
+            f["meta/Pdegree"]     = P_DEGREE
+            f["meta/sys_measure"] = "max |σ_w(p) − σ_w(production)| over sweep points"
+        end
+    end
+
+    return summary
+end
+
+sweep_sys_single         = sweep_systematics(inspection_results;
+                                             label = "(single shot)")
+sweep_sys_per_repetition = sweep_systematics(inspection_results_per_repetition;
+                                             label = "(per repetition)", file_suffix = "_per_repetition")
+
+
 
 
 
@@ -2226,7 +2339,7 @@ end # parameter sweep
 # # ==============================================================================
 
 # for dir_chosen in DIR_LIST
-#     @info "Processing dataset: $dir_chosen"
+#     @info "PROCESSING DATASET: $dir_chosen"
 
 #     data       = results[dir_chosen]
 #     p_baseline = Polynomial(data[3])   # background polynomial P_n(z)
