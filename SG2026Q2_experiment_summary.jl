@@ -40,6 +40,8 @@ using Alert
 const T_START = Dates.now()
 # Custom modules
 include("./Modules/TheoreticalSimulation.jl");
+TheoreticalSimulation.set_magnetic_field!(:calibration)       # back to the default (apparatus manual)
+TheoreticalSimulation.magnetic_field_mode()              # which one is active
 include("./Modules/MyExperimentalAnalysis.jl");
 using .MyExperimentalAnalysis;
 include("./Modules/DataReading.jl");
@@ -80,7 +82,8 @@ const DIR_LIST = [
     "20260827",
     "20260831",
     "20260902",
-    # "20260903"
+    # "20260903",
+    "20261105",
 ]
 n_runs = length(DIR_LIST)
 cols = palette(:darkrainbow, n_runs);
@@ -107,12 +110,12 @@ const SETUP = let matched = (:λ0, :nz, :σw)
              qm    = matched,
              cqd   = (matched..., :ki)),
      paths = (conv   = joinpath(@__DIR__, "data_studies",
-                                "CONV2026_20260916T121229019", "blur_conv_3.jld2"),
+                                "CONV2026_20261106T135211429", "blur_conv_5.jld2"),
               qm     = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP",
                                 "QM_T205_8M_Bexp", "qm_screen_profiles_f1_table.jld2"),
               cqd_up = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP",
                                 "CQD_T205_8M_Bexp",
-                                "cqd_8000000_up_profiles.jld2")))
+                                "cqd_8M_up_profiles.jld2")))
 end
 
 
