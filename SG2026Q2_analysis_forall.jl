@@ -47,13 +47,13 @@ MyExperimentalAnalysis.SAVE_FIG = SAVE_FIG;
 MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
-data_directories =  ["20260819", "20260821", "20260826", "20260827", "20260831", "20260902", "20260903"]
-data_directory      = data_directories[4] ;
+data_directories =  ["20260819", "20260821", "20260826", "20260827", "20260831", "20260902", "20260903", "20261105", "20261111"]
+data_directory      = data_directories[9] ;
 # Furnace 
 const TCELSIUS = 205
 const TKELVIN = 273.15 + TCELSIUS
 # Blurring (gaussian) width
-σw_um = 0.100
+σw_um = 0.125
 
 const OUTFILE_RAW         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
 const OUTFILE_PROCESSED   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
