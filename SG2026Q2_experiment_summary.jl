@@ -84,6 +84,7 @@ const DIR_LIST = [
     "20260902",
     # "20260903",
     "20261105",
+    "20261111",
 ]
 n_runs = length(DIR_LIST)
 cols = palette(:darkrainbow, n_runs);
