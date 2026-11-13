@@ -133,7 +133,7 @@ isdir(OUTDIR) || mkpath(OUTDIR);
 # Local modules (see INPUTS in the header)
 include("./Modules/TheoreticalSimulation.jl");
 TheoreticalSimulation.set_magnetic_field!(:calibration)       # back to the default (apparatus manual)
-TheoreticalSimulation.magnetic_field_mode()              # which one is active
+@info "Magnetic-field model" mode = TheoreticalSimulation.magnetic_field_mode()              # which one is active
 include("./Modules/DataReading.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
 include("./Modules/JLD2_MyTools.jl");
