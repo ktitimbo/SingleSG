@@ -43,12 +43,21 @@ include("./Modules/DataReading.jl")
 include("./Modules/ProfileFitTools.jl")
 include("./Modules/JLD2_MyTools.jl")
 include("./Modules/TheoreticalSimulation.jl")
+TheoreticalSimulation.set_magnetic_field!(:manual)       # back to the default (apparatus manual)
+@info "Magnetic-field model" mode = TheoreticalSimulation.magnetic_field_mode()              # which one is active
 # Forward output settings into TheoreticalSimulation so figures are written
 # to the same timestamped directory with the chosen extension.
 TheoreticalSimulation.SAVE_FIG = SAVE_FIG
 TheoreticalSimulation.FIG_EXT  = FIG_EXT
 TheoreticalSimulation.OUTDIR   = OUTDIR
 
+# ── Shared table style (defined before first use by pretty_table) ─────────────
+const TABLE_STYLE = TextTableStyle(
+    title                   = crayon"red bold",
+    first_line_column_label = crayon"yellow bold",
+    column_label            = crayon"yellow",
+    table_border            = crayon"blue bold",
+);
 
 """
     find_and_collapse_duplicates(data::Matrix{Float64}; col=1, atol=1e-3) 
@@ -140,7 +149,7 @@ pretty_table(
     row_number_column_label = "#",
     column_labels           = ["Ic [A]", "F2 [mm]", "F1 [mm]", "Δ = F1−F2 [mm]"],
     title                   = "QM SIMULATION — Peak positions",
-    formatters              = [fmt__printf("%+.4f", [1]), fmt__printf("%+.3f", 4:11)],
+    formatters              = [fmt__printf("%+.4f", [1]), fmt__printf("%+.3f", 2:4)],
     alignment               = :c,
     table_format            = TextTableFormat(borders = text_table_borders__unicode_rounded),
     style                   = TABLE_STYLE,
@@ -165,9 +174,9 @@ end
 const CQD_DIR = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP", "CQD_T205_8M")
 
 Ic_cqd_dw, zdw_cqd = _load_cqd_table(
-    joinpath(CQD_DIR, "cqd_8000000_dw_profiles.jld2"), :dw, :z_max_smooth_spline_mm)
+    joinpath(CQD_DIR, "cqd_8M_dw_profiles.jld2"), :dw, :z_max_smooth_spline_mm)
 Ic_cqd_up, zup_cqd = _load_cqd_table(
-    joinpath(CQD_DIR, "cqd_8000000_up_profiles.jld2"), :up, :z_max_smooth_spline_mm)
+    joinpath(CQD_DIR, "cqd_8M_up_profiles.jld2"), :up, :z_max_smooth_spline_mm)
 
 # ── Sanity check: current grids must match ────────────────────────────────────
 if Ic_cqd_dw ≈ Ic_cqd_up
@@ -260,7 +269,7 @@ let m = current_field[:, 1] .> 0
         linewidth  = 1.5,
     )
 end
-fig
+display(fig)
 
 
 # ── 2. COLLAPSE DUPLICATE CURRENT SETPOINTS ───────────────────────────────────
@@ -354,13 +363,6 @@ const COL_LABELS = [
     "Δ [mm]",  "σΔ [mm]",
     "Centroid [mm]", "σCentroid [mm]",
 ];
-
-const TABLE_STYLE = TextTableStyle(
-    title                   = crayon"red bold",
-    first_line_column_label = crayon"yellow bold",
-    column_label            = crayon"yellow",
-    table_border            = crayon"blue bold",
-);
 
 # Helper: render the n×11 matrix with consistent formatting.
 function _print_data_table(mat; title = "EXPERIMENTAL DATA")
@@ -929,9 +931,13 @@ let
             xticksvisible      = true,
             xticklabelsvisible = true,
             xtickformat        = pow10_fmt,
+            # Major y ticks at integer decades only, so pow10_fmt labels are exact
+            # (only decades inside the y-limits are drawn)
+            yticks             = 10.0 .^ (-6:3),
             ytickformat        = pow10_fmt,
             xminorticks        = x_minor,
             xminorticksvisible = true,
+            yminorticks        = IntervalsBetween(9),
             yminorticksvisible = true,
             xminorgridvisible  = true,
             yminorgridvisible  = true,
