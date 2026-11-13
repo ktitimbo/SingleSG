@@ -1882,6 +1882,31 @@ end # function run_analysis_per_repetition
 
 
 # ==============================================================================
+# RUN-TIME BOOKKEEPING
+# ==============================================================================
+# Wall-clock time of each top-level stage, so the closing summary shows where
+# a long run went, not only its total. `stage_done!(name)` records the time
+# elapsed since the previous checkpoint (the first one counts from T_START,
+# i.e. it covers package loading, module includes and setup).
+const STAGE_TIMES     = OrderedDict{String, Millisecond}()
+const LAST_CHECKPOINT = Ref(T_START)
+
+function stage_done!(name::AbstractString)
+    now_ = Dates.now()
+    STAGE_TIMES[name] = now_ - LAST_CHECKPOINT[]
+    LAST_CHECKPOINT[] = now_
+    @info "Stage finished" stage = name elapsed = fmt_duration(STAGE_TIMES[name])
+    return STAGE_TIMES[name]
+end
+
+# Human-readable duration rounded to whole seconds,
+# e.g. "2 hours, 41 minutes, 3 seconds" (milliseconds are noise here).
+fmt_duration(d::Period) = string(Dates.canonicalize(round(d, Second)))
+
+stage_done!("setup (packages, modules, constants)")
+
+
+# ==============================================================================
 # PARAMETER-SWEEP DRIVER
 # ==============================================================================
 # Runs `run_analysis` over every (zbinning, smoothing) combination in
@@ -1908,6 +1933,7 @@ for (zbinning, smoothing) in Iterators.product(ZBINNING_LIST, SMOOTH_LIST)
 end # parameter sweep
 
 @info "Parameter sweep complete" combinations=length(inspection_results) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
+stage_done!("sweep: single shot ($(length(inspection_results)) points)")
 
 
 # ==============================================================================
@@ -1938,6 +1964,7 @@ end # parameter sweep
 
 @info "Parameter sweep complete" combinations=length(inspection_results_per_repetition) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
 @info "Theory profiles computed (unique (I₀, z) pairs, reused across stages and sweep points)" n=length(THEORY_CACHE)
+stage_done!("sweep: per repetition ($(length(inspection_results_per_repetition)) points)")
 
 
 # ==============================================================================
@@ -2084,10 +2111,45 @@ sweep_sys_single         = sweep_systematics(inspection_results;
                                              label = "(single shot)")
 sweep_sys_per_repetition = sweep_systematics(inspection_results_per_repetition;
                                              label = "(per repetition)", file_suffix = "_per_repetition")
+stage_done!("sweep systematics")
 
-                                             
-# Closing
+
+# ==============================================================================
+# CLOSING: RUN-TIME SUMMARY
+# ==============================================================================
+# Prints how long each stage took and its share of the total, writes the same
+# summary to OUTDIR/run_timing.txt (so the cost of a run stays next to its
+# results), and sends a desktop notification.
 T_END = Dates.now()
-T_RUN = Dates.canonicalize(T_END - T_START)
-println("\n\nExperiment analysis finished!:  $(T_RUN)")
-alert("Experiment analysis finished!")
+T_RUN = T_END - T_START
+
+timing_report = let io = IOBuffer()
+    wname = maximum(length, keys(STAGE_TIMES))
+    println(io, "RUN TIME  ($(RUN_STAMP) on $(HOSTNAME))")
+    println(io, "  start : ", T_START)
+    println(io, "  end   : ", T_END)
+    println(io, "  threads: Julia = $(Threads.nthreads()), BLAS = $(BLAS.get_num_threads())")
+    println(io, "  dates  : $(length(DIR_LIST)),  sweep points: $(length(ZBINNING_LIST) * length(SMOOTH_LIST))")
+    println(io)
+    for (name, d) in STAGE_TIMES
+        share = 100 * Dates.value(d) / max(Dates.value(T_RUN), 1)
+        println(io, "  ", rpad(name, wname), "  ", lpad(@sprintf("%5.1f %%", share), 7), "  ", fmt_duration(d))
+    end
+    println(io, "  ", rpad("TOTAL", wname), "  ", lpad("100.0 %", 7), "  ", fmt_duration(T_RUN))
+    String(take!(io))
+end
+
+printstyled("\n\nExperiment analysis finished!\n"; color = :green, bold = true)
+println(timing_report)
+
+open(joinpath(OUTDIR, "run_timing.txt"), "w") do io
+    write(io, timing_report)
+end
+
+# The notification is a convenience: never let a missing notifier (e.g. a
+# headless/remote session) turn a finished run into an error.
+try
+    alert("Experiment analysis finished! ($(fmt_duration(T_RUN)))")
+catch err
+    @warn "Desktop notification failed" exception = err
+end
