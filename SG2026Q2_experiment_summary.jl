@@ -76,13 +76,13 @@ data_JSF = OrderedDict(
 
 
 const DIR_LIST = [
-    # "20260819",
+    "20260819",
     "20260821",
     "20260826",
     "20260827",
     "20260831",
     "20260902",
-    # "20260903",
+    "20260903",
     "20261105",
     "20261111",
 ]
@@ -111,7 +111,7 @@ const SETUP = let matched = (:λ0, :nz, :σw)
              qm    = matched,
              cqd   = (matched..., :ki)),
      paths = (conv   = joinpath(@__DIR__, "data_studies",
-                                "CONV2026_20261106T135211429", "blur_conv_5.jld2"),
+                                "CONV2026_20261112T155313226", "blur_conv_5_per_repetition.jld2"),
               qm     = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP",
                                 "QM_T205_8M_Bexp", "qm_screen_profiles_f1_table.jld2"),
               cqd_up = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP",
@@ -1420,7 +1420,8 @@ fig_Bfield = plot(
         titlefontsize = 12,
         xlabel="SG current (A)",
         ylabel="Magnetic field (T)",
-        legend = :bottomright,
+        legend = :topleft,
+        
         xgrid=false,
         gridalpha = 0.25,
         gridstyle = :dot,
@@ -1459,6 +1460,7 @@ plot!(fig_Bfield,
     size=(600,400),
     legend_columns =2,
     legendfontsize =8,
+    background_color_legend= nothing,
     foreground_color_legend= nothing,)
 display(fig_Bfield)
 plot!(fig_Bfield,
