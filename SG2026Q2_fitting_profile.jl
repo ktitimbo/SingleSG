@@ -258,7 +258,7 @@ const ZBINNING_LIST = [1, 2]
 const SMOOTH_LIST   = [0.001, 0.01]
 
 # Polynomial background degree
-const P_DEGREE   = 5
+const P_DEGREE   = 3
 const NCOLS_BG   = P_DEGREE + 1   # number of polynomial coefficients
 
 const NORM_MODE  = :none
@@ -278,7 +278,16 @@ const DIR_LIST = [
     "20260903",
     "20261105",
     "20261111",
+    "20261112",
 ]
+
+# Echo the run configuration so the terminal log states what was analysed
+# (same ANSI colour style as the other @info lines in this script).
+@info """\e[1;94mAnalysis configuration\e[0m
+  Directories      : \e[96m$(length(DIR_LIST))\e[0m
+  $(join(("\e[93m" * d * "\e[0m" for d in DIR_LIST), ", "))
+  Baseline degree  : \e[92mP_DEGREE = $(P_DEGREE)\e[0m  (\e[92m$(NCOLS_BG)\e[0m coefficients c₀…c$(ProfileFitTools.sub(P_DEGREE)))
+"""
 
 # ── PrettyTables header construction ──────────────────────────────────────────
 const HDR_TOP = Any[
