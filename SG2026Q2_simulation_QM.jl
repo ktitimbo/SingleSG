@@ -70,7 +70,7 @@ TheoreticalSimulation.FIG_EXT  = FIG_EXT;
 TheoreticalSimulation.OUTDIR   = OUTDIR;
 TheoreticalSimulation.set_magnetic_field!(:manual)       # back to the default (apparatus manual)
 # TheoreticalSimulation.set_magnetic_field!(:calibration)  # switch B and G together
-# TheoreticalSimulation.magnetic_field_mode()              # which one is active
+# @info "Magnetic-field model" mode = TheoreticalSimulation.magnetic_field_mode()             # which one is active
 
 
 println("\n\t\tRunning process on:\t $(RUN_STAMP) \n")
