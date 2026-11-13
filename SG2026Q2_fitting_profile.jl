@@ -103,6 +103,8 @@ include("./Modules/DataReading.jl")
 include("./Modules/ProfileFitTools.jl")
 include("./Modules/JLD2_MyTools.jl")
 include("./Modules/TheoreticalSimulation.jl")
+TheoreticalSimulation.set_magnetic_field!(:calibration)       # back to the default (apparatus manual)
+@info "Magnetic-field model" mode = TheoreticalSimulation.magnetic_field_mode()              # which one is active
 # Forward output settings into TheoreticalSimulation
 TheoreticalSimulation.SAVE_FIG = SAVE_FIG
 TheoreticalSimulation.FIG_EXT  = FIG_EXT
