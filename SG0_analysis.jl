@@ -37,7 +37,7 @@ include("./Modules/JLD2_MyTools.jl");
 include("./Modules/TheoreticalSimulation.jl");
 TheoreticalSimulation.set_magnetic_field!(:calibration)       # back to the default (apparatus manual)
 # TheoreticalSimulation.set_magnetic_field!(:calibration)  # switch B and G together
-TheoreticalSimulation.magnetic_field_mode()              # which one is active
+@info "Magnetic-field model" mode = TheoreticalSimulation.magnetic_field_mode()             # which one is active
 include("./Modules/MyExperimentalAnalysis.jl");
 using .MyExperimentalAnalysis;
 # Set the working directory to the current location
