@@ -41,7 +41,7 @@ const T_START = Dates.now()
 # Custom modules
 include("./Modules/TheoreticalSimulation.jl");
 TheoreticalSimulation.set_magnetic_field!(:calibration)       # back to the default (apparatus manual)
-TheoreticalSimulation.magnetic_field_mode()              # which one is active
+@info "Magnetic-field model" mode = TheoreticalSimulation.magnetic_field_mode()              # which one is active
 include("./Modules/MyExperimentalAnalysis.jl");
 using .MyExperimentalAnalysis;
 include("./Modules/DataReading.jl");
