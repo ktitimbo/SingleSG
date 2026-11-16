@@ -112,7 +112,7 @@ using LaTeXStrings, LinearAlgebra, LsqFit, Printf, PrettyTables
 cd(@__DIR__) ;
 include("../../Modules/TheoreticalSimulation.jl");
 TheoreticalSimulation.set_magnetic_field!(:calibration)       # back to the default (apparatus manual)
-TheoreticalSimulation.magnetic_field_mode()              # which one is active
+@info "Magnetic-field model" mode = TheoreticalSimulation.magnetic_field_mode()             # which one is active
 
 # Computer Modern (New Computer Modern, bundled with Makie), with minor ticks and
 # minor gridlines on every axis (lighter than the major grid)
