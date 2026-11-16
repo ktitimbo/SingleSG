@@ -26,7 +26,7 @@
 #        §6c             comparison 6b − 6a; output peaks_nz<nz>_<stamp>.jld2
 #    §7  Figures         for every current: frame-averaged F1|F2 images with
 #                        their profiles, and the z-profiles of all frames
-#    §8  Pattern widths  HWHM along z on the §6 profiles/splines/maxima:
+#    §8  Pattern widths  FWHM along z on the §6 profiles/splines/maxima:
 #                        every frame (mean ± SEM) and the mean profile
 #                        (jackknife), raw and spline; widths_nz<nz>_<stamp>.jld2
 #
@@ -857,7 +857,7 @@ PLOT_MEAN_ALL && plot_mean_F1F2_all(data_processed; peaks,       # §6a peaks pe
 
 
 # =============================================================================
-# §8  PATTERN WIDTHS ALONG z  (HWHM)
+# §8  PATTERN WIDTHS ALONG z  (FWHM)
 # =============================================================================
 # Width of the pattern along the deflection axis z, measured on EXACTLY the
 # profiles (same nz) and maxima (same λ0) that gave the peak positions of §6.
@@ -866,12 +866,12 @@ PLOT_MEAN_ALL && plot_mean_F1F2_all(data_processed; peaks,       # §6a peaks pe
 # (λ0 scan, 20260706/Round1, 3 currents × F1/F2, all frames + mean profile):
 #
 #      λ                1e-4     1e-3     3e-3     1e-2     3e-2     1e-1
-#      spline HWHM     +0.5–0.9  +1.3–1.8 +2.6–3.1 +6.9–7.8  +17      +38   %
+#      spline FWHM     +0.5–0.9  +1.3–1.8 +2.6–3.1 +6.9–7.8  +17      +38   %
 #      SEM z_max        2–16     1–3      0.2–1.4  0.2–0.7  0.2–0.5  0.2–0.4 μm
 #
 #   flat-topped lobes: a light spline follows the top → z_max wanders across
 #   it from frame to frame; a stiff spline rounds the top → the width grows.
-#   Hence z_max from λ0 = 0.01 (§6), widths from λ_w = 1e-3 (≈ +1.5 %, ≈ 4 μm).
+#   Hence z_max from λ0 = 0.01 (§6), widths from λ_w = 1e-3 (≈ +1.5 %, ≈ 8 μm on the FWHM).
 #   Set WIDTH_λW = λ0 to measure on the §6 splines themselves.
 #
 #   (a) framewise   : every frame of every current — profile and spline of
@@ -883,7 +883,7 @@ PLOT_MEAN_ALL && plot_mean_F1F2_all(data_processed; peaks,       # §6a peaks pe
 #                     error = jackknife over frames (leave one frame out,
 #                     re-average, refit, re-find the peak, re-measure).
 #
-# Each profile gives two HWHMs, both around the same peak z_max (§6, λ0) and
+# Each profile gives two FWHMs (raw, spline), both around the same peak z_max (§6, λ0) and
 # the same half-maximum level:
 #   level  = b + (S_w(z_max) − b)/2    S_w = module spline with λ_w, b = baseline
 #   spline : z_L, z_R = crossings of `level` by the spline S_w
@@ -891,11 +891,13 @@ PLOT_MEAN_ALL && plot_mean_F1F2_all(data_processed; peaks,       # §6a peaks pe
 #   raw    : z_L, z_R = crossings of `level` by the binned data points
 #            (walk outward bin by bin from the bin nearest z_max; linear
 #            interpolation between the last bin ≥ level and the first < level)
-#   HWHM = (z_R − z_L)/2,   HWHM_L = z_max − z_L,   HWHM_R = z_R − z_max
+#   FWHM   = z_R − z_L                 (main result: full width at half maximum)
+#   HWHM_L = z_max − z_L,   HWHM_R = z_R − z_max   (one-sided half widths,
+#            FWHM = HWHM_L + HWHM_R; HWHM_L = HWHM_R for a symmetric lobe)
 #
 # Baseline b: `:edges` = median of the outer WIDTH_EDGE_FRAC of the z-bins on
 # both sides (checked on 20260706/Round1: the edge windows hold only flat floor,
-# ≥ 22 HWHM from the peak; `:zero` widens the HWHM by 1–4.5 μm there).
+# ≥ 11 FWHM from the peak; `:zero` widens the FWHM by 2–9 μm there).
 #
 # ┌──────────────────────────────── MAINTENANCE ────────────────────────────────┐
 # │ The functions `replica_profiles`, `module_spline` and `module_peak` below   │
@@ -912,16 +914,16 @@ PLOT_MEAN_ALL && plot_mean_F1F2_all(data_processed; peaks,       # §6a peaks pe
 # └──────────────────────────────────────────────────────────────────────────────┘
 #
 # Caveats
-# * The SPLINE HWHM keeps the λ_w smoothing bias of the table above (+1.5 %
-#   at 1e-3). The RAW HWHM has no smoothing bias of its own but is noisier
+# * The SPLINE FWHM keeps the λ_w smoothing bias of the table above (+1.5 %
+#   at 1e-3). The RAW FWHM has no smoothing bias of its own but is noisier
 #   (two noisy points per edge); its level uses the spline height S_w(z_max),
 #   because the tallest raw bin is biased high by noise, so a stiff λ_w also
-#   widens it slightly (≤ ±2 μm for λ ≤ 3e-3, +1…5 μm at 1e-2).
+#   widens it slightly (FWHM ≤ ±4 μm for λ ≤ 3e-3, +2…10 μm at 1e-2).
 #   spline − raw ≈ smoothing bias.
 # * The framewise profiles are median-filtered along x, the mean profile is not
 #   (as in the module functions); compare (a) and (b) with that in mind.
 # * The mean profile also contains the frame-to-frame jitter σ_jit of the peak:
-#   HWHM_b² ≈ HWHM_a² + 2 ln2 σ_jit² for Gaussian lobes.
+#   FWHM_b² ≈ FWHM_a² + 8 ln2 σ_jit² for Gaussian lobes.
 # * Errors are statistical only (SEM over frames / jackknife); no σ_pix term,
 #   the crossings are interpolated, not read on the pixel grid.
 # * HWHM_L / HWHM_R depend on where z_max sits; treat them as an asymmetry
@@ -933,7 +935,7 @@ PLOT_MEAN_ALL && plot_mean_F1F2_all(data_processed; peaks,       # §6a peaks pe
 WIDTH_λW        = 1e-3     # spline smoothing for the widths (peaks keep the λ0 of §2/§6)
 WIDTH_BASELINE  = :edges   # :edges → median of the outer z-bins, :zero → b = 0
 WIDTH_EDGE_FRAC = 0.05     # fraction of z-bins used on EACH side for :edges
-WIDTH_JACKKNIFE = true     # jackknife error of the mean-profile HWHM (Nframes extra fits per current)
+WIDTH_JACKKNIFE = true     # jackknife error of the mean-profile widths (Nframes extra fits per current)
 WIDTH_MATCH_TOL = 1e-9     # [mm] / [counts] tolerance of the replica check against §6
 
 # --- Local copies of the module steps (see MAINTENANCE) --------------------------
@@ -1045,31 +1047,31 @@ function raw_crossing(z::AbstractVector, y::AbstractVector, z0::Real, level::Rea
     end
 end
 
-_halfwidths(zL, zR, zp) = (; zL, zR, hwhm = (zR - zL) / 2, hwhm_L = zp - zL, hwhm_R = zR - zp)
+_widths(zL, zR, zp) = (; zL, zR, fwhm = zR - zL, hwhm_L = zp - zL, hwhm_R = zR - zp)
 
 """
-    profile_hwhm(z, y, S, zpeak; baseline=:edges, frac=0.05) -> NamedTuple
+    profile_widths(z, y, S, zpeak; baseline=:edges, frac=0.05) -> NamedTuple
 
-Raw and spline HWHM of one profile `y(z)` with spline `S` around `zpeak`
+Raw and spline FWHM (+ the two half widths) of one profile `y(z)` with spline `S` around `zpeak`
 (see §8 header). Returns `(; zpeak, height, base, level, raw, spl)` with
-`raw`, `spl` = `(; zL, zR, hwhm, hwhm_L, hwhm_R)` [mm].
+`raw`, `spl` = `(; zL, zR, fwhm, hwhm_L, hwhm_R)` [mm].
 """
-function profile_hwhm(z::AbstractVector, y::AbstractVector, S, zpeak::Real;
+function profile_widths(z::AbstractVector, y::AbstractVector, S, zpeak::Real;
                       baseline::Symbol = :edges, frac::Real = 0.05)
     h, b = S(zpeak), profile_baseline(y; mode = baseline, frac)
     lvl  = b + (h - b) / 2
-    nanw = _halfwidths(NaN, NaN, zpeak)
+    nanw = _widths(NaN, NaN, zpeak)
     h > b || return (; zpeak, height = h, base = b, level = lvl, raw = nanw, spl = nanw)
     step = (z[2] - z[1]) / 4
-    spl  = _halfwidths(spline_crossing(S, zpeak, lvl, first(z), -1; step),
+    spl  = _widths(spline_crossing(S, zpeak, lvl, first(z), -1; step),
                        spline_crossing(S, zpeak, lvl, last(z),  +1; step), zpeak)
-    raw  = _halfwidths(raw_crossing(z, y, zpeak, lvl, -1), raw_crossing(z, y, zpeak, lvl, +1), zpeak)
+    raw  = _widths(raw_crossing(z, y, zpeak, lvl, -1), raw_crossing(z, y, zpeak, lvl, +1), zpeak)
     return (; zpeak, height = h, base = b, level = lvl, raw, spl)
 end
 
 # --- Analysis --------------------------------------------------------------------------
 const WIDTH_METHODS = (raw = "Raw", spl = "Spline")
-const WIDTH_QTYS    = (hwhm = "HWHM", hwhm_L = "HWHM_L", hwhm_R = "HWHM_R")
+const WIDTH_QTYS    = (fwhm = "FWHM", hwhm_L = "HWHM_L", hwhm_R = "HWHM_R")
 _wcol(q, m) = Symbol(q, "_", m)          # e.g. :hwhm_L_raw
 _ecol(q, m) = Symbol(:err, q, "_", m)    # e.g. :errhwhm_L_raw
 
@@ -1090,7 +1092,7 @@ splines; widths use a second spline of the same profile with smoothing `λw`. Re
 `(; F1, F2, check)` with, for each state,
 
 * `framewise.table`   — control columns of [`control_table`](@ref) + for
-  m ∈ {raw, spl}, q ∈ {hwhm, hwhm_L, hwhm_R}: `q_m` (mean over frames), `errq_m`
+  m ∈ {raw, spl}, q ∈ {fwhm, hwhm_L, hwhm_R}: `q_m` (mean over frames), `errq_m`
   (SEM) and `nfr_raw`, `nfr_spl` (valid frames);  `framewise.zero` its StartPosition;
 * `framewise.perframe` — `(Nframes, Ncurrents)` matrices: `q_m`, `zpeak`, `height`, `base`;
 * `meanprofile.table` — control columns + `zpeak`, `height`, `base`, `q_m`,
@@ -1120,7 +1122,7 @@ function width_analysis(data, peaks, peaks_mean; nz::Integer, λ0::Real, λw::Re
         mH, mB = fill(NaN, nI), fill(NaN, nI)
         dz_fw = dz_mp = dprof = 0.0
 
-        @showprogress "HWHM $state: " for j in 1:nI
+        @showprogress "FWHM $state: " for j in 1:nI
             r = replica_profiles(data, state, j; nz)
             dprof = max(dprof, maximum(abs, r.mean .- mp.mean_bin_profile[:, j + 1]))
 
@@ -1131,7 +1133,7 @@ function width_analysis(data, peaks, peaks_mean; nz::Integer, λ0::Real, λw::Re
                 S = module_spline(r.z, y, λ0)
                 dz_fw = max(dz_fw, abs(module_peak(S, r.z, y; method = :framewise) - fwmax[i, j]))
                 Sw = λw == λ0 ? S : module_spline(r.z, y, λw)
-                w = profile_hwhm(r.z, y, Sw, fwmax[i, j]; baseline, frac)
+                w = profile_widths(r.z, y, Sw, fwmax[i, j]; baseline, frac)
                 H[i, j], B[i, j] = w.height, w.base
                 for (m, q) in MQ
                     PF[_wcol(q, m)][i, j] = getproperty(getproperty(w, m), q)
@@ -1142,7 +1144,7 @@ function width_analysis(data, peaks, peaks_mean; nz::Integer, λ0::Real, λw::Re
             S = module_spline(r.z, r.mean, λ0)
             dz_mp = max(dz_mp, abs(module_peak(S, r.z, r.mean; method = :mean) - mp.peak_positions[j]))
             Sw = λw == λ0 ? S : module_spline(r.z, r.mean, λw)
-            w = profile_hwhm(r.z, r.mean, Sw, mp.peak_positions[j]; baseline, frac)
+            w = profile_widths(r.z, r.mean, Sw, mp.peak_positions[j]; baseline, frac)
             mH[j], mB[j] = w.height, w.base
             for (m, q) in MQ
                 MPv[_wcol(q, m)][j] = getproperty(getproperty(w, m), q)
@@ -1156,7 +1158,7 @@ function width_analysis(data, peaks, peaks_mean; nz::Integer, λ0::Real, λw::Re
                     yk = vec(mean(view(r.plain, :, [1:k-1; k+1:n]); dims = 2))
                     Sk = module_spline(r.z, yk, λ0)
                     zk = module_peak(Sk, r.z, yk; method = :mean)
-                    wk = profile_hwhm(r.z, yk, λw == λ0 ? Sk : module_spline(r.z, yk, λw), zk; baseline, frac)
+                    wk = profile_widths(r.z, yk, λw == λ0 ? Sk : module_spline(r.z, yk, λw), zk; baseline, frac)
                     for (m, q) in MQ
                         J[(m, q)][k] = getproperty(getproperty(wk, m), q)
                     end
@@ -1174,8 +1176,8 @@ function width_analysis(data, peaks, peaks_mean; nz::Integer, λ0::Real, λw::Re
             fwt[!, _wcol(q, m)] = μ
             fwt[!, _ecol(q, m)] = sem
         end
-        fwt.nfr_raw = vec(count(isfinite, PF[:hwhm_raw]; dims = 1))
-        fwt.nfr_spl = vec(count(isfinite, PF[:hwhm_spl]; dims = 1))
+        fwt.nfr_raw = vec(count(isfinite, PF[:fwhm_raw]; dims = 1))
+        fwt.nfr_spl = vec(count(isfinite, PF[:fwhm_spl]; dims = 1))
 
         mpt = copy(ctrl)
         mpt.zpeak, mpt.height, mpt.base = copy(mp.peak_positions), mH, mB
@@ -1199,17 +1201,17 @@ end
 """
     width_summary(fw, mp) -> DataFrame
 
-Compact view of one state: framewise (FW) and mean-profile (MP) HWHM, raw and
+Compact view of one state: framewise (FW) and mean-profile (MP) FWHM, raw and
 spline, with their errors [mm], valid frames, and spline − raw [μm]. `fw`, `mp`
 are tables (or StartPosition rows) of [`width_analysis`](@ref).
 """
 width_summary(fw::DataFrame, mp::DataFrame) = DataFrame(
     I0 = fw.I0, B0 = fw.B0,
-    fw_raw = fw.hwhm_raw, fw_raw_err = fw.errhwhm_raw,
-    fw_spl = fw.hwhm_spl, fw_spl_err = fw.errhwhm_spl, nfr = Int.(fw.nfr_raw),
-    mp_raw = mp.hwhm_raw, mp_raw_err = mp.errhwhm_raw,
-    mp_spl = mp.hwhm_spl, mp_spl_err = mp.errhwhm_spl,
-    d_fw = 1e3 .* (fw.hwhm_spl .- fw.hwhm_raw), d_mp = 1e3 .* (mp.hwhm_spl .- mp.hwhm_raw))
+    fw_raw = fw.fwhm_raw, fw_raw_err = fw.errfwhm_raw,
+    fw_spl = fw.fwhm_spl, fw_spl_err = fw.errfwhm_spl, nfr = Int.(fw.nfr_raw),
+    mp_raw = mp.fwhm_raw, mp_raw_err = mp.errfwhm_raw,
+    mp_spl = mp.fwhm_spl, mp_spl_err = mp.errfwhm_spl,
+    d_fw = 1e3 .* (fw.fwhm_spl .- fw.fwhm_raw), d_mp = 1e3 .* (mp.fwhm_spl .- mp.fwhm_raw))
 
 show_width_summary(df::DataFrame; title::AbstractString = "") =
     pretty_table(df; title,
@@ -1228,7 +1230,7 @@ show_width_summary(df::DataFrame; title::AbstractString = "") =
 """
     plot_width_check(data, widths, j; iframe=1, nz, baseline=:edges, frac=0.05, title="") -> Figure
 
-2 × 2 check of the HWHM extraction at current index `j`: rows F1 / F2, columns
+2 × 2 check of the FWHM extraction at current index `j`: rows F1 / F2, columns
 frame `iframe` (framewise profile) / mean profile. Grey: binned data; red:
 module spline with the width smoothing `widths.λw`; dotted: baseline;
 dashed: z_max (§6, λ0); blue: spline full width at
@@ -1244,16 +1246,16 @@ function plot_width_check(data, widths, j::Integer; iframe::Integer = 1, nz::Int
                  (r.mean,          W.meanprofile.table.zpeak[j],          "mean profile"))
         for (col, (y, zp, what)) in enumerate(cases)
             S = module_spline(r.z, y, widths.λw)
-            w = profile_hwhm(r.z, y, S, zp; baseline, frac)
+            w = profile_widths(r.z, y, S, zp; baseline, frac)
             ax = CM.Axis(fig[row, col]; xlabel = L"z \; (\mathrm{mm})", ylabel = L"\langle I \rangle_x",
-                         title = @sprintf("%s, %s:  HWHM raw %.4f / spline %.4f mm", state, what,
-                                          w.raw.hwhm, w.spl.hwhm))
+                         title = @sprintf("%s, %s:  FWHM raw %.4f / spline %.4f mm", state, what,
+                                          w.raw.fwhm, w.spl.fwhm))
             CM.scatter!(ax, r.z, y; markersize = 3, color = (:gray40, 0.5))
             zz = range(first(r.z), last(r.z); length = 4000)
             CM.lines!(ax, zz, S.(zz); color = :red, linewidth = 1.5)
             CM.hlines!(ax, [w.base]; color = :gray50, linestyle = :dot)
             CM.vlines!(ax, [zp]; color = :black, linestyle = :dash, linewidth = 1)
-            if isfinite(w.spl.hwhm)
+            if isfinite(w.spl.fwhm)
                 CM.lines!(ax, [w.spl.zL, w.spl.zR], [w.level, w.level]; color = :dodgerblue, linewidth = 2.5)
                 CM.xlims!(ax, zp - 5w.spl.hwhm_L, zp + 5w.spl.hwhm_R)
             end
@@ -1269,13 +1271,13 @@ end
 """
     plot_width_vs_current(widths; title="") -> Figure
 
-HWHM [μm] vs |I_SG0|, one panel per state: framewise (filled) and mean
+FWHM [μm] vs |I_SG0|, one panel per state: framewise (filled) and mean
 profile (open), raw (circles) and spline (squares), with their errors.
 """
 function plot_width_vs_current(widths; title::AbstractString = "")
     fig = CM.Figure(size = (1200, 520))
     axs = [CM.Axis(fig[1, c]; title = s, xlabel = L"|I_{\mathrm{SG0}}| \; (\mathrm{A})",
-                   ylabel = c == 1 ? L"\mathrm{HWHM}_z \; (\mu\mathrm{m})" : "",
+                   ylabel = c == 1 ? L"\mathrm{FWHM}_z \; (\mu\mathrm{m})" : "",
                    xminorticksvisible = true, yminorticksvisible = true,
                    xminorticks = CM.IntervalsBetween(5), yminorticks = CM.IntervalsBetween(5))
            for (c, s) in enumerate(("F1", "F2"))]
@@ -1287,7 +1289,7 @@ function plot_width_vs_current(widths; title::AbstractString = "")
     for (ax, state) in zip(axs, (:F1, :F2)), (grp, m, marker, filled, color, label) in series
         t = getproperty(getproperty(widths, state), grp).table
         x = t.I0                                                  # true currents, no offset
-        y, e = 1e3 .* t[!, _wcol(:hwhm, m)], 1e3 .* t[!, _ecol(:hwhm, m)]   # mm → μm
+        y, e = 1e3 .* t[!, _wcol(:fwhm, m)], 1e3 .* t[!, _ecol(:fwhm, m)]   # mm → μm
         CM.errorbars!(ax, x, y, map(v -> isfinite(v) ? v : 0.0, e); color, whiskerwidth = 5)
         CM.scatter!(ax, x, y; marker, label, markersize = 9,
                     color = filled ? color : :white, strokecolor = color, strokewidth = 1.5)
@@ -1301,13 +1303,13 @@ end
 # widths_nz<nz>_<RUN_STAMP>.jld2 in the run's summary folder (units as in §6):
 #
 #   meta/        as in the peaks file
-#   framewise/F1/  HWHM_Raw_mm, ErrHWHM_Raw_mm, HWHM_L_Raw_mm, ErrHWHM_L_Raw_mm,
+#   framewise/F1/  FWHM_Raw_mm, ErrFWHM_Raw_mm, HWHM_L_Raw_mm, ErrHWHM_L_Raw_mm,
 #                  HWHM_R_Raw_mm, ErrHWHM_R_Raw_mm, and the same with _Spline_
 #                  (mean ± SEM over frames, one per current), NFrames_Raw, NFrames_Spline
 #                  StartPosition/<6 control keys + the 12 keys above>
-#                  PerFrame/<the 6 HWHM keys>, Peak_mm, Height, Baseline  (Nframes × Ncurrents)
+#                  PerFrame/<the 6 width keys>, Peak_mm, Height, Baseline  (Nframes × Ncurrents)
 #   framewise/F2/  same
-#   meanprofile/F1/ the 12 HWHM keys (Err = jackknife), Peak_mm, Height, Baseline,
+#   meanprofile/F1/ the 12 width keys (Err = jackknife), Peak_mm, Height, Baseline,
 #                  StartPosition/...
 #   meanprofile/F2/ same
 #   settings/    AnalysisDirectory, nz, lambda0 (peaks), lambdaWidth (λ_w), HalfMax, Baseline, EdgeFrac,
@@ -1377,13 +1379,13 @@ pretty_table(widths.check; title = "§8 replica check against §6 (all must be �
 for state in (:F1, :F2)
     W = getproperty(widths, state)
     show_width_summary(width_summary(W.framewise.table, W.meanprofile.table);
-        title = "$ANALYSIS_DIR — $state HWHM along z  (nz = $nz, λ0 = $λ0 peaks, λ_w = $WIDTH_λW widths, baseline = $WIDTH_BASELINE)")
+        title = "$ANALYSIS_DIR — $state FWHM along z  (nz = $nz, λ0 = $λ0 peaks, λ_w = $WIDTH_λW widths, baseline = $WIDTH_BASELINE)")
     nrow(W.framewise.zero) > 0 &&
         show_width_summary(width_summary(W.framewise.zero, W.meanprofile.zero);
-            title = "$ANALYSIS_DIR — $state HWHM, StartPosition")
+            title = "$ANALYSIS_DIR — $state FWHM, StartPosition")
 end
 
-# Frame and current shown in the HWHM check figure
+# Frame and current shown in the FWHM check figure
 iframe   = 1           # frame index within the current setting
 icurrent = 16          # SG0 current index
 let (_, _, nf, nI) = size(data_processed[:F1ProcessedImages])
@@ -1393,16 +1395,16 @@ end
 
 fig_wcheck = plot_width_check(data_processed, widths, icurrent; iframe, nz,
                               baseline = WIDTH_BASELINE, frac = WIDTH_EDGE_FRAC,
-                              title = @sprintf("%s — HWHM check, frame %d, SG0 current = %.3f A",
+                              title = @sprintf("%s — FWHM check, frame %d, SG0 current = %.3f A",
                                                ANALYSIS_DIR, iframe, data_processed[:SG0Currents][icurrent]))
 display(fig_wcheck)
 
 fig_wI = plot_width_vs_current(widths;
-    title = L"%$(ANALYSIS_DIR) — HWHM along $z$  ($n_{z} = %$(nz)$, $\lambda_{0} = %$(λ0)$, $\lambda_{w} = %$(WIDTH_λW)$)")
+    title = L"%$(ANALYSIS_DIR) — FWHM along $z$  ($n_{z} = %$(nz)$, $\lambda_{0} = %$(λ0)$, $\lambda_{w} = %$(WIDTH_λW)$)")
 display(fig_wI)
 
 if SAVE_FIG
-    for (fig, name) in ((fig_wcheck, "HWHMcheck_frame$(iframe)_I$(icurrent)"), (fig_wI, "HWHM_vs_I_nz$(nz)"))
+    for (fig, name) in ((fig_wcheck, "FWHMcheck_frame$(iframe)_I$(icurrent)"), (fig_wI, "FWHM_vs_I_nz$(nz)"))
         fname = joinpath(summary_dir(ANALYSIS_DIR), "$(name)_$(RUN_STAMP).$(FIG_EXT)")
         CM.save(fname, fig; px_per_unit = 4)
         @info "Saved" fname
