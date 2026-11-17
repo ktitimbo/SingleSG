@@ -2,6 +2,10 @@
 # California Institute of Technology
 # June 2026
 
+# Total-time counter: started before package loading so the final figure
+# includes compilation/precompilation, data building and every (nz, λ0) run.
+const SCRIPT_T0 = time()
+
 ############## EXPERIMENT ANALYSIS PREAMBLE ##############
 # Headless/Windows-safe GR: set before using Plots
 # if !haskey(ENV, "GKSwstype")
@@ -30,6 +34,9 @@ using CSV, DataFrames, DelimitedFiles
 # Time-stamping/logging
 using Dates
 using Alert
+const SCRIPT_START = Dates.now()
+"Elapsed wall-clock time since the script started, as a canonical period (e.g. `1 minute, 23 seconds, 456 milliseconds`)."
+elapsed_since_start() = Dates.canonicalize(Dates.Millisecond(round(Int, 1e3 * (time() - SCRIPT_T0))))
 # Custom modules
 include("./Modules/JLD2_MyTools.jl");
 include("./Modules/MyExperimentalAnalysis.jl");
@@ -48,9 +55,9 @@ MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 
 # Data Directory
 data_directories =  ["20260819", 
-                        "20260821", "20260826", "20260827", "20260831", "20260902", 
-                        "20260903", 
-                        "20261105", "20261111", "20261112","20261113", "20261116"]
+                        "20260821", "20260826", "20260827", "20260831", "20260902", "20260903", 
+                        "20261105", "20261111", "20261112","20261113", "20261116",
+                    ]
 data_directory      = data_directories[12] ;
 # Furnace 
 const TCELSIUS = 205
@@ -61,6 +68,7 @@ const TKELVIN = 273.15 + TCELSIUS
 const OUTFILE_RAW         = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data.jld2")
 const OUTFILE_PROCESSED   = joinpath(BASE_PATH,"EXPERIMENTS",data_directory, "data_processed.jld2")
 const DATA_SUMMARY_PATH   = joinpath(BASE_PATH, "EXPDATA_ANALYSIS","summary",data_directory)
+const SUMMARY_FILE        = joinpath(DATA_SUMMARY_PATH, replace(data_directory * "_report_summary.jld2", "/" => "_"))
 isdir(DATA_SUMMARY_PATH) || mkpath(DATA_SUMMARY_PATH);
 
 
@@ -151,6 +159,9 @@ else
 end
 
 jldopen(OUTFILE_PROCESSED, "r") do file
+    # exposed to the outer (global) scope
+    global AcqStep, Iexp_coil, nI
+
     if haskey(file["meta"], "TemperatureInCelsius")
         @assert file["meta"]["TemperatureInCelsius"] == TCELSIUS "Experiment temperature doesn't match with the chosen for the simulation"
         @info "Furnace temperature = $(TCELSIUS)°C"
@@ -174,7 +185,8 @@ jldopen(OUTFILE_PROCESSED, "r") do file
         end
 
 
-        pl = plot(1000*currents[1:20], 1000*fields[1:20],
+        n_low = min(20, length(currents))   # first (lowest) currents; guards short scans
+        pl = plot(1000*currents[1:n_low], 1000*fields[1:n_low],
             label=false,
             xlabel="Current (mA)",
             ylabel="Magnetic field (mT)",
@@ -283,9 +295,6 @@ jldopen(OUTFILE_PROCESSED, "r") do file
     )
     display(fig_I0)
     saveplot(fig_I0, joinpath(BASE_PATH, "EXPERIMENTS", data_directory, "current_range.$(FIG_EXT)"))
-
-    # --- expose to outer scope ---
-    global AcqStep, Iexp_coil, nI
 end
 
 ΔIexp_coil     = 0.01 * Iexp_coil;
@@ -296,8 +305,9 @@ sort_Iexp_perm = sortperm(Iexp_coil);
 nbins_list  = (1, 2, 4)
 λ0_list     = (0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.10)
 PARAM_GRID = [(nz, λ0) for λ0 in λ0_list, nz in nbins_list] |> vec
+const N_RUNS = length(PARAM_GRID)
 const Cell = Union{Missing, String, Int, Float64}
-summary_table = Matrix{Cell}(undef, length(PARAM_GRID), 3)
+summary_table = Matrix{Cell}(missing, N_RUNS, 3)
 # ── Shared plot attributes ─────────────────────────────────────────────
 log_xaxis  = (:log10, L"$I_{c} \ (\mathrm{A})$", :log10);
 log_xticks = ([1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0],
@@ -310,7 +320,7 @@ base_plot_attrs = (size=(800,600), tickfontsize=11, guidefontsize=14, legendfont
 log_axis_attrs = (;
     xaxis=log_xaxis, xticks=log_xticks, xlims=(1e-3,1.0))
 
-jldopen(joinpath(DATA_SUMMARY_PATH, replace(data_directory * "_report_summary.jld2", "/" => "_")), "w") do file
+jldopen(SUMMARY_FILE, "w") do file
     file["meta/Currents"]      = Iexp_coil
     file["meta/ErrorCurrents"] = ΔIexp_coil
     file["meta/n_Currents"]    = nI
@@ -323,12 +333,12 @@ jldopen(joinpath(DATA_SUMMARY_PATH, replace(data_directory * "_report_summary.jl
         RUN_STAMP = Dates.format(T_START, "yyyymmddTHHMMSSsss");
         OUTDIR    = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", data_directory, RUN_STAMP);
         isdir(OUTDIR) || mkpath(OUTDIR);
-        @info "Created output directory" OUTDIR
+        @info "Run $(row)/$(N_RUNS)" nz λ0 OUTDIR elapsed=elapsed_since_start()
         MyExperimentalAnalysis.OUTDIR   = OUTDIR;
         summary_table[row,:] = Cell[RUN_STAMP, nz, λ0]
 
-        chosen_qm =  jldopen(data_qm_f1_path,"r") do file
-            file[JLD2_MyTools.make_keypath_qm(nz, σw_um, 0.001)]
+        chosen_qm = jldopen(data_qm_f1_path, "r") do qmfile
+            qmfile[JLD2_MyTools.make_keypath_qm(nz, σw_um, 0.001)]
         end
         Ic_QM_sim = [chosen_qm[i][:Icoil] for i in eachindex(chosen_qm)][2:end]
         zm_QM_sim = [chosen_qm[i][:z_max_smooth_spline_mm] for i in eachindex(chosen_qm)][2:end]
@@ -398,8 +408,8 @@ jldopen(joinpath(DATA_SUMMARY_PATH, replace(data_directory * "_report_summary.jl
                 table_border            = crayon"blue bold"),
             equal_data_column_widths = true,
             highlighters = [
-                TextHighlighter((d,i,j) -> d[i,2] == minimum(d[:,1]), crayon"fg:white bold bg:dark_gray"),
-                TextHighlighter((d,i,j) -> d[i,7] < 0,                crayon"fg:red bold bg:dark_gray"),
+                TextHighlighter((d,i,j) -> d[i,2] == minimum(d[:,2]), crayon"fg:white bold bg:dark_gray"),
+                TextHighlighter((d,i,j) -> d[i,7] < 0,               crayon"fg:red bold bg:dark_gray"),
                 TextHighlighter((d,i,j) -> d[i,9] > 0,                crayon"fg:green bold bg:dark_gray"),
             ],
         )
@@ -584,7 +594,7 @@ jldopen(joinpath(DATA_SUMMARY_PATH, replace(data_directory * "_report_summary.jl
             alignment    = :c,
             column_labels = [
                 ["Step", "Current","Current Error","F1 z","Std.Err.","F2 z","Std.Err.","Δz","Std.Err.","Centroid F1 z","Std.Err.","Centroid F2 z","Std.Err."],
-                ["", "[mA]","[mA]","[mm]","[mm]","[mm]","[mm]","[mm]","[mm]","[mm]","[mm]","[mm]","[mm]"]
+                ["", "[A]","[A]","[mm]","[mm]","[mm]","[mm]","[mm]","[mm]","[mm]","[mm]","[mm]","[mm]"]
             ],
             table_format = TextTableFormat(borders=text_table_borders__unicode_rounded),
             style = TextTableStyle(
@@ -593,8 +603,8 @@ jldopen(joinpath(DATA_SUMMARY_PATH, replace(data_directory * "_report_summary.jl
                 table_border            = crayon"blue bold"),
             equal_data_column_widths = true,
             highlighters = [
-                TextHighlighter((d,i,j) -> d[i,2] == minimum(d[:,1]), crayon"fg:white bold bg:dark_gray"),
-                TextHighlighter((d,i,j) -> d[i,10] < 0,                crayon"fg:red bold bg:dark_gray"),
+                TextHighlighter((d,i,j) -> d[i,2] == minimum(d[:,2]), crayon"fg:white bold bg:dark_gray"),
+                TextHighlighter((d,i,j) -> d[i,10] < 0,               crayon"fg:red bold bg:dark_gray"),
                 TextHighlighter((d,i,j) -> d[i,12] > 0,               crayon"fg:green bold bg:dark_gray"),
             ],
         )
@@ -799,10 +809,12 @@ jldopen(joinpath(DATA_SUMMARY_PATH, replace(data_directory * "_report_summary.jl
             Framewise F1 STDE (mm)  : $(round.(df_fw[!,:F1_z_centroid_se_mm], digits=9))
 
         CODE
-            Code name               : $(PROGRAM_FILE),
+            Code name               : $(PROGRAM_FILE)
             Start date              : $(T_START)
-            End data                : $(T_END)
+            End date                : $(T_END)
             Run time                : $(T_RUN)
+            Run index               : $(row) / $(N_RUNS)
+            Total elapsed so far    : $(elapsed_since_start())
             Hostname                : $(hostname)
 
         ***************************************************
@@ -867,7 +879,7 @@ jldopen(joinpath(DATA_SUMMARY_PATH, replace(data_directory * "_report_summary.jl
             :fw_F2_peak_pos         => (collect(df_fw.F2_z_centroid_mm), collect(df_fw.F2_z_centroid_se_mm)),
         )
 
-        pretty_table(summary_table;
+        pretty_table(summary_table[1:row, :];
             title         = data_directory,
             alignment     = :c,
             column_labels = [ "Filename", "n" ,  "λ₀" ],
@@ -880,17 +892,29 @@ jldopen(joinpath(DATA_SUMMARY_PATH, replace(data_directory * "_report_summary.jl
             equal_data_column_widths = true
         )
 
-        println("Experiment analysis finished!\n\n")
+        println("Experiment analysis finished! [$(row)/$(N_RUNS)] — total elapsed: $(elapsed_since_start())\n\n")
 
     end
-    
+
 end
 
-path = joinpath(DATA_SUMMARY_PATH, data_directory * "_report_summary.jld2")
-JLD2_MyTools.show_exp_summary(path, data_directory)
+JLD2_MyTools.show_exp_summary(SUMMARY_FILE, data_directory)
 
-println("EXPERIMENTAL ANALYSIS COMPLETED!")
-alert("EXPERIMENTAL ANALYSIS COMPLETED!")
+# ── Total time counter ─────────────────────────────────────────────────
+const SCRIPT_END = Dates.now()
+const T_TOTAL    = elapsed_since_start()
+println("""
+***************************************************
+EXPERIMENTAL ANALYSIS COMPLETED!
+    Data directory          : $(data_directory)
+    Runs (nz × λ₀)          : $(N_RUNS)
+    Script start            : $(SCRIPT_START)
+    Script end              : $(SCRIPT_END)
+    Total time              : $(T_TOTAL)
+    Mean time per run       : $(Dates.canonicalize(Dates.Millisecond(round(Int, 1e3 * (time() - SCRIPT_T0) / N_RUNS))))
+***************************************************
+""")
+alert("EXPERIMENTAL ANALYSIS COMPLETED! Total time: $(T_TOTAL)")
 
 # joinpath(data_summary_path, data_directory * "_report_summary.jld2")
 
