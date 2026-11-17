@@ -258,7 +258,7 @@ const ZBINNING_LIST = [1, 2]
 const SMOOTH_LIST   = [0.001, 0.01]
 
 # Polynomial background degree
-const P_DEGREE   = 3
+const P_DEGREE   = 5
 const NCOLS_BG   = P_DEGREE + 1   # number of polynomial coefficients
 
 const NORM_MODE  = :none
@@ -269,18 +269,11 @@ const λ0_EXP     = 0.0001   # spline smoothing penalty used when interpolating 
 const NRANGE_Z   = 10_001   # number of points on the symmetric theory z-grid (odd, so z=0 is included exactly)
 
 const DIR_LIST = [
-    "20260819",
-    "20260821",
-    "20260826",
-    "20260827",
-    "20260831",
-    "20260902",
-    "20260903",
-    "20261105",
-    "20261111",
-    "20261112",
-    "20261113",
-]
+                    "20260819",
+                    "20260821", "20260826", "20260827", "20260831", "20260902",
+                    "20260903",
+                    "20261105", "20261111", "20261112", "20261113", "20261116"
+                ]
 
 # Echo the run configuration so the terminal log states what was analysed
 # (same ANSI colour style as the other @info lines in this script).
@@ -1919,36 +1912,6 @@ stage_done!("setup (packages, modules, constants)")
 
 
 # ==============================================================================
-# PARAMETER-SWEEP DRIVER
-# ==============================================================================
-# Runs `run_analysis` over every (zbinning, smoothing) combination in
-# ZBINNING_LIST × SMOOTH_LIST so the sensitivity of the fitted blur width to
-# upstream preprocessing choices can be inspected visually/in logs before
-# trusting one combination. Only the run matching (WANTED_ZBINNING,
-# WANTED_SMOOTH) has `save_results=true` and therefore writes JLD2/report
-# files to OUTDIR — every other combination is computed and displayed but
-# not persisted, by design (keeps OUTDIR limited to the chosen production
-# parameters rather than every point in the sweep grid).
-
-inspection_results = OrderedDict{Tuple{Int, Float64}, OrderedDict{Any, NamedTuple}}()
-
-for (zbinning, smoothing) in Iterators.product(ZBINNING_LIST, SMOOTH_LIST)
-    save_this_run =
-        zbinning == WANTED_ZBINNING &&
-        smoothing == WANTED_SMOOTH
-
-    inspection_results[(zbinning, smoothing)] = run_analysis(
-        zbinning,
-        smoothing;
-        save_results = save_this_run,
-    )
-end # parameter sweep
-
-@info "Parameter sweep complete" combinations=length(inspection_results) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
-stage_done!("sweep: single shot ($(length(inspection_results)) points)")
-
-
-# ==============================================================================
 # PARAMETER-SWEEP DRIVER (per repetition)
 # ==============================================================================
 # Runs `run_analysis_per_repetition` over every (zbinning, smoothing) combination in
@@ -1977,6 +1940,36 @@ end # parameter sweep
 @info "Parameter sweep complete" combinations=length(inspection_results_per_repetition) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
 @info "Theory profiles computed (unique (I₀, z) pairs, reused across stages and sweep points)" n=length(THEORY_CACHE)
 stage_done!("sweep: per repetition ($(length(inspection_results_per_repetition)) points)")
+
+
+# ==============================================================================
+# PARAMETER-SWEEP DRIVER
+# ==============================================================================
+# Runs `run_analysis` over every (zbinning, smoothing) combination in
+# ZBINNING_LIST × SMOOTH_LIST so the sensitivity of the fitted blur width to
+# upstream preprocessing choices can be inspected visually/in logs before
+# trusting one combination. Only the run matching (WANTED_ZBINNING,
+# WANTED_SMOOTH) has `save_results=true` and therefore writes JLD2/report
+# files to OUTDIR — every other combination is computed and displayed but
+# not persisted, by design (keeps OUTDIR limited to the chosen production
+# parameters rather than every point in the sweep grid).
+
+inspection_results = OrderedDict{Tuple{Int, Float64}, OrderedDict{Any, NamedTuple}}()
+
+for (zbinning, smoothing) in Iterators.product(ZBINNING_LIST, SMOOTH_LIST)
+    save_this_run =
+        zbinning == WANTED_ZBINNING &&
+        smoothing == WANTED_SMOOTH
+
+    inspection_results[(zbinning, smoothing)] = run_analysis(
+        zbinning,
+        smoothing;
+        save_results = save_this_run,
+    )
+end # parameter sweep
+
+@info "Parameter sweep complete" combinations=length(inspection_results) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
+stage_done!("sweep: single shot ($(length(inspection_results)) points)")
 
 
 # ==============================================================================
