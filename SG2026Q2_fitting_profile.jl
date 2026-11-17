@@ -279,6 +279,7 @@ const DIR_LIST = [
     "20261105",
     "20261111",
     "20261112",
+    "20261113",
 ]
 
 # Echo the run configuration so the terminal log states what was analysed
