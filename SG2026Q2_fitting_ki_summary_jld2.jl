@@ -176,7 +176,7 @@ const DATA_DIRECTORIES = [
                           "20260819",
                           "20260821", "20260826", "20260827", "20260831", "20260902",
                           "20260903",
-                          "20261105", "20261111", "20261112",
+                          "20261105", "20261111", "20261112", "20261113", "20261116"
                         ]
 const NZ_EXP   = 2              # z-bins of the experimental profile extraction   (file: meta/nz)
 const λ0_EXP   = 0.01           # raw smoothing parameter of the experiment       (file: meta/λ0)
