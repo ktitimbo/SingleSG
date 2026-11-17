@@ -87,23 +87,23 @@
 # Field falls to 50 % of B(0) at y ~ 30.5 mm (0.443 A and 0.963 A).
 # The remanent field depends on the direction of the last current applied.
 #
-# ---------- Output ----------
+# ---------- Output ----------  (FIGDIR = figures/with_ushape)
 #
-#   figures/SG0_fig0_zero_current.{pdf,png}         Section 0
-#   figures/SG0_fig0b_zero_current_fit.{pdf,png}    Section 0.1
-#   figures/SG0_fig1_raw.{pdf,png}                  Section 1
-#   figures/SG0_fig1b_raw_minus_zero_current.{pdf,png} Section 1
-#   figures/SG0_fig2_center_vs_current.{pdf,png}    Section 2
-#   figures/SG0_fig3_relative.{pdf,png}             Section 3
-#   figures/SG0_fig4_relative_fit.{pdf,png}         Section 4
-#   figures/SG0_fig5_global_fit.{pdf,png}           Section 5
-#   figures/SG0_fig6_full_profile.{pdf,png}         Section 6
-#   figures/SG0_fig7_separation_vs_current.{pdf,png} Section 7
-#   figures/SG0_fig8_calibrations.{pdf,png}          Section 8
-#   figures/SG0_fig9_separation_vs_field.{pdf,png}   Section 8
-#   figures/SG0_fig10_cqd_fit.{pdf,png}              Section 9
-#   figures/SG0_fig11_BL0_from_data.{pdf,png}        Section 10
-#   figures/SG0_fig12_length_from_data.{pdf,png}     Section 11
+#   figures/with_ushape/SG0_fig0_zero_current.{pdf,png}         Section 0
+#   figures/with_ushape/SG0_fig0b_zero_current_fit.{pdf,png}    Section 0.1
+#   figures/with_ushape/SG0_fig1_raw.{pdf,png}                  Section 1
+#   figures/with_ushape/SG0_fig1b_raw_minus_zero_current.{pdf,png} Section 1
+#   figures/with_ushape/SG0_fig2_center_vs_current.{pdf,png}    Section 2
+#   figures/with_ushape/SG0_fig3_relative.{pdf,png}             Section 3
+#   figures/with_ushape/SG0_fig4_relative_fit.{pdf,png}         Section 4
+#   figures/with_ushape/SG0_fig5_global_fit.{pdf,png}           Section 5
+#   figures/with_ushape/SG0_fig6_full_profile.{pdf,png}         Section 6
+#   figures/with_ushape/SG0_fig7_separation_vs_current.{pdf,png} Section 7
+#   figures/with_ushape/SG0_fig8_calibrations.{pdf,png}          Section 8
+#   figures/with_ushape/SG0_fig9_separation_vs_field.{pdf,png}   Section 8
+#   figures/with_ushape/SG0_fig10_cqd_fit.{pdf,png}              Section 9
+#   figures/with_ushape/SG0_fig11_BL0_from_data.{pdf,png}        Section 10
+#   figures/with_ushape/SG0_fig12_length_from_data.{pdf,png}     Section 11
 #
 # Packages: ] add CSV DataFrames CairoMakie LaTeXStrings LsqFit PrettyTables
 using CSV, DataFrames, CairoMakie
@@ -112,7 +112,7 @@ using LaTeXStrings, LinearAlgebra, LsqFit, Printf, PrettyTables
 cd(@__DIR__) ;
 include("../../Modules/TheoreticalSimulation.jl");
 TheoreticalSimulation.set_magnetic_field!(:calibration)       # back to the default (apparatus manual)
-TheoreticalSimulation.magnetic_field_mode()              # which one is active
+@info "Magnetic-field model" mode = TheoreticalSimulation.magnetic_field_mode()             # which one is active
 
 # Computer Modern (New Computer Modern, bundled with Makie), with minor ticks and
 # minor gridlines on every axis (lighter than the major grid)
@@ -144,7 +144,7 @@ CQD_Bn = 12.4e-6 # Teslas
 const DATAFILE  = "SG0_raw_data_field_profile_2026-10-28_29.csv"
 const CALIBFILE = "SG0_calibration_center_BI_2026-10-29.csv"
 const SEPFILE   = "spin_resolved_sep_20260706.csv"      # Chapter 2
-const FIGDIR    = "figures"
+const FIGDIR    = joinpath("figures", "with_ushape")     # figures of this script
 
 # SG0 field divisor f of the CQD fit (Chapter 3): the SG0 field integral is BL0(I) / f, as in
 # the NY script and the fit note (f = 1: the measured field as is; f = 7: Revision F, the
@@ -2172,7 +2172,44 @@ end
 
 fig10 = plot_cqd_fits(curves, FIELD_MODELS, cqd_results)
 display(figtag!(fig10, "SG0_fig10_cqd_fit"))
-savefig(fig10, "SG0_fig10_cqd_fit")                     # figures/SG0_fig10_cqd_fit.{pdf,png}
+savefig(fig10, "SG0_fig10_cqd_fit")                     # figures/with_ushape/SG0_fig10_cqd_fit.{pdf,png}
+
+
+# -----------------------------------------------------------------------------
+# Summary of Chapter 3 for the REPL: the fit with the SG0 field from the magnetometer data
+# (FIELD_MODELS[1]). The β0 models in the table above are only references for comparison.
+# Dc0 = Dc1 BL0(I) / BL1 ([138]) is quoted at 1 A and at the highest current of the data.
+# -----------------------------------------------------------------------------
+let m = FIELD_MODELS[1], r = cqd_results[1], Iall = curves[1].I
+    Imin, Imax = minimum(Iall[Iall .> 0]), maximum(Iall)
+    bar = "═"^74
+    hdr(s)                    = printstyled(s, "\n"; color = :cyan, bold = true)
+    row(k, v; c = :light_green) = (printstyled("  ", rpad(k, 24); color = :light_black);
+                                   printstyled(v, "\n"; color = c, bold = true))
+    println()
+    hdr(bar)
+    hdr("  CHAPTER 3 SUMMARY - CQD fit, SG0 field from the magnetometer data")
+    hdr(@sprintf("  (Bc = %.1f G/A × I / f,  f = %g;  DIR_MODE = :%s;  N_BN = %g)",
+                 cal_lin.c[2], F_DIV, DIR_MODE, N_BN))
+    hdr(bar)
+    row("k_i", @sprintf("%.4g    (Δχ² = 1: %.4g - %.4g)", r.ki, r.ki_lo, r.ki_hi))
+    row("Dc1   (SG1 dose)", @sprintf("%.5f", r.Dc1) *
+                            (r.Dc1_at_edge ? "    WARNING: at the edge of the scan" : "");
+        c = r.Dc1_at_edge ? :light_red : :light_green)
+    row("Dc0   (SG0 dose)", @sprintf("%.5f at 1 A,   %.5f at %.3f A (max)",
+                                     r.Dc1 * m.BL0(1.0) / CQD.BL1, r.Dc0_max, Imax))
+    row("DIR", @sprintf("%.4f    (%s)", r.DIR,
+                        DIR_MODE === :geom ? "fixed at the geometric value" : "solved from the baseline"))
+    row("κ", @sprintf("%.4f ± %.4f", r.p, r.p_err))
+    row("L_eff (SG0)", N_BN == 0 ? @sprintf("%.2f mm", L_eff) :
+                       @sprintf("%.2f mm without threshold;  L(I) = %.2f-%.2f mm (%.3f-%.3f A)",
+                                L_eff, leff_of(m.BL0, m.Bc, Imin), leff_of(m.BL0, m.Bc, Imax), Imin, Imax))
+    row("BL0 per ampere (SG0)", @sprintf("%.4e T m/A    (BL1 = %.4e T m)", m.BL0(1.0), CQD.BL1))
+    row("χ² parallel", @sprintf("%.2f / %d", r.chi2_par, r.n_par); c = :yellow)
+    row("χ² antiparallel", @sprintf("%.2f / %d    (pure CQD, w = 0: %.1f)",
+                                    r.chi2_anti, r.n_anti, r.chi2_anti_pure); c = :yellow)
+    hdr(bar)
+end
 
 
 # =============================================================================
@@ -2447,7 +2484,58 @@ end
 
 fig11 = plot_BL0_from_data(sfit4, g4, Dc1_4, aw4, curves)
 display(figtag!(fig11, "SG0_fig11_BL0_from_data"))
-savefig(fig11, "SG0_fig11_BL0_from_data")              # figures/SG0_fig11_BL0_from_data.{pdf,png}
+savefig(fig11, "SG0_fig11_BL0_from_data")              # figures/with_ushape/SG0_fig11_BL0_from_data.{pdf,png}
+
+
+# -----------------------------------------------------------------------------
+# Summary of Chapter 4 for the REPL: k_i given (C4_KI), BL0(I) = s BL0_mag(I; N, f) fitted to
+# the parallel set, then κ to the antiparallel set. Dc0 = k_i |γe| s BL0_mag / v_a and the
+# implied effective length L = s BL0_mag / |Bc| (Bc after f) are quoted at 1 A and at the
+# highest current of the parallel data.
+# -----------------------------------------------------------------------------
+let Imax = maximum(par4.I)
+    bar = "═"^74
+    hdr(s)                    = printstyled(s, "\n"; color = :cyan, bold = true)
+    row(k, v; c = :light_green) = (printstyled("  ", rpad(k, 24); color = :light_black);
+                                   printstyled(v, "\n"; color = c, bold = true))
+    Bc(I)   = 1e-4 * cal_lin.c[2] * I / C4_F_DIV        # center field after f (T)
+    println()
+    hdr(bar)
+    hdr("  CHAPTER 4 SUMMARY - SG0 field integral fitted to the separations, k_i given")
+    hdr(@sprintf("  (BL0 = s BL0_mag(I; N, f),  N = %g,  f = %g;  DIR_MODE = :%s)",
+                 C4_N_BN, C4_F_DIV, DIR_MODE))
+    hdr(bar)
+    row("k_i   (given)", @sprintf("%.4g", C4_KI); c = :white)
+    row("Dc1   (SG1 dose)", @sprintf("%.5f", Dc1_4))
+    row("DIR", @sprintf("%.4f    (%s)", DIR4, DIR_MODE === :geom ? "fixed at the geometric value" :
+                                               "solved from the baseline at this Dc1"))
+    if sfit4 === nothing
+        row("s", "global fit skipped: model BL0 = 0 at every current (threshold too high)";
+            c = :light_red)
+    else
+        s = sfit4.s
+        row("s     (BL0 scale)", @sprintf("%.4f    (Δχ² = 1: %.4f - %.4f)", s, sfit4.s_lo, sfit4.s_hi) *
+                                 (sfit4.at_edge ? "    WARNING: at the edge of the scan" : "");
+            c = sfit4.at_edge ? :light_red : :light_green)
+        row("BL0 per ampere (SG0)", @sprintf("%.4e T m/A    (magnetometer: %.4e T m/A)",
+                                             s * BL0_mag(1.0; N = 0), BL0_mag(1.0; N = 0)))
+        row("Dc0   (SG0 dose)", @sprintf("%.5f at 1 A,   %.5f at %.3f A (max)",
+                                         dose_from_ki(C4_KI, s * BL0_mag(1.0)),
+                                         dose_from_ki(C4_KI, s * BL0_mag(Imax)), Imax))
+        Lf(I) = 1e3 * s * BL0_mag(I) / abs(Bc(I))         # implied effective length (mm)
+        # not fitted: the magnetometer length scaled by the fitted s (L = s BL0_mag / |Bc|)
+        row("s × L_eff (SG0)", C4_N_BN == 0 ?
+                @sprintf("%.2f mm = s × %.2f mm    (derived from s, not fitted)", Lf(1.0), L_eff) :
+                @sprintf("%.2f mm at 1 A,   %.2f mm at %.3f A    (s × L(I) with the cut; derived from s, not fitted)",
+                         Lf(1.0), Lf(Imax), Imax))
+        row("κ", @sprintf("%.4f ± %.4f", aw4.p, aw4.p_err))
+        row("χ² parallel", @sprintf("%.2f / %d    (s = 1, magnetometer BL0: %.2f)",
+                                    sfit4.chi2, length(par4.I), sfit4.chi2_s1); c = :yellow)
+        row("χ² antiparallel", @sprintf("%.2f / %d    (pure CQD, w = 0: %.1f)",
+                                        aw4.chi2, aw4.n, aw4.chi2_pure); c = :yellow)
+    end
+    hdr(bar)
+end
 
 
 # =============================================================================
@@ -2671,7 +2759,70 @@ end
 
 fig12 = plot_length_from_data(lfit5, jfit5, g5, Dc1_5, aw5, aw5j, curves)
 display(figtag!(fig12, "SG0_fig12_length_from_data"))
-savefig(fig12, "SG0_fig12_length_from_data")          # figures/SG0_fig12_length_from_data.{pdf,png}
+savefig(fig12, "SG0_fig12_length_from_data")          # figures/with_ushape/SG0_fig12_length_from_data.{pdf,png}
+
+
+# -----------------------------------------------------------------------------
+# Summary of Chapter 5 for the REPL: the two fits of Section 11, with Bc from the magnetometer
+# and SG0 a top hat of length ℓ. (A) k_i given (C5_KI): ℓ fitted to the parallel set, then κ.
+# (B) k_i and ℓ fitted jointly to the parallel set, then κ. Fitted values in green, given
+# inputs in white, values derived from them in gray-blue. Dc0 = Dc1 ℓ BL0_per_mm / BL1 is
+# quoted at 1 A and at the highest current of the parallel data.
+# -----------------------------------------------------------------------------
+let Imax = maximum(par5.I)
+    bar = "═"^74
+    hdr(s)                    = printstyled(s, "\n"; color = :cyan, bold = true)
+    sub(s)                    = printstyled(s, "\n"; color = :magenta, bold = true)
+    row(k, v; c = :light_green) = (printstyled("  ", rpad(k, 24); color = :light_black);
+                                   printstyled(v, "\n"; color = c, bold = true))
+    der = :light_blue                                     # derived, not fitted
+    # Δχ² = 1 interval; an unbracketed side (NaN) is shown as a one-sided bound
+    ival(lo, hi, fmt) = isnan(lo) && isnan(hi) ? "not bracketed" :
+                        isnan(lo) ? "< " * fmt(hi) : isnan(hi) ? "> " * fmt(lo) : fmt(lo) * " - " * fmt(hi)
+    e4(x) = @sprintf("%.4g", x); f2(x) = @sprintf("%.2f", x)
+    dose0(Dc1, ℓ, I) = Dc1 * ℓ * BL0_per_mm(I) / CQD.BL1
+    dirnote = DIR_MODE === :geom ? "fixed at the geometric value" : "solved from the baseline at this Dc1"
+    println()
+    hdr(bar)
+    hdr("  CHAPTER 5 SUMMARY - SG0 length ℓ fitted to the separations (top hat)")
+    hdr(@sprintf("  (BL0 = |Bc| ℓ,  Bc = %.1f G/A × I / f,  f = %g,  N = %g;  DIR_MODE = :%s)",
+                 cal_lin.c[2], C5_F_DIV, C5_N_BN, DIR_MODE))
+    hdr(bar)
+    if lfit5 === nothing
+        row("fits", "skipped: SG0 is below the threshold at every data current"; c = :light_red)
+    else
+        sub("  (A) k_i given, ℓ fitted")
+        row("k_i   (given)", e4(C5_KI); c = :white)
+        row("Dc1   (SG1 dose)", @sprintf("%.5f", Dc1_5); c = der)
+        row("DIR", @sprintf("%.4f    (%s)", DIR5, dirnote); c = der)
+        row("ℓ     (SG0 length)", @sprintf("%.2f mm    (Δχ² = 1: %s)", lfit5.s, ival(lfit5.s_lo, lfit5.s_hi, f2)) *
+                                  (lfit5.at_edge ? "    WARNING: at the edge of the scan" : "");
+            c = lfit5.at_edge ? :light_red : :light_green)
+        row("Dc0   (SG0 dose)", @sprintf("%.5f at 1 A,   %.5f at %.3f A (max)",
+                                         dose0(Dc1_5, lfit5.s, 1.0), dose0(Dc1_5, lfit5.s, Imax), Imax); c = der)
+        row("κ", @sprintf("%.4f ± %.4f", aw5.p, aw5.p_err))
+        row("χ² parallel", @sprintf("%.2f / %d    (ℓ = L_eff = %.2f mm: %.2f)", lfit5.chi2, length(par5.I), L_eff,
+                                    chi2(g5.(L_eff .* Dc1_5 .* BLmm5 ./ CQD.BL1), par5.y, par5.yerror)); c = :yellow)
+        row("χ² antiparallel", @sprintf("%.2f / %d    (pure CQD, w = 0: %.1f)", aw5.chi2, aw5.n, aw5.chi2_pure); c = :yellow)
+
+        sub("  (B) k_i and ℓ fitted jointly")
+        row("k_i", @sprintf("%.4g    (Δχ² = 1: %s)", jfit5.ki, ival(jfit5.ki_lo, jfit5.ki_hi, e4)) *
+                   (jfit5.at_edge ? "    WARNING: Dc1 at the edge of the scan" : "");
+            c = jfit5.at_edge ? :light_red : :light_green)
+        row("Dc1   (SG1 dose)", @sprintf("%.5f", jfit5.Dc1); c = der)
+        row("DIR", @sprintf("%.4f    (%s)", jfit5.DIR, dirnote); c = der)
+        row("ℓ     (SG0 length)", @sprintf("%.2f mm    (Δχ² = 1 at the best k_i: %s)",
+                                           jfit5.ℓ, ival(jfit5.ℓ_lo, jfit5.ℓ_hi, f2)))
+        row("k_i ℓ", @sprintf("%.4e mm    (the product the doses fix)", jfit5.kl); c = der)
+        row("Dc0   (SG0 dose)", @sprintf("%.5f at 1 A,   %.5f at %.3f A (max)",
+                                         dose0(jfit5.Dc1, jfit5.ℓ, 1.0), dose0(jfit5.Dc1, jfit5.ℓ, Imax), Imax); c = der)
+        row("κ", @sprintf("%.4f ± %.4f", aw5j.p, aw5j.p_err))
+        row("χ² parallel", @sprintf("%.2f / %d", jfit5.chi2, length(par5.I)); c = :yellow)
+        row("χ² antiparallel", @sprintf("%.2f / %d    (pure CQD, w = 0: %.1f)", aw5j.chi2, aw5j.n, aw5j.chi2_pure); c = :yellow)
+        row("L_eff (profile, Ch. 3)", @sprintf("%.2f mm    (magnetometer profile, for comparison with ℓ)", L_eff); c = :white)
+    end
+    hdr(bar)
+end
 
 println("\nFigures written to ", abspath(FIGDIR))
 
