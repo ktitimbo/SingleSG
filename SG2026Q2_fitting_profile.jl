@@ -258,7 +258,7 @@ const ZBINNING_LIST = [1, 2]
 const SMOOTH_LIST   = [0.001, 0.01]
 
 # Polynomial background degree
-const P_DEGREE   = 5
+const P_DEGREE   = 3
 const NCOLS_BG   = P_DEGREE + 1   # number of polynomial coefficients
 
 const NORM_MODE  = :none
@@ -282,6 +282,41 @@ const DIR_LIST = [
   $(join(("\e[93m" * d * "\e[0m" for d in DIR_LIST), ", "))
   Baseline degree  : \e[92mP_DEGREE = $(P_DEGREE)\e[0m  (\e[92m$(NCOLS_BG)\e[0m coefficients c₀…c$(ProfileFitTools.sub(P_DEGREE)))
 """
+
+# ── Preflight: every input file must be readable before any fitting starts ─────
+# The sweeps take hours and open these files one date at a time, so a broken
+# input would otherwise only surface deep into the run (after every earlier
+# date was already fitted). Typical causes: the upstream summary for a new date
+# is still being written (JLD2 writes its header — the "Superblock" — only when
+# the file is closed, so a file still open in another Julia session cannot be
+# read), the date was not analysed yet, or not for every sweep point (nz, λ₀).
+summary_path(dir) = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", "summary", dir, dir * "_report_summary.jld2")
+
+let problems = String[]
+    for dir in DIR_LIST
+        path = summary_path(dir)
+        if !isfile(path)
+            push!(problems, "$dir : file not found  ($path)")
+            continue
+        end
+        try
+            jldopen(path, "r") do f
+                for (nz, λ) in Iterators.product(ZBINNING_LIST, SMOOTH_LIST)
+                    key = JLD2_MyTools.make_keypath_exp(dir, nz, λ)
+                    haskey(f, key) || push!(problems, "$dir : missing sweep point nz=$nz, λ₀=$λ  (key \"$key\")")
+                end
+            end
+        catch err
+            push!(problems, "$dir : cannot be opened — $(rstrip(sprint(showerror, err), '.')). " *
+                            "Still being written by another session, or corrupted? ($path)")
+        end
+    end
+    isempty(problems) ||
+        error("Input preflight failed for $(length(problems)) item(s); fix them or remove the date from DIR_LIST:\n  " *
+              join(problems, "\n  "))
+    @info "\e[1;92mPreflight OK\e[0m: all $(length(DIR_LIST)) summary files readable, " *
+          "$(length(ZBINNING_LIST) * length(SMOOTH_LIST)) sweep points each"
+end
 
 # ── PrettyTables header construction ──────────────────────────────────────────
 const HDR_TOP = Any[
@@ -1910,6 +1945,35 @@ fmt_duration(d::Period) = string(Dates.canonicalize(round(d, Second)))
 
 stage_done!("setup (packages, modules, constants)")
 
+# ==============================================================================
+# PARAMETER-SWEEP DRIVER
+# ==============================================================================
+# Runs `run_analysis` over every (zbinning, smoothing) combination in
+# ZBINNING_LIST × SMOOTH_LIST so the sensitivity of the fitted blur width to
+# upstream preprocessing choices can be inspected visually/in logs before
+# trusting one combination. Only the run matching (WANTED_ZBINNING,
+# WANTED_SMOOTH) has `save_results=true` and therefore writes JLD2/report
+# files to OUTDIR — every other combination is computed and displayed but
+# not persisted, by design (keeps OUTDIR limited to the chosen production
+# parameters rather than every point in the sweep grid).
+
+inspection_results = OrderedDict{Tuple{Int, Float64}, OrderedDict{Any, NamedTuple}}()
+
+for (zbinning, smoothing) in Iterators.product(ZBINNING_LIST, SMOOTH_LIST)
+    save_this_run =
+        zbinning == WANTED_ZBINNING &&
+        smoothing == WANTED_SMOOTH
+
+    inspection_results[(zbinning, smoothing)] = run_analysis(
+        zbinning,
+        smoothing;
+        save_results = save_this_run,
+    )
+end # parameter sweep
+
+@info "Parameter sweep complete" combinations=length(inspection_results) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
+stage_done!("sweep: single shot ($(length(inspection_results)) points)")
+
 
 # ==============================================================================
 # PARAMETER-SWEEP DRIVER (per repetition)
@@ -1941,35 +2005,6 @@ end # parameter sweep
 @info "Theory profiles computed (unique (I₀, z) pairs, reused across stages and sweep points)" n=length(THEORY_CACHE)
 stage_done!("sweep: per repetition ($(length(inspection_results_per_repetition)) points)")
 
-
-# ==============================================================================
-# PARAMETER-SWEEP DRIVER
-# ==============================================================================
-# Runs `run_analysis` over every (zbinning, smoothing) combination in
-# ZBINNING_LIST × SMOOTH_LIST so the sensitivity of the fitted blur width to
-# upstream preprocessing choices can be inspected visually/in logs before
-# trusting one combination. Only the run matching (WANTED_ZBINNING,
-# WANTED_SMOOTH) has `save_results=true` and therefore writes JLD2/report
-# files to OUTDIR — every other combination is computed and displayed but
-# not persisted, by design (keeps OUTDIR limited to the chosen production
-# parameters rather than every point in the sweep grid).
-
-inspection_results = OrderedDict{Tuple{Int, Float64}, OrderedDict{Any, NamedTuple}}()
-
-for (zbinning, smoothing) in Iterators.product(ZBINNING_LIST, SMOOTH_LIST)
-    save_this_run =
-        zbinning == WANTED_ZBINNING &&
-        smoothing == WANTED_SMOOTH
-
-    inspection_results[(zbinning, smoothing)] = run_analysis(
-        zbinning,
-        smoothing;
-        save_results = save_this_run,
-    )
-end # parameter sweep
-
-@info "Parameter sweep complete" combinations=length(inspection_results) saved_pair=(WANTED_ZBINNING, WANTED_SMOOTH)
-stage_done!("sweep: single shot ($(length(inspection_results)) points)")
 
 
 # ==============================================================================
