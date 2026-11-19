@@ -2984,87 +2984,6 @@ function _get_scipy_io()
     return _scipy_io_ref[]
 end
 
-"""
-    SG0_stack_data(version, data_directory; pattern, order, verbose) -> OrderedDict
-
-Load, validate, and stack Stern-Gerlach scan data from a directory of `.mat` files
-into a single `OrderedDict`. Files are sorted by acquisition step before stacking.
-
-Loading proceeds in two passes to minimise I/O:
-1. **Pre-scan** — scalars and string metadata only (`variable_names` restricted,
-   no array data deserialised).
-2. **Array pass** — `F1`, `F2`, `BG` only, iterated in sorted order.
-
-Scalar and string fields are discovered dynamically from the first file against
-known field tables — fields present in the tables but absent from the `.mat` files
-are silently skipped (with a notice if `verbose = true`).
-
-Errors across multiple files are accumulated and reported together rather than
-failing on the first bad file.
-
-# Arguments
-- `version::AbstractString`        : dataset version tag (reserved for future dispatch, currently unused)
-- `data_directory::AbstractString` : path to the folder containing `.mat` files
-
-# Keyword arguments
-- `pattern`        : `Regex` filter applied to filenames (default `r"\\.mat\$"i`)
-- `order::Symbol`  : sort direction for acquisition steps; `:asc` or `:desc` (default `:asc`)
-- `verbose::Bool`  : show progress bar and layout info during loading (default `true`)
-
-# Returns
-`OrderedDict{Symbol, Any}` with the following keys. All keys except `:Directory`,
-`:Files`, `:AcquisitionStep`, `:F1_data`, `:F2_data`, and `:BG_data` are present
-only if the corresponding variable exists in the `.mat` files.
-
-| Key                      | Type / value                                               |
-|:-------------------------|:-----------------------------------------------------------|
-| `:Directory`             | `String` — absolute path of `data_directory`              |
-| `:Files`                 | `Vector{String}` — sorted file paths                      |
-| `:AcquisitionStep`       | `Vector{Int}` — sorted acquisition step indices           |
-| `:AcquisitionTime`       | `Vector{String}` — from `acquisitionTime` variable *(if present)* |
-| `:TemperatureinCelsius`  | `Float64` if uniform across files, `Vector{Float64}` otherwise *(if present)* |
-| `:MGcurrentInA`          | `Vector{Float64}` — main coil current (A) *(if present)*  |
-| `:MGfieldInTesla`        | `Vector{Float64}` — main coil field (T, converted from G) *(if present)* |
-| `:SG0currentInA`         | `Vector{Float64}` — SG0 coil current (A) *(if present)*   |
-| `:SG0BfieldInTesla`      | `Vector{Float64}` — SG0 field (T, converted from G) *(if present)* |
-| `:SG1currentInA`         | `Vector{Float64}` — SG1 coil current (A) *(if present)*   |
-| `:SG1BfieldInTesla`      | `Vector{Float64}` — SG1 field (T, converted from G) *(if present)* |
-| `:SG2currentInA`         | `Vector{Float64}` — SG2 coil current (A) *(if present)*   |
-| `:SG2BfieldInTesla`      | `Vector{Float64}` — SG2 field (T, converted from G) *(if present)* |
-| `:F1_data`               | `Array{T, 4}` — shape `(Nx, Nz, Nframes, Nfiles)`         |
-| `:F2_data`               | `Array{T, 4}` — shape `(Nx, Nz, Nframes, Nfiles)`         |
-| `:BG_data`               | `Array{T, 4}` — shape `(Nx, Nz, Nframes, Nfiles)`         |
-
-Array eltype `T` is inferred from the first file.
-
-# Throws
-- `ArgumentError` — if `order` is not `:asc` or `:desc`
-- `ErrorException` — if no files match `pattern` in `data_directory`
-- `ErrorException` — if one or more files fail scalar read or array read,
-  with a combined report listing every failing file and its error message
-
-# Notes
-- Only `F1`, `F2`, `BG`, and `stepInAcquisitionOrder` are guaranteed to exist
-  in every `.mat` file; all other fields are loaded only if present.
-- Struct variables (`F1struct`, `F2struct`, `BGstruct`) are ignored.
-- All matched files must have identical array shapes for `F1`, `F2`, and `BG`.
-- Field values are stored in Tesla; the raw Gauss values in the `.mat` files
-  are multiplied by `1e-4` on load.
-- Scalar field discovery assumes that if a key exists in the first file it
-  exists in all files of the dataset.
-- Requires `scipy.io` to be available in the active Python environment
-  (accessed via a module-level lazy singleton `_get_scipy_io()`).
-
-# Example
-julia
-data = SG0_stack_data("v1", "/path/to/scans")
-
-F1    = data[:F1_data]            # (Nx, Nz, Nframes, Nfiles)
-B_SG0 = data[:SG0BfieldInTesla]  # present only if SG0 fields exist in the files
-
-haskey(data, :AcquisitionTime)   && println(data[:AcquisitionTime])
-haskey(data, :SG2BfieldInTesla)  && println("SG2 data found")
-"""
 # function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
 #                         pattern       = r"\.mat$"i,
 #                         order::Symbol = :asc,
@@ -3275,6 +3194,89 @@ function _parse_acqtime(s::AbstractString)
     end
 end
 
+"""
+    SG0_stack_data(version, data_directory; pattern, order, verbose) -> OrderedDict
+
+Load, validate, and stack Stern-Gerlach scan data from a directory of `.mat` files
+into a single `OrderedDict`. All metadata is read from variables inside the `.mat`
+files (not from filenames). Files are sorted by acquisition step before stacking.
+
+Loading proceeds in two passes:
+1. **Pre-scan** — reads only the scalar/string metadata keys and
+   `stepInAcquisitionOrder` from each file (plus the shape and eltype of `F1`
+   from the first file).
+2. **Array pass** — reads `F1`, `F2`, `BG`, iterated in sorted order.
+
+Optional fields are discovered from the first file against known field tables;
+fields in the tables but absent from the `.mat` files are skipped (with an
+`@info` notice if `verbose = true`).
+
+Errors are accumulated across all files and reported together (one report for
+the pre-scan, one for the array pass) rather than failing on the first bad file.
+
+# Arguments
+- `version::AbstractString`        : dataset version tag (reserved for future dispatch, currently unused)
+- `data_directory::AbstractString` : path to the folder containing `.mat` files
+
+# Keyword arguments
+- `pattern`        : `Regex` filter applied to file paths (default `r"\\.mat\$"i`)
+- `order::Symbol`  : sort direction for acquisition steps; `:asc` or `:desc` (default `:asc`)
+- `verbose::Bool`  : show progress bar and info messages during loading (default `true`)
+
+# Returns
+`OrderedDict{Symbol, Any}` with the following keys. All keys except `:Directory`,
+`:Files`, `:AcquisitionStep`, `:F1_data`, `:F2_data`, and `:BG_data` are present
+only if the corresponding variable exists in the `.mat` files.
+
+| Key                      | `.mat` variable            | Type / value                                               |
+|:-------------------------|:---------------------------|:-----------------------------------------------------------|
+| `:Directory`             | —                          | `String` — `data_directory` as passed                      |
+| `:Files`                 | —                          | `Vector{String}` — file **basenames**, in sorted order     |
+| `:AcquisitionStep`       | `stepInAcquisitionOrder`   | `Vector{Int}` — sorted acquisition step indices            |
+| `:AcquisitionTime`       | `acquisitionTime`          | `Vector{String}` — reformatted to `"yyyymmddTHHMMSS"` (raw string kept if it does not parse) |
+| `:MGcurrentInA`          | `MGcurrentinA`             | `Vector{Float64}` — main coil current (A)                  |
+| `:MGfieldInTesla`        | `MGfieldinGauss`           | `Vector{Float64}` — main coil field (T, converted from G)  |
+| `:SG0currentInA`         | `SG0currentinA`            | `Vector{Float64}` — SG0 coil current (A)                   |
+| `:SG0BfieldInTesla`      | `SG0BfieldinGauss`         | `Vector{Float64}` — SG0 field (T, converted from G)        |
+| `:SG1currentInA`         | `SG1currentinA`            | `Vector{Float64}` — SG1 coil current (A)                   |
+| `:SG1BfieldInTesla`      | `SG1BfieldinGauss`         | `Vector{Float64}` — SG1 field (T, converted from G)        |
+| `:TemperatureInCelsius`  | `ovenTemperatureinCelsius` | `Float64` if identical across files, `Vector{Float64}` otherwise |
+| `:F1_data`               | `F1`                       | `Array{T, 4}` — shape `(Nx, Nz, Nframes, Nfiles)`          |
+| `:F2_data`               | `F2`                       | `Array{T, 4}` — shape `(Nx, Nz, Nframes, Nfiles)`          |
+| `:BG_data`               | `BG`                       | `Array{T, 4}` — shape `(Nx, Nz, Nframes, Nfiles)`          |
+
+Array eltype `T` is inferred from `F1` in the first file. Unlike the filename-based
+`SG0_stack_data(data_directory; ...)` method, no current uncertainty
+(`:CurrentsError`) is computed.
+
+# Throws
+- `ArgumentError` — if `order` is not `:asc` or `:desc`
+- `ErrorException` — if no files match `pattern` in `data_directory`
+- `ErrorException` — if one or more files fail the pre-scan or the array read,
+  with a combined report listing every failing file and its error message
+
+# Notes
+- `F1`, `F2`, `BG`, and `stepInAcquisitionOrder` are required in every `.mat`
+  file; all other fields are loaded only if present.
+- Any other variables in the files (e.g. `F1struct`, `F2struct`, `BGstruct`) are ignored.
+- All matched files must have identical array shapes for `F1`, `F2`, and `BG`.
+- Field values are stored in Tesla; the raw Gauss values in the `.mat` files
+  are multiplied by `1e-4` on load.
+- Field discovery assumes that if a key exists in the first file it exists in
+  all files of the dataset; a file missing it fails the pre-scan.
+- Files are read with MAT.jl (`matopen`).
+
+# Example
+```julia
+data = SG0_stack_data("v1", "/path/to/scans")
+
+F1    = data[:F1_data]            # (Nx, Nz, Nframes, Nfiles)
+B_SG0 = data[:SG0BfieldInTesla]   # present only if SG0 fields exist in the files
+
+haskey(data, :AcquisitionTime)      && println(data[:AcquisitionTime])
+haskey(data, :TemperatureInCelsius) && println(data[:TemperatureInCelsius])
+```
+"""
 function SG0_stack_data(version::AbstractString, data_directory::AbstractString;
                          pattern       = r"\.mat$"i,
                          order::Symbol = :asc,
