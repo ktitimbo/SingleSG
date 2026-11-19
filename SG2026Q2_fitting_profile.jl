@@ -258,7 +258,7 @@ const ZBINNING_LIST = [1, 2]
 const SMOOTH_LIST   = [0.001, 0.01]
 
 # Polynomial background degree
-const P_DEGREE   = 3
+const P_DEGREE   = 5
 const NCOLS_BG   = P_DEGREE + 1   # number of polynomial coefficients
 
 const NORM_MODE  = :none
@@ -272,7 +272,7 @@ const DIR_LIST = [
                     "20260819",
                     "20260821", "20260826", "20260827", "20260831", "20260902",
                     "20260903",
-                    "20261105", "20261111", "20261112", "20261113", "20261116"
+                    "20261105", "20261111", "20261112", "20261113", "20261116", "20261118",
                 ]
 
 # Echo the run configuration so the terminal log states what was analysed
