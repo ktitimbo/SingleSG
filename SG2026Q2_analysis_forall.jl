@@ -56,9 +56,9 @@ MyExperimentalAnalysis.FIG_EXT  = FIG_EXT;
 # Data Directory
 data_directories =  ["20260819", 
                         "20260821", "20260826", "20260827", "20260831", "20260902", "20260903", 
-                        "20261105", "20261111", "20261112","20261113", "20261116",
+                        "20261105", "20261111", "20261112","20261113", "20261116", "20261118",
                     ]
-data_directory      = data_directories[12] ;
+data_directory      = data_directories[13] ;
 # Furnace 
 const TCELSIUS = 205
 const TKELVIN = 273.15 + TCELSIUS
