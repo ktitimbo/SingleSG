@@ -9,19 +9,21 @@
 #  ------------------------------------------------------------------
 #  Both calibrated models get one extra free parameter, a vertical shift:
 #
-#      z_model(I) = z_init + m(I)/s       m = CQD ki_itp(I, kᵢ)  or  QM zqm(I)
+#      z_model(I) = (z_init + m(I))/s     m = CQD ki_itp(I, kᵢ)  or  QM zqm(I)
 #
 #  z_init (mm) absorbs an origin that is not the true zero-deflection position,
 #  e.g. the deflection already present at the lowest (non-zero) current where
-#  the origin is set (ORIGIN_MODE = :lowest_current), or a residual camera
+#  the origin is set (zero-current midpoint), or a residual camera
 #  offset. It is fitted separately for CQD and QM (same freedom for both):
-#    • s(kᵢ, z_init) closed form on the shifted tail  z − z_init ≈ m/s;
+#    • s(kᵢ, z_init) closed form on the tail with the shifted model  z_init + m ≈ s·z;
 #    • z_init and kᵢ minimise the log10 loss on the fit subset (nested Brent);
-#    • QM: z_init from the fit subset, then s on the shifted tail.
+#    • QM: z_init from the fit subset, then s on the tail (shifted model).
 #  Settings: FIT_ZINIT, ZINIT_BOUNDS. FIT_ZINIT = false reproduces the
 #  no-offset script. Parameter counts in χ²_red/AIC/BIC: CQD 3, QM 2.
 #  z_init is added to fig002 (scan), the figures' labels, the tables, the
 #  archives and the combined table/figure.
+#  All figures are drawn with CairoMakie (not Plots/GR): PNG at PX_PER_UNIT
+#  pixels per unit, LaTeX labels via MathTeXEngine, theme set in section 0.
 #
 #  PURPOSE
 #  -------
@@ -60,9 +62,10 @@
 #    1. raw F=1 / F=2 peak positions x ± δx (camera frame, `PEAK_KEY_F1/F2`)
 #       are converted to mm with the magnification M ± δM of the directory:
 #           z = x/M,   δz² = (δx/M)² + (x·δM/M²)²
-#    2. origin z0 (ORIGIN_MODE):
-#         :lowest_current  mean F1/F2 midpoint of the repeats at the lowest current
-#         :file_centroid   the centroid stored in the file (`centroid_fw_mm`)
+#    2. origin z0 = mean F1/F2 midpoint of the repeats at I = 0 (lowest current
+#       if there is none), as in SG2026Q2_experiment_summary.jl; error = larger
+#       of the propagated √(Σδ²)/n and the scatter std/√n of the repeats.
+#       The file's `centroid_fw_mm` (midpoint averaged over I ≥ 20 mA) is not used.
 #    3. F=1 deflection  z_F1 = −(z_F1,raw − z0),  δz² = δz_F1² + δz0²
 #    4. sorted by current, cut at I ≥ I_THRESHOLD, non-positive z removed
 #    5. δI from the file (`ErrorCurrentsPhys`, δI_MODE = :phys) or a fraction of
@@ -94,7 +97,7 @@
 #       (χ², AIC/BIC, …) and diagnostic panels (fig006).
 #    S/A. Summary and per-directory archive.
 #    ALL. Combined table of kᵢ and s over the directories, weighted mean of kᵢ,
-#         fig_ki_all_directories.
+#         fig_ki_all_directories, fig_summary_all_directories (all data + median curves).
 #
 #  INPUTS  (external — this script does not create them)
 #  ----------------------------------------------------
@@ -114,6 +117,7 @@
 #      fig001  CQD z_max(kᵢ) slices vs QM at selected currents
 #      fig002  interpolated (I, kᵢ) surface and contour
 #      fig_ki_all_directories       kᵢ, s and z_init per directory, weighted mean of kᵢ
+#      fig_summary_all_directories  all directories' data + CQD/QM curves at the median kᵢ, z_init, s
 #      ki_all_directories.csv       one row per directory (kᵢ, s, errors, χ², ΔAIC, …)
 #      SG_ki_scale_all_directories.jld2  the same table + weighted mean
 #    In RUN_OUTDIR/<DATA_DIR>/ (per directory; figures .<FIG_EXT>, default png):
@@ -154,14 +158,28 @@
 # -----------------------------------------------------------------------------
 # 0) Packages and global setup
 # -----------------------------------------------------------------------------
-using Plots; gr()
-Plots.default(
-    # show=true, 
-    dpi=600, fontfamily="Computer Modern",
-    grid=true, minorgrid=true, framestyle=:box, widen=true,
-)
+# Figures: CairoMakie (vector-quality PNG/PDF/SVG). LaTeX labels (L"...") are
+# rendered by MathTeXEngine; theme_latexfonts() gives Computer Modern text.
+using CairoMakie
+const PX_PER_UNIT = 3            # PNG resolution: pixels per figure unit (size=(900,800) → 2700×2400 px)
+CairoMakie.activate!(type = "png", px_per_unit = PX_PER_UNIT)
+set_theme!(merge(Theme(
+    fontsize = 15,
+    Axis = (
+        xgridvisible = true, ygridvisible = true,
+        xminorgridvisible = true, yminorgridvisible = true,
+        xminorticksvisible = true, yminorticksvisible = true,
+        xgridcolor = (:black, 0.12), ygridcolor = (:black, 0.12),
+        xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05),
+        titlefont = :regular,
+    ),
+    Axis3 = (titlefont = :regular,),
+    Legend = (framevisible = true, framecolor = :transparent,
+              backgroundcolor = (:white, 0.85), titlefont = :regular,
+              patchsize = (22, 12), rowgap = 0),
+    Colorbar = (minorticksvisible = false,),
+), theme_latexfonts()))
 FIG_EXT = "png"   # "png" | "pdf" | "svg"
-using Plots.PlotMeasures
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using LaTeXStrings, Printf, PrettyTables
@@ -201,7 +219,6 @@ const NZ_EXP   = 2              # z-bins of the experimental profile extraction 
 const λ0_EXP   = 0.01           # raw smoothing parameter of the experiment       (file: meta/λ0)
 const PEAK_KEY_F1 = :fw_F1_peak_pos_raw   # raw F=1 peak position (camera frame) and its error
 const PEAK_KEY_F2 = :fw_F2_peak_pos_raw   # raw F=2 peak position (used for the origin)
-const ORIGIN_MODE = :lowest_current       # :lowest_current | :file_centroid  (see header)
 # Analysis configuration shared by the QM and CQD tables
 const NX_FIXED  = 128       # x-bins (bookkeeping only)
 const NZ_FIXED  = 2         # z-bins used in profile extraction (simulation)
@@ -220,10 +237,10 @@ const N_BACK_PTS    = 8     # points in the high-current window
 const TAIL_SCALE_MODE = :log     # :linear | :log | :legacy — same for CQD and QM
 const I_PLATEAU       = 0.650    # (A) plateau = tails confined to I_min ≥ I_PLATEAU;
                                  #     the final tail = all points with I ≥ I_PLATEAU
-# Vertical offset of the models:  z_model(I) = z_init + m(I)/s
+# Vertical offset of the models:  z_model(I) = (z_init + m(I))/s
 const FIT_ZINIT    = true             # false → z_init ≡ 0 (reproduces the no-offset script)
 const ZINIT_BOUNDS = (-0.009, 0.009)  # (mm) search bracket of z_init; the lower side is
-                                      #      also limited by z_init + m/s > 0 on the fit points
+                                      #      also limited by z_init + m > 0 on the fit points
 const ZINIT_FIT_BOUNDS = FIT_ZINIT ? ZINIT_BOUNDS : nothing
 const N_PAR_CQD = FIT_ZINIT ? 3 : 2   # free parameters (kᵢ, s, z_init) for χ²_red, AIC, BIC
 const N_PAR_QM  = FIT_ZINIT ? 2 : 1   # (s, z_init)
@@ -319,14 +336,16 @@ fmt(v, d) = round(v, sigdigits = d)
 #
 #   Every model curve enters the fits as
 #
-#       z_model(I) = z_init + m(I)/s          m = CQD ki_itp(I, kᵢ)  or  QM zqm(I)
+#       z_model(I) = (z_init + m(I)) / s      m = CQD ki_itp(I, kᵢ)  or  QM zqm(I)
 #
-#   z_init (mm) is a rigid vertical shift of the measured F=1 deflection. It
+#   i.e. the offset is added to the SIMULATED curve before the calibration
+#   factor is applied (s·z ≈ z_init + m). In data units the shift is z_init/s.
+#   z_init (mm, model units) is a rigid vertical shift of the F=1 deflection. It
 #   absorbs an origin z0 that is not the true zero-deflection position — e.g.
-#   with ORIGIN_MODE = :lowest_current the origin is taken at the lowest
+#   if a directory has no I = 0 point the origin is taken at the lowest
 #   *non-zero* current, where the beam is already (slightly) deflected — or any
 #   residual offset of the camera frame. It is relevant at low currents only
-#   (z of a few |z_init|); at high current it is negligible next to m/s.
+#   (z of a few |z_init|); at high current it is negligible next to m.
 #
 #   fit_cqd_ki_scale            — (kᵢ, z_init, s_CQD), point estimates only (fast; used in the scan)
 #   fit_qm_scale                — (z_init, s_QM),      point estimates only (fast; used in the scan)
@@ -335,12 +354,13 @@ fmt(v, d) = round(v, sigdigits = d)
 #
 # Common ingredients:
 #   • tail       = last `n_tail` rows of the full data matrix (high currents).
-#                  For a given z_init, s is closed form on the SHIFTED tail
-#                  z − z_init ≈ m/s  (scale_mode, identical for CQD and QM):
-#         :log     log10 s = ⟨log10 m − log10(z − z_init)⟩
-#         :linear  s = ⟨m,m⟩/⟨z − z_init, m⟩
-#         :legacy  s = ⟨m, z − z_init⟩/⟨z − z_init, z − z_init⟩
-#   • loss       = log10-space (weighted) residual of  z_init + m/s  vs z on the
+#                  For a given z_init, s is closed form on the tail with the
+#                  SHIFTED MODEL  m' = z_init + m ≈ s·z  (data unchanged;
+#                  scale_mode, identical for CQD and QM):
+#         :log     log10 s = ⟨log10 m' − log10 z⟩
+#         :linear  s = ⟨m',m'⟩/⟨z, m'⟩
+#         :legacy  s = ⟨m', z⟩/⟨z, z⟩
+#   • loss       = log10-space (weighted) residual of  (z_init + m)/s  vs z on the
 #                  selected fit subset; a non-positive prediction → loss = Inf.
 #   • s is profiled out (closed form), z_init by an inner bounded Brent search
 #     in `zinit_bounds`, kᵢ by the outer Brent search: the joint
@@ -355,7 +375,7 @@ fmt(v, d) = round(v, sigdigits = d)
     _scale_from_tail(m, z; scale_mode, w=nothing) -> (s, var_log10_s)
 
 Closed-form calibration factor `s` such that `m/s ≈ z` on the tail points
-(`m` model, `z` data — already shifted by `z_init`), and the conditional
+(`m` model — already shifted, `z_init + m` —, `z` raw data), and the conditional
 variance of `u = log10 s` from the scatter of the tail.
 
 - `:log`    → `u = ⟨log10 m − log10 z⟩` (weighted by `w` if given); `Var(u) = var(d)/n` or `1/Σw`.
@@ -411,12 +431,12 @@ _zinit_step(ẑ, Z) = cbrt(eps(Float64)) * max(abs(ẑ), minimum(Z))
 
 Three-parameter fit of the induction coefficient `kᵢ`, the vertical offset
 `z_init` (mm) and the calibration factor `s`, so that the **calibrated CQD
-model** `z_init + m/s` matches the raw experiment `z`.
+model** `(z_init + m)/s` matches the raw experiment `z`.
 
 For candidate `(kᵢ, z_init)`, `s(kᵢ, z_init)` is the closed-form factor that
-makes `itp(I,kᵢ)/s` agree with the shifted tail `z − z_init` (last `n_tail`
-rows of `data_org`); `(kᵢ, z_init)` then minimise the log10-space MSE between
-`z` and `z_init + itp(I,kᵢ)/s` on `selected_points` — z_init by an inner Brent
+makes `(z_init + itp(I,kᵢ))/s` agree with the tail `z` (last `n_tail` rows of
+`data_org`); `(kᵢ, z_init)` then minimise the log10-space MSE between
+`z` and `(z_init + itp(I,kᵢ))/s` on `selected_points` — z_init by an inner Brent
 search in `zinit_bounds`, kᵢ by the outer one. `zinit_bounds = nothing` fixes
 `z_init = 0` (no-offset fit).
 
@@ -445,23 +465,22 @@ function fit_cqd_ki_scale(data_org, selected_points, ki_list, ki_range;
     I_fit = selected_points[:, 1]
     z_fit = selected_points[:, 3]
 
-    # closed-form scale s(kᵢ, z_init):  model_tail / s ≈ z_tail − z_init
+    # closed-form scale s(kᵢ, z_init):  (z_init + model_tail) / s ≈ z_tail
     function scale_for(ki, zi)
-        m  = itp.(I_tail, Ref(ki))
-        zt = z_tail .- zi
-        ok = isfinite.(m) .& (m .> 0) .& (zt .> 0)
+        m  = zi .+ itp.(I_tail, Ref(ki))
+        ok = isfinite.(m) .& (m .> 0) .& (z_tail .> 0)
         any(ok) || return NaN
-        first(_scale_from_tail(m[ok], zt[ok]; scale_mode = scale_mode))
+        first(_scale_from_tail(m[ok], z_tail[ok]; scale_mode = scale_mode))
     end
 
-    # composite objective: log-space MSE of z_init + m/s on the fit subset
+    # composite objective: log-space MSE of (z_init + m)/s on the fit subset
     function loss(ki, zi)
         s = scale_for(ki, zi)
         (isfinite(s) && s > 0) || return Inf
         m  = itp.(I_fit, Ref(ki))
-        ok = isfinite.(m) .& (m .> 0)
+        ok = isfinite.(m)
         any(ok) || return Inf
-        p = zi .+ m[ok] ./ s
+        p = (zi .+ m[ok]) ./ s
         all(>(0), p) || return Inf
         mean(abs2, log10.(p) .- log10.(z_fit[ok]))
     end
@@ -474,7 +493,7 @@ function fit_cqd_ki_scale(data_org, selected_points, ki_list, ki_range;
     k_fit  = Optim.minimizer(res)
     zi_fit = best_zi(k_fit)[1]
     s_fit  = scale_for(k_fit, zi_fit)
-    model(Ivec) = zi_fit .+ itp.(Ivec, Ref(k_fit)) ./ s_fit
+    model(Ivec) = (zi_fit .+ itp.(Ivec, Ref(k_fit))) ./ s_fit
 
     # diagnostics: calibrated model vs raw data
     rmse_fit  = sqrt(mean(abs2, model(I_fit)  .- z_fit))          # mm
@@ -503,8 +522,8 @@ end
     fit_qm_scale(data_org, selected_points, zqm; n_tail, scale_mode=:linear, zinit_bounds=nothing)
 
 Offset `z_init` and calibration factor `s` such that the **calibrated QM
-model** `z_init + zqm(I)/s` matches the raw experiment. `s(z_init)` comes from
-the shifted tail (last `n_tail` rows of `data_org`), `z_init` minimises the
+model** `(z_init + zqm(I))/s` matches the raw experiment. `s(z_init)` comes from
+the tail with the shifted model (last `n_tail` rows of `data_org`), `z_init` minimises the
 log10-space MSE on `selected_points` (Brent in `zinit_bounds`).
 `zinit_bounds = nothing` → `z_init = 0` and `s` from the tail alone (as in the
 no-offset script).
@@ -523,25 +542,25 @@ function fit_qm_scale(data_org, selected_points, zqm;
     I_fit  = selected_points[:, 1]
     z_fit  = selected_points[:, 3]
     m_fit  = zqm.(I_fit)
-    okf    = isfinite.(m_fit) .& (m_fit .> 0)
+    okf    = isfinite.(m_fit)
 
     function scale_for(zi)
-        zt = z_tail .- zi
-        ok = isfinite.(m_tail) .& (m_tail .> 0) .& (zt .> 0)
+        mt = zi .+ m_tail
+        ok = isfinite.(mt) .& (mt .> 0) .& (z_tail .> 0)
         any(ok) || return NaN
-        first(_scale_from_tail(m_tail[ok], zt[ok]; scale_mode = scale_mode))
+        first(_scale_from_tail(mt[ok], z_tail[ok]; scale_mode = scale_mode))
     end
     function loss(zi)
         s = scale_for(zi)
         (isfinite(s) && s > 0 && any(okf)) || return Inf
-        p = zi .+ m_fit[okf] ./ s
+        p = (zi .+ m_fit[okf]) ./ s
         all(>(0), p) || return Inf
         mean(abs2, log10.(p) .- log10.(z_fit[okf]))
     end
 
     zi = fitz ? _minimize_1d(loss, zinit_bounds[1], zinit_bounds[2])[1] : 0.0
     s  = scale_for(zi)
-    model(Ivec) = zi .+ zqm.(Ivec) ./ s
+    model(Ivec) = (zi .+ zqm.(Ivec)) ./ s
 
     rmse_tail = sqrt(mean(abs2, model(I_tail) .- z_tail))
     z_all = data_org[:, 3]
@@ -619,13 +638,13 @@ end
                                 conf=0.95, use_Zse=false, profile=true, profile_grid=400)
 
 Uncertainty-aware companion of `fit_cqd_ki_scale`: fits `kᵢ`, the offset
-`z_init` and the calibration factor `s` (calibrated model `z_init + m/s` ≈ raw
+`z_init` and the calibration factor `s` (calibrated model `(z_init + m)/s` ≈ raw
 data `z`) and returns formal uncertainties on all three.
 
 Model. For candidate `(kᵢ, z_init)` the scale `s(kᵢ, z_init)` is fixed by the
-shifted tail `z − z_init` (closed form, see `scale_mode`). `(kᵢ, z_init)`
+tail with the shifted model `z_init + m ≈ s·z` (closed form, see `scale_mode`). `(kᵢ, z_init)`
 minimise the (optionally weighted) log10-space RSS on `selected_points`,
-`RSS = Σ wᵢ (log10[z_init + itp(Iᵢ,kᵢ)/s] − log10 Zᵢ)²` (nested Brent
+`RSS = Σ wᵢ (log10[(z_init + itp(Iᵢ,kᵢ))/s] − log10 Zᵢ)²` (nested Brent
 searches). With `use_Zse=true`, `wᵢ = (Zᵢ ln10 / σZᵢ)²`; otherwise all 1.
 
 Uncertainties (composite residuals, so the Jacobian includes ∂s/∂kᵢ and ∂s/∂z_init):
@@ -690,14 +709,14 @@ function fit_cqd_ki_scale_with_error(itp, data_org, selected_points;
 
     ki_min, ki_max = float(bounds[1]), float(bounds[2])
 
-    # ---- scale s(kᵢ, z_init) and Var(log10 s | kᵢ, z_init) on the shifted tail
+    # ---- scale s(kᵢ, z_init) and Var(log10 s | kᵢ, z_init) on the tail:
+    #      shifted model z_init + m ≈ s·Z (data unchanged)
     function scale_for(ki, zi)
-        m  = itp.(I_t, Ref(ki))
-        zt = Z_t .- zi
-        ok = isfinite.(m) .& (m .> 0) .& (zt .> 0)
+        m  = zi .+ itp.(I_t, Ref(ki))
+        ok = isfinite.(m) .& (m .> 0)
         count(ok) ≥ 2 || return (NaN, NaN)
-        wt = use_Zse ? ((zt[ok] .* ln10) ./ σZ_t[ok]) .^ 2 : nothing
-        _scale_from_tail(m[ok], zt[ok]; scale_mode = scale_mode, w = wt)
+        wt = use_Zse ? ((Z_t[ok] .* ln10) ./ σZ_t[ok]) .^ 2 : nothing     # 1/σ²(log10 Z)
+        _scale_from_tail(m[ok], Z_t[ok]; scale_mode = scale_mode, w = wt)
     end
 
     # ---- composite residuals on the fit subset -------------------------------
@@ -705,9 +724,9 @@ function fit_cqd_ki_scale_with_error(itp, data_org, selected_points;
         s, _ = scale_for(ki, zi)
         (isfinite(s) && s > 0) || return nothing
         mI = itp.(I, Ref(ki))
-        m  = isfinite.(mI) .& (mI .> 0)
+        m  = isfinite.(mI)
         any(m) || return nothing
-        zpred = zi .+ mI[m] ./ s
+        zpred = (zi .+ mI[m]) ./ s
         all(>(0), zpred) || return nothing
         r = log10.(zpred) .- log10.(Z[m])
         return (r = r, w = w[m], m = m, s = s)
@@ -761,7 +780,7 @@ function fit_cqd_ki_scale_with_error(itp, data_org, selected_points;
 
     function r_on_mask(ki, zi, mask)
         s, _ = scale_for(ki, zi)
-        zpred = zi .+ itp.(I[mask], Ref(ki)) ./ s
+        zpred = (zi .+ itp.(I[mask], Ref(ki))) ./ s
         log10.(zpred) .- log10.(Z[mask])
     end
     rJ   = r_on_mask(k̂, ẑ, mJ)
@@ -830,7 +849,7 @@ function fit_cqd_ki_scale_with_error(itp, data_org, selected_points;
         extrema((scale_for(ci_profile[1], best_zi(ci_profile[1])[1])[1],
                  scale_for(ci_profile[2], best_zi(ci_profile[2])[1])[1]))
 
-    m_tail    = ẑ .+ itp.(I_t, Ref(k̂)) ./ ŝ
+    m_tail    = (ẑ .+ itp.(I_t, Ref(k̂))) ./ ŝ
     okt       = isfinite.(m_tail)
     tail_rmse = sqrt(mean(abs2, m_tail[okt] .- Z_t[okt]))
 
@@ -885,11 +904,11 @@ end
                             use_Zse=false, profile=true, profile_grid=400)
 
 Uncertainty-aware companion of `fit_qm_scale`: offset `z_init` and calibration
-factor `s` such that the **calibrated QM model** `z_init + zqm(I)/s` matches the
+factor `s` such that the **calibrated QM model** `(z_init + zqm(I))/s` matches the
 raw experiment, with formal uncertainties on both.
 
 - `z_init` minimises the log10-space RSS on `selected_points` (s(z_init) from
-  the shifted tail); linearised SE from `∂r/∂z_init` (central differences),
+  the tail, shifted model z_init + zqm ≈ s·z); linearised SE from `∂r/∂z_init` (central differences),
   Student-t interval `z_init_ci_t` and profile interval `z_init_ci_profile`,
   with `z_init_dof = n − 1 − p_s` (`p_s = 1` when the tail lies inside the fit
   subset, as in the CQD fitter).
@@ -946,16 +965,17 @@ function fit_qm_scale_with_error(zqm, data_org, selected_points;
     I, Z, σZ, m_f = I[mf], Z[mf], σZ[mf], m_f[mf]
     w = use_Zse ? ((Z .* ln10) ./ σZ) .^ 2 : ones(length(I))
 
-    tail_w(zi) = use_Zse ? (((Z_t .- zi) .* ln10) ./ σZ_t) .^ 2 : nothing
+    # tail: shifted model z_init + m ≈ s·Z (data unchanged); log10-space weights 1/σ²(log10 Z)
+    w_tail = use_Zse ? ((Z_t .* ln10) ./ σZ_t) .^ 2 : nothing
     function scale_for(zi)
-        zt = Z_t .- zi
-        all(>(0), zt) || return (NaN, NaN)
-        _scale_from_tail(m_t, zt; scale_mode = scale_mode, w = tail_w(zi))
+        mt = zi .+ m_t
+        all(>(0), mt) || return (NaN, NaN)
+        _scale_from_tail(mt, Z_t; scale_mode = scale_mode, w = w_tail)
     end
     function residuals_for(zi)
         s, _ = scale_for(zi)
         (isfinite(s) && s > 0) || return nothing
-        zpred = zi .+ m_f ./ s
+        zpred = (zi .+ m_f) ./ s
         all(>(0), zpred) || return nothing
         log10.(zpred) .- log10.(Z)
     end
@@ -991,9 +1011,8 @@ function fit_qm_scale_with_error(zqm, data_org, selected_points;
     end
 
     # ---- scale at ẑ: tail estimator ⊕ part propagated from z_init -----------
-    zt  = Z_t .- ẑ
-    w_t = use_Zse ? ((zt .* ln10) ./ σZ_t) .^ 2 : ones(n)
-    d   = log10.(m_t) .- log10.(zt)          # log10 ratios model/(data − z_init) on the tail
+    w_t = use_Zse ? w_tail : ones(n)
+    d   = log10.(ẑ .+ m_t) .- log10.(Z_t)    # log10 ratios (z_init + model)/data on the tail
     ŝ, var_u_tail = scale_for(ẑ)
     û    = log10(ŝ)
     dudz = fitz ? (log10(scale_for(ẑ + hz)[1]) - log10(scale_for(ẑ - hz)[1])) / (2hz) : 0.0
@@ -1029,9 +1048,9 @@ function fit_qm_scale_with_error(zqm, data_org, selected_points;
     end
 
     # ---- diagnostics: calibrated model vs raw data ---------------------------
-    tail_rmse = sqrt(mean(abs2, ẑ .+ m_t ./ ŝ .- Z_t))
+    tail_rmse = sqrt(mean(abs2, (ẑ .+ m_t) ./ ŝ .- Z_t))
     z_all = data_org[:, 3]
-    p_all = ẑ .+ zqm.(data_org[:, 1]) ./ ŝ
+    p_all = (ẑ .+ zqm.(data_org[:, 1])) ./ ŝ
     r2    = 1 - sum(abs2, p_all .- z_all) / sum(abs2, z_all .- mean(z_all))
 
     return (
@@ -1203,173 +1222,192 @@ function compare_datasets(x_ref::AbstractVector, # current
  
     # ---- Plot of log-errors ----
     if plot_errors
-        fig = plot( x_ref,
-            R_B.log_err,
-            seriestype=:scatter,
-            label="log10(cqd) - log10(exp)",
-            title="Log Errors for CQD and QM",
-            xlabel="Current", ylabel="Log Error",
-            markersize=3,
-            markerstrokewidth=0.01,
-        )
-        plot!( x_ref,
-            R_C.log_err,
-            seriestype=:scatter,
-            markersize=3,
-            markerstrokewidth=0.01,
-            label="log10(qm) - log10(exp)"
-        )
-        display(fig)
+        fig = Figure(size = (800, 500))
+        ax  = Axis(fig[1, 1]; title = "Log Errors for CQD and QM",
+                   xlabel = "Current", ylabel = "Log Error")
+        scatter!(ax, x_ref, R_B.log_err; markersize = 7, color = :red,
+                 label = "log10(cqd) - log10(exp)")
+        scatter!(ax, x_ref, R_C.log_err; markersize = 7, color = :blue,
+                 label = "log10(qm) - log10(exp)")
+        axislegend(ax; position = :rt)
+        SHOW_FIGS && display(fig)
     end
  
     return (CQD = R_B, QM = R_C)
 end
  
 """
-    plot_cqd_vs_qm(ZCQD, ZQM, Icurrent, ki_list;
-                   idx_top=[1,2,3,12], idx_bottom=[-1,-2,-3,-4],
-                   palette_name=:rainbow)
- 
+    LOGX, LOGY
+
+Keyword bundles for a log10 axis in CairoMakie (`Axis(fig[1,1]; LOGX..., LOGY...)`):
+the scale plus minor ticks at 2…9 × 10ⁿ.
+"""
+const LOGX = (xscale = log10, xminorticks = IntervalsBetween(9))
+const LOGY = (yscale = log10, yminorticks = IntervalsBetween(9))
+
+"""
+    decade_ticks(v)
+
+`(values, labels)` tick specification with `10^{n}` LaTeX labels for decade
+values `v` (e.g. `decade_ticks([1e-2, 1e-1, 1.0])`).
+"""
+decade_ticks(v) = (v, [L"10^{%$(round(Int, log10(x)))}" for x in v])
+
+"""
+    logsafe(v)
+
+Copy of `v` with the non-positive / non-finite entries replaced by `NaN`. On a
+log axis Makie throws a `DomainError` for values ≤ 0 (Plots dropped them
+silently); `NaN` is simply not drawn.
+"""
+logsafe(v) = map(t -> (isfinite(t) && t > 0) ? float(t) : NaN, v)
+
+"""
+    yerr_log!(ax, x, y, σ; kw...)
+    xerr_log!(ax, x, y, σ; kw...)
+
+Symmetric error bars that remain valid on a log axis: the lower half-length is
+clipped to `0.999·y` (resp. `0.999·x`) so the lower end stays > 0; the upper end
+is unchanged. Also fine on a linear axis (where it only matters if σ > |y|).
+"""
+function yerr_log!(ax, x, y, σ; color = :black, whiskerwidth = 5, linewidth = 1, kw...)
+    lo = min.(σ, 0.999 .* abs.(y))
+    errorbars!(ax, x, y, lo, σ; color, whiskerwidth, linewidth, kw...)
+end
+function xerr_log!(ax, x, y, σ; color = :black, whiskerwidth = 5, linewidth = 1, kw...)
+    lo = min.(σ, 0.999 .* abs.(x))
+    errorbars!(ax, x, y, lo, σ; direction = :x, color, whiskerwidth, linewidth, kw...)
+end
+
+"""
+    save_fig(fig, path; show = SHOW_FIGS)
+
+Display the CairoMakie figure (if `show`) and save it to `path`; the format
+follows the extension (png at `PX_PER_UNIT` pixels per unit, or pdf / svg).
+"""
+function save_fig(fig, path; show = SHOW_FIGS)
+    show && display(fig)
+    save(path, fig)
+    return path
+end
+
+"""
+    plot_cqd_vs_qm(ZCQD, ZQM, Icurrent, ki_list, I_compared;
+                   palette_name=:rainbow, size=(1100, 1250))
+
 Diagnostic figure showing, for a handful of coil currents, how the CQD
 prediction varies with kᵢ against the (kᵢ-independent) QM value.
- 
-For each selected current index, `ZCQD[idx, :]` is drawn versus the kᵢ axis and
-the QM value `ZQM[idx]` is overlaid as a dashed horizontal line. Three stacked
+
+`I_compared` is a list of three lists of currents (A), one per panel, e.g.
+`[[0.0], [0.001, 0.005, 0.010, 0.015], [0.850, 0.900, 0.950, 1.000]]`. Each
+current is looked up by value in `Icurrent` (error if absent). For each one,
+`ZCQD[row, :]` is drawn versus kᵢ on a **log10 kᵢ axis** (one point per grid
+kᵢ) and the QM value `ZQM[row]` as a dashed horizontal line. Three stacked
 panels share the kᵢ axis:
-1. `idx_linear` (default `[1]`: the I = 0 mA row) on a **linear** y axis in
-   **μm**, with the signed values — no `abs`, so a negative z_max shows up;
-2. `idx_top` (small-deflection currents), log10 y axis, mm;
-3. `idx_bottom` (large-deflection currents), log10 y axis, mm.
-Negative indices count from the end of `Icurrent`. Each panel has its own
-legend, inside the plot area (an outer legend would change that panel's
-width and break the alignment of the shared axis). A current has the same
-colour in panels 1 and 2.
+1. `I_compared[1]` on a **linear** y axis in **μm**, with the signed values
+   (no `abs`, so a negative z_max shows up); lines **and markers**, a
+   different marker symbol for each series (CQD and QM of each current);
+   symmetric y range ±`ylim_top` (μm), automatic when `nothing` (largest
+   |value| rounded up to 1, 2 or 5 × 10ⁿ); legend inside, right, at z = 0;
+2. `I_compared[2]`, log10 y axis in mm, range taken from the plotted data;
+3. `I_compared[3]`, log10 y axis in mm.
 
-Returns the combined `Plots.Plot` (shared x-axis).
+Colours: one colour per current over the whole figure (no repeats), sampled
+from `palette_name` with as many colours as there are currents in total. The
+**reddest** (last) colour goes to the top panel; panels 2 and 3 take the
+remaining colours in order. Each panel has its own legend, inside the plot
+area. On the log panels the non-positive CQD values are not drawn (`logsafe`).
+
+Returns the CairoMakie `Figure`.
 """
-function plot_cqd_vs_qm(ZCQD, ZQM, Icurrent, ki_list;
-        idx_top = [1, 2, 3, 12],
-        idx_bottom = [-1, -2, -3, -4],
-        idx_linear = [1],
-        palette_name = :rainbow
+function plot_cqd_vs_qm(ZCQD, ZQM, Icurrent, ki_list, I_compared;
+        palette_name = :rainbow,
+        ylim_top = nothing,          # (μm) top panel y range ±ylim_top; nothing = automatic
+        size = (1100, 1250),
     )
-
-    cls = palette(palette_name, max(length(idx_top), length(idx_bottom)))
-    no_xlabels = (1:length(ki_list), fill("", length(ki_list)))   # shared axis: grid, no labels
-    row(idx)   = idx > 0 ? idx : length(Icurrent) + idx + 1        # allow negative indices
-    # colour of a current = its colour in the idx_top panel (black if it is not there)
-    col_of(idx) = (k = findfirst(==(idx), idx_top); k === nothing ? :black : cls[k])
-
-    # ---------------------------
-    # FIGURE L (linear y axis in μm, signed z_max — no absolute value; 0 mA by default)
-    # ---------------------------
-    figl = plot()
-    for idx in idx_linear
-        plot!(figl, 1e3 .* ZCQD[row(idx), :],          # mm → μm
-            label = "CQD $(1000*Icurrent[row(idx)]) mA",
-            line = (:solid, col_of(idx), 2))
-        hline!(figl, [1e3 * ZQM[row(idx)]],
-            label = "QM $(1000*Icurrent[row(idx)]) mA",
-            line = (:dash, col_of(idx), 1.5))
+    @assert length(I_compared) == 3 "I_compared must hold three lists (one per panel)"
+    # rows of Icurrent for every requested current (by value)
+    function row_of(Ix)
+        r = findfirst(I -> isapprox(I, Ix; atol = 1e-9), Icurrent)
+        r === nothing && error("plot_cqd_vs_qm: current $(Ix) A is not in the simulated currents")
+        return r
     end
-    hline!(figl, [0.0]; line = (:dot, :black, 1), label = false)
-    plot!(figl,
-        ylabel = L"$z_{max}$ ($\mathrm{\mu m}$)",
-        xticks = no_xlabels,
-        xlabel = "",
-        xminorticks = false,
-        top_margin = 2mm,
-        bottom_margin = -3mm,
-        left_margin = 10mm,
-        legend = :best,
-        background_color_legend = RGBA(1, 1, 1, 0.85),
-        foreground_color_legend = nothing,
-    )
+    rows = [row_of.(Ip) for Ip in I_compared]
 
-    # ---------------------------
-    # FIGURE A (top selected currents)
-    # ---------------------------
-    figa = plot()
-    for (j, idx) in enumerate(idx_top)
-        idx2 = idx > 0 ? idx : length(Icurrent) + idx + 1  # allow negatives
-        plot!(figa, ZCQD[idx2, :],
-            label = "CQD $(1000*Icurrent[idx2]) mA",
-            line = (:solid, cls[j], 2))
-        hline!(figa, abs.([ZQM[idx2]]),
-            label = "QM",
-            line = (:dash, cls[j], 1.5))
+    # one colour per current; the reddest (last in the palette) for the top panel
+    n_tot = sum(length, rows)
+    cmap  = Makie.resample_cmap(palette_name, n_tot)
+    n1    = length(rows[1])
+    cols  = [cmap[end-n1+1:end],                                   # panel 1: red end
+             cmap[1:length(rows[2])],                              # panel 2
+             cmap[length(rows[2])+1 : length(rows[2])+length(rows[3])]]   # panel 3
+
+    kx  = collect(float.(ki_list))                                 # kᵢ (×10⁻⁶), log x axis
+    mA(r) = 1000 * Icurrent[r]
+    # marker symbols of the upper panel, one per series (CQD, QM, CQD, QM, …)
+    mk_cycle = [:circle, :rect, :diamond, :utriangle, :dtriangle, :pentagon, :hexagon, :star5, :cross, :xcross]
+    mk(n)    = mk_cycle[mod1(n, length(mk_cycle))]
+
+    fig = Figure(; size)
+    # larger axis labels and tick labels (every panel goes through xkw)
+    xkw = (LOGX..., xlabelsize = 22, ylabelsize = 22, xticklabelsize = 17, yticklabelsize = 17,
+           xticks = decade_ticks(10.0 .^ (floor(Int, log10(minimum(kx))):ceil(Int, log10(maximum(kx))))))
+
+    # ---- panel 1: linear y in μm, signed z_max, lines + markers ----
+    ax_l = Axis(fig[1, 1]; xkw..., ylabel = L"$z_{max}$ ($\mathrm{\mu m}$)")
+    hlines!(ax_l, 0.0; color = :black, linestyle = :dot, linewidth = 1)
+    for (n, (r, c)) in enumerate(zip(rows[1], cols[1]))
+        scatterlines!(ax_l, kx, 1e3 .* ZCQD[r, :]; color = c, linewidth = 2,           # mm → μm
+            marker = mk(2n - 1), markersize = 10, markercolor = c, strokecolor = c, strokewidth = 0.8,
+            label = "CQD $(mA(r)) mA")
+        scatterlines!(ax_l, kx, fill(1e3 * ZQM[r], length(kx)); color = c, linewidth = 1.5, linestyle = :dash,
+            marker = mk(2n), markersize = 9, markercolor = :white, strokecolor = c, strokewidth = 1.2,
+            label = "QM $(mA(r)) mA")
     end
-    plot!(figa,
-        size = (1050,500),
-        yaxis = :log10,
-        ylabel = L"$z_{max}$ (mm)",
-        ylims = (1e-4, 1e-1),
-        yticks = ([1e-4, 1e-3, 1e-2, 1e-1],
-                  [L"10^{-4}", L"10^{-3}", L"10^{-2}", L"10^{-1}"]),
-        # shared x axis: grid lines at every kᵢ, but no tick labels / x label here
-        xticks = no_xlabels,
-        xlabel = "",
-        xminorticks = false,
-        bottom_margin = -3mm,             # pull the panels together (shared axis)
-        top_margin = 0mm,
-        left_margin = 10mm,
-        # own legend, inside: upper left is empty in the real tables (the
-        # 15 mA curve only rises towards 10⁻¹ at large kᵢ)
-        legend = :topleft, legend_columns = 4,
-        background_color_legend = RGBA(1, 1, 1, 0.85),
-        foreground_color_legend = nothing,
-    )
- 
-    # ---------------------------
-    # FIGURE B (bottom selected currents)
-    # ---------------------------
-    figb = plot()
-    for (j, idx) in enumerate(idx_bottom)
-        idx2 = idx > 0 ? idx : length(Icurrent) + idx + 1
-        plot!(figb, ZCQD[idx2, :],
-            label = "CQD $(1000*Icurrent[idx2]) mA",
-            line = (:solid, cls[j], 2))
-        hline!(figb, abs.([ZQM[idx2]]),
-            label = "QM",
-            line = (:dash, cls[j], 1.5))
+    # symmetric y range about 0: ±ylim_top (μm) if given, otherwise the largest
+    # |value| drawn rounded up to 1, 2 or 5 × 10ⁿ
+    ymax_l = maximum(abs, vcat([1e3 .* vec(ZCQD[r, :]) for r in rows[1]]..., [1e3 * ZQM[r] for r in rows[1]]))
+    if ylim_top === nothing
+        dec    = 10.0^floor(log10(ymax_l))
+        ylim_l = dec * first(filter(m -> m * dec >= ymax_l, [1, 2, 5, 10]))
+    else
+        ylim_l = ylim_top
     end
- 
-    plot!(figb,
-        size = (1050,500),
-        yaxis = :log10,
-        ylabel = L"$z_{max}$ (mm)",
-        ylims = (5e-1, 3),
-        yticks = ([1e-1, 1.0],
-                  [L"10^{-1}", L"10^{0}"]),
-        xlabel = L"$k_{i} \quad (\,\times 10^{-6})$",
-        xtickfont = font(4),
-        xticks = (1:length(ki_list), round.(ki_list, sigdigits=2)),
-        xminorticks = false,
-        xrotation = 88,
-        top_margin = 0mm,
-        bottom_margin = 5mm,
-        left_margin = 10mm,
-        # legend inside, lower right (empty: at large kᵢ the curves sit at the top).
-        # An :outerbottom legend would overlap the x label (GR ignores the tall
-        # rotated tick labels), and an outer legend anywhere else would change
-        # this panel's width or open a gap between the panels.
-        legend = :bottomright, legend_columns = 4,
-        foreground_color_legend = nothing, background_color_legend = RGBA(1, 1, 1, 0.85),
-    )
- 
-    # ---------------------------
-    # Combined figure
-    # ---------------------------
-    # Shared x axis: link = :x keeps the kᵢ range identical; only the bottom
-    # panel carries tick labels and the x label, the others sit right on it.
-    # Explicit canvas: the panels' own `size` is ignored once combined. Only the
-    # left margin is set here (it applies to every subplot); the bottom/top
-    # margins stay per panel so that no gap opens between them.
-    fig = plot(figl, figa, figb, layout = (3, 1),
-        link = :x,
-        size = (1100, 1400),
-        left_margin = 10mm,
-    )
+    ylims!(ax_l, -ylim_l, ylim_l)
+    axislegend(ax_l; position = :rc)          # inside, right edge, at mid-height (z = 0)
+
+    # ---- panel 2: log y; range from the data actually drawn (CQD > 0 and |QM|):
+    #      ×0.5 below, ×4 above so the upper-left legend does not cover the curves
+    vals_a = filter(v -> isfinite(v) && v > 0,
+                    vcat([vec(ZCQD[r, :]) for r in rows[2]]..., [abs(ZQM[r]) for r in rows[2]]))
+    ya_lo, ya_hi = 0.5 * minimum(vals_a), 4.0 * maximum(vals_a)
+    ax_a = Axis(fig[2, 1]; xkw..., LOGY..., ylabel = L"$z_{max}$ (mm)",
+        yticks = decade_ticks(10.0 .^ (floor(Int, log10(ya_lo)):ceil(Int, log10(ya_hi)))))
+    for (r, c) in zip(rows[2], cols[2])
+        lines!(ax_a, kx, logsafe(ZCQD[r, :]); color = c, linewidth = 2, label = "CQD $(mA(r)) mA")
+        hlines!(ax_a, abs(ZQM[r]); color = c, linewidth = 1.5, linestyle = :dash, label = "QM")
+    end
+    ylims!(ax_a, ya_lo, ya_hi)
+    axislegend(ax_a; position = :lt, nbanks = 4)
+
+    # ---- panel 3: log y ----
+    ax_b = Axis(fig[3, 1]; xkw..., LOGY..., ylabel = L"$z_{max}$ (mm)",
+        yticks = decade_ticks([1e-1, 1.0]),
+        xlabel = L"$k_{i} \quad (\,\times 10^{-6})$")
+    for (r, c) in zip(rows[3], cols[3])
+        lines!(ax_b, kx, logsafe(ZCQD[r, :]); color = c, linewidth = 2, label = "CQD $(mA(r)) mA")
+        hlines!(ax_b, abs(ZQM[r]); color = c, linewidth = 1.5, linestyle = :dash, label = "QM")
+    end
+    ylims!(ax_b, 5e-1, 3)
+    # lower right is empty: at large kᵢ the curves sit at the top
+    axislegend(ax_b; position = :rb, nbanks = 4)
+
+    # shared x axis: identical kᵢ range, labels only at the bottom, panels close together
+    linkxaxes!(ax_l, ax_a, ax_b)
+    for a in (ax_l, ax_a)
+        hidexdecorations!(a; grid = false, minorgrid = false, ticks = false, minorticks = false)
+    end
+    rowgap!(fig.layout, 6)
     return fig
 end
  
@@ -1446,107 +1484,94 @@ function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
 end
  
 """
-    make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD, stats_QM; σ=nothing)
- 
+    make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD, stats_QM; σ=nothing,
+                          size=(1250, 1000))
+
 Diagnostic figure for the goodness of fit of the two *calibrated* models
-(CQD: `ki_itp/s_CQD`, QM: `zqm/s_QM`) against the raw scattered experiment.
- 
-Panels
+(CQD: `(z_init + ki_itp)/s_CQD`, QM: `(z_init + zqm)/s_QM`) against the raw
+scattered experiment.
+
+Panels (2 × 2 grid of one CairoMakie `Figure`)
 1. data (with y-error bars if `σ` is given) vs both models, log–log;
 2. natural-log residuals `log(model) − log(exp)` vs current, annotated with
    logRMSE and R²_log;
 3. pulls `(model − exp)/σ` vs current with ±1σ/±2σ bands, annotated with the
    reduced χ² (only if `σ` is given; otherwise an empty placeholder);
 4. histogram of the log residuals, annotated with NMAD and logRMSE.
- 
-Returns `(p_data, p_resid, p_pull, p_hist)`.
+
+Returns the `Figure`.
 """
-function make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD::FitStats, stats_QM::FitStats; σ = nothing)
+function make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD::FitStats, stats_QM::FitStats;
+                               σ = nothing, size = (1250, 1000))
     # residuals in natural-log space, sign convention model − data
     r_CQD = log.(y_CQD) .- log.(y)
     r_QM  = log.(y_QM)  .- log.(y)
- 
-    xt = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"])
- 
+
+    xt  = decade_ticks([1e-2, 1e-1, 1.0])
+    fig = Figure(; size)
+    # marker style of the residual scatters (fill with alpha, darker stroke)
+    mk_cqd = (marker = :circle, markersize = 10, color = (:salmon3, 0.70), strokecolor = :red4,  strokewidth = 0.8)
+    mk_qm  = (marker = :circle, markersize = 10, color = (:royalblue3, 0.70), strokecolor = :blue4, strokewidth = 0.8)
+
     # 1) Data vs calibrated models (log–log)
-    p_data = plot(x, y;
-        yerror = σ,
-        seriestype = :scatter,
-        marker = (:circle, :white, 3, stroke(:black, 0.8)),
-        xscale = :log10, yscale = :log10, xticks = xt,
-        label = "Experiment",
-        xlabel = "Coil Current (A)",
-        ylabel = "Peak position (mm)",
-        title = "Data vs calibrated models",
-        legend = :bottomright,
-    )
-    plot!(p_data, x, y_CQD; label = "CQD", line = (:solid, :red, 1.5))
-    plot!(p_data, x, y_QM;  label = "QM",  line = (:dot,   :blue, 2))
- 
+    ax1 = Axis(fig[1, 1]; LOGX..., LOGY..., xticks = xt,
+        yticks = decade_ticks([1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0]),
+        xlabel = "Coil Current (A)", ylabel = "Peak position (mm)",
+        title = "Data vs calibrated models")
+    σ === nothing || yerr_log!(ax1, x, y, σ)
+    scatter!(ax1, x, logsafe(y); label = "Experiment",
+        marker = :circle, markersize = 7, color = :white, strokecolor = :black, strokewidth = 0.8)
+    lines!(ax1, x, y_CQD; label = "CQD", color = :red,  linewidth = 1.5)
+    lines!(ax1, x, y_QM;  label = "QM",  color = :blue, linewidth = 2, linestyle = :dot)
+    axislegend(ax1; position = :rb)
+
     # 2) Log residuals vs current
-    p_resid = plot(x, r_CQD;
-        seriestype = :scatter,
-        marker = (:circle, 5, 0.70, :salmon3, stroke(0.8, :red4)),
-        xscale = :log10, xticks = xt,
+    ax2 = Axis(fig[1, 2]; LOGX..., xticks = xt,
         xlabel = "Coil Current (A)",
         ylabel = L"\ln(y_{\mathrm{model}}) - \ln(y_{\mathrm{exp}})",
-        title = "Log-space residuals",
-        label = "CQD",
-        legend = :topright,
-    )
-    scatter!(p_resid, x, r_QM; label = "QM",
-        marker = (:circle, 5, 0.70, :royalblue3, stroke(0.8, :blue4)))
-    hline!(p_resid, [0.0]; c = :black, ls = :dash, label = false)
+        title = "Log-space residuals")
+    hlines!(ax2, 0.0; color = :black, linestyle = :dash)
+    scatter!(ax2, x, r_CQD; label = "CQD", mk_cqd...)
+    scatter!(ax2, x, r_QM;  label = "QM",  mk_qm...)
     txt_CQD = L"CQD: logRMSE $= %$(fmt(stats_CQD.logRMSE, 3))$, $R^{2}_{\log} = %$(round(stats_CQD.R2_log, digits=4))$"
     txt_QM  = L"QM: logRMSE $= %$(fmt(stats_QM.logRMSE,  3))$, $R^{2}_{\log} = %$(round(stats_QM.R2_log,  digits=4))$"
-    x_annot = x[argmin(abs.(x .- median(x)))]
-    rmin, rmax = extrema(vcat(r_CQD, r_QM))
-    annotate!(p_resid, (x_annot, rmin + 0.15(rmax - rmin), Plots.text(txt_CQD, 8)))
-    annotate!(p_resid, (x_annot, rmin + 0.05(rmax - rmin), Plots.text(txt_QM,  8)))
- 
+    text!(ax2, 0.5, 0.15; text = txt_CQD, space = :relative, align = (:center, :center), fontsize = 12)
+    text!(ax2, 0.5, 0.05; text = txt_QM,  space = :relative, align = (:center, :center), fontsize = 12)
+    axislegend(ax2; position = :rt)
+
     # 3) Pulls vs current (needs σ)
     if σ === nothing
-        p_pull = plot(; title = "Pulls (no σ supplied)", framestyle = :none)
+        ax3 = Axis(fig[2, 1]; title = "Pulls (no σ supplied)")
+        hidedecorations!(ax3); hidespines!(ax3)
     else
         pu_CQD = pull(y_CQD, y, σ)
         pu_QM  = pull(y_QM,  y, σ)
-        p_pull = plot(;
-            xscale = :log10, xticks = xt,
+        ax3 = Axis(fig[2, 1]; LOGX..., xticks = xt,
             xlabel = "Coil Current (A)",
             ylabel = L"(y_{\mathrm{model}} - y_{\mathrm{exp}})/\sigma_{\mathrm{exp}}",
-            title = "Normalised residuals (pulls)",
-            legend = :topright,
-        )
-        hspan!(p_pull, [-2, 2]; fillalpha = 0.08, color = :gray, linealpha = 0, label = L"\pm 2\sigma")
-        hspan!(p_pull, [-1, 1]; fillalpha = 0.15, color = :gray, linealpha = 0, label = L"\pm 1\sigma")
-        hline!(p_pull, [0.0]; c = :black, ls = :dash, label = false)
-        scatter!(p_pull, x, pu_CQD;
-            label = L"CQD: $\chi^{2}_{\mathrm{red}} = %$(fmt(stats_CQD.chi2_red, 3))$",
-            marker = (:circle, 5, 0.70, :salmon3, stroke(0.8, :red4)))
-        scatter!(p_pull, x, pu_QM;
-            label = L"QM: $\chi^{2}_{\mathrm{red}} = %$(fmt(stats_QM.chi2_red, 3))$",
-            marker = (:circle, 5, 0.70, :royalblue3, stroke(0.8, :blue4)))
+            title = "Normalised residuals (pulls)")
+        hspan!(ax3, -2, 2; color = (:gray, 0.08), label = L"\pm 2\sigma")
+        hspan!(ax3, -1, 1; color = (:gray, 0.15), label = L"\pm 1\sigma")
+        hlines!(ax3, 0.0; color = :black, linestyle = :dash)
+        scatter!(ax3, x, pu_CQD; label = L"CQD: $\chi^{2}_{\mathrm{red}} = %$(fmt(stats_CQD.chi2_red, 3))$", mk_cqd...)
+        scatter!(ax3, x, pu_QM;  label = L"QM: $\chi^{2}_{\mathrm{red}} = %$(fmt(stats_QM.chi2_red, 3))$",  mk_qm...)
+        axislegend(ax3; position = :rt)
     end
- 
+
     # 4) Histogram of log residuals
-    p_hist = histogram(r_CQD;
-        normalize = true, color = :red, alpha = 0.4,
-        label = "CQD",
-        xlabel = "log-space residual",
-        ylabel = "Normalised count",
-        title = "Distribution of log-space residuals",
-        legend = :topright,
-    )
-    histogram!(p_hist, r_QM; normalize = true, color = :blue, alpha = 0.4, label = "QM")
-    vline!(p_hist, [0.0]; c = :black, ls = :dash, lw = 1, label = false)
+    ax4 = Axis(fig[2, 2];
+        xlabel = "log-space residual", ylabel = "Normalised count",
+        title = "Distribution of log-space residuals")
+    hist!(ax4, r_CQD; normalization = :pdf, color = (:red,  0.4), label = "CQD")
+    hist!(ax4, r_QM;  normalization = :pdf, color = (:blue, 0.4), label = "QM")
+    vlines!(ax4, 0.0; color = :black, linestyle = :dash, linewidth = 1)
     txt2_CQD = @sprintf "CQD: NMAD = %.3g, logRMSE = %.3g" stats_CQD.NMAD stats_CQD.logRMSE
     txt2_QM  = @sprintf "QM:  NMAD = %.3g, logRMSE = %.3g" stats_QM.NMAD  stats_QM.logRMSE
-    hx_lo, hx_hi = Plots.xlims(p_hist)
-    hy_hi        = Plots.ylims(p_hist)[2]
-    annotate!(p_hist, (hx_lo + 0.03(hx_hi - hx_lo), 0.90hy_hi, Plots.text(txt2_CQD, 8, :left)))
-    annotate!(p_hist, (hx_lo + 0.03(hx_hi - hx_lo), 0.82hy_hi, Plots.text(txt2_QM,  8, :left)))
- 
-    return p_data, p_resid, p_pull, p_hist
+    text!(ax4, 0.03, 0.95; text = txt2_CQD, space = :relative, align = (:left, :top), fontsize = 12)
+    text!(ax4, 0.03, 0.88; text = txt2_QM,  space = :relative, align = (:left, :top), fontsize = 12)
+    axislegend(ax4; position = :rt)
+
+    return fig
 end
 
 # =============================================================================
@@ -1785,9 +1810,11 @@ section("2", "THE (I, kᵢ) INTERPOLANT — fig001, fig002 (common to all direct
 # -----------------------------------------------------------------------------
 # fig001 — CQD z_max(kᵢ) slices vs QM at selected currents
 # -----------------------------------------------------------------------------
-fig = plot_cqd_vs_qm(z_up_ki, zmax_QM, Icoils, cqd_meta[:ki]);
-display(fig)
-savefig(fig, joinpath(RUN_OUTDIR, "fig001.$(FIG_EXT)"))
+# currents (A) of the three panels: top (linear, μm) | middle (log) | bottom (log).
+# One colour per current from the :rainbow palette; the reddest goes to the top panel.
+I_compared = [[0.0], [0.001, 0.005, 0.010, 0.015], [0.850, 0.900, 0.950, 1.000]];
+fig = plot_cqd_vs_qm(z_up_ki, zmax_QM, Icoils, cqd_meta[:ki], I_compared);
+save_fig(fig, joinpath(RUN_OUTDIR, "fig001.$(FIG_EXT)"); show = true)
 
 
 
@@ -1805,40 +1832,71 @@ ki_itp = Spline2D(Icoils, cqd_meta[:ki][KI_START:KI_STOP], z_up_ki[:, KI_START:K
 # -----------------------------------------------------------------------------
 # fig002 — interpolated surface and contour (log10 z)
 # -----------------------------------------------------------------------------
-i_surface  = range(10e-3, 1.0; length = 101);
-ki_surface = range(ki_bounds[1], ki_bounds[2]; length = 101);
+# log-spaced currents: the I axes below are logarithmic, so a linear grid would
+# give a few very wide cells (vertical bands) at low current
+i_surface  = 10 .^ range(-3, 0; length = 301);           # 1 mA … 1 A
+ki_surface = range(ki_bounds[1], ki_bounds[2]; length = 301);
 Z = [ki_itp(x, y) for y in ki_surface, x in i_surface];
- 
-fit_surface = surface(log10.(i_surface), ki_surface, log10.(abs.(Z));
-    title = "Fitting surface",
-    xlabel = L"I_{c}", ylabel = L"$k_{i}\times 10^{-6}$", zlabel = L"$z\ (\mathrm{mm})$",
-    legend = false, color = :viridis,
-    xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
-    camera = (20, 25),
-    xlims = log10.((8e-4, 2.05)), zlims = log10.((2e-4, 10.0)),
-    gridalpha = 0.3,
-);
  
 logZ    = log10.(max.(abs.(Z), 1e-12));            # clamp away from log10(0)
 lo, hi  = floor(minimum(logZ)), ceil(maximum(logZ));
 decades = collect(lo:1:hi);
-fit_contour = contourf(i_surface, ki_surface, logZ;
-    levels = 101, title = "Fitting contour",
+# fixed colour range of fig002 (mm): values outside it take the end colours
+Z_CRANGE   = (1e-3, 5.0);
+crange     = log10.(Z_CRANGE);
+cbar_vals  = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0];
+
+# Makie wants z[i, j] at (x[i], y[j]); Z is indexed [kᵢ, I] → transpose
+fit_figs = Figure(size = (1200, 1400));
+ax_surf = Axis3(fit_figs[1, 1:2];
+    title = "Fitting surface", titlesize = 18,
+    xlabelsize = 22, ylabelsize = 22, zlabelsize = 22, xticklabelsize = 16, yticklabelsize = 16, zticklabelsize = 16,
+    xlabel = L"I_{c}", ylabel = L"$k_{i}\times 10^{-6}$", zlabel = L"$z\ (\mathrm{mm})$",
+    xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+    zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
+    azimuth = 1.30π, elevation = deg2rad(25),
+    xgridcolor = (:black, 0.15), ygridcolor = (:black, 0.15), zgridcolor = (:black, 0.15));
+surface!(ax_surf, log10.(i_surface), ki_surface, permutedims(logZ); colormap = :viridis, colorrange = crange);
+xlims!(ax_surf, log10(8e-4), log10(2.05));
+zlims!(ax_surf, log10(2e-4), log10(10.0));
+
+# Lower panel: log10 kᵢ axis from the smallest grid kᵢ up to KI_MAX_PLOT. ki_itp
+# only covers the fit bracket (≤ ki_hi), so the panel uses its own plotting-only
+# spline over every grid kᵢ ≤ KI_MAX_PLOT, built in (I, log10 kᵢ) because the kᵢ
+# grid is log-spaced. The fit itself is unaffected.
+KI_MAX_PLOT = 100.0;                                   # (×10⁻⁶) top of the kᵢ axis
+sel_plot    = findall(<=(KI_MAX_PLOT), cqd_meta[:ki]);
+itp_plot    = Spline2D(Icoils, log10.(cqd_meta[:ki][sel_plot]), z_up_ki[:, sel_plot];
+                       kx = 3, ky = 3, s = 0.0);
+ki_cont     = 10 .^ range(log10(minimum(cqd_meta[:ki])), log10(KI_MAX_PLOT); length = 301);
+logZc       = log10.(max.(abs.([itp_plot(x, log10(y)) for x in i_surface, y in ki_cont]), 1e-12));  # [I, kᵢ]
+
+ax_cont = Axis(fit_figs[2, 1]; LOGX..., LOGY...,
+    title = "Fitting contour", titlesize = 18,
+    xlabelsize = 22, ylabelsize = 22, xticklabelsize = 17, yticklabelsize = 17,
     xlabel = L"$I_{c}$ (A)", ylabel = L"$k_{i}\times 10^{-6}$",
-    color = :viridis, linewidth = 0.2, linestyle = :dash,
-    xaxis = :log10, xlims = (9e-3, 1.05),
-    xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    clims = (lo, hi),
-    colorbar_ticks = (decades, [L"10^{%$k}" for k in decades]),
-    colorbar_title = L"$ z \ \mathrm{(mm)}$",
-);
- 
-fit_figs = plot(fit_surface, fit_contour;
-    layout = @layout([a; b]), size = (1800, 750), 
-    left_margin=5mm, bottom_margin = 8mm, top_margin = 3mm);
-display(fit_figs)
-savefig(fit_figs, joinpath(RUN_OUTDIR, "fig002.$(FIG_EXT)"))
+    xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
+    yticks = decade_ticks(10.0 .^ (floor(Int, log10(minimum(ki_cont))):round(Int, log10(KI_MAX_PLOT)))),
+    xgridvisible = false, ygridvisible = false, xminorgridvisible = false, yminorgridvisible = false);
+# smooth heatmap (301 × 301 cells, no seams in the Cairo output) plus white
+# labelled iso-lines at 1, 2, 5 × 10ⁿ mm: z can be read off directly, and the
+# tilt of the lines shows where z depends on kᵢ
+cf = heatmap!(ax_cont, collect(i_surface), ki_cont, logZc;
+    colormap = :viridis, colorrange = crange);
+decades_c  = floor(minimum(logZc)):ceil(maximum(logZc));
+iso_levels = sort(vec([log10(m * 10.0^d) for d in decades_c, m in (1, 2, 5)]));
+iso_levels = filter(l -> minimum(logZc) < l < maximum(logZc), iso_levels);
+contour!(ax_cont, collect(i_surface), ki_cont, logZc;
+    levels = iso_levels, color = :white, linewidth = 1.0,
+    labels = true, labelsize = 15, labelfont = :bold, labelcolor = :white,
+    labelformatter = l -> string(round(10^l, sigdigits = 1)));
+xlims!(ax_cont, extrema(i_surface)...);           # no empty strips beside the heatmap
+ylims!(ax_cont, extrema(ki_cont)...);
+Colorbar(fit_figs[2, 2], cf; labelsize = 22, ticklabelsize = 16,
+    ticks = (log10.(cbar_vals), string.(cbar_vals)), minorticksvisible = false,
+    label = L"$ z \ \mathrm{(mm)}$");
+rowsize!(fit_figs.layout, 1, Relative(0.55));
+save_fig(fit_figs, joinpath(RUN_OUTDIR, "fig002.$(FIG_EXT)"); show = true)
 
 
 
@@ -1901,23 +1959,43 @@ function analyze_directory(DATA_DIR::AbstractString)
     zf2   = x2 ./ M
     δzf2  = sqrt.((δx2 ./ M) .^ 2 .+ (x2 .* δM ./ M^2) .^ 2)
 
-    # ---- 2. origin z0 ---------------------------------------------------------------
-    ic_min  = minimum(ic_raw)
-    rep_idx = findall(x -> isapprox(x, ic_min; atol = 1e-9), ic_raw)
-    z0, δz0 = if ORIGIN_MODE === :lowest_current
-        # mean F1/F2 midpoint of the repeats at the lowest current; errors in quadrature / n
-        centroid     = (zf1 .+ zf2) ./ 2
-        err_centroid = sqrt.(δzf1 .^ 2 .+ δzf2 .^ 2) ./ 2
-        (mean(centroid[rep_idx]), sqrt(sum(abs2, err_centroid[rep_idx])) / length(rep_idx))
-    elseif ORIGIN_MODE === :file_centroid
-        c, δc = exp_entry[:centroid_fw_mm]
-        (c / M, sqrt((δc / M)^2 + (c * δM / M^2)^2))
-    else
-        error("ORIGIN_MODE must be :lowest_current or :file_centroid, got $ORIGIN_MODE")
+    # ---- 2. origin z0 from the zero-current repeats (as in SG2026Q2_experiment_summary.jl)
+    # At I = 0 the F=1 and F=2 peaks coincide, so the midpoint of each repeat is the
+    # undeflected beam position:
+    #   (a) select the repeats at I = 0 (fall back to the lowest current, with a
+    #       warning, if a directory has no zero-current point);
+    #   (b) midpoint of each repeat   c_k = (z_F1,k + z_F2,k)/2,
+    #       error                     δc_k = √(δz_F1,k² + δz_F2,k²)/2   (peak + magnification errors);
+    #   (c) origin                    z0 = mean(c_k);
+    #   (d) its error = the LARGER of
+    #         propagated  √(Σ δc_k²)/n     (the SG2026Q2_experiment_summary.jl definition)
+    #         scatter     std(c_k)/√n      (spread of the repeats, n ≥ 2)
+    #       so that repeats scattering more than their own errors are not underestimated.
+    # The summary file's `centroid_fw_mm` is NOT used: it averages the midpoint over
+    # I ≥ 20 mA (weighted toward the highest currents), a different definition.
+    rep_idx = findall(x -> abs(x) < 1e-9, ic_raw)                                # (a)
+    I_ref   = 0.0
+    if isempty(rep_idx)
+        I_ref   = minimum(ic_raw)
+        rep_idx = findall(x -> isapprox(x, I_ref; atol = 1e-9), ic_raw)
+        @warn "No zero-current measurement in $(DATA_DIR): origin taken from the lowest current" I_ref n = length(rep_idx)
     end
-    @info cstr("Origin in the camera frame (", :cyan) * cstr(String(ORIGIN_MODE), :yellow, :bold) *
-          cstr("): z0 = ", :cyan) * cstr(@sprintf("%.5f ± %.5f mm", z0, δz0), :yellow, :bold) *
-          cstr("   (M = $(M) ± $(δM); $(length(rep_idx)) repeats at I = $(ic_min) A)", :cyan)
+    n_rep        = length(rep_idx)
+    centroid     = (zf1 .+ zf2) ./ 2                                            # (b)
+    err_centroid = sqrt.(δzf1 .^ 2 .+ δzf2 .^ 2) ./ 2
+    z0           = mean(centroid[rep_idx])                                      # (c)
+    δz0_prop     = sqrt(sum(abs2, err_centroid[rep_idx])) / n_rep               # (d)
+    δz0_scat     = n_rep > 1 ? std(centroid[rep_idx]) / sqrt(n_rep) : NaN
+    δz0, z0_err_method = (n_rep > 1 && δz0_scat > δz0_prop) ?
+        (δz0_scat, @sprintf("scatter std/√n of the %d repeats (> propagated %.5f mm)", n_rep, δz0_prop)) :
+        (δz0_prop, n_rep > 1 ?
+            @sprintf("propagated peak + magnification errors, √(Σδ²)/n of %d repeats (≥ scatter %.5f mm)", n_rep, δz0_scat) :
+            "propagated peak + magnification errors (single point: no scatter estimate)")
+    # F1–F2 separation at I_ref: ≈ 0 if the peaks really coincide there
+    Δz_ref, δΔz_ref = mean(zf2[rep_idx] .- zf1[rep_idx]), sqrt(sum(δzf1[rep_idx] .^ 2 .+ δzf2[rep_idx] .^ 2)) / n_rep
+    @info cstr("Origin in the camera frame (zero-current midpoint): z0 = ", :cyan) *
+          cstr(@sprintf("%.5f ± %.5f mm", z0, δz0), :yellow, :bold) *
+          cstr("   (M = $(M) ± $(δM); $(n_rep) repeats at I = $(I_ref) A)", :cyan)
 
     # ---- 3. F=1 deflection (positive for log–log) -------------------------------------
     zF1_all  = -(zf1 .- z0)
@@ -1926,6 +2004,56 @@ function analyze_directory(DATA_DIR::AbstractString)
     # ---- 4. sort, threshold, positivity ------------------------------------------------
     ord  = sortperm(ic_raw)
     I_s, δIphys_s, z_s, δz_s = ic_raw[ord], δic_phys[ord], zF1_all[ord], δzF1_all[ord]
+
+    # ---- 4a. tables of the points NOT used in the fits (printed before the main table)
+    # same style as the main table below
+    show_points(M, title, labels, units, fmts) = pretty_table(M;
+        alignment     = :c,
+        title         = title,
+        column_labels = [labels, units],
+        formatters    = fmts,
+        style         = TextTableStyle(first_line_column_label = crayon"yellow bold",
+                                       table_border = crayon"blue bold",
+                                       column_label = crayon"yellow bold",
+                                       title = crayon"bold red"),
+        table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
+        equal_data_column_widths = true,
+        show_row_number_column = true,
+        fit_table_in_display_horizontally = false, fit_table_in_display_vertically = false)
+    zf1_s, zf2_s = zf1[ord], zf2[ord]
+
+    # (i) zero-current repeats: raw F=1 / F=2 positions, their midpoint, and the
+    #     F=1 deflection relative to the origin z0
+    i0 = findall(x -> abs(x) < 1e-9, I_s)
+    if isempty(i0)
+        println(cstr("  No zero-current points in $(DATA_DIR) (lowest current: $(minimum(I_s)) A)", :cyan))
+    else
+        show_points(hcat(I_s[i0], δIphys_s[i0], zf1_s[i0], zf2_s[i0], (zf1_s[i0] .+ zf2_s[i0]) ./ 2, z_s[i0], δz_s[i0]),
+            "ZERO-CURRENT DATA — $(DATA_DIR)  ($(length(i0)) point(s))",
+            ["Ic", "δIc (phys)", "z F=1 raw", "z F=2 raw", "midpoint", "z", "δz (pos.)"],
+            ["(A)", "(A)", "(mm)", "(mm)", "(mm)", "(mm)", "(mm)"],
+            [fmt__printf("%1.5f", 1:2), fmt__printf("%1.5f", 3:7)])
+        println("    z F=1/F=2 raw : peak positions in the camera frame / M;  midpoint = (F=1 + F=2)/2")
+        println("    z = −(z F=1 raw − z0) : F=1 deflection relative to the origin;  ideally ≈ 0 at I = 0")
+        println("    origin z0 = mean of the $(n_rep) midpoints = $(@sprintf("%.5f ± %.5f", z0, δz0)) mm")
+        println("      error: ", z0_err_method)
+        println("      F=2 − F=1 separation at I = 0: $(@sprintf("%.5f ± %.5f", Δz_ref, δΔz_ref)) mm  (≈ 0 if the peaks coincide)")
+    end
+
+    # (ii) currents 0 < I < I_THRESHOLD: measured but discarded from all fits
+    ib = findall(x -> 1e-9 <= abs(x) < I_THRESHOLD, I_s)
+    if isempty(ib)
+        println(cstr("  No points with 0 < I < $(I_THRESHOLD) A in $(DATA_DIR)", :cyan))
+    else
+        show_points(hcat(I_s[ib], δIphys_s[ib], z_s[ib], δz_s[ib], 100 .* δz_s[ib] ./ abs.(z_s[ib])),
+            "DISCARDED DATA (0 < Ic < I_THRESHOLD = $(I_THRESHOLD) A) — $(DATA_DIR)  ($(length(ib)) point(s))",
+            ["Ic", "δIc (phys)", "z", "δz (pos.)", "δz/|z|"],
+            ["(A)", "(A)", "(mm)", "(mm)", "(%)"],
+            [fmt__printf("%1.5f", 1:2), fmt__printf("%1.5f", 3:4), fmt__printf("%1.1f", [5])])
+        println("    not used in any fit or goodness-of-fit statistic; δz/|z| shows how poorly")
+        println("    resolved the deflection is at these currents (negative z: peak on the wrong side of z0)")
+    end
+
     keep = (I_s .>= I_THRESHOLD) .& isfinite.(z_s) .& (z_s .> 0) .& isfinite.(δz_s)
     n_dropped_pos = count((I_s .>= I_THRESHOLD) .& .!((z_s .> 0) .& isfinite.(z_s)))
     n_dropped_pos > 0 && @warn "$(n_dropped_pos) point(s) above I_THRESHOLD dropped (non-positive or non-finite z)"
@@ -1941,6 +2069,8 @@ function analyze_directory(DATA_DIR::AbstractString)
     δz_total = sqrt.((dzdI_s .* δI_s) .^ 2 .+ δz_s .^ 2)
 
     data    = hcat(I_s, δI_s, z_s, δz_total);     # [I, δI, z, δz], sorted, I ≥ I_THRESHOLD
+    # kept for the final summary figure (all directories together)
+    DIR_DATA[String(DATA_DIR)] = (I = copy(I_s), δI = copy(δI_s), z = copy(z_s), δz = copy(δz_total))
     N_data  = size(data, 1);
     I_scan  = logspace10(I_THRESHOLD, 1.00; n = 801);
 
@@ -1957,37 +2087,47 @@ function analyze_directory(DATA_DIR::AbstractString)
         table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
         equal_data_column_widths = true,
         show_row_number_column = true)
+    # brief legend of the table above
+    δI_note = δI_MODE === :frac ? "δI = $(δI_FRAC) × Ic (fixed fraction, δI_MODE = :frac)" :
+                                  "δI = ErrorCurrentsPhys from the summary file (δI_MODE = :phys)"
+    println(cstr("  Columns:", :cyan, :bold))
+    println("    Ic         coil current; points sorted, Ic ≥ $(I_THRESHOLD) A, non-positive z removed")
+    println("    δIc        current uncertainty: ", δI_note)
+    println("    z          F=1 deflection = −(x/M − z0), z0 = mean zero-current midpoint (see table above)")
+    println("    δz (pos.)  position error only: peak error ⊕ magnification error ⊕ origin error")
+    println("    dz/dI      local slope of z(I) from a weighted log–log smoothing spline")
+    println("    δz total   √(δz(pos.)² + (dz/dI · δIc)²)  → used in every fit, error bar, pull and χ²")
+    println(cstr("  nz, λ0 in the title: profile-extraction setting of the experiment (NZ_EXP, λ0_EXP)", :cyan))
     @info "Experimental points kept" N = N_data I_range = extrema(data[:, 1]) z_range = extrema(data[:, 3])
 
 
     # -----------------------------------------------------------------------------
     # fig001 — CQD family (one curve per kᵢ), QM curve and experiment
     # -----------------------------------------------------------------------------
-    color_list = palette(:darkrainbow, n_ki);
-    fig = plot(xlabel = "Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)");
+    color_list = Makie.resample_cmap(:darkrainbow, n_ki);
+    fig = Figure(size = (1350, 850));
+    ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
+        xlabel = "Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
+        xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
+        yticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]));
     for (i, ki) in enumerate(cqd_meta[:ki])
         mask_cqd = log_mask(Icoils, z_up_ki[:, i])
-        plot!(fig, Icoils[mask_cqd], z_up_ki[mask_cqd, i],
-            label = L"$k_{i}=%$(round(ki, sigdigits=2))\times 10^{-6}$",
-            line = (:solid, color_list[i]))
+        lines!(ax, Icoils[mask_cqd], z_up_ki[mask_cqd, i];
+            color = color_list[i], linewidth = 1,
+            label = L"$k_{i}=%$(round(ki, sigdigits=2))\times 10^{-6}$")
     end
     mask_qm = log_mask(Icoils, zmax_QM);
-    plot!(fig, Icoils[mask_qm], zmax_QM[mask_qm], label = "QM", line = (:dashdot, :black, 2));
-    plot!(fig, data[:, 1], data[:, 3];
-        yerror = data[:, 4], seriestype = :scatter,
-        marker = (:circle, 4, :gold, stroke(0.8, :black)),
+    lines!(ax, Icoils[mask_qm], zmax_QM[mask_qm]; color = :black, linestyle = :dashdot, linewidth = 2, label = "QM");
+    mask_d = log_mask(data[:, 1], data[:, 3]);
+    yerr_log!(ax, data[mask_d, 1], data[mask_d, 3], data[mask_d, 4]);
+    scatter!(ax, data[mask_d, 1], data[mask_d, 3];
+        marker = :circle, markersize = 9, color = :gold, strokecolor = :black, strokewidth = 0.8,
         label = "Experiment $(DATA_DIR)");
-    plot!(fig,
-        size = (1350, 850),
-        xaxis = :log10, yaxis = :log10,
-        xticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        legend = :outerright, legend_columns = 2, legendfontsize = 7, legendtitlefontsize = 8,
-        left_margin = 6mm, bottom_margin = 5mm, foreground_color_legend = nothing)
-    annotate!(fig, 1e-2, 1,
-        text(L"$n_{z} = %$(NZ_FIXED)$ | $\sigma_{\mathrm{conv}}=%$(Int(1e3*σW_FIXED))\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_FIXED)$", :black, 12));
-    SHOW_FIGS && display(fig)
-    savefig(fig, joinpath(OUTDIR, "fig001.$(FIG_EXT)"))
+    text!(ax, 1e-2, 1;
+        text = L"$n_{z} = %$(NZ_FIXED)$ | $\sigma_{\mathrm{conv}}=%$(Int(1e3*σW_FIXED))\mathrm{\mu m}$ | $\lambda_{\mathrm{fit}}=%$(λ0_FIXED)$",
+        align = (:center, :center), fontsize = 16);
+    Legend(fig[1, 2], ax; nbanks = 2, labelsize = 10, patchsize = (16, 8));
+    save_fig(fig, joinpath(OUTDIR, "fig001.$(FIG_EXT)"))
 
 
 
@@ -2095,60 +2235,58 @@ function analyze_directory(DATA_DIR::AbstractString)
 
     # fig002 — kᵢ (CQD) | s (CQD & QM) | R² (CQD & QM), shared x
     xlab = L"Lowest current in the calibration tail $I_{\min}$ (A)";
+    # marker + line series: white-filled markers stroked in the line colour
+    sl!(ax, x, y, c; marker = :circle, linestyle = :solid, label = nothing) =
+        scatterlines!(ax, x, y; color = c, linestyle, linewidth = 1.5, label,
+                      marker, markersize = 8, markercolor = :white, strokecolor = c, strokewidth = 0.8)
+    mark_plateau!(ax) = vlines!(ax, I_PLATEAU; color = :gray, linestyle = :dot, linewidth = 1)
 
-    p_ki = plot(scan_cqd.I_min, scan_cqd.ki;
-        marker = (:circle, 3, :white, stroke(0.8, :blue)), line = (:solid, :blue, 1.5),
-        ylabel = L"$k_{i}\ \left(\times 10^{-6}\right)$",
-        label  = L"CQD: $k_{i} \pm \sigma_{\mathrm{sys}} = %$(fmt(ki_ref,4)) \pm %$(fmt(ki_sys,1))$",
-        legend = :bottomleft)
-    hspan!(p_ki, [ki_ref - ki_sys, ki_ref + ki_sys]; fillalpha = 0.15, color = :blue, linealpha = 0, label = false)
-    hline!(p_ki, [ki_ref]; line = (:dash, :blue, 1), label = false)
-    vline!(p_ki, [I_PLATEAU]; line = (:dot, :gray, 1), label = false)
+    fig = Figure(size = (950, 1250));
+    Label(fig[0, 1], L"Convergence of $k_{i}$, $s$, $z_{\mathrm{init}}$ vs calibration-tail length ($%$(TAIL_SCALE_MODE)$ scale)";
+          fontsize = 17, tellwidth = false)
 
-    p_s = plot(scan_cqd.I_min, scan_cqd.scale;
-        marker = (:circle, 3, :white, stroke(0.8, :red)), line = (:solid, :red, 1.5),
-        ylabel = L"scale $s$ (model$/s \approx$ data)",
-        label  = L"CQD: $\bar{s} \pm \sigma_{\mathrm{sys}} = %$(fmt(s_cqd,4)) \pm %$(fmt(s_cqd_σ,1))$",
-        legend = :left)
-    hspan!(p_s, [s_cqd - s_cqd_σ, s_cqd + s_cqd_σ]; fillalpha = 0.15, color = :red, linealpha = 0, label = false)
-    hline!(p_s, [s_cqd]; line = (:dash, :red, 1), label = false)
-    plot!(p_s, scan_qm.I_min, scan_qm.scale;
-        marker = (:diamond, 3, :white, stroke(0.8, :purple)), line = (:dashdot, :purple, 1.5),
-        label  = L"QM: $\bar{s} \pm \sigma_{\mathrm{sys}} = %$(fmt(s_qm,4)) \pm %$(fmt(s_qm_σ,1))$")
-    hspan!(p_s, [s_qm - s_qm_σ, s_qm + s_qm_σ]; fillalpha = 0.15, color = :purple, linealpha = 0, label = false)
-    hline!(p_s, [s_qm]; line = (:dash, :purple, 1), label = false)
-    vline!(p_s, [I_PLATEAU]; line = (:dot, :gray, 1), label = false)
+    p_ki = Axis(fig[1, 1]; ylabel = L"$k_{i}\ \left(\times 10^{-6}\right)$")
+    hspan!(p_ki, ki_ref - ki_sys, ki_ref + ki_sys; color = (:blue, 0.15))
+    hlines!(p_ki, ki_ref; color = :blue, linestyle = :dash, linewidth = 1)
+    mark_plateau!(p_ki)
+    sl!(p_ki, scan_cqd.I_min, scan_cqd.ki, :blue;
+        label = L"CQD: $k_{i} \pm \sigma_{\mathrm{sys}} = %$(fmt(ki_ref,4)) \pm %$(fmt(ki_sys,1))$")
+    axislegend(p_ki; position = :lb, labelsize = 13)
 
-    p_r2 = plot(scan_cqd.I_min, scan_cqd.r2;
-        marker = (:circle, 3, :white, stroke(0.8, :red)), line = (:solid, :red, 1.5),
-        ylabel = L"$R^{2}$ (full data, calibrated model)", xlabel = xlab,
-        label  = L"CQD: $\langle R^{2}\rangle = %$(fmt(r2_cqd,5))$")
-    plot!(p_r2, scan_qm.I_min, scan_qm.r2;
-        marker = (:diamond, 3, :white, stroke(0.8, :purple)), line = (:dashdot, :purple, 1.5),
-        label  = L"QM: $\langle R^{2}\rangle = %$(fmt(r2_qm,5))$",
-        legend = :bottomleft)
-    vline!(p_r2, [I_PLATEAU]; line = (:dot, :gray, 1), label = false)
+    p_s = Axis(fig[2, 1]; ylabel = L"scale $s$ (model$/s \approx$ data)")
+    hspan!(p_s, s_cqd - s_cqd_σ, s_cqd + s_cqd_σ; color = (:red, 0.15))
+    hlines!(p_s, s_cqd; color = :red, linestyle = :dash, linewidth = 1)
+    hspan!(p_s, s_qm - s_qm_σ, s_qm + s_qm_σ; color = (:purple, 0.15))
+    hlines!(p_s, s_qm; color = :purple, linestyle = :dash, linewidth = 1)
+    mark_plateau!(p_s)
+    sl!(p_s, scan_cqd.I_min, scan_cqd.scale, :red;
+        label = L"CQD: $\bar{s} \pm \sigma_{\mathrm{sys}} = %$(fmt(s_cqd,4)) \pm %$(fmt(s_cqd_σ,1))$")
+    sl!(p_s, scan_qm.I_min, scan_qm.scale, :purple; marker = :diamond, linestyle = :dashdot,
+        label = L"QM: $\bar{s} \pm \sigma_{\mathrm{sys}} = %$(fmt(s_qm,4)) \pm %$(fmt(s_qm_σ,1))$")
+    axislegend(p_s; position = :lc, labelsize = 13)
 
     # z_init (μm) of both models vs tail length
-    p_zi = plot(scan_cqd.I_min, 1e3 .* scan_cqd.z_init;
-        marker = (:circle, 3, :white, stroke(0.8, :red)), line = (:solid, :red, 1.5),
-        ylabel = L"$z_{\mathrm{init}}$ ($\mathrm{\mu m}$)",
-        label  = L"CQD: $z_{\mathrm{init}} = %$(fmt(1e3*zi_cqd,3)) \pm %$(fmt(1e3*zi_cqd_σ,1))\ \mathrm{\mu m}$",
-        legend = :best)
-    plot!(p_zi, scan_qm.I_min, 1e3 .* scan_qm.z_init;
-        marker = (:diamond, 3, :white, stroke(0.8, :purple)), line = (:dashdot, :purple, 1.5),
-        label  = L"QM: $z_{\mathrm{init}} = %$(fmt(1e3*zi_qm,3)) \pm %$(fmt(1e3*zi_qm_σ,1))\ \mathrm{\mu m}$")
-    hline!(p_zi, [0.0]; line = (:dash, :black, 1), label = false)
-    vline!(p_zi, [I_PLATEAU]; line = (:dot, :gray, 1), label = false)
+    p_zi = Axis(fig[3, 1]; ylabel = L"$z_{\mathrm{init}}$ ($\mathrm{\mu m}$)")
+    hlines!(p_zi, 0.0; color = :black, linestyle = :dash, linewidth = 1)
+    mark_plateau!(p_zi)
+    sl!(p_zi, scan_cqd.I_min, 1e3 .* scan_cqd.z_init, :red;
+        label = L"CQD: $z_{\mathrm{init}} = %$(fmt(1e3*zi_cqd,3)) \pm %$(fmt(1e3*zi_cqd_σ,1))\ \mathrm{\mu m}$")
+    sl!(p_zi, scan_qm.I_min, 1e3 .* scan_qm.z_init, :purple; marker = :diamond, linestyle = :dashdot,
+        label = L"QM: $z_{\mathrm{init}} = %$(fmt(1e3*zi_qm,3)) \pm %$(fmt(1e3*zi_qm_σ,1))\ \mathrm{\mu m}$")
+    axislegend(p_zi; position = :rt, labelsize = 13)
 
-    fig = plot(p_ki, p_s, p_zi, p_r2;
-        layout = (4, 1), link = :x,
-        size = (900, 1250), left_margin = 5mm, bottom_margin = 3mm,
-        legendfontsize = 9,
-        plot_title = L"Convergence of $k_{i}$, $s$, $z_{\mathrm{init}}$ vs calibration-tail length ($%$(TAIL_SCALE_MODE)$ scale)",
-    )
-    SHOW_FIGS && display(fig)
-    savefig(fig, joinpath(OUTDIR, "fig002_tail_convergence.$(FIG_EXT)"))
+    p_r2 = Axis(fig[4, 1]; ylabel = L"$R^{2}$ (full data, calibrated model)", xlabel = xlab)
+    mark_plateau!(p_r2)
+    sl!(p_r2, scan_cqd.I_min, scan_cqd.r2, :red;
+        label = L"CQD: $\langle R^{2}\rangle = %$(fmt(r2_cqd,5))$")
+    sl!(p_r2, scan_qm.I_min, scan_qm.r2, :purple; marker = :diamond, linestyle = :dashdot,
+        label = L"QM: $\langle R^{2}\rangle = %$(fmt(r2_qm,5))$")
+    axislegend(p_r2; position = :lb, labelsize = 13)
+
+    linkxaxes!(p_ki, p_s, p_zi, p_r2)
+    foreach(a -> hidexdecorations!(a; grid = false, minorgrid = false, ticks = false, minorticks = false), (p_ki, p_s, p_zi))
+    rowgap!(fig.layout, 6)
+    save_fig(fig, joinpath(OUTDIR, "fig002_tail_convergence.$(FIG_EXT)"))
 
 
 
@@ -2192,9 +2330,9 @@ function analyze_directory(DATA_DIR::AbstractString)
         end
     end
 
-    # calibrated model curves used by every figure below:  z_init + model/s
-    m_qm_scan  = fit_qs.z_init .+ zqm.(I_scan)                    ./ fit_qs.scale;
-    m_cqd_scan = fit_cs.z_init .+ ki_itp.(I_scan, Ref(fit_cs.ki)) ./ fit_cs.scale;
+    # calibrated model curves used by every figure below:  (z_init + model)/s
+    m_qm_scan  = (fit_qs.z_init .+ zqm.(I_scan))                    ./ fit_qs.scale;
+    m_cqd_scan = (fit_cs.z_init .+ ki_itp.(I_scan, Ref(fit_cs.ki))) ./ fit_cs.scale;
     mask_qm_scan  = log_mask(I_scan, m_qm_scan);      # z_init < 0 can make the lowest currents ≤ 0
     mask_cqd_scan = log_mask(I_scan, m_cqd_scan);
 
@@ -2210,8 +2348,8 @@ function analyze_directory(DATA_DIR::AbstractString)
     ##################################################################################################
 
     I_d, δI_d, z_d, σ_d = data[:, 1], data[:, 2], data[:, 3], data[:, 4];
-    m_qm_d  = fit_qs.z_init .+ zqm.(I_d)                    ./ fit_qs.scale;
-    m_cqd_d = fit_cs.z_init .+ ki_itp.(I_d, Ref(fit_cs.ki)) ./ fit_cs.scale;
+    m_qm_d  = (fit_qs.z_init .+ zqm.(I_d))                    ./ fit_qs.scale;
+    m_cqd_d = (fit_cs.z_init .+ ki_itp.(I_d, Ref(fit_cs.ki))) ./ fit_cs.scale;
     # log-space metrics below need positive predictions (guaranteed on the fit
     # subset; with FIT_KI_MODE ≠ :full a negative z_init may break it elsewhere)
     @assert all(m_qm_d .> 0) && all(m_cqd_d .> 0) "Calibrated model ≤ 0 at a measured current (z_init too negative); use FIT_KI_MODE = :full or narrow ZINIT_BOUNDS"
@@ -2219,25 +2357,22 @@ function analyze_directory(DATA_DIR::AbstractString)
     # -----------------------------------------------------------------------------
     # fig003 — data with error bars + calibrated QM + calibrated CQD
     # -----------------------------------------------------------------------------
-    fig = plot(I_scan[mask_qm_scan], m_qm_scan[mask_qm_scan];
-        label = L"QM ($s = %$(fmt(fit_qs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_qs.z_init, 3))\ \mathrm{\mu m}$)",
-        line = (:solid, :blue, 1.75))
-    plot!(fig, I_d, z_d;
-        yerror = σ_d, seriestype = :scatter,
-        marker = (:circle, 3, :gray35, stroke(0.8, :black)),
-        label = "Data $(DATA_DIR)")
-    plot!(fig, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan];
-        label = L"CQD: $k_{i}= \left( %$(fmt(fit_cs.ki, 3)) \pm %$(fmt(fit_cs.ki_err, 1)) \right) \times 10^{-6}$, $s = %$(fmt(fit_cs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_cs.z_init, 3))\ \mathrm{\mu m}$",
-        line = (:solid, :red, 2))
-    plot!(fig;
+    fig = Figure(size = (900, 800));
+    ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
         title = "Calibrated models vs data",
         xlabel = "Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
-        xaxis = :log10, yaxis = :log10, xticks = log_ticks, yticks = log_ticks,
-        labelfontsize = 14, tickfontsize = 12,
-        xlims = (0.010, 1.05), size = (900, 800),
-        legendtitle = cfg_legend, legendtitlefontsize = 10, legendfontsize = 12, left_margin = 3mm)
-    SHOW_FIGS && display(fig)
-    savefig(fig, joinpath(OUTDIR, "fig003.$(FIG_EXT)"))
+        xticks = log_ticks, yticks = log_ticks,
+        xlabelsize = 18, ylabelsize = 18, xticklabelsize = 16, yticklabelsize = 16);
+    lines!(ax, I_scan[mask_qm_scan], m_qm_scan[mask_qm_scan]; color = :blue, linewidth = 1.75,
+        label = L"QM ($s = %$(fmt(fit_qs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_qs.z_init, 3))\ \mathrm{\mu m}$)")
+    yerr_log!(ax, I_d, z_d, σ_d)
+    scatter!(ax, I_d, logsafe(z_d); marker = :circle, markersize = 7, color = :gray35,
+        strokecolor = :black, strokewidth = 0.8, label = "Data $(DATA_DIR)")
+    lines!(ax, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan]; color = :red, linewidth = 2,
+        label = L"CQD: $k_{i}= \left( %$(fmt(fit_cs.ki, 3)) \pm %$(fmt(fit_cs.ki_err, 1)) \right) \times 10^{-6}$, $s = %$(fmt(fit_cs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_cs.z_init, 3))\ \mathrm{\mu m}$")
+    xlims!(ax, 0.010, 1.05)
+    axislegend(ax; position = :rb, title = cfg_legend, titlesize = 13, labelsize = 13)
+    save_fig(fig, joinpath(OUTDIR, "fig003.$(FIG_EXT)"))
 
     # -----------------------------------------------------------------------------
     # fig004 — relative error (%) and pulls of both calibrated models
@@ -2251,25 +2386,19 @@ function analyze_directory(DATA_DIR::AbstractString)
     # -----------------------------------------------------------------------------
     lbl_qm  = L"QM ($s = %$(fmt(fit_qs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_qs.z_init, 3))\ \mathrm{\mu m}$)";
     lbl_cqd = L"CQD ($k_{i}=%$(fmt(fit_cs.ki, 4)) \times10^{-6}$, $s = %$(fmt(fit_cs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_cs.z_init, 3))\ \mathrm{\mu m}$)";
-    axis_kw = (
-        xaxis = :log10,
-        xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        xlims = (0.010, 1.05),
-        labelfontsize = 14, tickfontsize = 12,
-        legend = :outerright, legendfontsize = 11, legendtitle = cfg_legend, legendtitlefontsize = 9,
-        left_margin = 3mm, bottom_margin = 3mm,
-    )
+    axis_kw = (LOGX...,
+        xticks = decade_ticks([1e-2, 1e-1, 1.0]),
+        xlabelsize = 18, ylabelsize = 18, xticklabelsize = 16, yticklabelsize = 16, titlesize = 18)
+    # filled markers stroked in their own colour, connecting line semi-transparent
+    sl_fill!(ax, x, y, c; marker = :circle, label = nothing) =
+        scatterlines!(ax, x, y; color = (c, 0.4), linewidth = 1.5, label,
+                      marker, markersize = 8, markercolor = c, strokecolor = c, strokewidth = 0.8)
 
     println("Model comparison — log-space metrics (calibrated models vs raw data)")
     compare_datasets(I_d, z_d, m_cqd_d, m_qm_d; plot_errors = true);
 
     re_qm  = 100 .* relerr(m_qm_d,  z_d);
     re_cqd = 100 .* relerr(m_cqd_d, z_d);
-    fig_rel = plot(; title = "Relative error of the calibrated models", titlefontsize = 14,
-        xlabel = "Current (A)", ylabel = L"(\mathrm{model}-\mathrm{exp})/\mathrm{exp}\ (\%)", axis_kw...)
-    hline!(fig_rel, [0.0]; line = (:dash, :black, 1), label = false)
-    plot!(fig_rel, I_d, re_qm;  label = lbl_qm,  line = (:solid, :blue,  1.5), marker = (:circle, 3, :blue, stroke(0.8, :blue)), linealpha = 0.4)
-    plot!(fig_rel, I_d, re_cqd; label = lbl_cqd, line = (:solid, :red, 1.5), marker = (:diamond, 3, :red, stroke(0.8, :red)), linealpha = 0.4)
 
     pull_qm  = pull(m_qm_d,  z_d, σ_d);
     pull_cqd = pull(m_cqd_d, z_d, σ_d);
@@ -2282,21 +2411,27 @@ function analyze_directory(DATA_DIR::AbstractString)
     @info "Pulls — QM  (k = $(N_PAR_QM))"  pull_summary(pull_qm,  N_PAR_QM)...
     @info "Pulls — CQD (k = $(N_PAR_CQD))" pull_summary(pull_cqd, N_PAR_CQD)...
 
-    fig_pull = plot(; title = "Normalised residuals (pulls)", titlefontsize = 14,
-        xlabel = "Current (A)", ylabel = L"(\mathrm{model}-\mathrm{exp})/\sigma_{\mathrm{exp}}", axis_kw...)
-    hspan!(fig_pull, [-2, 2]; fillalpha = 0.08, color = :gray, linealpha = 0, label = L"\pm 2\sigma")
-    hspan!(fig_pull, [-1, 1]; fillalpha = 0.15, color = :gray, linealpha = 0, label = L"\pm 1\sigma")
-    hline!(fig_pull, [0.0]; line = (:dash, :black, 1), label = false)
-    plot!(fig_pull, I_d, pull_qm;
-        label = L"QM ($\chi^{2}_{\mathrm{red}} = %$(fmt(chi2red(pull_qm, N_PAR_QM), 3))$, $k = %$(N_PAR_QM)$)",
-        line = (:solid, :blue, 1.5), marker = (:circle, 3, :blue, stroke(0.8, :blue)), linealpha = 0.4)
-    plot!(fig_pull, I_d, pull_cqd;
-        label = L"CQD ($\chi^{2}_{\mathrm{red}} = %$(fmt(chi2red(pull_cqd, N_PAR_CQD), 3))$, $k = %$(N_PAR_CQD)$)",
-        line = (:solid, :red, 1.5), marker = (:diamond, 3, :red, stroke(0.8, :red)), linealpha = 0.4)
+    fig = Figure(size = (1350, 850));
+    fig_rel = Axis(fig[1, 1]; axis_kw..., title = "Relative error of the calibrated models",
+        xlabel = "Current (A)", ylabel = L"(\mathrm{model}-\mathrm{exp})/\mathrm{exp}\ (\%)")
+    hlines!(fig_rel, 0.0; color = :black, linestyle = :dash, linewidth = 1)
+    sl_fill!(fig_rel, I_d, re_qm,  :blue; label = lbl_qm)
+    sl_fill!(fig_rel, I_d, re_cqd, :red;  marker = :diamond, label = lbl_cqd)
+    Legend(fig[1, 2], fig_rel; title = cfg_legend, titlesize = 12, labelsize = 13)
 
-    fig = plot(fig_rel, fig_pull; layout = (2, 1), link = :x, size = (1100, 750))
-    SHOW_FIGS && display(fig)
-    savefig(fig, joinpath(OUTDIR, "fig004.$(FIG_EXT)"))
+    fig_pull = Axis(fig[2, 1]; axis_kw..., title = "Normalised residuals (pulls)",
+        xlabel = "Current (A)", ylabel = L"(\mathrm{model}-\mathrm{exp})/\sigma_{\mathrm{exp}}")
+    hspan!(fig_pull, -2, 2; color = (:gray, 0.08), label = L"\pm 2\sigma")
+    hspan!(fig_pull, -1, 1; color = (:gray, 0.15), label = L"\pm 1\sigma")
+    hlines!(fig_pull, 0.0; color = :black, linestyle = :dash, linewidth = 1)
+    sl_fill!(fig_pull, I_d, pull_qm, :blue;
+        label = L"QM ($\chi^{2}_{\mathrm{red}} = %$(fmt(chi2red(pull_qm, N_PAR_QM), 3))$, $k = %$(N_PAR_QM)$)")
+    sl_fill!(fig_pull, I_d, pull_cqd, :red; marker = :diamond,
+        label = L"CQD ($\chi^{2}_{\mathrm{red}} = %$(fmt(chi2red(pull_cqd, N_PAR_CQD), 3))$, $k = %$(N_PAR_CQD)$)")
+    Legend(fig[2, 2], fig_pull; title = cfg_legend, titlesize = 12, labelsize = 13)
+    linkxaxes!(fig_rel, fig_pull)
+    xlims!(fig_rel, 0.010, 1.05)
+    save_fig(fig, joinpath(OUTDIR, "fig004.$(FIG_EXT)"))
 
     CSV.write(joinpath(OUTDIR, "model_residuals_scaled.csv"), DataFrame(
         Ic = I_d, z_exp = z_d, dz_exp = σ_d, z_QM = m_qm_d, z_CQD = m_cqd_d,
@@ -2305,25 +2440,22 @@ function analyze_directory(DATA_DIR::AbstractString)
     # -----------------------------------------------------------------------------
     # fig005 — publication-style overlay
     # -----------------------------------------------------------------------------
-    fig = plot(title = L"Peak position ($F=1$) — %$(DATA_DIR)")
-    plot!(fig, I_d, z_d;
-        xerror = δI_d, yerror = σ_d, seriestype = :scatter,
-        label = "Experimental data",
-        marker = (:circle, 4, :darkgreen, stroke(0.6, :black)))
-    plot!(fig, I_scan[mask_qm_scan], m_qm_scan[mask_qm_scan];
-        label = L"Quantum mechanics: $s = %$(fmt(fit_qs.scale, 4)) \pm %$(fmt(fit_qs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_qs.z_init, 3)) \pm %$(fmt(1e3*fit_qs.z_init_err, 1)))\ \mathrm{\mu m}$",
-        line = (:solid, :blue, 1.75))
-    plot!(fig, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan];
-        label = L"CoQuantum dynamics: $k_{i} = \left( %$(fmt(fit_cs.ki, 4)) \pm %$(fmt(fit_cs.ki_err, 1)) \right) \times 10^{-6}$, $s = %$(fmt(fit_cs.scale, 4)) \pm %$(fmt(fit_cs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_cs.z_init, 3)) \pm %$(fmt(1e3*fit_cs.z_init_err, 1)))\ \mathrm{\mu m}$",
-        line = (:dot, :red, 2))
-    plot!(fig;
+    fig = Figure(size = (1000, 850));
+    ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
+        title = L"Peak position ($F=1$) — %$(DATA_DIR)",
         xlabel = "Coil Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
-        xaxis = :log10, yaxis = :log10, xticks = log_ticks, yticks = log_ticks,
-        labelfontsize = 14, tickfontsize = 12, size = (900, 800),
-        legend = :topleft, legendtitle = tail_legend, legendtitlefontsize = 10, legendfontsize = 11,
-        left_margin = 3mm)
-    SHOW_FIGS && display(fig)
-    savefig(fig, joinpath(OUTDIR, "fig005.$(FIG_EXT)"))
+        xticks = log_ticks, yticks = log_ticks,
+        xlabelsize = 18, ylabelsize = 18, xticklabelsize = 16, yticklabelsize = 16);
+    xerr_log!(ax, I_d, z_d, δI_d)
+    yerr_log!(ax, I_d, z_d, σ_d)
+    scatter!(ax, I_d, logsafe(z_d); marker = :circle, markersize = 9, color = :darkgreen,
+        strokecolor = :black, strokewidth = 0.6, label = "Experimental data")
+    lines!(ax, I_scan[mask_qm_scan], m_qm_scan[mask_qm_scan]; color = :blue, linewidth = 1.75,
+        label = L"Quantum mechanics: $s = %$(fmt(fit_qs.scale, 4)) \pm %$(fmt(fit_qs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_qs.z_init, 3)) \pm %$(fmt(1e3*fit_qs.z_init_err, 1)))\ \mathrm{\mu m}$")
+    lines!(ax, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan]; color = :red, linewidth = 2, linestyle = :dot,
+        label = L"CoQuantum dynamics: $k_{i} = \left( %$(fmt(fit_cs.ki, 4)) \pm %$(fmt(fit_cs.ki_err, 1)) \right) \times 10^{-6}$, $s = %$(fmt(fit_cs.scale, 4)) \pm %$(fmt(fit_cs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_cs.z_init, 3)) \pm %$(fmt(1e3*fit_cs.z_init_err, 1)))\ \mathrm{\mu m}$")
+    axislegend(ax; position = :lt, title = tail_legend, titlesize = 13, labelsize = 12)
+    save_fig(fig, joinpath(OUTDIR, "fig005.$(FIG_EXT)"))
 
 
 
@@ -2360,44 +2492,38 @@ function analyze_directory(DATA_DIR::AbstractString)
     # -----------------------------------------------------------------------------
     # single_SG_comparison — vs coil current
     # -----------------------------------------------------------------------------
-    fig = plot()
-    plot!(fig, I_sc, z_sc;
-        xerr = δI_sc, yerr = δz_sc,
-        label = "Experimental data", seriestype = :scatter,
-        marker = (:circle, 4, :white, stroke(0.5, :black)))
-    plot!(fig, I_scan[mask_qm_scan], m_qm_scan[mask_qm_scan];  label = "Existing models", line = (:dash, :blue, 1.75))
-    plot!(fig, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan];
-        label = L"Coquantum dynamics: $k_{i} \approx %$(fmt(fit_cs.ki, 2)) \times 10^{-6}$",
-        line = (:solid, :red, 2), markerstrokewidth = 1)
-    plot!(fig;
-        xlabel = "Coil Current (A)", ylabel = L"$F=1$ peak position (mm)",
-        xaxis = :log10, yaxis = :log10, xticks = log_ticks, yticks = log_ticks,
-        labelfontsize = 16, tickfontsize = 14, size = (900, 800),
-        legendfontsize = 12, left_margin = 3mm)
-    SHOW_FIGS && display(fig)
-    savefig(fig, joinpath(OUTDIR, "single_SG_comparison.png"))
-    savefig(fig, joinpath(OUTDIR, "single_SG_comparison.svg"))
+    # styles shared by the two single_SG_comparison figures
+    sg_axis = (LOGX..., LOGY..., ylabel = L"$F=1$ peak position (mm)", yticks = log_ticks,
+               xlabelsize = 20, ylabelsize = 20, xticklabelsize = 18, yticklabelsize = 18)
+    function sg_series!(ax, xd, δxd, xm)
+        xerr_log!(ax, xd, z_sc, δxd)
+        yerr_log!(ax, xd, z_sc, δz_sc)
+        scatter!(ax, xd, logsafe(z_sc); marker = :circle, markersize = 9, color = :white,
+                 strokecolor = :black, strokewidth = 0.5, label = "Experimental data")
+        lines!(ax, xm[mask_qm_scan], m_qm_scan[mask_qm_scan]; color = :blue, linewidth = 1.75,
+               linestyle = :dash, label = "Existing models")
+        lines!(ax, xm[mask_cqd_scan], m_cqd_scan[mask_cqd_scan]; color = :red, linewidth = 2,
+               label = L"Coquantum dynamics: $k_{i} \approx %$(fmt(fit_cs.ki, 2)) \times 10^{-6}$")
+    end
+
+    fig = Figure(size = (900, 800));
+    ax  = Axis(fig[1, 1]; sg_axis..., xlabel = "Coil Current (A)", xticks = log_ticks)
+    sg_series!(ax, I_sc, δI_sc, I_scan)
+    axislegend(ax; position = :rb, labelsize = 16)
+    save_fig(fig, joinpath(OUTDIR, "single_SG_comparison.png"))
+    save(joinpath(OUTDIR, "single_SG_comparison.svg"), fig)
 
     # -----------------------------------------------------------------------------
     # single_SG_comparison_vsg — vs magnetic-field gradient G(I)
     # -----------------------------------------------------------------------------
-    fig = plot()
-    plot!(fig, G_sc, z_sc;
-        xerr = δG_sc, yerr = δz_sc,
-        label = "Experimental data", seriestype = :scatter,
-        marker = (:circle, 4, :white, stroke(0.5, :black)))
-    plot!(fig, G_scan[mask_qm_scan], m_qm_scan[mask_qm_scan];  label = "Existing models", line = (:dash, :blue, 1.75))
-    plot!(fig, G_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan];
-        label = L"Coquantum dynamics: $k_{i} \approx %$(fmt(fit_cs.ki, 2)) \times 10^{-6}$",
-        line = (:solid, :red, 2), markerstrokewidth = 1)
-    plot!(fig;
-        xlabel = "Magnetic field gradient (T/m)", ylabel = L"$F=1$ peak position (mm)",
-        xaxis = :log10, yaxis = :log10, yticks = log_ticks, xlims = (5, 400),
-        labelfontsize = 16, tickfontsize = 14, size = (900, 800),
-        legend = :topleft, legendfontsize = 12, left_margin = 3mm)
-    SHOW_FIGS && display(fig)
-    savefig(fig, joinpath(OUTDIR, "single_SG_comparison_vsg.png"))
-    savefig(fig, joinpath(OUTDIR, "single_SG_comparison_vsg.svg"))
+    fig = Figure(size = (900, 800));
+    ax  = Axis(fig[1, 1]; sg_axis..., xlabel = "Magnetic field gradient (T/m)",
+               xticks = ([5, 10, 20, 50, 100, 200, 400], ["5", "10", "20", "50", "100", "200", "400"]))
+    sg_series!(ax, G_sc, δG_sc, G_scan)
+    xlims!(ax, 5, 400)
+    axislegend(ax; position = :lt, labelsize = 16)
+    save_fig(fig, joinpath(OUTDIR, "single_SG_comparison_vsg.png"))
+    save(joinpath(OUTDIR, "single_SG_comparison_vsg.svg"), fig)
 
     # -----------------------------------------------------------------------------
     # Tables: experiment (both axes) and calibrated model curves
@@ -2450,10 +2576,8 @@ function analyze_directory(DATA_DIR::AbstractString)
               DataFrame(metric = metrics, CQD = gof_table[:, 1], QM = gof_table[:, 2]))
 
     # fig006 — diagnostic panels
-    p1, p2, p3, p4 = make_diagnostic_plots(I_sc, z_sc, m_cqd_sc, m_qm_sc, stats_CQD, stats_QM; σ = δz_sc)
-    fig = plot(p1, p2, p3, p4; layout = (2, 2), size = (1200, 1000), left_margin = 4mm, bottom_margin = 3mm)
-    SHOW_FIGS && display(fig)
-    savefig(fig, joinpath(OUTDIR, "fig006.$(FIG_EXT)"))
+    fig = make_diagnostic_plots(I_sc, z_sc, m_cqd_sc, m_qm_sc, stats_CQD, stats_QM; σ = δz_sc)
+    save_fig(fig, joinpath(OUTDIR, "fig006.$(FIG_EXT)"))
 
 
     ##################################################################################################
@@ -2470,7 +2594,7 @@ function analyze_directory(DATA_DIR::AbstractString)
 
     @info cstr("DATA", :green, :bold) *
           row("directory",  cstr(DATA_DIR, :magenta, :bold)) *
-          row("exp config", cstr("nz = $(NZ_EXP), λ0 = $(λ0_EXP), $(PEAK_KEY_F1), origin $(ORIGIN_MODE), δI $(δI_MODE)", :green)) *
+          row("exp config", cstr("nz = $(NZ_EXP), λ0 = $(λ0_EXP), $(PEAK_KEY_F1), origin zero-current midpoint (n = $(n_rep)), δI $(δI_MODE)", :green)) *
           row("points",     cstr("$(N_data) with I ≥ $(I_THRESHOLD) A", :green))
 
     @info cstr("RESULT — CQD", :green, :bold) *
@@ -2534,7 +2658,10 @@ function analyze_directory(DATA_DIR::AbstractString)
         f["settings/nz_exp"]        = NZ_EXP
         f["settings/λ0_exp"]        = λ0_EXP
         f["settings/peak_key"]      = String(PEAK_KEY_F1)
-        f["settings/origin_mode"]   = String(ORIGIN_MODE)
+        f["settings/origin_mode"]   = "zero_current_midpoint"     # mean F1/F2 midpoint of the I = 0 repeats
+        f["settings/z0_n_repeats"]  = n_rep
+        f["settings/z0_I_ref_A"]    = I_ref
+        f["settings/z0_err_method"] = z0_err_method
         f["settings/z0_mm"]         = z0
         f["settings/z0Err_mm"]      = δz0
         f["settings/magnification"]    = M
@@ -2583,7 +2710,7 @@ function analyze_directory(DATA_DIR::AbstractString)
         f["experiment/CQD_up_mm"]      = m_cqd_sc
         f["experiment/QM_zF1_mm"]      = m_qm_sc
 
-        # --- calibrated model curves (z_init + model/s) on the dense scan I_scan ---
+        # --- calibrated model curves ((z_init + model)/s) on the dense scan I_scan ---
         f["model/Current_A"]   = I_scan
         f["model/Gradient_Tm"] = G_scan
         f["model/CQD_up_mm"]   = m_cqd_scan
@@ -2662,6 +2789,9 @@ end
 section("LOOP", "ANALYSIS OF $(length(DATA_DIRECTORIES)) DIRECTORIES — nz = $(NZ_EXP), λ0 = $(λ0_EXP)")
 ##################################################################################################
 dir_results = NamedTuple[]
+# measured points of every directory [I, δI, z, δz], filled by analyze_directory,
+# used by the final summary figure
+const DIR_DATA = OrderedDict{String,NamedTuple}()
 dir_failed  = Pair{String,String}[]
 for (idx, dir) in enumerate(DATA_DIRECTORIES)
     println("\n", cstr("▶▶▶  DIRECTORY [$(idx)/$(length(DATA_DIRECTORIES))]  $(dir)", :magenta, :bold))
@@ -2793,33 +2923,88 @@ open(joinpath(RUN_OUTDIR, "final_table.txt"), "w") do io
                  fit_table_in_display_vertically   = false)
 end
 
-# fig_all — kᵢ (top) and calibration factors (bottom) per directory
-xs = 1:nrow(df_all)
-p_kall = plot(xs, df_all.ki; yerror = df_all.ki_err_tot, seriestype = :scatter,
-    marker = (:circle, 5, :white, stroke(1, :blue)), label = L"$k_{i}$ (stat $\oplus$ sys)",
-    ylabel = L"$k_{i}\ \left(\times 10^{-6}\right)$", legend = :best,
-    xticks = (xs, df_all.dir), xrotation = 45)
-scatter!(p_kall, xs, df_all.ki; yerror = df_all.ki_err, marker = (:circle, 5, :blue), label = L"$k_{i}$ (stat)")
-hspan!(p_kall, [ki_wmean - ki_wmerr, ki_wmean + ki_wmerr]; fillalpha = 0.2, color = :blue, linealpha = 0, label = false)
-hline!(p_kall, [ki_wmean]; line = (:dash, :blue, 1),
+# fig_all — kᵢ, calibration factors and z_init per directory (shared x)
+xs  = 1:nrow(df_all)
+fig = Figure(size = (1100, 1150))
+Label(fig[0, 1], L"$n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$ | tail $I \geq %$(I_PLATEAU)$ A"; fontsize = 17, tellwidth = false)
+dir_ticks = (collect(xs), string.(df_all.dir))
+ax_kw_all = (xticks = dir_ticks, xminorgridvisible = false, xminorticksvisible = false)
+
+p_kall = Axis(fig[1, 1]; ax_kw_all..., ylabel = L"$k_{i}\ \left(\times 10^{-6}\right)$")
+hspan!(p_kall, ki_wmean - ki_wmerr, ki_wmean + ki_wmerr; color = (:blue, 0.2))
+hlines!(p_kall, ki_wmean; color = :blue, linestyle = :dash, linewidth = 1,
     label = L"weighted mean $%$(fmt(ki_wmean, 4)) \pm %$(fmt(ki_wmerr, 2))$")
-p_sall = plot(xs, df_all.scale_cqd; yerror = df_all.scale_cqd_err, seriestype = :scatter,
-    marker = (:circle, 5, :red), label = L"$s_{\mathrm{CQD}}$",
-    ylabel = L"scale $s$", legend = :best,
-    xticks = (xs, df_all.dir), xrotation = 45, bottom_margin = 8mm)
-scatter!(p_sall, xs, df_all.scale_qm; yerror = df_all.scale_qm_err,
-    marker = (:diamond, 5, :purple), label = L"$s_{\mathrm{QM}}$")
-p_zall = plot(xs, 1e3 .* df_all.zinit_cqd; yerror = 1e3 .* df_all.zinit_cqd_err, seriestype = :scatter,
-    marker = (:circle, 5, :red), label = L"$z_{\mathrm{init}}$ CQD",
-    ylabel = L"$z_{\mathrm{init}}$ ($\mathrm{\mu m}$)", legend = :best,
-    xticks = (xs, df_all.dir), xrotation = 45, bottom_margin = 8mm)
-scatter!(p_zall, xs, 1e3 .* df_all.zinit_qm; yerror = 1e3 .* df_all.zinit_qm_err,
-    marker = (:diamond, 5, :purple), label = L"$z_{\mathrm{init}}$ QM")
-hline!(p_zall, [0.0]; line = (:dash, :black, 1), label = false)
-fig = plot(p_kall, p_sall, p_zall; layout = (3, 1), link = :x, size = (1100, 1150), left_margin = 5mm,
-    plot_title = L"$n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$ | tail $I \geq %$(I_PLATEAU)$ A")
-SHOW_FIGS && display(fig)
-savefig(fig, joinpath(RUN_OUTDIR, "fig_ki_all_directories.$(FIG_EXT)"))
+errorbars!(p_kall, xs, df_all.ki, df_all.ki_err_tot; color = :blue, whiskerwidth = 8)
+errorbars!(p_kall, xs, df_all.ki, df_all.ki_err; color = :blue, linewidth = 2, whiskerwidth = 4)
+scatter!(p_kall, xs, df_all.ki; marker = :circle, markersize = 13, color = :white, strokecolor = :blue,
+    strokewidth = 1, label = L"$k_{i}$ (stat $\oplus$ sys)")
+scatter!(p_kall, xs, df_all.ki; marker = :circle, markersize = 9, color = :blue, label = L"$k_{i}$ (stat)")
+axislegend(p_kall; position = :rt)
+
+p_sall = Axis(fig[2, 1]; ax_kw_all..., ylabel = L"scale $s$")
+errorbars!(p_sall, xs, df_all.scale_cqd, df_all.scale_cqd_err; color = :red, whiskerwidth = 6)
+scatter!(p_sall, xs, df_all.scale_cqd; marker = :circle, markersize = 11, color = :red, label = L"$s_{\mathrm{CQD}}$")
+errorbars!(p_sall, xs, df_all.scale_qm, df_all.scale_qm_err; color = :purple, whiskerwidth = 6)
+scatter!(p_sall, xs, df_all.scale_qm; marker = :diamond, markersize = 11, color = :purple, label = L"$s_{\mathrm{QM}}$")
+axislegend(p_sall; position = :rt)
+
+p_zall = Axis(fig[3, 1]; ax_kw_all..., ylabel = L"$z_{\mathrm{init}}$ ($\mathrm{\mu m}$)", xticklabelrotation = π / 4)
+hlines!(p_zall, 0.0; color = :black, linestyle = :dash, linewidth = 1)
+errorbars!(p_zall, xs, 1e3 .* df_all.zinit_cqd, 1e3 .* df_all.zinit_cqd_err; color = :red, whiskerwidth = 6)
+scatter!(p_zall, xs, 1e3 .* df_all.zinit_cqd; marker = :circle, markersize = 11, color = :red, label = L"$z_{\mathrm{init}}$ CQD")
+errorbars!(p_zall, xs, 1e3 .* df_all.zinit_qm, 1e3 .* df_all.zinit_qm_err; color = :purple, whiskerwidth = 6)
+scatter!(p_zall, xs, 1e3 .* df_all.zinit_qm; marker = :diamond, markersize = 11, color = :purple, label = L"$z_{\mathrm{init}}$ QM")
+axislegend(p_zall; position = :rt)
+
+linkxaxes!(p_kall, p_sall, p_zall)
+xlims!(p_zall, 0.5, nrow(df_all) + 0.5)
+foreach(a -> hidexdecorations!(a; grid = false, ticks = false), (p_kall, p_sall))
+rowgap!(fig.layout, 6)
+save_fig(fig, joinpath(RUN_OUTDIR, "fig_ki_all_directories.$(FIG_EXT)"))
+
+# -----------------------------------------------------------------------------
+# fig_summary_all_directories — every directory's measured points together with
+# ONE calibrated CQD curve and ONE calibrated QM curve built from the MEDIANS of
+# the per-directory fits:
+#     CQD: (z̃_init,CQD + ki_itp(I, k̃ᵢ)) / s̃_CQD        QM: (z̃_init,QM + zqm(I)) / s̃_QM
+# (each directory was fitted with its own s and z_init; the median curves show the
+#  typical calibrated model, not a joint fit of all the data)
+# -----------------------------------------------------------------------------
+ki_med    = median(df_all.ki);        zi_cqd_med = median(df_all.zinit_cqd);  s_cqd_med = median(df_all.scale_cqd)
+zi_qm_med = median(df_all.zinit_qm);  s_qm_med   = median(df_all.scale_qm)
+@info "Summary curves (medians over $(nrow(df_all)) directories)" ki_med zi_cqd_med_um = 1e3 * zi_cqd_med s_cqd_med zi_qm_med_um = 1e3 * zi_qm_med s_qm_med
+
+I_sum      = logspace10(I_THRESHOLD, 1.00; n = 801)
+m_cqd_sum  = (zi_cqd_med .+ ki_itp.(I_sum, Ref(ki_med))) ./ s_cqd_med
+m_qm_sum   = (zi_qm_med  .+ zqm.(I_sum))                 ./ s_qm_med
+mk_cqd_sum = log_mask(I_sum, m_cqd_sum)
+mk_qm_sum  = log_mask(I_sum, m_qm_sum)
+
+dirs_ok   = [d for d in df_all.dir if haskey(DIR_DATA, d)]
+cols_dir  = Makie.resample_cmap(:viridis, max(length(dirs_ok), 2))[1:length(dirs_ok)]
+mks_dir   = [:circle, :rect, :diamond, :utriangle, :dtriangle, :pentagon, :hexagon, :star5, :ltriangle, :rtriangle]
+
+fig = Figure(size = (1250, 900))
+ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
+    title  = L"All directories — $n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$, $\sigma_{\mathrm{conv}} = %$(1e3*σW_FIXED)\,\mathrm{\mu m}$",
+    xlabel = "Coil Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
+    xticks = ([0.02, 0.05, 0.1, 0.2, 0.5, 1.0], ["0.02", "0.05", "0.1", "0.2", "0.5", "1"]),
+    yticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0, 10.0]),
+    xlabelsize = 22, ylabelsize = 22, xticklabelsize = 17, yticklabelsize = 17, titlesize = 18)
+for (j, d) in enumerate(dirs_ok)
+    dd = DIR_DATA[d]
+    ok = log_mask(dd.I, dd.z)
+    yerr_log!(ax, dd.I[ok], dd.z[ok], dd.δz[ok]; color = (cols_dir[j], 0.8))
+    scatter!(ax, dd.I[ok], dd.z[ok]; marker = mks_dir[mod1(j, length(mks_dir))], markersize = 9,
+             color = (cols_dir[j], 0.85), strokecolor = :black, strokewidth = 0.4, label = d)
+end
+lines!(ax, I_sum[mk_qm_sum], m_qm_sum[mk_qm_sum]; color = :blue, linewidth = 2.5, linestyle = :dash,
+    label = L"QM: $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_qm_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_qm_med, 4))$")
+lines!(ax, I_sum[mk_cqd_sum], m_cqd_sum[mk_cqd_sum]; color = :red, linewidth = 2.5,
+    label = L"CQD: $\tilde{k}_{i} = %$(fmt(ki_med, 3))\times 10^{-6}$, $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_cqd_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_cqd_med, 4))$")
+xlims!(ax, 0.9 * I_THRESHOLD, 1.05)
+Legend(fig[1, 2], ax; labelsize = 13)                     # ~ : median over the directories
+save_fig(fig, joinpath(RUN_OUTDIR, "fig_summary_all_directories.$(FIG_EXT)"))
 
 # combined archive (plain vectors; one entry per analysed directory)
 all_path = joinpath(RUN_OUTDIR, "SG_ki_scale_all_directories.jld2")
