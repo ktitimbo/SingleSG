@@ -91,7 +91,7 @@
 #       over the plateau quoted as tail-choice systematic.           fig002
 #    5. Final fits with formal uncertainties at the chosen `N_TAIL`
 #       (`fit_cqd_ki_scale_with_error`, `fit_qm_scale_with_error`).
-#    6. Diagnostics: overlay (fig003), relative error + pulls (fig004),
+#    6. Diagnostics: overlay (fig003), relative error + pulls + log errors (fig004),
 #       publication overlay (fig005).
 #    7. Publication figures vs current and vs gradient, goodness-of-fit table
 #       (χ², AIC/BIC, …) and diagnostic panels (fig006).
@@ -124,7 +124,7 @@
 #      fig001  CQD family + QM + experiment (log–log)
 #      fig002_tail_convergence  kᵢ, s, z_init and R² vs calibration-tail length
 #      fig003  data + calibrated QM + calibrated CQD (diagnostic)
-#      fig004  relative error (%) and pulls vs current, both models
+#      fig004  relative error (%), pulls and log errors vs current, both models
 #      fig005  data + calibrated models (publication style)
 #      fig006  goodness-of-fit diagnostic panels
 #      single_SG_comparison(.png|.svg)      points vs current
@@ -2362,20 +2362,22 @@ function analyze_directory(DATA_DIR::AbstractString)
         title = "Calibrated models vs data",
         xlabel = "Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
         xticks = log_ticks, yticks = log_ticks,
-        xlabelsize = 18, ylabelsize = 18, xticklabelsize = 16, yticklabelsize = 16);
+        xlabelsize = 24, ylabelsize = 24, xticklabelsize = 20, yticklabelsize = 20);
+    # plotting order = legend order: data, QM, CQD
+    yerr_log!(ax, I_d, z_d, σ_d)
+    scatter!(ax, I_d, logsafe(z_d); marker = :circle, markersize = 11, color = :transparent,
+        strokecolor = :black, strokewidth = 1.2, label = "Data $(DATA_DIR)")     # open circles
     lines!(ax, I_scan[mask_qm_scan], m_qm_scan[mask_qm_scan]; color = :blue, linewidth = 1.75,
         label = L"QM ($s = %$(fmt(fit_qs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_qs.z_init, 3))\ \mathrm{\mu m}$)")
-    yerr_log!(ax, I_d, z_d, σ_d)
-    scatter!(ax, I_d, logsafe(z_d); marker = :circle, markersize = 7, color = :gray35,
-        strokecolor = :black, strokewidth = 0.8, label = "Data $(DATA_DIR)")
     lines!(ax, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan]; color = :red, linewidth = 2,
         label = L"CQD: $k_{i}= \left( %$(fmt(fit_cs.ki, 3)) \pm %$(fmt(fit_cs.ki_err, 1)) \right) \times 10^{-6}$, $s = %$(fmt(fit_cs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_cs.z_init, 3))\ \mathrm{\mu m}$")
     xlims!(ax, 0.010, 1.05)
-    axislegend(ax; position = :rb, title = cfg_legend, titlesize = 13, labelsize = 13)
+    axislegend(ax, cfg_legend; position = :rb, titlesize = 15, labelsize = 15,   # title is positional
+        backgroundcolor = :transparent, framevisible = false)
     save_fig(fig, joinpath(OUTDIR, "fig003.$(FIG_EXT)"))
 
     # -----------------------------------------------------------------------------
-    # fig004 — relative error (%) and pulls of both calibrated models
+    # fig004 — relative error (%), pulls and log errors of both calibrated models
     #
     # Both models are divided by their own tail-fitted factor; the data are
     # untouched. Two complementary views of (model − exp):
@@ -2395,7 +2397,21 @@ function analyze_directory(DATA_DIR::AbstractString)
                       marker, markersize = 8, markercolor = c, strokecolor = c, strokewidth = 0.8)
 
     println("Model comparison — log-space metrics (calibrated models vs raw data)")
-    compare_datasets(I_d, z_d, m_cqd_d, m_qm_d; plot_errors = true);
+    metrics_d = compare_datasets(I_d, z_d, m_cqd_d, m_qm_d; plot_errors = false);   # log errors → fig004 (c)
+    println("""
+    Metrics  (e = log10(model) − log10(exp) per point, N = $(length(z_d)); red = the smaller value of the row;
+              all are lower-is-better and none uses the error bars δz)
+      log_MSE, log_RMSE : mean of e², and its root. Typical model/data mismatch; 10^log_RMSE − 1 ≈ typical fractional error.
+      max_log_error     : largest |e| (worst single point).
+      rel_mean/median/max : mean, median and largest of |model − exp|/exp (fractional).
+      MAPE (%)          : 100 × rel_mean.
+      sMAPE (%)         : 100 × mean |model − exp| / ((exp + model)/2); symmetric, bounded by 200 %.
+      L2_norm           : ‖model − exp‖ / ‖exp‖ (linear; dominated by the largest-z points).
+      L2_log_norm       : ‖e‖ / ‖log10(exp)‖; depends on where the data sit (log10(exp) ≈ 0 near 1 mm), use with care.
+      chi2_log          : Σ (e/std(e))²; scaled by the spread of e itself, so ≈ N − 1 for any model — not a fit test.
+      KS_distance       : max difference of the normalised cumulative sums of exp and model (shape check).
+    For significance against the error bars see the pulls/χ²_red (fig004) and the goodness-of-fit table (section 7).
+    """)
 
     re_qm  = 100 .* relerr(m_qm_d,  z_d);
     re_cqd = 100 .* relerr(m_cqd_d, z_d);
@@ -2411,16 +2427,28 @@ function analyze_directory(DATA_DIR::AbstractString)
     @info "Pulls — QM  (k = $(N_PAR_QM))"  pull_summary(pull_qm,  N_PAR_QM)...
     @info "Pulls — CQD (k = $(N_PAR_CQD))" pull_summary(pull_cqd, N_PAR_CQD)...
 
-    fig = Figure(size = (1350, 850));
+    CSV.write(joinpath(OUTDIR, "model_residuals_scaled.csv"), DataFrame(
+        Ic = I_d, z_exp = z_d, dz_exp = σ_d, z_QM = m_qm_d, z_CQD = m_cqd_d,
+        relQM = re_qm ./ 100, relCQD = re_cqd ./ 100, pullQM = pull_qm, pullCQD = pull_cqd))
+
+    # -----------------------------------------------------------------------------
+    # fig004 — three views of (model − exp), shared current axis (top → bottom):
+    #   (a) relative error (model − exp)/exp in %           → size of the discrepancy
+    #   (b) pulls (model − exp)/σ_exp                       → significance in units of δz
+    #   (c) log errors log10(model) − log10(exp)            → the residual the fits minimise
+    # -----------------------------------------------------------------------------
+    fig = Figure(size = (1350, 1250));
+    # (a) relative error
     fig_rel = Axis(fig[1, 1]; axis_kw..., title = "Relative error of the calibrated models",
-        xlabel = "Current (A)", ylabel = L"(\mathrm{model}-\mathrm{exp})/\mathrm{exp}\ (\%)")
+        ylabel = L"(\mathrm{model}-\mathrm{exp})/\mathrm{exp}\ (\%)")
     hlines!(fig_rel, 0.0; color = :black, linestyle = :dash, linewidth = 1)
     sl_fill!(fig_rel, I_d, re_qm,  :blue; label = lbl_qm)
     sl_fill!(fig_rel, I_d, re_cqd, :red;  marker = :diamond, label = lbl_cqd)
-    Legend(fig[1, 2], fig_rel; title = cfg_legend, titlesize = 12, labelsize = 13)
+    Legend(fig[1, 2], fig_rel, cfg_legend; titlesize = 12, labelsize = 13)
 
+    # (b) pulls
     fig_pull = Axis(fig[2, 1]; axis_kw..., title = "Normalised residuals (pulls)",
-        xlabel = "Current (A)", ylabel = L"(\mathrm{model}-\mathrm{exp})/\sigma_{\mathrm{exp}}")
+        ylabel = L"(\mathrm{model}-\mathrm{exp})/\sigma_{\mathrm{exp}}")
     hspan!(fig_pull, -2, 2; color = (:gray, 0.08), label = L"\pm 2\sigma")
     hspan!(fig_pull, -1, 1; color = (:gray, 0.15), label = L"\pm 1\sigma")
     hlines!(fig_pull, 0.0; color = :black, linestyle = :dash, linewidth = 1)
@@ -2428,14 +2456,26 @@ function analyze_directory(DATA_DIR::AbstractString)
         label = L"QM ($\chi^{2}_{\mathrm{red}} = %$(fmt(chi2red(pull_qm, N_PAR_QM), 3))$, $k = %$(N_PAR_QM)$)")
     sl_fill!(fig_pull, I_d, pull_cqd, :red; marker = :diamond,
         label = L"CQD ($\chi^{2}_{\mathrm{red}} = %$(fmt(chi2red(pull_cqd, N_PAR_CQD), 3))$, $k = %$(N_PAR_CQD)$)")
-    Legend(fig[2, 2], fig_pull; title = cfg_legend, titlesize = 12, labelsize = 13)
-    linkxaxes!(fig_rel, fig_pull)
-    xlims!(fig_rel, 0.010, 1.05)
-    save_fig(fig, joinpath(OUTDIR, "fig004.$(FIG_EXT)"))
+    Legend(fig[2, 2], fig_pull, cfg_legend; titlesize = 12, labelsize = 13)
 
-    CSV.write(joinpath(OUTDIR, "model_residuals_scaled.csv"), DataFrame(
-        Ic = I_d, z_exp = z_d, dz_exp = σ_d, z_QM = m_qm_d, z_CQD = m_cqd_d,
-        relQM = re_qm ./ 100, relCQD = re_cqd ./ 100, pullQM = pull_qm, pullCQD = pull_cqd))
+    # (c) log errors (formerly the separate "Log Errors for CQD and QM" plot of compare_datasets)
+    fig_log = Axis(fig[3, 1]; axis_kw..., title = "Log errors of the calibrated models",
+        xlabel = "Current (A)",
+        ylabel = L"\log_{10}(\mathrm{model}) - \log_{10}(\mathrm{exp})")
+    hlines!(fig_log, 0.0; color = :black, linestyle = :dash, linewidth = 1)
+    sl_fill!(fig_log, I_d, metrics_d.QM.log_err,  :blue;
+        label = L"QM ($\mathrm{RMSE}_{\log} = %$(fmt(metrics_d.QM.log_RMSE, 3))$)")
+    sl_fill!(fig_log, I_d, metrics_d.CQD.log_err, :red; marker = :diamond,
+        label = L"CQD ($\mathrm{RMSE}_{\log} = %$(fmt(metrics_d.CQD.log_RMSE, 3))$)")
+    Legend(fig[3, 2], fig_log, cfg_legend; titlesize = 12, labelsize = 13)
+
+    # one current axis for the three panels; tick labels only on the bottom one
+    linkxaxes!(fig_rel, fig_pull, fig_log)
+    hidexdecorations!(fig_rel;  grid = false, minorgrid = false, ticks = false, minorticks = false)
+    hidexdecorations!(fig_pull; grid = false, minorgrid = false, ticks = false, minorticks = false)
+    xlims!(fig_log, 0.010, 1.05)
+    rowgap!(fig.layout, 10)
+    save_fig(fig, joinpath(OUTDIR, "fig004.$(FIG_EXT)"))
 
     # -----------------------------------------------------------------------------
     # fig005 — publication-style overlay
@@ -2454,7 +2494,7 @@ function analyze_directory(DATA_DIR::AbstractString)
         label = L"Quantum mechanics: $s = %$(fmt(fit_qs.scale, 4)) \pm %$(fmt(fit_qs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_qs.z_init, 3)) \pm %$(fmt(1e3*fit_qs.z_init_err, 1)))\ \mathrm{\mu m}$")
     lines!(ax, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan]; color = :red, linewidth = 2, linestyle = :dot,
         label = L"CoQuantum dynamics: $k_{i} = \left( %$(fmt(fit_cs.ki, 4)) \pm %$(fmt(fit_cs.ki_err, 1)) \right) \times 10^{-6}$, $s = %$(fmt(fit_cs.scale, 4)) \pm %$(fmt(fit_cs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_cs.z_init, 3)) \pm %$(fmt(1e3*fit_cs.z_init_err, 1)))\ \mathrm{\mu m}$")
-    axislegend(ax; position = :lt, title = tail_legend, titlesize = 13, labelsize = 12)
+    axislegend(ax, tail_legend; position = :lt, titlesize = 13, labelsize = 12)   # title is positional
     save_fig(fig, joinpath(OUTDIR, "fig005.$(FIG_EXT)"))
 
 
@@ -2572,6 +2612,19 @@ function analyze_directory(DATA_DIR::AbstractString)
                                        title = crayon"bold red"),
         table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
         equal_data_column_widths = true)
+    println("""
+    Metrics  (r = ln(model) − ln(exp) per point, N = $(length(z_sc)), σ_r = δz/z; k = fitted parameters;
+              highlighted = the better model of the row)
+      logMSE, logRMSE : mean of r², and its root (natural log: logRMSE ≈ typical fractional error).   lower is better
+      R2_log          : 1 − Σr² / Σ(ln exp − mean)²; fraction of the log-variation of the data reproduced.  higher is better
+      chi2_log        : χ² = Σ (r/σ_r)²; residuals in units of the error bars.                          lower is better
+      chi2_red        : χ²/(N − k); ≈ 1 if the model is right and δz is correct, ≫ 1 = significant misfit. lower is better
+      p_chi2          : P(χ² ≥ observed | model correct), dof = N − k; < 0.05 → model rejected at 95 %.  higher is better
+      AIC             : χ² + 2k;     compares models, penalising parameters. ΔAIC > 2 notable, > 10 decisive. lower is better
+      BIC             : χ² + k ln N; like AIC with a stronger parameter penalty.                         lower is better
+      NMAD            : 1.4826 × median|r|; robust (outlier-insensitive) scatter of the log residuals.   lower is better
+    The χ²-based rows (chi2_log … BIC) use the error bars; the others do not. ΔAIC/ΔBIC (CQD − QM) are printed above.
+    """)
     CSV.write(joinpath(OUTDIR, "goodness_of_fit.csv"),
               DataFrame(metric = metrics, CQD = gof_table[:, 1], QM = gof_table[:, 2]))
 
