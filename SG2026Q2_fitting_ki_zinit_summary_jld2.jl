@@ -92,10 +92,10 @@
 #       over the plateau quoted as tail-choice systematic.           fig002
 #    5. Final fits with formal uncertainties at the chosen `N_TAIL`
 #       (`fit_cqd_ki_scale_with_error`, `fit_qm_scale_with_error`).
-#    6. Diagnostics: relative error + pulls + log errors (fig004),
-#       data + calibrated models with all fit uncertainties and settings (fig005).
-#    7. Publication figures vs current and vs gradient, goodness-of-fit table
-#       (χ², AIC/BIC, …) and diagnostic panels (fig006).
+#    6. Diagnostics: relative error + pulls + log errors (fig003),
+#       data + calibrated models with all fit uncertainties and settings (fig004).
+#    7. Publication figures vs current (fig005) and vs gradient (fig006),
+#       goodness-of-fit table (χ², AIC/BIC, …) and diagnostic panels (fig007).
 #    S/A. Summary and per-directory archive.
 #    ALL. Combined table of kᵢ and s over the directories, weighted mean of kᵢ,
 #         fig_ki_all_directories, fig_summary_all_directories (all data + median curves).
@@ -124,12 +124,12 @@
 #    In RUN_OUTDIR/<DATA_DIR>/ (per directory; figures .<FIG_EXT>, default png):
 #      fig001  CQD family + QM + experiment (log–log)
 #      fig002_tail_convergence  kᵢ, s, z_init and R² vs calibration-tail length
-#      fig004  relative error (%), pulls and log errors vs current, both models
-#      fig005  data + calibrated models, fit uncertainties, tail and analysis settings
-#              (fig003 was removed: it showed the same curves as fig005)
-#      fig006  goodness-of-fit diagnostic panels
-#      single_SG_comparison(.png|.svg)      points vs current
-#      single_SG_comparison_vsg(.png|.svg)  points vs field gradient
+#      fig003  relative error (%), pulls and log errors vs current, both models
+#      fig004  data + calibrated models, fit uncertainties, tail and analysis settings
+#      fig005_single_SG_comparison(.png|.svg)      points vs current (2:1, publication)
+#      fig006_single_SG_comparison_vsg(.png|.svg)  points vs field gradient (2:1, publication)
+#      fig007  goodness-of-fit diagnostic panels
+#      (numbered in the order the figures are made and displayed)
 #    Tables (.csv)
 #      tail_convergence_cqd.csv   scan of (kᵢ, s_CQD, tail RMSE, R²) vs n_tail
 #      tail_convergence_qm.csv    scan of (s_QM, tail RMSE, R²) vs n_tail
@@ -1933,7 +1933,7 @@ save_fig(fit_figs, joinpath(RUN_OUTDIR, "fig002.$(FIG_EXT)"); show = true)
 #  `analyze_directory(DATA_DIR)` runs, for one experimental directory, the whole
 #  chain of the single-directory analysis: load z(I) from the summary JLD2,
 #  fig001, tail-convergence study (fig002), final fits, diagnostics
-#  (fig004–fig006), CSV tables and the run archive, all written to
+#  (fig003–fig007), CSV tables and the run archive, all written to
 #  RUN_OUTDIR/<DATA_DIR>/. Uses the globals of sections 0–2 (zqm, ki_itp,
 #  cqd_meta, …). Returns one NamedTuple row of results for the combined table.
 ##################################################################################################
@@ -2377,7 +2377,7 @@ function analyze_directory(DATA_DIR::AbstractString)
 
     ##################################################################################################
     #  6) DIAGNOSTICS ON THE MEASURED POINTS
-    section("6", "[$(DATA_DIR)] DIAGNOSTICS ON THE MEASURED POINTS — fig004, fig005")
+    section("6", "[$(DATA_DIR)] DIAGNOSTICS ON THE MEASURED POINTS — fig003, fig004")
     ##################################################################################################
 
     I_d, δI_d, z_d, σ_d = data[:, 1], data[:, 2], data[:, 3], data[:, 4];
@@ -2388,7 +2388,7 @@ function analyze_directory(DATA_DIR::AbstractString)
     @assert all(m_qm_d .> 0) && all(m_cqd_d .> 0) "Calibrated model ≤ 0 at a measured current (z_init too negative); use FIT_KI_MODE = :full or narrow ZINIT_BOUNDS_DIR[\"$(DATA_DIR)\"]"
 
     # -----------------------------------------------------------------------------
-    # fig004 — relative error (%), pulls and log errors of both calibrated models
+    # fig003 — relative error (%), pulls and log errors of both calibrated models
     #
     # Both models are divided by their own tail-fitted factor; the data are
     # untouched. Two complementary views of (model − exp):
@@ -2408,7 +2408,7 @@ function analyze_directory(DATA_DIR::AbstractString)
                       marker, markersize = 8, markercolor = c, strokecolor = c, strokewidth = 0.8)
 
     println("Model comparison — log-space metrics (calibrated models vs raw data)")
-    metrics_d = compare_datasets(I_d, z_d, m_cqd_d, m_qm_d; plot_errors = false);   # log errors → fig004 (c)
+    metrics_d = compare_datasets(I_d, z_d, m_cqd_d, m_qm_d; plot_errors = false);   # log errors → fig003 (c)
     println("""
     Metrics  (e = log10(model) − log10(exp) per point, N = $(length(z_d)); red = the smaller value of the row;
               all are lower-is-better and none uses the error bars δz)
@@ -2421,7 +2421,7 @@ function analyze_directory(DATA_DIR::AbstractString)
       L2_log_norm       : ‖e‖ / ‖log10(exp)‖; depends on where the data sit (log10(exp) ≈ 0 near 1 mm), use with care.
       chi2_log          : Σ (e/std(e))²; scaled by the spread of e itself, so ≈ N − 1 for any model — not a fit test.
       KS_distance       : max difference of the normalised cumulative sums of exp and model (shape check).
-    For significance against the error bars see the pulls/χ²_red (fig004) and the goodness-of-fit table (section 7).
+    For significance against the error bars see the pulls/χ²_red (fig003) and the goodness-of-fit table (section 7).
     """)
 
     re_qm  = 100 .* relerr(m_qm_d,  z_d);
@@ -2443,7 +2443,7 @@ function analyze_directory(DATA_DIR::AbstractString)
         relQM = re_qm ./ 100, relCQD = re_cqd ./ 100, pullQM = pull_qm, pullCQD = pull_cqd))
 
     # -----------------------------------------------------------------------------
-    # fig004 — three views of (model − exp), shared current axis (top → bottom):
+    # fig003 — three views of (model − exp), shared current axis (top → bottom):
     #   (a) relative error (model − exp)/exp in %           → size of the discrepancy
     #   (b) pulls (model − exp)/σ_exp                       → significance in units of δz
     #   (c) log errors log10(model) − log10(exp)            → the residual the fits minimise
@@ -2486,10 +2486,10 @@ function analyze_directory(DATA_DIR::AbstractString)
     hidexdecorations!(fig_pull; grid = false, minorgrid = false, ticks = false, minorticks = false)
     xlims!(fig_log, 0.010, 1.05)
     rowgap!(fig.layout, 10)
-    save_fig(fig, joinpath(OUTDIR, "fig004.$(FIG_EXT)"))
+    save_fig(fig, joinpath(OUTDIR, "fig003.$(FIG_EXT)"))
 
     # -----------------------------------------------------------------------------
-    # fig005 — publication-style overlay
+    # fig004 — data + calibrated models, all fit uncertainties, tail and analysis settings
     # -----------------------------------------------------------------------------
     fig = Figure(size = (1500, 800));
     ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
@@ -2509,13 +2509,13 @@ function analyze_directory(DATA_DIR::AbstractString)
     axislegend(ax, tail_legend; position = :lt, titlesize = 14, labelsize = 14)   # title is positional
     # analysis settings (directory, n_z, λ0, σ_conv), bottom-right inside the axes
     text!(ax, 0.985, 0.03; text = cfg_legend, space = :relative, align = (:right, :bottom), fontsize = 15)
-    save_fig(fig, joinpath(OUTDIR, "fig005.$(FIG_EXT)"))
+    save_fig(fig, joinpath(OUTDIR, "fig004.$(FIG_EXT)"))
 
 
 
     ##################################################################################################
     #  7) PUBLICATION FIGURES AND GOODNESS OF FIT
-    section("7", "[$(DATA_DIR)] PUBLICATION FIGURES, GOODNESS OF FIT (fig006)")
+    section("7", "[$(DATA_DIR)] PUBLICATION FIGURES (fig005, fig006), GOODNESS OF FIT (fig007)")
     ##################################################################################################
     # Measured points (propagated δz) vs the two calibrated models. The points are
     # approximately independent, so χ², p-values and AIC/BIC are meaningful here.
@@ -2544,9 +2544,9 @@ function analyze_directory(DATA_DIR::AbstractString)
     pull_cqd_sc = pull(m_cqd_sc, z_sc, δz_sc);
 
     # -----------------------------------------------------------------------------
-    # single_SG_comparison — vs coil current
+    # fig005_single_SG_comparison — vs coil current
     # -----------------------------------------------------------------------------
-    # styles shared by the two single_SG_comparison figures (same size, 2:1 width:height)
+    # styles shared by fig005 and fig006 (same size, 2:1 width:height)
     sg_size = (1200, 600)
     sg_axis =(LOGX..., LOGY..., ylabel = L"$F=1$ peak position (mm)", yticks = log_ticks,
                xlabelsize = 20, ylabelsize = 20, xticklabelsize = 18, yticklabelsize = 18)
@@ -2577,11 +2577,11 @@ function analyze_directory(DATA_DIR::AbstractString)
     sg_series!(ax, I_sc, δI_sc, I_sg)
     xlims!(ax, 1e-2, 1.2)
     axislegend(ax; position = :lt, labelsize = 16)
-    save_fig(fig, joinpath(OUTDIR, "single_SG_comparison.png"))
-    save(joinpath(OUTDIR, "single_SG_comparison.svg"), fig)
+    save_fig(fig, joinpath(OUTDIR, "fig005_single_SG_comparison.png"))
+    save(joinpath(OUTDIR, "fig005_single_SG_comparison.svg"), fig)
 
     # -----------------------------------------------------------------------------
-    # single_SG_comparison_vsg — vs magnetic-field gradient G(I)
+    # fig006_single_SG_comparison_vsg — vs magnetic-field gradient G(I)
     # -----------------------------------------------------------------------------
     fig = Figure(size = sg_size);
     ax  = Axis(fig[1, 1]; sg_axis..., xlabel = "Magnetic field gradient (T/m)",
@@ -2589,8 +2589,8 @@ function analyze_directory(DATA_DIR::AbstractString)
     sg_series!(ax, G_sc, δG_sc, G_sg)
     xlims!(ax, 3, 400)
     axislegend(ax; position = :lt, labelsize = 16)
-    save_fig(fig, joinpath(OUTDIR, "single_SG_comparison_vsg.png"))
-    save(joinpath(OUTDIR, "single_SG_comparison_vsg.svg"), fig)
+    save_fig(fig, joinpath(OUTDIR, "fig006_single_SG_comparison_vsg.png"))
+    save(joinpath(OUTDIR, "fig006_single_SG_comparison_vsg.svg"), fig)
 
     # -----------------------------------------------------------------------------
     # Tables: experiment (both axes) and calibrated model curves
@@ -2655,9 +2655,9 @@ function analyze_directory(DATA_DIR::AbstractString)
     CSV.write(joinpath(OUTDIR, "goodness_of_fit.csv"),
               DataFrame(metric = metrics, CQD = gof_table[:, 1], QM = gof_table[:, 2]))
 
-    # fig006 — diagnostic panels
+    # fig007 — diagnostic panels
     fig = make_diagnostic_plots(I_sc, z_sc, m_cqd_sc, m_qm_sc, stats_CQD, stats_QM; σ = δz_sc)
-    save_fig(fig, joinpath(OUTDIR, "fig006.$(FIG_EXT)"))
+    save_fig(fig, joinpath(OUTDIR, "fig007.$(FIG_EXT)"))
 
 
     ##################################################################################################
@@ -2796,7 +2796,7 @@ function analyze_directory(DATA_DIR::AbstractString)
         f["model/CQD_up_mm"]   = m_cqd_scan
         f["model/QM_zF1_mm"]   = m_qm_scan
 
-        # --- residual views on the measured points (inputs of fig006) ---
+        # --- residual views on the measured points (inputs of fig007) ---
         f["statistical_analysis/Current_A"]   = I_sc
         f["statistical_analysis/relErr_CQD"]  = re_cqd_sc         # already dimensionless
         f["statistical_analysis/relErr_QM"]   = re_qm_sc
@@ -3090,7 +3090,7 @@ fs_leg_dir = 16         # legend font size of fig_summary_all_directories
 fig = Figure(size = (1700, 900))
 ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
     # title  = L"All directories — $n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$, $\sigma_{\mathrm{conv}} = %$(1e3*σW_FIXED)\,\mathrm{\mu m}$",
-    xlabel = "Coil current (A)", ylabel = L"$F=1$ peak position (mm)",     # same labels as single_SG_comparison
+    xlabel = "Coil current (A)", ylabel = L"$F=1$ peak position (mm)",     # same labels as fig005_single_SG_comparison
     xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
     xminorticksvisible = true, yminorticksvisible = true,       # 2…9 × 10ⁿ (IntervalsBetween(9) from LOGX/LOGY)
     xminorticksize = 4, yminorticksize = 4,
