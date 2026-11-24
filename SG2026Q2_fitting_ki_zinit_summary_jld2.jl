@@ -18,7 +18,8 @@
 #    • s(kᵢ, z_init) closed form on the tail with the shifted model  z_init + m ≈ s·z;
 #    • z_init and kᵢ minimise the log10 loss on the fit subset (nested Brent);
 #    • QM: z_init from the fit subset, then s on the tail (shifted model).
-#  Settings: FIT_ZINIT, ZINIT_BOUNDS. FIT_ZINIT = false reproduces the
+#  Settings: FIT_ZINIT, ZINIT_BOUNDS (default) and ZINIT_BOUNDS_DIR (per-directory
+#  brackets). FIT_ZINIT = false reproduces the
 #  no-offset script. Parameter counts in χ²_red/AIC/BIC: CQD 3, QM 2.
 #  z_init is added to fig002 (scan), the figures' labels, the tables, the
 #  archives and the combined table/figure.
@@ -91,8 +92,8 @@
 #       over the plateau quoted as tail-choice systematic.           fig002
 #    5. Final fits with formal uncertainties at the chosen `N_TAIL`
 #       (`fit_cqd_ki_scale_with_error`, `fit_qm_scale_with_error`).
-#    6. Diagnostics: overlay (fig003), relative error + pulls + log errors (fig004),
-#       publication overlay (fig005).
+#    6. Diagnostics: relative error + pulls + log errors (fig004),
+#       data + calibrated models with all fit uncertainties and settings (fig005).
 #    7. Publication figures vs current and vs gradient, goodness-of-fit table
 #       (χ², AIC/BIC, …) and diagnostic panels (fig006).
 #    S/A. Summary and per-directory archive.
@@ -123,9 +124,9 @@
 #    In RUN_OUTDIR/<DATA_DIR>/ (per directory; figures .<FIG_EXT>, default png):
 #      fig001  CQD family + QM + experiment (log–log)
 #      fig002_tail_convergence  kᵢ, s, z_init and R² vs calibration-tail length
-#      fig003  data + calibrated QM + calibrated CQD (diagnostic)
 #      fig004  relative error (%), pulls and log errors vs current, both models
-#      fig005  data + calibrated models (publication style)
+#      fig005  data + calibrated models, fit uncertainties, tail and analysis settings
+#              (fig003 was removed: it showed the same curves as fig005)
 #      fig006  goodness-of-fit diagnostic panels
 #      single_SG_comparison(.png|.svg)      points vs current
 #      single_SG_comparison_vsg(.png|.svg)  points vs field gradient
@@ -212,8 +213,9 @@ const BASE_PATH = raw"F:\SternGerlachExperiments";
 const DATA_DIRECTORIES = [
                         #   "20260819",
                         #   "20260821", "20260826", "20260827", "20260831", "20260902",
-                          "20260903",
-                        #   "20261105", "20261111", "20261112", "20261113", "20261116", "20261118"
+                        #   "20260903",
+                        #   "20261105", 
+                          "20261111", "20261112", "20261113", "20261116", "20261118"
                         ]
 const NZ_EXP   = 2              # z-bins of the experimental profile extraction   (file: meta/nz)
 const λ0_EXP   = 0.01           # raw smoothing parameter of the experiment       (file: meta/λ0)
@@ -239,9 +241,34 @@ const I_PLATEAU       = 0.650    # (A) plateau = tails confined to I_min ≥ I_P
                                  #     the final tail = all points with I ≥ I_PLATEAU
 # Vertical offset of the models:  z_model(I) = (z_init + m(I))/s
 const FIT_ZINIT    = true             # false → z_init ≡ 0 (reproduces the no-offset script)
-const ZINIT_BOUNDS = (-0.009, 0.009)  # (mm) search bracket of z_init; the lower side is
+const ZINIT_BOUNDS = (-0.009, 0.009)  # (mm) DEFAULT search bracket of z_init; the lower side is
                                       #      also limited by z_init + m > 0 on the fit points
-const ZINIT_FIT_BOUNDS = FIT_ZINIT ? ZINIT_BOUNDS : nothing
+# Per-directory z_init brackets (mm). Each entry is either
+#   A          → symmetric bracket (−A, A)       e.g. "20260903" => 0.009
+#   (lo, hi)   → asymmetric bracket              e.g. "20260903" => (-0.012, 0.005)
+# A directory not listed here uses ZINIT_BOUNDS.
+const ZINIT_BOUNDS_DIR = Dict{String, Union{Float64, Tuple{Float64, Float64}}}(
+    "20260819" => 0.009,
+    "20260821" => 0.007,
+    "20260826" => 0.007,
+    "20260827" => 0.009,
+    "20260831" => 0.008,
+    "20260902" => 0.0010,
+    "20260903" => 0.0065,
+    "20261105" => 0.007,
+    "20261111" => 0.009,
+    "20261112" => 0.008,
+    "20261113" => 0.008,
+    "20261116" => 0.008,
+    "20261118" => 0.009,
+)
+_as_bracket(A::Real)  = (-abs(Float64(A)), abs(Float64(A)))
+_as_bracket(b::Tuple) = (Float64(b[1]), Float64(b[2]))
+zinit_bounds(dir::AbstractString) = _as_bracket(get(ZINIT_BOUNDS_DIR, dir, ZINIT_BOUNDS))
+for d in keys(ZINIT_BOUNDS_DIR)
+    lo, hi = zinit_bounds(d)
+    lo < hi || error("ZINIT_BOUNDS_DIR[\"$d\"] gives ($lo, $hi): need lower < upper (and A ≠ 0)")
+end
 const N_PAR_CQD = FIT_ZINIT ? 3 : 2   # free parameters (kᵢ, s, z_init) for χ²_red, AIC, BIC
 const N_PAR_QM  = FIT_ZINIT ? 2 : 1   # (s, z_init)
 # Figures
@@ -1906,7 +1933,7 @@ save_fig(fit_figs, joinpath(RUN_OUTDIR, "fig002.$(FIG_EXT)"); show = true)
 #  `analyze_directory(DATA_DIR)` runs, for one experimental directory, the whole
 #  chain of the single-directory analysis: load z(I) from the summary JLD2,
 #  fig001, tail-convergence study (fig002), final fits, diagnostics
-#  (fig003–fig006), CSV tables and the run archive, all written to
+#  (fig004–fig006), CSV tables and the run archive, all written to
 #  RUN_OUTDIR/<DATA_DIR>/. Uses the globals of sections 0–2 (zqm, ki_itp,
 #  cqd_meta, …). Returns one NamedTuple row of results for the combined table.
 ##################################################################################################
@@ -1915,6 +1942,12 @@ function analyze_directory(DATA_DIR::AbstractString)
     isdir(OUTDIR) || mkpath(OUTDIR)
     experiment_path = summary_path(DATA_DIR)
     @assert isfile(experiment_path) "Experimental summary not found: $experiment_path"
+    # z_init bracket of this directory (ZINIT_BOUNDS_DIR, falling back to ZINIT_BOUNDS)
+    local ZB = zinit_bounds(DATA_DIR)
+    local ZINIT_FIT_BOUNDS = FIT_ZINIT ? ZB : nothing
+    FIT_ZINIT && @info cstr("z_init bracket for $(DATA_DIR): ", :cyan) *
+        cstr(@sprintf("[%.2f, %.2f] μm", 1e3 * ZB[1], 1e3 * ZB[2]), :yellow, :bold) *
+        cstr(haskey(ZINIT_BOUNDS_DIR, DATA_DIR) ? "  (ZINIT_BOUNDS_DIR)" : "  (default ZINIT_BOUNDS)", :cyan)
 
 
     ##################################################################################################
@@ -2323,10 +2356,10 @@ function analyze_directory(DATA_DIR::AbstractString)
 
     # z_init stuck on the edge of its bracket → the bracket (not the data) decides it
     if FIT_ZINIT
-        zw = ZINIT_BOUNDS[2] - ZINIT_BOUNDS[1]
+        zw = ZB[2] - ZB[1]
         for (name, zi) in (("CQD", fit_cs.z_init), ("QM", fit_qs.z_init))
-            min(zi - ZINIT_BOUNDS[1], ZINIT_BOUNDS[2] - zi) < 1e-3 * zw &&
-                @warn "$(name): best-fit z_init sits on the edge of ZINIT_BOUNDS; widen it" z_init = zi bounds = ZINIT_BOUNDS
+            min(zi - ZB[1], ZB[2] - zi) < 1e-3 * zw &&
+                @warn "$(name): best-fit z_init sits on the edge of its bracket; widen ZINIT_BOUNDS_DIR[\"$(DATA_DIR)\"]" z_init = zi bounds = ZB
         end
     end
 
@@ -2344,7 +2377,7 @@ function analyze_directory(DATA_DIR::AbstractString)
 
     ##################################################################################################
     #  6) DIAGNOSTICS ON THE MEASURED POINTS
-    section("6", "[$(DATA_DIR)] DIAGNOSTICS ON THE MEASURED POINTS — fig003, fig004, fig005")
+    section("6", "[$(DATA_DIR)] DIAGNOSTICS ON THE MEASURED POINTS — fig004, fig005")
     ##################################################################################################
 
     I_d, δI_d, z_d, σ_d = data[:, 1], data[:, 2], data[:, 3], data[:, 4];
@@ -2352,29 +2385,7 @@ function analyze_directory(DATA_DIR::AbstractString)
     m_cqd_d = (fit_cs.z_init .+ ki_itp.(I_d, Ref(fit_cs.ki))) ./ fit_cs.scale;
     # log-space metrics below need positive predictions (guaranteed on the fit
     # subset; with FIT_KI_MODE ≠ :full a negative z_init may break it elsewhere)
-    @assert all(m_qm_d .> 0) && all(m_cqd_d .> 0) "Calibrated model ≤ 0 at a measured current (z_init too negative); use FIT_KI_MODE = :full or narrow ZINIT_BOUNDS"
-
-    # -----------------------------------------------------------------------------
-    # fig003 — data with error bars + calibrated QM + calibrated CQD
-    # -----------------------------------------------------------------------------
-    fig = Figure(size = (900, 800));
-    ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
-        title = "Calibrated models vs data",
-        xlabel = "Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
-        xticks = log_ticks, yticks = log_ticks,
-        xlabelsize = 24, ylabelsize = 24, xticklabelsize = 20, yticklabelsize = 20);
-    # plotting order = legend order: data, QM, CQD
-    yerr_log!(ax, I_d, z_d, σ_d)
-    scatter!(ax, I_d, logsafe(z_d); marker = :circle, markersize = 11, color = :transparent,
-        strokecolor = :black, strokewidth = 1.2, label = "Data $(DATA_DIR)")     # open circles
-    lines!(ax, I_scan[mask_qm_scan], m_qm_scan[mask_qm_scan]; color = :blue, linewidth = 1.75,
-        label = L"QM ($s = %$(fmt(fit_qs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_qs.z_init, 3))\ \mathrm{\mu m}$)")
-    lines!(ax, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan]; color = :red, linewidth = 2,
-        label = L"CQD: $k_{i}= \left( %$(fmt(fit_cs.ki, 3)) \pm %$(fmt(fit_cs.ki_err, 1)) \right) \times 10^{-6}$, $s = %$(fmt(fit_cs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_cs.z_init, 3))\ \mathrm{\mu m}$")
-    xlims!(ax, 0.010, 1.05)
-    axislegend(ax, cfg_legend; position = :rb, titlesize = 15, labelsize = 15,   # title is positional
-        backgroundcolor = :transparent, framevisible = false)
-    save_fig(fig, joinpath(OUTDIR, "fig003.$(FIG_EXT)"))
+    @assert all(m_qm_d .> 0) && all(m_cqd_d .> 0) "Calibrated model ≤ 0 at a measured current (z_init too negative); use FIT_KI_MODE = :full or narrow ZINIT_BOUNDS_DIR[\"$(DATA_DIR)\"]"
 
     # -----------------------------------------------------------------------------
     # fig004 — relative error (%), pulls and log errors of both calibrated models
@@ -2480,21 +2491,24 @@ function analyze_directory(DATA_DIR::AbstractString)
     # -----------------------------------------------------------------------------
     # fig005 — publication-style overlay
     # -----------------------------------------------------------------------------
-    fig = Figure(size = (1000, 850));
+    fig = Figure(size = (1500, 800));
     ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
         title = L"Peak position ($F=1$) — %$(DATA_DIR)",
         xlabel = "Coil Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
         xticks = log_ticks, yticks = log_ticks,
-        xlabelsize = 18, ylabelsize = 18, xticklabelsize = 16, yticklabelsize = 16);
+        xlabelsize = 20, ylabelsize = 20, xticklabelsize = 18, yticklabelsize = 18, titlesize = 18);
     xerr_log!(ax, I_d, z_d, δI_d)
     yerr_log!(ax, I_d, z_d, σ_d)
-    scatter!(ax, I_d, logsafe(z_d); marker = :circle, markersize = 9, color = :darkgreen,
-        strokecolor = :black, strokewidth = 0.6, label = "Experimental data")
+    scatter!(ax, I_d, logsafe(z_d); marker = :circle, markersize = 12, color = :transparent,
+        strokecolor = :black, strokewidth = 1.2, label = "Experimental data")      # open black circles
     lines!(ax, I_scan[mask_qm_scan], m_qm_scan[mask_qm_scan]; color = :blue, linewidth = 1.75,
         label = L"Quantum mechanics: $s = %$(fmt(fit_qs.scale, 4)) \pm %$(fmt(fit_qs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_qs.z_init, 3)) \pm %$(fmt(1e3*fit_qs.z_init_err, 1)))\ \mathrm{\mu m}$")
     lines!(ax, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan]; color = :red, linewidth = 2, linestyle = :dot,
         label = L"CoQuantum dynamics: $k_{i} = \left( %$(fmt(fit_cs.ki, 4)) \pm %$(fmt(fit_cs.ki_err, 1)) \right) \times 10^{-6}$, $s = %$(fmt(fit_cs.scale, 4)) \pm %$(fmt(fit_cs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_cs.z_init, 3)) \pm %$(fmt(1e3*fit_cs.z_init_err, 1)))\ \mathrm{\mu m}$")
-    axislegend(ax, tail_legend; position = :lt, titlesize = 13, labelsize = 12)   # title is positional
+    xlims!(ax, 0.010, 1.05)
+    axislegend(ax, tail_legend; position = :lt, titlesize = 14, labelsize = 14)   # title is positional
+    # analysis settings (directory, n_z, λ0, σ_conv), bottom-right inside the axes
+    text!(ax, 0.985, 0.03; text = cfg_legend, space = :relative, align = (:right, :bottom), fontsize = 15)
     save_fig(fig, joinpath(OUTDIR, "fig005.$(FIG_EXT)"))
 
 
@@ -2532,35 +2546,48 @@ function analyze_directory(DATA_DIR::AbstractString)
     # -----------------------------------------------------------------------------
     # single_SG_comparison — vs coil current
     # -----------------------------------------------------------------------------
-    # styles shared by the two single_SG_comparison figures
-    sg_axis = (LOGX..., LOGY..., ylabel = L"$F=1$ peak position (mm)", yticks = log_ticks,
+    # styles shared by the two single_SG_comparison figures (same size, 2:1 width:height)
+    sg_size = (1200, 600)
+    sg_axis =(LOGX..., LOGY..., ylabel = L"$F=1$ peak position (mm)", yticks = log_ticks,
                xlabelsize = 20, ylabelsize = 20, xticklabelsize = 18, yticklabelsize = 18)
+    # model curves of these two figures start 10 % below the current threshold
+    # (0.9·I_THRESHOLD, e.g. 0.018 A for 0.020 A). I_scan starts at I_THRESHOLD, so the
+    # calibrated models are re-evaluated on their own grid; the gradient axis uses the
+    # same grid converted point by point, G(I_sg).
+    I_line_lo = 0.9 * I_THRESHOLD
+    I_sg      = logspace10(I_line_lo, 1.00; n = 801)
+    G_sg      = gradvsI.(I_sg)
+    m_qm_sg   = (fit_qs.z_init .+ zqm.(I_sg))                    ./ fit_qs.scale
+    m_cqd_sg  = (fit_cs.z_init .+ ki_itp.(I_sg, Ref(fit_cs.ki))) ./ fit_cs.scale
+    sg_qm     = log_mask(I_sg, m_qm_sg)          # drops points where z_init makes the model ≤ 0
+    sg_cqd    = log_mask(I_sg, m_cqd_sg)
     function sg_series!(ax, xd, δxd, xm)
         xerr_log!(ax, xd, z_sc, δxd)
         yerr_log!(ax, xd, z_sc, δz_sc)
-        scatter!(ax, xd, logsafe(z_sc); marker = :circle, markersize = 9, color = :white,
-                 strokecolor = :black, strokewidth = 0.5, label = "Experimental data")
-        lines!(ax, xm[mask_qm_scan], m_qm_scan[mask_qm_scan]; color = :blue, linewidth = 1.75,
+        scatter!(ax, xd, logsafe(z_sc); marker = :circle, markersize = 11, color = :white,
+                 strokecolor = :black, strokewidth = 0.9, label = "Experimental data")
+        lines!(ax, xm[sg_qm], m_qm_sg[sg_qm]; color = :blue, linewidth = 1.75,
                linestyle = :dash, label = "Existing models")
-        lines!(ax, xm[mask_cqd_scan], m_cqd_scan[mask_cqd_scan]; color = :red, linewidth = 2,
+        lines!(ax, xm[sg_cqd], m_cqd_sg[sg_cqd]; color = :red, linewidth = 2,
                label = L"Coquantum dynamics: $k_{i} \approx %$(fmt(fit_cs.ki, 2)) \times 10^{-6}$")
     end
 
-    fig = Figure(size = (900, 800));
-    ax  = Axis(fig[1, 1]; sg_axis..., xlabel = "Coil Current (A)", xticks = log_ticks)
-    sg_series!(ax, I_sc, δI_sc, I_scan)
-    axislegend(ax; position = :rb, labelsize = 16)
+    fig = Figure(size = sg_size);
+    ax  = Axis(fig[1, 1]; sg_axis..., xlabel = "Coil current (A)", xticks = log_ticks)
+    sg_series!(ax, I_sc, δI_sc, I_sg)
+    xlims!(ax, 1e-2, 1.2)
+    axislegend(ax; position = :lt, labelsize = 16)
     save_fig(fig, joinpath(OUTDIR, "single_SG_comparison.png"))
     save(joinpath(OUTDIR, "single_SG_comparison.svg"), fig)
 
     # -----------------------------------------------------------------------------
     # single_SG_comparison_vsg — vs magnetic-field gradient G(I)
     # -----------------------------------------------------------------------------
-    fig = Figure(size = (900, 800));
+    fig = Figure(size = sg_size);
     ax  = Axis(fig[1, 1]; sg_axis..., xlabel = "Magnetic field gradient (T/m)",
-               xticks = ([5, 10, 20, 50, 100, 200, 400], ["5", "10", "20", "50", "100", "200", "400"]))
-    sg_series!(ax, G_sc, δG_sc, G_scan)
-    xlims!(ax, 5, 400)
+               xticks = ([3, 5, 10, 20, 50, 100, 200, 400], ["3", "5", "10", "20", "50", "100", "200", "400"]))
+    sg_series!(ax, G_sc, δG_sc, G_sg)
+    xlims!(ax, 3, 400)
     axislegend(ax; position = :lt, labelsize = 16)
     save_fig(fig, joinpath(OUTDIR, "single_SG_comparison_vsg.png"))
     save(joinpath(OUTDIR, "single_SG_comparison_vsg.svg"), fig)
@@ -2726,7 +2753,7 @@ function analyze_directory(DATA_DIR::AbstractString)
         f["settings/ki_mode"]       = String(FIT_KI_MODE)
         f["settings/I_plateau_A"]   = I_PLATEAU
         f["settings/fit_zinit"]     = FIT_ZINIT
-        f["settings/zinit_bounds_mm"] = collect(Float64, ZINIT_BOUNDS)
+        f["settings/zinit_bounds_mm"] = collect(Float64, ZB)
         f["settings/n_par_cqd"]     = N_PAR_CQD
         f["settings/n_par_qm"]      = N_PAR_QM
 
@@ -2968,7 +2995,8 @@ pretty_table(final_tbl;
     table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
     fit_table_in_display_horizontally = false,
     fit_table_in_display_vertically   = false)
-zb_um = 1e3 .* ZINIT_BOUNDS
+zb_lines = join([@sprintf("    %-10s [%.2f, %.2f] μm", d, 1e3 * zinit_bounds(d)[1], 1e3 * zinit_bounds(d)[2])
+                  for d in DATA_DIRECTORIES], "\n")
 final_legend = """
 Uncertainties:  value ± stat ± sys
   stat : statistical error of the final fit (tail I ≥ $(I_PLATEAU) A), from the `_with_error` fitters:
@@ -2980,7 +3008,9 @@ Uncertainties:  value ± stat ± sys
   Weighted mean : Σwᵢvᵢ/Σwᵢ with wᵢ = 1/(statᵢ² + sysᵢ²); its error is 1/√Σwᵢ (single total ±).
   Consistency   : χ² = Σwᵢ(vᵢ − mean)², dof = n − 1; χ²/dof ≫ 1 means the directories scatter
                   more than their quoted errors.
-  z_init = $(@sprintf("%.2f", zb_um[1])) or $(@sprintf("%.2f", zb_um[2])) μm means the fit stopped at the edge of ZINIT_BOUNDS
+  z_init brackets per directory (ZINIT_BOUNDS_DIR, default ZINIT_BOUNDS):
+$(zb_lines)
+  z_init equal to an end of its directory's bracket means the fit stopped at that edge
          (sys ≈ 0 then only says every tail hit the same bound, not that z_init is well determined).
 """
 println(final_legend)
@@ -3051,13 +3081,16 @@ mk_cqd_sum = log_mask(I_sum, m_cqd_sum)
 mk_qm_sum  = log_mask(I_sum, m_qm_sum)
 
 dirs_ok   = [d for d in df_all.dir if haskey(DIR_DATA, d)]
-cols_dir  = Makie.resample_cmap(:viridis, max(length(dirs_ok), 2))[1:length(dirs_ok)]
+# stroke colours: viridis without its pale-yellow end, so every open marker stays visible on white
+cols_dir  = [get(cgrad(:viridis), t) for t in range(0.0, 0.85; length = max(length(dirs_ok), 2))][1:length(dirs_ok)]
 mks_dir   = [:circle, :rect, :diamond, :utriangle, :dtriangle, :pentagon, :hexagon, :star5, :ltriangle, :rtriangle]
+ms_dir    = 14          # marker size of the data points in fig_summary_all_directories (also used by its legend)
+fs_leg_dir = 16         # legend font size of fig_summary_all_directories
 
-fig = Figure(size = (1250, 900))
+fig = Figure(size = (1700, 900))
 ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
-    title  = L"All directories — $n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$, $\sigma_{\mathrm{conv}} = %$(1e3*σW_FIXED)\,\mathrm{\mu m}$",
-    xlabel = "Coil Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
+    # title  = L"All directories — $n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$, $\sigma_{\mathrm{conv}} = %$(1e3*σW_FIXED)\,\mathrm{\mu m}$",
+    xlabel = "Coil current (A)", ylabel = L"$F=1$ peak position (mm)",     # same labels as single_SG_comparison
     xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
     xminorticksvisible = true, yminorticksvisible = true,       # 2…9 × 10ⁿ (IntervalsBetween(9) from LOGX/LOGY)
     xminorticksize = 4, yminorticksize = 4,
@@ -3067,15 +3100,17 @@ for (j, d) in enumerate(dirs_ok)
     dd = DIR_DATA[d]
     ok = log_mask(dd.I, dd.z)
     yerr_log!(ax, dd.I[ok], dd.z[ok], dd.δz[ok]; color = (cols_dir[j], 0.8))
-    scatter!(ax, dd.I[ok], dd.z[ok]; marker = mks_dir[mod1(j, length(mks_dir))], markersize = 9,
-             color = (cols_dir[j], 0.85), strokecolor = :black, strokewidth = 0.4, label = d)
+    # open markers: transparent fill, the directory is told apart by stroke colour and shape
+    scatter!(ax, dd.I[ok], dd.z[ok]; marker = mks_dir[mod1(j, length(mks_dir))], markersize = ms_dir,
+             color = :transparent, strokecolor = cols_dir[j], strokewidth = 1.3, label = d)
 end
 lines!(ax, I_sum[mk_qm_sum], m_qm_sum[mk_qm_sum]; color = :blue, linewidth = 2.5, linestyle = :dash,
-    label = L"QM: $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_qm_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_qm_med, 4))$")
+    label = L"Existing models: $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_qm_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_qm_med, 4))$")
 lines!(ax, I_sum[mk_cqd_sum], m_cqd_sum[mk_cqd_sum]; color = :red, linewidth = 2.5,
-    label = L"CQD: $\tilde{k}_{i} = %$(fmt(ki_med, 3))\times 10^{-6}$, $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_cqd_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_cqd_med, 4))$")
-xlims!(ax, min(1e-2, 0.9 * I_THRESHOLD), 1.05)       # start at a decade so 10⁻² is labelled
-Legend(fig[1, 2], ax; labelsize = 13)                     # ~ : median over the directories
+    label = L"Co-quantum dynamics: $\tilde{k}_{i} = %$(fmt(ki_med, 3))\times 10^{-6}$, $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_cqd_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_cqd_med, 4))$")
+xlims!(ax, min(1e-2, 0.9 * I_THRESHOLD), 1.1)        # start at a decade so 10⁻² is labelled
+axislegend(ax; position = :lt, labelsize = fs_leg_dir,    # ~ : median over the directories
+           backgroundcolor = :transparent, framevisible = false)
 save_fig(fig, joinpath(RUN_OUTDIR, "fig_summary_all_directories.$(FIG_EXT)"))
 
 # combined archive (plain vectors; one entry per analysed directory)
