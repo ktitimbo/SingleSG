@@ -92,10 +92,10 @@
 #       over the plateau quoted as tail-choice systematic.           fig002
 #    5. Final fits with formal uncertainties at the chosen `N_TAIL`
 #       (`fit_cqd_ki_scale_with_error`, `fit_qm_scale_with_error`).
-#    6. Diagnostics: relative error + pulls + log errors (fig003),
-#       data + calibrated models with all fit uncertainties and settings (fig004).
-#    7. Publication figures vs current (fig005) and vs gradient (fig006),
-#       goodness-of-fit table (χ², AIC/BIC, …) and diagnostic panels (fig007).
+#    6. Diagnostics: data + models, relative error, pulls, log residuals and their
+#       histogram, with every fitted parameter, its uncertainty, the tail and the settings (fig003).
+#    7. Publication figures vs current (fig004) and vs gradient (fig005),
+#       goodness-of-fit table (χ², AIC/BIC, …).
 #    S/A. Summary and per-directory archive.
 #    ALL. Combined table of kᵢ and s over the directories, weighted mean of kᵢ,
 #         fig_ki_all_directories, fig_summary_all_directories (all data + median curves).
@@ -119,16 +119,18 @@
 #      fig002  interpolated (I, kᵢ) surface and contour
 #      fig_ki_all_directories       kᵢ, s and z_init per directory, weighted mean of kᵢ
 #      fig_summary_all_directories  all directories' data + CQD/QM curves at the median kᵢ, z_init, s
+#      fig_summary_all_directories_ext  the same, model curves extended down to 0.9·I_THRESHOLD
 #      ki_all_directories.csv       one row per directory (kᵢ, s, errors, χ², ΔAIC, …)
 #      SG_ki_scale_all_directories.jld2  the same table + weighted mean
+#      SG_fit_export.jld2           per directory: fit values ± errors, z0, measured points
+#                                   (I, B, G, z_F1) and dense calibrated QM/CQD curves; global
+#                                   median-parameter QM/CQD curves
 #    In RUN_OUTDIR/<DATA_DIR>/ (per directory; figures .<FIG_EXT>, default png):
 #      fig001  CQD family + QM + experiment (log–log)
 #      fig002_tail_convergence  kᵢ, s, z_init and R² vs calibration-tail length
-#      fig003  relative error (%), pulls and log errors vs current, both models
-#      fig004  data + calibrated models, fit uncertainties, tail and analysis settings
-#      fig005_single_SG_comparison(.png|.svg)      points vs current (2:1, publication)
-#      fig006_single_SG_comparison_vsg(.png|.svg)  points vs field gradient (2:1, publication)
-#      fig007  goodness-of-fit diagnostic panels
+#      fig003  data + models, relative error, pulls, log residuals + histogram, both models
+#      fig004_single_SG_comparison(.png|.svg)      points vs current (2:1, publication)
+#      fig005_single_SG_comparison_vsg(.png|.svg)  points vs field gradient (2:1, publication)
 #      (numbered in the order the figures are made and displayed)
 #    Tables (.csv)
 #      tail_convergence_cqd.csv   scan of (kᵢ, s_CQD, tail RMSE, R²) vs n_tail
@@ -215,7 +217,8 @@ const DATA_DIRECTORIES = [
                         #   "20260821", "20260826", "20260827", "20260831", "20260902",
                         #   "20260903",
                         #   "20261105", 
-                          "20261111", "20261112", "20261113", "20261116", "20261118"
+                          "20261111", "20261112", 
+                          "20261113", "20261116", "20261118"
                         ]
 const NZ_EXP   = 2              # z-bins of the experimental profile extraction   (file: meta/nz)
 const λ0_EXP   = 0.01           # raw smoothing parameter of the experiment       (file: meta/λ0)
@@ -1251,7 +1254,7 @@ function compare_datasets(x_ref::AbstractVector, # current
     if plot_errors
         fig = Figure(size = (800, 500))
         ax  = Axis(fig[1, 1]; title = "Log Errors for CQD and QM",
-                   xlabel = "Current", ylabel = "Log Error")
+                   xlabel = "SG current(A)", ylabel = "Log Error")
         scatter!(ax, x_ref, R_B.log_err; markersize = 7, color = :red,
                  label = "log10(cqd) - log10(exp)")
         scatter!(ax, x_ref, R_C.log_err; markersize = 7, color = :blue,
@@ -1381,7 +1384,7 @@ function plot_cqd_vs_qm(ZCQD, ZQM, Icurrent, ki_list, I_compared;
            xticks = decade_ticks(10.0 .^ (floor(Int, log10(minimum(kx))):ceil(Int, log10(maximum(kx))))))
 
     # ---- panel 1: linear y in μm, signed z_max, lines + markers ----
-    ax_l = Axis(fig[1, 1]; xkw..., ylabel = L"$z_{max}$ ($\mathrm{\mu m}$)")
+    ax_l = Axis(fig[1, 1]; xkw..., ylabel = L"Peak position $(\mathrm{\mu m})$")
     hlines!(ax_l, 0.0; color = :black, linestyle = :dot, linewidth = 1)
     for (n, (r, c)) in enumerate(zip(rows[1], cols[1]))
         scatterlines!(ax_l, kx, 1e3 .* ZCQD[r, :]; color = c, linewidth = 2,           # mm → μm
@@ -1408,7 +1411,7 @@ function plot_cqd_vs_qm(ZCQD, ZQM, Icurrent, ki_list, I_compared;
     vals_a = filter(v -> isfinite(v) && v > 0,
                     vcat([vec(ZCQD[r, :]) for r in rows[2]]..., [abs(ZQM[r]) for r in rows[2]]))
     ya_lo, ya_hi = 0.5 * minimum(vals_a), 4.0 * maximum(vals_a)
-    ax_a = Axis(fig[2, 1]; xkw..., LOGY..., ylabel = L"$z_{max}$ (mm)",
+    ax_a = Axis(fig[2, 1]; xkw..., LOGY..., ylabel = L"Peak position $(\mathrm{mm})$",
         yticks = decade_ticks(10.0 .^ (floor(Int, log10(ya_lo)):ceil(Int, log10(ya_hi)))))
     for (r, c) in zip(rows[2], cols[2])
         lines!(ax_a, kx, logsafe(ZCQD[r, :]); color = c, linewidth = 2, label = "CQD $(mA(r)) mA")
@@ -1418,7 +1421,7 @@ function plot_cqd_vs_qm(ZCQD, ZQM, Icurrent, ki_list, I_compared;
     axislegend(ax_a; position = :lt, nbanks = 4)
 
     # ---- panel 3: log y ----
-    ax_b = Axis(fig[3, 1]; xkw..., LOGY..., ylabel = L"$z_{max}$ (mm)",
+    ax_b = Axis(fig[3, 1]; xkw..., LOGY..., ylabel = L"Peak position $(\mathrm{mm})$",
         yticks = decade_ticks([1e-1, 1.0]),
         xlabel = L"$k_{i} \quad (\,\times 10^{-6})$")
     for (r, c) in zip(rows[3], cols[3])
@@ -1510,97 +1513,6 @@ function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
     return FitStats(logMSE, logRMSE, R2_log, chi2_log, chi2_red, p_chi2, AIC, BIC, NMAD)
 end
  
-"""
-    make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD, stats_QM; σ=nothing,
-                          size=(1250, 1000))
-
-Diagnostic figure for the goodness of fit of the two *calibrated* models
-(CQD: `(z_init + ki_itp)/s_CQD`, QM: `(z_init + zqm)/s_QM`) against the raw
-scattered experiment.
-
-Panels (2 × 2 grid of one CairoMakie `Figure`)
-1. data (with y-error bars if `σ` is given) vs both models, log–log;
-2. natural-log residuals `log(model) − log(exp)` vs current, annotated with
-   logRMSE and R²_log;
-3. pulls `(model − exp)/σ` vs current with ±1σ/±2σ bands, annotated with the
-   reduced χ² (only if `σ` is given; otherwise an empty placeholder);
-4. histogram of the log residuals, annotated with NMAD and logRMSE.
-
-Returns the `Figure`.
-"""
-function make_diagnostic_plots(x, y, y_CQD, y_QM, stats_CQD::FitStats, stats_QM::FitStats;
-                               σ = nothing, size = (1250, 1000))
-    # residuals in natural-log space, sign convention model − data
-    r_CQD = log.(y_CQD) .- log.(y)
-    r_QM  = log.(y_QM)  .- log.(y)
-
-    xt  = decade_ticks([1e-2, 1e-1, 1.0])
-    fig = Figure(; size)
-    # marker style of the residual scatters (fill with alpha, darker stroke)
-    mk_cqd = (marker = :circle, markersize = 10, color = (:salmon3, 0.70), strokecolor = :red4,  strokewidth = 0.8)
-    mk_qm  = (marker = :circle, markersize = 10, color = (:royalblue3, 0.70), strokecolor = :blue4, strokewidth = 0.8)
-
-    # 1) Data vs calibrated models (log–log)
-    ax1 = Axis(fig[1, 1]; LOGX..., LOGY..., xticks = xt,
-        yticks = decade_ticks([1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0]),
-        xlabel = "Coil Current (A)", ylabel = "Peak position (mm)",
-        title = "Data vs calibrated models")
-    σ === nothing || yerr_log!(ax1, x, y, σ)
-    scatter!(ax1, x, logsafe(y); label = "Experiment",
-        marker = :circle, markersize = 7, color = :white, strokecolor = :black, strokewidth = 0.8)
-    lines!(ax1, x, y_CQD; label = "CQD", color = :red,  linewidth = 1.5)
-    lines!(ax1, x, y_QM;  label = "QM",  color = :blue, linewidth = 2, linestyle = :dot)
-    axislegend(ax1; position = :rb)
-
-    # 2) Log residuals vs current
-    ax2 = Axis(fig[1, 2]; LOGX..., xticks = xt,
-        xlabel = "Coil Current (A)",
-        ylabel = L"\ln(y_{\mathrm{model}}) - \ln(y_{\mathrm{exp}})",
-        title = "Log-space residuals")
-    hlines!(ax2, 0.0; color = :black, linestyle = :dash)
-    scatter!(ax2, x, r_CQD; label = "CQD", mk_cqd...)
-    scatter!(ax2, x, r_QM;  label = "QM",  mk_qm...)
-    txt_CQD = L"CQD: logRMSE $= %$(fmt(stats_CQD.logRMSE, 3))$, $R^{2}_{\log} = %$(round(stats_CQD.R2_log, digits=4))$"
-    txt_QM  = L"QM: logRMSE $= %$(fmt(stats_QM.logRMSE,  3))$, $R^{2}_{\log} = %$(round(stats_QM.R2_log,  digits=4))$"
-    text!(ax2, 0.5, 0.15; text = txt_CQD, space = :relative, align = (:center, :center), fontsize = 12)
-    text!(ax2, 0.5, 0.05; text = txt_QM,  space = :relative, align = (:center, :center), fontsize = 12)
-    axislegend(ax2; position = :rt)
-
-    # 3) Pulls vs current (needs σ)
-    if σ === nothing
-        ax3 = Axis(fig[2, 1]; title = "Pulls (no σ supplied)")
-        hidedecorations!(ax3); hidespines!(ax3)
-    else
-        pu_CQD = pull(y_CQD, y, σ)
-        pu_QM  = pull(y_QM,  y, σ)
-        ax3 = Axis(fig[2, 1]; LOGX..., xticks = xt,
-            xlabel = "Coil Current (A)",
-            ylabel = L"(y_{\mathrm{model}} - y_{\mathrm{exp}})/\sigma_{\mathrm{exp}}",
-            title = "Normalised residuals (pulls)")
-        hspan!(ax3, -2, 2; color = (:gray, 0.08), label = L"\pm 2\sigma")
-        hspan!(ax3, -1, 1; color = (:gray, 0.15), label = L"\pm 1\sigma")
-        hlines!(ax3, 0.0; color = :black, linestyle = :dash)
-        scatter!(ax3, x, pu_CQD; label = L"CQD: $\chi^{2}_{\mathrm{red}} = %$(fmt(stats_CQD.chi2_red, 3))$", mk_cqd...)
-        scatter!(ax3, x, pu_QM;  label = L"QM: $\chi^{2}_{\mathrm{red}} = %$(fmt(stats_QM.chi2_red, 3))$",  mk_qm...)
-        axislegend(ax3; position = :rt)
-    end
-
-    # 4) Histogram of log residuals
-    ax4 = Axis(fig[2, 2];
-        xlabel = "log-space residual", ylabel = "Normalised count",
-        title = "Distribution of log-space residuals")
-    hist!(ax4, r_CQD; normalization = :pdf, color = (:red,  0.4), label = "CQD")
-    hist!(ax4, r_QM;  normalization = :pdf, color = (:blue, 0.4), label = "QM")
-    vlines!(ax4, 0.0; color = :black, linestyle = :dash, linewidth = 1)
-    txt2_CQD = @sprintf "CQD: NMAD = %.3g, logRMSE = %.3g" stats_CQD.NMAD stats_CQD.logRMSE
-    txt2_QM  = @sprintf "QM:  NMAD = %.3g, logRMSE = %.3g" stats_QM.NMAD  stats_QM.logRMSE
-    text!(ax4, 0.03, 0.95; text = txt2_CQD, space = :relative, align = (:left, :top), fontsize = 12)
-    text!(ax4, 0.03, 0.88; text = txt2_QM,  space = :relative, align = (:left, :top), fontsize = 12)
-    axislegend(ax4; position = :rt)
-
-    return fig
-end
-
 # =============================================================================
 # 0d) Console styling helpers
 #
@@ -1878,7 +1790,7 @@ fit_figs = Figure(size = (1200, 1400));
 ax_surf = Axis3(fit_figs[1, 1:2];
     title = "Fitting surface", titlesize = 18,
     xlabelsize = 22, ylabelsize = 22, zlabelsize = 22, xticklabelsize = 16, yticklabelsize = 16, zticklabelsize = 16,
-    xlabel = L"I_{c}", ylabel = L"$k_{i}\times 10^{-6}$", zlabel = L"$z\ (\mathrm{mm})$",
+    xlabel = "SG current(A)", ylabel = L"$k_{i}\times 10^{-6}$", zlabel = L"Peak position $(\mathrm{mm})$",
     xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
     azimuth = 1.30π, elevation = deg2rad(25),
@@ -1901,7 +1813,7 @@ logZc       = log10.(max.(abs.([itp_plot(x, log10(y)) for x in i_surface, y in k
 ax_cont = Axis(fit_figs[2, 1]; LOGX..., LOGY...,
     title = "Fitting contour", titlesize = 18,
     xlabelsize = 22, ylabelsize = 22, xticklabelsize = 17, yticklabelsize = 17,
-    xlabel = L"$I_{c}$ (A)", ylabel = L"$k_{i}\times 10^{-6}$",
+    xlabel = "SG current(A)", ylabel = L"$k_{i}\times 10^{-6}$",
     xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
     yticks = decade_ticks(10.0 .^ (floor(Int, log10(minimum(ki_cont))):round(Int, log10(KI_MAX_PLOT)))),
     xgridvisible = false, ygridvisible = false, xminorgridvisible = false, yminorgridvisible = false);
@@ -1933,7 +1845,7 @@ save_fig(fit_figs, joinpath(RUN_OUTDIR, "fig002.$(FIG_EXT)"); show = true)
 #  `analyze_directory(DATA_DIR)` runs, for one experimental directory, the whole
 #  chain of the single-directory analysis: load z(I) from the summary JLD2,
 #  fig001, tail-convergence study (fig002), final fits, diagnostics
-#  (fig003–fig007), CSV tables and the run archive, all written to
+#  (fig003–fig005), CSV tables and the run archive, all written to
 #  RUN_OUTDIR/<DATA_DIR>/. Uses the globals of sections 0–2 (zqm, ki_itp,
 #  cqd_meta, …). Returns one NamedTuple row of results for the combined table.
 ##################################################################################################
@@ -1979,7 +1891,7 @@ function analyze_directory(DATA_DIR::AbstractString)
     @info "Experimental entry loaded" key = exp_key runstamp = get(exp_entry, :RUNSTAMP, "n/a")
 
     # ---- raw columns --------------------------------------------------------------
-    ic_raw   = Float64.(exp_entry[:Currents])            # coil current (A)
+    ic_raw   = Float64.(exp_entry[:Currents])            # SG current(A)
     δic_phys = Float64.(exp_entry[:ErrorCurrentsPhys])   # its physical uncertainty (A)
     x1, δx1  = Float64.(exp_entry[PEAK_KEY_F1][1]), Float64.(exp_entry[PEAK_KEY_F1][2])
     x2, δx2  = Float64.(exp_entry[PEAK_KEY_F2][1]), Float64.(exp_entry[PEAK_KEY_F2][2])
@@ -2140,7 +2052,7 @@ function analyze_directory(DATA_DIR::AbstractString)
     color_list = Makie.resample_cmap(:darkrainbow, n_ki);
     fig = Figure(size = (1350, 850));
     ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
-        xlabel = "Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
+        xlabel = "SG current(A)", ylabel = L"Peak position $(\mathrm{mm})$",
         xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
         yticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]));
     for (i, ki) in enumerate(cqd_meta[:ki])
@@ -2377,7 +2289,7 @@ function analyze_directory(DATA_DIR::AbstractString)
 
     ##################################################################################################
     #  6) DIAGNOSTICS ON THE MEASURED POINTS
-    section("6", "[$(DATA_DIR)] DIAGNOSTICS ON THE MEASURED POINTS — fig003, fig004")
+    section("6", "[$(DATA_DIR)] DIAGNOSTICS ON THE MEASURED POINTS — fig003")
     ##################################################################################################
 
     I_d, δI_d, z_d, σ_d = data[:, 1], data[:, 2], data[:, 3], data[:, 4];
@@ -2388,7 +2300,7 @@ function analyze_directory(DATA_DIR::AbstractString)
     @assert all(m_qm_d .> 0) && all(m_cqd_d .> 0) "Calibrated model ≤ 0 at a measured current (z_init too negative); use FIT_KI_MODE = :full or narrow ZINIT_BOUNDS_DIR[\"$(DATA_DIR)\"]"
 
     # -----------------------------------------------------------------------------
-    # fig003 — relative error (%), pulls and log errors of both calibrated models
+    # Residual quantities for fig003 (relative error, pulls, log errors) of both calibrated models
     #
     # Both models are divided by their own tail-fitted factor; the data are
     # untouched. Two complementary views of (model − exp):
@@ -2397,11 +2309,11 @@ function analyze_directory(DATA_DIR::AbstractString)
     # Here the points are individual measurements (approximately independent),
     # so χ²_red is meaningful.
     # -----------------------------------------------------------------------------
-    lbl_qm  = L"QM ($s = %$(fmt(fit_qs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_qs.z_init, 3))\ \mathrm{\mu m}$)";
-    lbl_cqd = L"CQD ($k_{i}=%$(fmt(fit_cs.ki, 4)) \times10^{-6}$, $s = %$(fmt(fit_cs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_cs.z_init, 3))\ \mathrm{\mu m}$)";
+    lbl_qm  = L"Existing models ($s = %$(fmt(fit_qs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_qs.z_init, 3))\ \mathrm{\mu m}$)";
+    lbl_cqd = L"Co-quantum dynamics ($k_{i}=%$(fmt(fit_cs.ki, 4)) \times10^{-6}$, $s = %$(fmt(fit_cs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_cs.z_init, 3))\ \mathrm{\mu m}$)";
     axis_kw = (LOGX...,
-        xticks = decade_ticks([1e-2, 1e-1, 1.0]),
-        xlabelsize = 18, ylabelsize = 18, xticklabelsize = 16, yticklabelsize = 16, titlesize = 18)
+        xticks = decade_ticks([1e-2, 1e-1, 1.0]), xlabel = "SG current(A)",
+        xlabelsize = 18, ylabelsize = 16, xticklabelsize = 15, yticklabelsize = 15, titlesize = 16)
     # filled markers stroked in their own colour, connecting line semi-transparent
     sl_fill!(ax, x, y, c; marker = :circle, label = nothing) =
         scatterlines!(ax, x, y; color = (c, 0.4), linewidth = 1.5, label,
@@ -2443,85 +2355,91 @@ function analyze_directory(DATA_DIR::AbstractString)
         relQM = re_qm ./ 100, relCQD = re_cqd ./ 100, pullQM = pull_qm, pullCQD = pull_cqd))
 
     # -----------------------------------------------------------------------------
-    # fig003 — three views of (model − exp), shared current axis (top → bottom):
-    #   (a) relative error (model − exp)/exp in %           → size of the discrepancy
-    #   (b) pulls (model − exp)/σ_exp                       → significance in units of δz
-    #   (c) log errors log10(model) − log10(exp)            → the residual the fits minimise
+    # fig003 — data, calibrated models and goodness-of-fit diagnostics in one figure
+    # (merges the former residual stack, the goodness-of-fit diagnostic panels and the
+    #  full-uncertainty overlay into one figure):
+    #   top, both columns : data (δI, δz) + calibrated models, analysis settings in the legend
+    #   (a) relative error (model − exp)/exp in %       → size of the discrepancy
+    #   (b) pulls (model − exp)/σ_exp, ±1σ/±2σ bands    → significance in units of δz
+    #   (c) log residuals log10(model) − log10(exp)     → the residual the fits minimise
+    #   (d) histogram of the log residuals               → their distribution (NMAD)
+    # All log quantities are log10, consistent with the log-space metrics table above.
     # -----------------------------------------------------------------------------
-    fig = Figure(size = (1350, 1250));
+    lerr_qm, lerr_cqd = metrics_d.QM.log_err, metrics_d.CQD.log_err
+    nmad10(r) = 1.4826 * median(abs.(r))                       # robust spread of the log10 residuals
+    # summary numbers shown in the panels (pre-formatted: L-strings cannot interpolate calls with commas)
+    rms_qm,  rms_cqd  = fmt(sqrt(mean(abs2, re_qm)), 3), fmt(sqrt(mean(abs2, re_cqd)), 3)
+    c2_qm,   c2_cqd   = fmt(chi2red(pull_qm, N_PAR_QM), 3), fmt(chi2red(pull_cqd, N_PAR_CQD), 3)
+    lrm_qm,  lrm_cqd  = fmt(metrics_d.QM.log_RMSE, 3), fmt(metrics_d.CQD.log_RMSE, 3)
+    nmad_qm, nmad_cqd = fmt(nmad10(lerr_qm), 3), fmt(nmad10(lerr_cqd), 3)
+    zero_line!(ax) = hlines!(ax, 0.0; color = :black, linestyle = :dash, linewidth = 1)
+    both_models!(ax, yq, yc) = (sl_fill!(ax, I_d, yq, :blue; label = lbl_qm);
+                                sl_fill!(ax, I_d, yc, :red; marker = :diamond, label = lbl_cqd))
+    panel_text!(ax, s; pos = (0.02, 0.04), align = (:left, :bottom)) =
+        text!(ax, pos...; text = s, space = :relative, align, fontsize = 13)
+
+    fig = Figure(size = (1500, 1450));
+    # top: data + calibrated models
+    ax_fit = Axis(fig[1, 1:2]; axis_kw..., LOGY..., yticks = log_ticks, title = "Data and calibrated models",
+        ylabel = L"Peak position $(\mathrm{mm})$", xlabelsize = 18, ylabelsize = 18)
+    xerr_log!(ax_fit, I_d, z_d, δI_d)
+    yerr_log!(ax_fit, I_d, z_d, σ_d)
+    scatter!(ax_fit, I_d, logsafe(z_d); marker = :circle, markersize = 12, color = :transparent,
+        strokecolor = :black, strokewidth = 1.2, label = "Experimental data")
+    # full legend (formerly a separate overlay figure): every fitted parameter with its uncertainty,
+    # calibration tail as the legend title, analysis settings as a text line
+    lbl_qm_full  = L"Existing models: $s = %$(fmt(fit_qs.scale, 4)) \pm %$(fmt(fit_qs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_qs.z_init, 3)) \pm %$(fmt(1e3*fit_qs.z_init_err, 1)))\ \mathrm{\mu m}$"
+    lbl_cqd_full = L"Co-quantum dynamics: $k_{i} = \left( %$(fmt(fit_cs.ki, 4)) \pm %$(fmt(fit_cs.ki_err, 1)) \right) \times 10^{-6}$, $s = %$(fmt(fit_cs.scale, 4)) \pm %$(fmt(fit_cs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_cs.z_init, 3)) \pm %$(fmt(1e3*fit_cs.z_init_err, 1)))\ \mathrm{\mu m}$"
+    lines!(ax_fit, I_scan[mask_qm_scan],  m_qm_scan[mask_qm_scan];  color = :blue, linewidth = 1.75, label = lbl_qm_full)
+    lines!(ax_fit, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan]; color = :red,  linewidth = 2,    label = lbl_cqd_full)
+    axislegend(ax_fit, tail_legend; position = :lt, titlesize = 14, labelsize = 14,  # title is positional
+        framevisible = false, backgroundcolor = :transparent)
+    text!(ax_fit, 0.985, 0.04; text = cfg_legend, space = :relative, align = (:right, :bottom), fontsize = 14)
+
     # (a) relative error
-    fig_rel = Axis(fig[1, 1]; axis_kw..., title = "Relative error of the calibrated models",
+    ax_rel = Axis(fig[2, 1]; axis_kw..., title = "Relative error",
         ylabel = L"(\mathrm{model}-\mathrm{exp})/\mathrm{exp}\ (\%)")
-    hlines!(fig_rel, 0.0; color = :black, linestyle = :dash, linewidth = 1)
-    sl_fill!(fig_rel, I_d, re_qm,  :blue; label = lbl_qm)
-    sl_fill!(fig_rel, I_d, re_cqd, :red;  marker = :diamond, label = lbl_cqd)
-    Legend(fig[1, 2], fig_rel, cfg_legend; titlesize = 12, labelsize = 13)
+    zero_line!(ax_rel); both_models!(ax_rel, re_qm, re_cqd)
+    panel_text!(ax_rel, L"rms: QM $%$(rms_qm)\,\% $,  CQD $%$(rms_cqd)\,\% $")
 
     # (b) pulls
-    fig_pull = Axis(fig[2, 1]; axis_kw..., title = "Normalised residuals (pulls)",
+    ax_pull = Axis(fig[2, 2]; axis_kw..., title = "Normalised residuals (pulls)",
         ylabel = L"(\mathrm{model}-\mathrm{exp})/\sigma_{\mathrm{exp}}")
-    hspan!(fig_pull, -2, 2; color = (:gray, 0.08), label = L"\pm 2\sigma")
-    hspan!(fig_pull, -1, 1; color = (:gray, 0.15), label = L"\pm 1\sigma")
-    hlines!(fig_pull, 0.0; color = :black, linestyle = :dash, linewidth = 1)
-    sl_fill!(fig_pull, I_d, pull_qm, :blue;
-        label = L"QM ($\chi^{2}_{\mathrm{red}} = %$(fmt(chi2red(pull_qm, N_PAR_QM), 3))$, $k = %$(N_PAR_QM)$)")
-    sl_fill!(fig_pull, I_d, pull_cqd, :red; marker = :diamond,
-        label = L"CQD ($\chi^{2}_{\mathrm{red}} = %$(fmt(chi2red(pull_cqd, N_PAR_CQD), 3))$, $k = %$(N_PAR_CQD)$)")
-    Legend(fig[2, 2], fig_pull, cfg_legend; titlesize = 12, labelsize = 13)
+    hspan!(ax_pull, -2, 2; color = (:gray, 0.08))
+    hspan!(ax_pull, -1, 1; color = (:gray, 0.15))
+    zero_line!(ax_pull); both_models!(ax_pull, pull_qm, pull_cqd)
+    panel_text!(ax_pull, L"$\chi^{2}_{\mathrm{red}}$: QM $%$(c2_qm)$ ($k=%$(N_PAR_QM)$),  CQD $%$(c2_cqd)$ ($k=%$(N_PAR_CQD)$)")
 
-    # (c) log errors (formerly the separate "Log Errors for CQD and QM" plot of compare_datasets)
-    fig_log = Axis(fig[3, 1]; axis_kw..., title = "Log errors of the calibrated models",
-        xlabel = "Current (A)",
-        ylabel = L"\log_{10}(\mathrm{model}) - \log_{10}(\mathrm{exp})")
-    hlines!(fig_log, 0.0; color = :black, linestyle = :dash, linewidth = 1)
-    sl_fill!(fig_log, I_d, metrics_d.QM.log_err,  :blue;
-        label = L"QM ($\mathrm{RMSE}_{\log} = %$(fmt(metrics_d.QM.log_RMSE, 3))$)")
-    sl_fill!(fig_log, I_d, metrics_d.CQD.log_err, :red; marker = :diamond,
-        label = L"CQD ($\mathrm{RMSE}_{\log} = %$(fmt(metrics_d.CQD.log_RMSE, 3))$)")
-    Legend(fig[3, 2], fig_log, cfg_legend; titlesize = 12, labelsize = 13)
+    # (c) log residuals
+    ax_log = Axis(fig[3, 1]; axis_kw..., title = "Log residuals",
+        ylabel = L"\log_{10}(\mathrm{model})-\log_{10}(\mathrm{exp})")
+    zero_line!(ax_log); both_models!(ax_log, lerr_qm, lerr_cqd)
+    panel_text!(ax_log, L"$\mathrm{RMSE}_{\log}$: QM $%$(lrm_qm)$, CQD $%$(lrm_cqd)$")
 
-    # one current axis for the three panels; tick labels only on the bottom one
-    linkxaxes!(fig_rel, fig_pull, fig_log)
-    hidexdecorations!(fig_rel;  grid = false, minorgrid = false, ticks = false, minorticks = false)
-    hidexdecorations!(fig_pull; grid = false, minorgrid = false, ticks = false, minorticks = false)
-    xlims!(fig_log, 0.010, 1.05)
-    rowgap!(fig.layout, 10)
+    # (d) distribution of the log residuals
+    ax_hist = Axis(fig[3, 2]; title = "Distribution of the log residuals", titlesize = 16,
+        xlabel = L"\log_{10}(\mathrm{model})-\log_{10}(\mathrm{exp})", ylabel = "density",
+        xlabelsize = 16, ylabelsize = 16, xticklabelsize = 15, yticklabelsize = 15)
+    hist!(ax_hist, lerr_qm;  normalization = :pdf, bins = 12, color = (:blue, 0.35), strokecolor = :blue, strokewidth = 0.8)
+    hist!(ax_hist, lerr_cqd; normalization = :pdf, bins = 12, color = (:red,  0.35), strokecolor = :red,  strokewidth = 0.8)
+    vlines!(ax_hist, 0.0; color = :black, linestyle = :dash, linewidth = 1)
+    panel_text!(ax_hist, L"NMAD: QM $%$(nmad_qm)$, CQD $%$(nmad_cqd)$"; pos = (0.98, 0.96), align = (:right, :top))
+
+    foreach(a -> xlims!(a, 0.010, 1.05), (ax_fit, ax_rel, ax_pull, ax_log))
+    rowsize!(fig.layout, 1, Relative(0.36)); rowgap!(fig.layout, 14)
     save_fig(fig, joinpath(OUTDIR, "fig003.$(FIG_EXT)"))
-
-    # -----------------------------------------------------------------------------
-    # fig004 — data + calibrated models, all fit uncertainties, tail and analysis settings
-    # -----------------------------------------------------------------------------
-    fig = Figure(size = (1500, 800));
-    ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
-        title = L"Peak position ($F=1$) — %$(DATA_DIR)",
-        xlabel = "Coil Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
-        xticks = log_ticks, yticks = log_ticks,
-        xlabelsize = 20, ylabelsize = 20, xticklabelsize = 18, yticklabelsize = 18, titlesize = 18);
-    xerr_log!(ax, I_d, z_d, δI_d)
-    yerr_log!(ax, I_d, z_d, σ_d)
-    scatter!(ax, I_d, logsafe(z_d); marker = :circle, markersize = 12, color = :transparent,
-        strokecolor = :black, strokewidth = 1.2, label = "Experimental data")      # open black circles
-    lines!(ax, I_scan[mask_qm_scan], m_qm_scan[mask_qm_scan]; color = :blue, linewidth = 1.75,
-        label = L"Quantum mechanics: $s = %$(fmt(fit_qs.scale, 4)) \pm %$(fmt(fit_qs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_qs.z_init, 3)) \pm %$(fmt(1e3*fit_qs.z_init_err, 1)))\ \mathrm{\mu m}$")
-    lines!(ax, I_scan[mask_cqd_scan], m_cqd_scan[mask_cqd_scan]; color = :red, linewidth = 2, linestyle = :dot,
-        label = L"CoQuantum dynamics: $k_{i} = \left( %$(fmt(fit_cs.ki, 4)) \pm %$(fmt(fit_cs.ki_err, 1)) \right) \times 10^{-6}$, $s = %$(fmt(fit_cs.scale, 4)) \pm %$(fmt(fit_cs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_cs.z_init, 3)) \pm %$(fmt(1e3*fit_cs.z_init_err, 1)))\ \mathrm{\mu m}$")
-    xlims!(ax, 0.010, 1.05)
-    axislegend(ax, tail_legend; position = :lt, titlesize = 14, labelsize = 14)   # title is positional
-    # analysis settings (directory, n_z, λ0, σ_conv), bottom-right inside the axes
-    text!(ax, 0.985, 0.03; text = cfg_legend, space = :relative, align = (:right, :bottom), fontsize = 15)
-    save_fig(fig, joinpath(OUTDIR, "fig004.$(FIG_EXT)"))
 
 
 
     ##################################################################################################
     #  7) PUBLICATION FIGURES AND GOODNESS OF FIT
-    section("7", "[$(DATA_DIR)] PUBLICATION FIGURES (fig005, fig006), GOODNESS OF FIT (fig007)")
+    section("7", "[$(DATA_DIR)] PUBLICATION FIGURES (fig004, fig005), GOODNESS-OF-FIT TABLE")
     ##################################################################################################
     # Measured points (propagated δz) vs the two calibrated models. The points are
     # approximately independent, so χ², p-values and AIC/BIC are meaningful here.
 
     # columns of the experimental table, named once for the whole section
-    I_sc  = data[:, 1];      # coil current (A)
+    I_sc  = data[:, 1];      # SG current(A)
     δI_sc = data[:, 2];      # current uncertainty (A)
     z_sc  = data[:, 3];      # F=1 peak position (mm)
     δz_sc = data[:, 4];      # propagated position uncertainty (mm)
@@ -2544,17 +2462,17 @@ function analyze_directory(DATA_DIR::AbstractString)
     pull_cqd_sc = pull(m_cqd_sc, z_sc, δz_sc);
 
     # -----------------------------------------------------------------------------
-    # fig005_single_SG_comparison — vs coil current
+    # fig004_single_SG_comparison — vs coil current
     # -----------------------------------------------------------------------------
-    # styles shared by fig005 and fig006 (same size, 2:1 width:height)
+    # styles shared by fig004 and fig005 (same size, 2:1 width:height)
     sg_size = (1200, 600)
-    sg_axis =(LOGX..., LOGY..., ylabel = L"$F=1$ peak position (mm)", yticks = log_ticks,
+    sg_axis =(LOGX..., LOGY..., ylabel = L"Peak position $(\mathrm{mm})$", yticks = log_ticks,
                xlabelsize = 20, ylabelsize = 20, xticklabelsize = 18, yticklabelsize = 18)
     # model curves of these two figures start 10 % below the current threshold
     # (0.9·I_THRESHOLD, e.g. 0.018 A for 0.020 A). I_scan starts at I_THRESHOLD, so the
     # calibrated models are re-evaluated on their own grid; the gradient axis uses the
     # same grid converted point by point, G(I_sg).
-    I_line_lo = 0.9 * I_THRESHOLD
+    I_line_lo = 0.95 * I_THRESHOLD
     I_sg      = logspace10(I_line_lo, 1.00; n = 801)
     G_sg      = gradvsI.(I_sg)
     m_qm_sg   = (fit_qs.z_init .+ zqm.(I_sg))                    ./ fit_qs.scale
@@ -2565,23 +2483,24 @@ function analyze_directory(DATA_DIR::AbstractString)
         xerr_log!(ax, xd, z_sc, δxd)
         yerr_log!(ax, xd, z_sc, δz_sc)
         scatter!(ax, xd, logsafe(z_sc); marker = :circle, markersize = 11, color = :white,
-                 strokecolor = :black, strokewidth = 0.9, label = "Experimental data")
+                 strokecolor = :black, strokewidth = 0.9, label = "Experiment")
         lines!(ax, xm[sg_qm], m_qm_sg[sg_qm]; color = :blue, linewidth = 1.75,
                linestyle = :dash, label = "Existing models")
         lines!(ax, xm[sg_cqd], m_cqd_sg[sg_cqd]; color = :red, linewidth = 2,
-               label = L"Coquantum dynamics: $k_{i} \approx %$(fmt(fit_cs.ki, 2)) \times 10^{-6}$")
+            #    label = L"Coquantum dynamics: $k_{i} \approx %$(fmt(fit_cs.ki, 2)) \times 10^{-6}$",
+               label = "Coquantum dynamics")
     end
 
     fig = Figure(size = sg_size);
-    ax  = Axis(fig[1, 1]; sg_axis..., xlabel = "Coil current (A)", xticks = log_ticks)
+    ax  = Axis(fig[1, 1]; sg_axis..., xlabel = "SG current(A)", xticks = log_ticks)
     sg_series!(ax, I_sc, δI_sc, I_sg)
-    xlims!(ax, 1e-2, 1.2)
+    xlims!(ax, 18e-3, 1.05)
     axislegend(ax; position = :lt, labelsize = 16)
-    save_fig(fig, joinpath(OUTDIR, "fig005_single_SG_comparison.png"))
-    save(joinpath(OUTDIR, "fig005_single_SG_comparison.svg"), fig)
+    save_fig(fig, joinpath(OUTDIR, "fig004_single_SG_comparison.png"))
+    save(joinpath(OUTDIR, "fig004_single_SG_comparison.svg"), fig)
 
     # -----------------------------------------------------------------------------
-    # fig006_single_SG_comparison_vsg — vs magnetic-field gradient G(I)
+    # fig005_single_SG_comparison_vsg — vs magnetic-field gradient G(I)
     # -----------------------------------------------------------------------------
     fig = Figure(size = sg_size);
     ax  = Axis(fig[1, 1]; sg_axis..., xlabel = "Magnetic field gradient (T/m)",
@@ -2589,8 +2508,8 @@ function analyze_directory(DATA_DIR::AbstractString)
     sg_series!(ax, G_sc, δG_sc, G_sg)
     xlims!(ax, 3, 400)
     axislegend(ax; position = :lt, labelsize = 16)
-    save_fig(fig, joinpath(OUTDIR, "fig006_single_SG_comparison_vsg.png"))
-    save(joinpath(OUTDIR, "fig006_single_SG_comparison_vsg.svg"), fig)
+    save_fig(fig, joinpath(OUTDIR, "fig005_single_SG_comparison_vsg.png"))
+    save(joinpath(OUTDIR, "fig005_single_SG_comparison_vsg.svg"), fig)
 
     # -----------------------------------------------------------------------------
     # Tables: experiment (both axes) and calibrated model curves
@@ -2654,10 +2573,6 @@ function analyze_directory(DATA_DIR::AbstractString)
     """)
     CSV.write(joinpath(OUTDIR, "goodness_of_fit.csv"),
               DataFrame(metric = metrics, CQD = gof_table[:, 1], QM = gof_table[:, 2]))
-
-    # fig007 — diagnostic panels
-    fig = make_diagnostic_plots(I_sc, z_sc, m_cqd_sc, m_qm_sc, stats_CQD, stats_QM; σ = δz_sc)
-    save_fig(fig, joinpath(OUTDIR, "fig007.$(FIG_EXT)"))
 
 
     ##################################################################################################
@@ -2796,7 +2711,7 @@ function analyze_directory(DATA_DIR::AbstractString)
         f["model/CQD_up_mm"]   = m_cqd_scan
         f["model/QM_zF1_mm"]   = m_qm_scan
 
-        # --- residual views on the measured points (inputs of fig007) ---
+        # --- residual views on the measured points (goodness-of-fit inputs) ---
         f["statistical_analysis/Current_A"]   = I_sc
         f["statistical_analysis/relErr_CQD"]  = re_cqd_sc         # already dimensionless
         f["statistical_analysis/relErr_QM"]   = re_qm_sc
@@ -2857,6 +2772,7 @@ function analyze_directory(DATA_DIR::AbstractString)
         n_tail            = N_TAIL,
         I_tail_min        = fit_cs.tail_range[1],
         z0_mm             = z0,
+        z0_err_mm         = δz0,
         outdir            = OUTDIR,
     )
 end
@@ -3074,44 +2990,54 @@ ki_med    = median(df_all.ki);        zi_cqd_med = median(df_all.zinit_cqd);  s_
 zi_qm_med = median(df_all.zinit_qm);  s_qm_med   = median(df_all.scale_qm)
 @info "Summary curves (medians over $(nrow(df_all)) directories)" ki_med zi_cqd_med_um = 1e3 * zi_cqd_med s_cqd_med zi_qm_med_um = 1e3 * zi_qm_med s_qm_med
 
-I_sum      = logspace10(I_THRESHOLD, 1.00; n = 801)
-m_cqd_sum  = (zi_cqd_med .+ ki_itp.(I_sum, Ref(ki_med))) ./ s_cqd_med
-m_qm_sum   = (zi_qm_med  .+ zqm.(I_sum))                 ./ s_qm_med
-mk_cqd_sum = log_mask(I_sum, m_cqd_sum)
-mk_qm_sum  = log_mask(I_sum, m_qm_sum)
-
-dirs_ok   = [d for d in df_all.dir if haskey(DIR_DATA, d)]
+dirs_ok  = [d for d in df_all.dir if haskey(DIR_DATA, d)]
 # stroke colours: viridis without its pale-yellow end, so every open marker stays visible on white
 cols_dir  = [get(cgrad(:viridis), t) for t in range(0.0, 0.85; length = max(length(dirs_ok), 2))][1:length(dirs_ok)]
 mks_dir   = [:circle, :rect, :diamond, :utriangle, :dtriangle, :pentagon, :hexagon, :star5, :ltriangle, :rtriangle]
 ms_dir    = 14          # marker size of the data points in fig_summary_all_directories (also used by its legend)
 fs_leg_dir = 16         # legend font size of fig_summary_all_directories
 
-fig = Figure(size = (1700, 900))
-ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
-    # title  = L"All directories — $n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$, $\sigma_{\mathrm{conv}} = %$(1e3*σW_FIXED)\,\mathrm{\mu m}$",
-    xlabel = "Coil current (A)", ylabel = L"$F=1$ peak position (mm)",     # same labels as fig005_single_SG_comparison
-    xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
-    xminorticksvisible = true, yminorticksvisible = true,       # 2…9 × 10ⁿ (IntervalsBetween(9) from LOGX/LOGY)
-    xminorticksize = 4, yminorticksize = 4,
-    yticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0, 10.0]),
-    xlabelsize = 22, ylabelsize = 22, xticklabelsize = 17, yticklabelsize = 17, titlesize = 18)
-for (j, d) in enumerate(dirs_ok)
-    dd = DIR_DATA[d]
-    ok = log_mask(dd.I, dd.z)
-    yerr_log!(ax, dd.I[ok], dd.z[ok], dd.δz[ok]; color = (cols_dir[j], 0.8))
-    # open markers: transparent fill, the directory is told apart by stroke colour and shape
-    scatter!(ax, dd.I[ok], dd.z[ok]; marker = mks_dir[mod1(j, length(mks_dir))], markersize = ms_dir,
-             color = :transparent, strokecolor = cols_dir[j], strokewidth = 1.3, label = d)
+# One function draws both versions of the summary figure, so their styling stays identical;
+# only the lowest current of the median model curves differs:
+#   fig_summary_all_directories      curves from I_THRESHOLD
+#   fig_summary_all_directories_ext  curves extended down to 0.9·I_THRESHOLD (as fig004/fig005)
+function summary_all_directories_fig(I_lo)
+    I_sum      = logspace10(I_lo, 1.00; n = 801)
+    m_cqd_sum  = (zi_cqd_med .+ ki_itp.(I_sum, Ref(ki_med))) ./ s_cqd_med
+    m_qm_sum   = (zi_qm_med  .+ zqm.(I_sum))                 ./ s_qm_med
+    mk_cqd_sum = log_mask(I_sum, m_cqd_sum)
+    mk_qm_sum  = log_mask(I_sum, m_qm_sum)
+
+    fig = Figure(size = (1700, 900))
+    ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
+        # title  = L"All directories — $n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$, $\sigma_{\mathrm{conv}} = %$(1e3*σW_FIXED)\,\mathrm{\mu m}$",
+        xlabel = "SG current(A)", ylabel = L"Peak position $(\mathrm{mm})$",     # same labels as fig003, fig004 and every plot against current
+        xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
+        xminorticksvisible = true, yminorticksvisible = true,       # 2…9 × 10ⁿ (IntervalsBetween(9) from LOGX/LOGY)
+        xminorticksize = 4, yminorticksize = 4,
+        yticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0, 10.0]),
+        xlabelsize = 22, ylabelsize = 22, xticklabelsize = 17, yticklabelsize = 17, titlesize = 18)
+    for (j, d) in enumerate(dirs_ok)
+        dd = DIR_DATA[d]
+        ok = log_mask(dd.I, dd.z)
+        yerr_log!(ax, dd.I[ok], dd.z[ok], dd.δz[ok]; color = (cols_dir[j], 0.8))
+        # open markers: transparent fill, the directory is told apart by stroke colour and shape
+        scatter!(ax, dd.I[ok], dd.z[ok]; marker = mks_dir[mod1(j, length(mks_dir))], markersize = ms_dir,
+                 color = :transparent, strokecolor = cols_dir[j], strokewidth = 1.3, label = d)
+    end
+    lines!(ax, I_sum[mk_qm_sum], m_qm_sum[mk_qm_sum]; color = :blue, linewidth = 2.5, linestyle = :dash,
+        label = L"Existing models: $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_qm_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_qm_med, 4))$")
+    lines!(ax, I_sum[mk_cqd_sum], m_cqd_sum[mk_cqd_sum]; color = :red, linewidth = 2.5,
+        label = L"Co-quantum dynamics: $\tilde{k}_{i} = %$(fmt(ki_med, 3))\times 10^{-6}$, $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_cqd_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_cqd_med, 4))$")
+    xlims!(ax, min(1e-2, 0.9 * I_THRESHOLD), 1.1)        # start at a decade so 10⁻² is labelled
+    axislegend(ax; position = :lt, labelsize = fs_leg_dir,    # ~ : median over the directories
+               backgroundcolor = :transparent, framevisible = false)
+    return fig
 end
-lines!(ax, I_sum[mk_qm_sum], m_qm_sum[mk_qm_sum]; color = :blue, linewidth = 2.5, linestyle = :dash,
-    label = L"Existing models: $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_qm_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_qm_med, 4))$")
-lines!(ax, I_sum[mk_cqd_sum], m_cqd_sum[mk_cqd_sum]; color = :red, linewidth = 2.5,
-    label = L"Co-quantum dynamics: $\tilde{k}_{i} = %$(fmt(ki_med, 3))\times 10^{-6}$, $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_cqd_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_cqd_med, 4))$")
-xlims!(ax, min(1e-2, 0.9 * I_THRESHOLD), 1.1)        # start at a decade so 10⁻² is labelled
-axislegend(ax; position = :lt, labelsize = fs_leg_dir,    # ~ : median over the directories
-           backgroundcolor = :transparent, framevisible = false)
-save_fig(fig, joinpath(RUN_OUTDIR, "fig_summary_all_directories.$(FIG_EXT)"))
+save_fig(summary_all_directories_fig(I_THRESHOLD),
+         joinpath(RUN_OUTDIR, "fig_summary_all_directories.$(FIG_EXT)"))
+save_fig(summary_all_directories_fig(0.9 * I_THRESHOLD),
+         joinpath(RUN_OUTDIR, "fig_summary_all_directories_ext.$(FIG_EXT)"))
 
 # combined archive (plain vectors; one entry per analysed directory)
 all_path = joinpath(RUN_OUTDIR, "SG_ki_scale_all_directories.jld2")
@@ -3135,6 +3061,97 @@ jldopen(all_path, "w") do f
     f["combined/ki_chi2"]   = ki_chi2
     f["combined/ki_dof"]    = ki_dof
 end
+
+# -----------------------------------------------------------------------------
+# Export file: per directory the fit results, the measured points and the dense
+# calibrated model curves; globally the median-parameter curves.
+#   directories/<dir>/          ki, ki_error, cqd_/qm_ scale & zinit (+ _error), z0 (+ _error),
+#                               measured points: current, field, gradient, zf1 position (+ errors)
+#   directories/<dir>/qm/       (z_init,QM + zqm(I))/s_QM on a dense current grid, with B and G
+#   directories/<dir>/cqd/      (z_init,CQD + ki_itp(I, kᵢ))/s_CQD on the same grid, with B and G
+#   global/qm/, global/cqd/     the same with the medians over the directories
+# `_error` = statistical error of the final fit (Student-t half-width, 95 %);
+# `_sys`   = tail-choice systematic (spread over the plateau of the tail scan).
+# Model values are kept as computed: with z_init < 0 they can be ≤ 0 at the lowest currents.
+# Units: current A, field T, gradient T/m, positions and z_init/z0 mm, kᵢ in units of 10⁻⁶.
+# -----------------------------------------------------------------------------
+const EXPORT_N_DENSE = 2000                                   # points of the dense current grid
+I_dense = collect(range(1.0 / EXPORT_N_DENSE, 1.0; length = EXPORT_N_DENSE))   # (0, 1] A, step 0.5 mA
+B_dense = TheoreticalSimulation.BvsI.(I_dense)                # T
+G_dense = TheoreticalSimulation.GvsI.(I_dense)                # T/m
+zqm_dense = zqm.(I_dense)                                     # QM model, mm (before calibration)
+
+export_path = joinpath(RUN_OUTDIR, "SG_fit_export.jld2")
+jldopen(export_path, "w") do f
+    f["meta/script"]     = @__FILE__
+    f["meta/run_stamp"]  = RUN_STAMP
+    f["meta/directories"] = String.(df_all.dir)
+    f["meta/units"] = "current A, field T, gradient T/m, positions/zinit/z0 mm, ki ×1e-6; " *
+                      "_error = stat (95 % t half-width), _sys = tail-choice systematic"
+    f["meta/model"] = "QM: (zinit + zqm(I))/scale;  CQD: (zinit + z_CQD(I, ki))/scale"
+
+    for r in eachrow(df_all)
+        d  = String(r.dir)
+        g  = "directories/" * d * "/"
+        dd = DIR_DATA[d]
+        # fit results
+        f[g * "ki"]               = r.ki
+        f[g * "ki_error"]         = r.ki_err
+        f[g * "ki_sys"]           = r.ki_sys
+        f[g * "cqd_scale"]        = r.scale_cqd
+        f[g * "cqd_scale_error"]  = r.scale_cqd_err
+        f[g * "cqd_scale_sys"]    = r.scale_cqd_sys
+        f[g * "cqd_zinit"]        = r.zinit_cqd
+        f[g * "cqd_zinit_error"]  = r.zinit_cqd_err
+        f[g * "cqd_zinit_sys"]    = r.zinit_cqd_sys
+        f[g * "qm_scale"]         = r.scale_qm
+        f[g * "qm_scale_error"]   = r.scale_qm_err
+        f[g * "qm_scale_sys"]     = r.scale_qm_sys
+        f[g * "qm_zinit"]         = r.zinit_qm
+        f[g * "qm_zinit_error"]   = r.zinit_qm_err
+        f[g * "qm_zinit_sys"]     = r.zinit_qm_sys
+        f[g * "z0"]               = r.z0_mm
+        f[g * "z0_error"]         = r.z0_err_mm
+        # measured points used in the fits (I ≥ I_THRESHOLD)
+        f[g * "current"]          = dd.I
+        f[g * "current_error"]    = dd.δI
+        f[g * "magnetic_field"]   = TheoreticalSimulation.BvsI.(dd.I)
+        # δB ≈ |B(I+δI) − B(I−δI)|/2, propagated from δI like the gradient error below
+        f[g * "magnetic_field_error"] = abs.(TheoreticalSimulation.BvsI.(dd.I .+ dd.δI) .-
+                                             TheoreticalSimulation.BvsI.(max.(dd.I .- dd.δI, 0.0))) ./ 2
+        f[g * "gradient"]         = TheoreticalSimulation.GvsI.(dd.I)
+        # δG ≈ |G(I+δI) − G(I−δI)|/2 (same as the gradient plot; G is not linear through 0)
+        f[g * "gradient_error"]   = abs.(TheoreticalSimulation.GvsI.(dd.I .+ dd.δI) .-
+                                         TheoreticalSimulation.GvsI.(max.(dd.I .- dd.δI, 0.0))) ./ 2
+        f[g * "zf1_position"]       = dd.z
+        f[g * "zf1_position_error"] = dd.δz
+        # calibrated model curves on the dense grid
+        for (m, z) in (("qm",  (r.zinit_qm  .+ zqm_dense) ./ r.scale_qm),
+                       ("cqd", (r.zinit_cqd .+ ki_itp.(I_dense, Ref(r.ki))) ./ r.scale_cqd))
+            f[g * m * "/current"]        = I_dense
+            f[g * m * "/magnetic_field"] = B_dense
+            f[g * m * "/gradient"]       = G_dense
+            f[g * m * "/zf1_position"]   = z
+        end
+    end
+
+    # global: medians over the directories (same as fig_summary_all_directories)
+    f["global/qm/qm_median_scale"]   = s_qm_med
+    f["global/qm/qm_median_zinit"]   = zi_qm_med
+    f["global/qm/current"]           = I_dense
+    f["global/qm/magnetic_field"]    = B_dense
+    f["global/qm/gradient"]          = G_dense
+    f["global/qm/zf1_position"]      = (zi_qm_med .+ zqm_dense) ./ s_qm_med
+    f["global/cqd/cqd_median_scale"] = s_cqd_med
+    f["global/cqd/cqd_median_zinit"] = zi_cqd_med
+    f["global/cqd/cqd_median_ki"]    = ki_med
+    f["global/cqd/current"]          = I_dense
+    f["global/cqd/magnetic_field"]   = B_dense
+    f["global/cqd/gradient"]         = G_dense
+    f["global/cqd/zf1_position"]     = (zi_cqd_med .+ ki_itp.(I_dense, Ref(ki_med))) ./ s_cqd_med
+end
+@info cstr("Export file written: ", :green) * cstr(export_path, :magenta)
+
 @info cstr("Combined results written to ", :green) * cstr(RUN_OUTDIR, :magenta) *
       cstr("   (elapsed $(Dates.canonicalize(round(Dates.now() - T_START, Dates.Second))))", :green)
 
