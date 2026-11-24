@@ -2915,12 +2915,29 @@ pretty_table(final_tbl;
     table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
     fit_table_in_display_horizontally = false,
     fit_table_in_display_vertically   = false)
+zb_um = 1e3 .* ZINIT_BOUNDS
+final_legend = """
+Uncertainties:  value ± stat ± sys
+  stat : statistical error of the final fit (tail I ≥ $(I_PLATEAU) A), from the `_with_error` fitters:
+         Student-t half-width at 95 % confidence = t-quantile(dof) × standard error, the
+         standard error coming from the covariance σ²(JᵀWJ)⁻¹ of the fit (finite-difference Jacobian).
+  sys  : tail-choice systematic = standard deviation of the parameter over the plateau of the
+         tail-convergence scan (all tails with I_min ≥ $(I_PLATEAU) A), i.e. how much the result
+         moves when the number of high-current points used in the fit is changed.
+  Weighted mean : Σwᵢvᵢ/Σwᵢ with wᵢ = 1/(statᵢ² + sysᵢ²); its error is 1/√Σwᵢ (single total ±).
+  Consistency   : χ² = Σwᵢ(vᵢ − mean)², dof = n − 1; χ²/dof ≫ 1 means the directories scatter
+                  more than their quoted errors.
+  z_init = $(@sprintf("%.2f", zb_um[1])) or $(@sprintf("%.2f", zb_um[2])) μm means the fit stopped at the edge of ZINIT_BOUNDS
+         (sys ≈ 0 then only says every tail hit the same bound, not that z_init is well determined).
+"""
+println(final_legend)
 open(joinpath(RUN_OUTDIR, "final_table.txt"), "w") do io
     pretty_table(io, final_tbl; title = final_title, column_labels = final_labels,
                  alignment = [:l, :c, :c, :c, :c, :c],
                  table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
                  fit_table_in_display_horizontally = false,
                  fit_table_in_display_vertically   = false)
+    println(io, final_legend)
 end
 
 # fig_all — kᵢ, calibration factors and z_init per directory (shared x)
@@ -2988,7 +3005,9 @@ fig = Figure(size = (1250, 900))
 ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
     title  = L"All directories — $n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$, $\sigma_{\mathrm{conv}} = %$(1e3*σW_FIXED)\,\mathrm{\mu m}$",
     xlabel = "Coil Current (A)", ylabel = L"$z_{\mathrm{max}}$ (mm)",
-    xticks = ([0.02, 0.05, 0.1, 0.2, 0.5, 1.0], ["0.02", "0.05", "0.1", "0.2", "0.5", "1"]),
+    xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
+    xminorticksvisible = true, yminorticksvisible = true,       # 2…9 × 10ⁿ (IntervalsBetween(9) from LOGX/LOGY)
+    xminorticksize = 4, yminorticksize = 4,
     yticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0, 10.0]),
     xlabelsize = 22, ylabelsize = 22, xticklabelsize = 17, yticklabelsize = 17, titlesize = 18)
 for (j, d) in enumerate(dirs_ok)
@@ -3002,7 +3021,7 @@ lines!(ax, I_sum[mk_qm_sum], m_qm_sum[mk_qm_sum]; color = :blue, linewidth = 2.5
     label = L"QM: $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_qm_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_qm_med, 4))$")
 lines!(ax, I_sum[mk_cqd_sum], m_cqd_sum[mk_cqd_sum]; color = :red, linewidth = 2.5,
     label = L"CQD: $\tilde{k}_{i} = %$(fmt(ki_med, 3))\times 10^{-6}$, $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_cqd_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_cqd_med, 4))$")
-xlims!(ax, 0.9 * I_THRESHOLD, 1.05)
+xlims!(ax, min(1e-2, 0.9 * I_THRESHOLD), 1.05)       # start at a decade so 10⁻² is labelled
 Legend(fig[1, 2], ax; labelsize = 13)                     # ~ : median over the directories
 save_fig(fig, joinpath(RUN_OUTDIR, "fig_summary_all_directories.$(FIG_EXT)"))
 
