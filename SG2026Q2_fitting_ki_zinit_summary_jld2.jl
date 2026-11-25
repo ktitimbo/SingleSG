@@ -129,8 +129,8 @@
 #      fig001  CQD family + QM + experiment (log–log)
 #      fig002_tail_convergence  kᵢ, s, z_init and R² vs calibration-tail length
 #      fig003  data + models, relative error, pulls, log residuals + histogram, both models
-#      fig004_single_SG_comparison(.png|.svg)      points vs current (2:1, publication)
-#      fig005_single_SG_comparison_vsg(.png|.svg)  points vs field gradient (2:1, publication)
+#      fig004_single_SG_comparison(.FIG_EXT|.svg) points vs current (2:1, publication)
+#      fig005_single_SG_comparison_vsg(.FIG_EXT|.svg) points vs field gradient (2:1, publication)
 #      (numbered in the order the figures are made and displayed)
 #    Tables (.csv)
 #      tail_convergence_cqd.csv   scan of (kᵢ, s_CQD, tail RMSE, R²) vs n_tail
@@ -232,6 +232,7 @@ const λ0_FIXED  = 0.01      # raw smoothing parameter (simulation)
 const λ0_SPLINE = 0.001     # spline smoothing parameter (bookkeeping only)
 # Experimental data
 const I_THRESHOLD  = 0.020  # (A) lowest current kept for all fits
+const SHOW_DIR_LABEL = true # true → directory code name in the lower-right corner of fig004 and fig005
 const δI_MODE = :frac       # :frac → δI = δI_FRAC·I | :phys → δI = ErrorCurrentsPhys from the file
 const δI_FRAC = 0.001       # δI placeholder used when δI_MODE = :frac
 # kᵢ-loss subset (counted in points; capped at the number of points of each directory)
@@ -279,7 +280,7 @@ const SHOW_FIGS = true      # display every figure (false: only save them — fa
 
 const RUN_STAMP  = Dates.format(T_START, "yyyymmddTHHMMSSsss");
 const RUN_OUTDIR = joinpath(@__DIR__, "data_studies",
-                            "FIT2026_ki_scale_zinit_dirs_nz$(NZ_EXP)_l$(@sprintf("%.3f", λ0_EXP))_" * RUN_STAMP);
+                            "FIT2026_per_round_fit_" * RUN_STAMP);
 isdir(RUN_OUTDIR) || mkpath(RUN_OUTDIR);
 @info "Created output directory" RUN_OUTDIR
 @info "Running on host" hostname = gethostname()
@@ -1254,7 +1255,7 @@ function compare_datasets(x_ref::AbstractVector, # current
     if plot_errors
         fig = Figure(size = (800, 500))
         ax  = Axis(fig[1, 1]; title = "Log Errors for CQD and QM",
-                   xlabel = "SG current(A)", ylabel = "Log Error")
+                   xlabel = "SG current (A)", ylabel = "Log Error")
         scatter!(ax, x_ref, R_B.log_err; markersize = 7, color = :red,
                  label = "log10(cqd) - log10(exp)")
         scatter!(ax, x_ref, R_C.log_err; markersize = 7, color = :blue,
@@ -1790,7 +1791,7 @@ fit_figs = Figure(size = (1200, 1400));
 ax_surf = Axis3(fit_figs[1, 1:2];
     title = "Fitting surface", titlesize = 18,
     xlabelsize = 22, ylabelsize = 22, zlabelsize = 22, xticklabelsize = 16, yticklabelsize = 16, zticklabelsize = 16,
-    xlabel = "SG current(A)", ylabel = L"$k_{i}\times 10^{-6}$", zlabel = L"Peak position $(\mathrm{mm})$",
+    xlabel = "SG current (A)", ylabel = L"$k_{i}\times 10^{-6}$", zlabel = L"Peak position $(\mathrm{mm})$",
     xticks = (log10.([1e-3, 1e-2, 1e-1, 1.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
     zticks = (log10.([1e-3, 1e-2, 1e-1, 1.0, 10.0]), [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}", L"10^{1}"]),
     azimuth = 1.30π, elevation = deg2rad(25),
@@ -1813,7 +1814,7 @@ logZc       = log10.(max.(abs.([itp_plot(x, log10(y)) for x in i_surface, y in k
 ax_cont = Axis(fit_figs[2, 1]; LOGX..., LOGY...,
     title = "Fitting contour", titlesize = 18,
     xlabelsize = 22, ylabelsize = 22, xticklabelsize = 17, yticklabelsize = 17,
-    xlabel = "SG current(A)", ylabel = L"$k_{i}\times 10^{-6}$",
+    xlabel = "SG current (A)", ylabel = L"$k_{i}\times 10^{-6}$",
     xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
     yticks = decade_ticks(10.0 .^ (floor(Int, log10(minimum(ki_cont))):round(Int, log10(KI_MAX_PLOT)))),
     xgridvisible = false, ygridvisible = false, xminorgridvisible = false, yminorgridvisible = false);
@@ -2052,7 +2053,7 @@ function analyze_directory(DATA_DIR::AbstractString)
     color_list = Makie.resample_cmap(:darkrainbow, n_ki);
     fig = Figure(size = (1350, 850));
     ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
-        xlabel = "SG current(A)", ylabel = L"Peak position $(\mathrm{mm})$",
+        xlabel = "SG current (A)", ylabel = L"Peak position $(\mathrm{mm})$",
         xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
         yticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]));
     for (i, ki) in enumerate(cqd_meta[:ki])
@@ -2311,8 +2312,11 @@ function analyze_directory(DATA_DIR::AbstractString)
     # -----------------------------------------------------------------------------
     lbl_qm  = L"Existing models ($s = %$(fmt(fit_qs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_qs.z_init, 3))\ \mathrm{\mu m}$)";
     lbl_cqd = L"Co-quantum dynamics ($k_{i}=%$(fmt(fit_cs.ki, 4)) \times10^{-6}$, $s = %$(fmt(fit_cs.scale, 4))$, $z_{\mathrm{init}} = %$(fmt(1e3*fit_cs.z_init, 3))\ \mathrm{\mu m}$)";
-    axis_kw = (LOGX...,
-        xticks = decade_ticks([1e-2, 1e-1, 1.0]), xlabel = "SG current(A)",
+    # current axis of fig003 and fig004: ticks labelled in mA, minor ticks at every 1…9 × 10ⁿ A
+    I_ticks_mA = (xticks = ([0.020, 0.040, 0.080, 0.100, 0.200, 0.400, 0.800, 1.000], ["20", "40", "80", "100", "200", "400", "800", "1000"]),
+                  xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]),
+                  xminorticksvisible = true, xminorgridvisible = true)
+    axis_kw = (LOGX..., I_ticks_mA..., xlabel = "SG current (mA)",
         xlabelsize = 18, ylabelsize = 16, xticklabelsize = 15, yticklabelsize = 15, titlesize = 16)
     # filled markers stroked in their own colour, connecting line semi-transparent
     sl_fill!(ax, x, y, c; marker = :circle, label = nothing) =
@@ -2385,7 +2389,7 @@ function analyze_directory(DATA_DIR::AbstractString)
     xerr_log!(ax_fit, I_d, z_d, δI_d)
     yerr_log!(ax_fit, I_d, z_d, σ_d)
     scatter!(ax_fit, I_d, logsafe(z_d); marker = :circle, markersize = 12, color = :transparent,
-        strokecolor = :black, strokewidth = 1.2, label = "Experimental data")
+        strokecolor = :black, strokewidth = 1.2, label = "Experimental data ($(DATA_DIR))")
     # full legend (formerly a separate overlay figure): every fitted parameter with its uncertainty,
     # calibration tail as the legend title, analysis settings as a text line
     lbl_qm_full  = L"Existing models: $s = %$(fmt(fit_qs.scale, 4)) \pm %$(fmt(fit_qs.scale_err, 1))$, $z_{\mathrm{init}} = (%$(fmt(1e3*fit_qs.z_init, 3)) \pm %$(fmt(1e3*fit_qs.z_init_err, 1)))\ \mathrm{\mu m}$"
@@ -2425,7 +2429,7 @@ function analyze_directory(DATA_DIR::AbstractString)
     vlines!(ax_hist, 0.0; color = :black, linestyle = :dash, linewidth = 1)
     panel_text!(ax_hist, L"NMAD: QM $%$(nmad_qm)$, CQD $%$(nmad_cqd)$"; pos = (0.98, 0.96), align = (:right, :top))
 
-    foreach(a -> xlims!(a, 0.010, 1.05), (ax_fit, ax_rel, ax_pull, ax_log))
+    foreach(a -> xlims!(a, 0.95 * I_THRESHOLD, 1.05 * 1.0), (ax_fit, ax_rel, ax_pull, ax_log))   # 0.95·I_THRESHOLD … 1.05 A
     rowsize!(fig.layout, 1, Relative(0.36)); rowgap!(fig.layout, 14)
     save_fig(fig, joinpath(OUTDIR, "fig003.$(FIG_EXT)"))
 
@@ -2491,12 +2495,18 @@ function analyze_directory(DATA_DIR::AbstractString)
                label = "Coquantum dynamics")
     end
 
+    # directory code name in the lower-right corner; switched on/off with SHOW_DIR_LABEL (or show = …)
+    dir_tag!(ax; show = SHOW_DIR_LABEL) =
+        show && text!(ax, 0.985, 0.03; text = DATA_DIR, space = :relative, align = (:right, :bottom), fontsize = 18,
+                      font = :bold, color = :gray40)
+
     fig = Figure(size = sg_size);
-    ax  = Axis(fig[1, 1]; sg_axis..., xlabel = "SG current(A)", xticks = log_ticks)
+    ax  = Axis(fig[1, 1]; sg_axis..., I_ticks_mA..., xlabel = "SG current (mA)")
     sg_series!(ax, I_sc, δI_sc, I_sg)
-    xlims!(ax, 18e-3, 1.05)
+    xlims!(ax, 0.95 * I_THRESHOLD, 1.05 * 1.0)   # 0.95·I_THRESHOLD … 1.05 A (same as fig003)
     axislegend(ax; position = :lt, labelsize = 16)
-    save_fig(fig, joinpath(OUTDIR, "fig004_single_SG_comparison.png"))
+    dir_tag!(ax)
+    save_fig(fig, joinpath(OUTDIR, "fig004_single_SG_comparison.$(FIG_EXT)"))
     save(joinpath(OUTDIR, "fig004_single_SG_comparison.svg"), fig)
 
     # -----------------------------------------------------------------------------
@@ -2508,7 +2518,8 @@ function analyze_directory(DATA_DIR::AbstractString)
     sg_series!(ax, G_sc, δG_sc, G_sg)
     xlims!(ax, 3, 400)
     axislegend(ax; position = :lt, labelsize = 16)
-    save_fig(fig, joinpath(OUTDIR, "fig005_single_SG_comparison_vsg.png"))
+    dir_tag!(ax)
+    save_fig(fig, joinpath(OUTDIR, "fig005_single_SG_comparison_vsg.$(FIG_EXT)"))
     save(joinpath(OUTDIR, "fig005_single_SG_comparison_vsg.svg"), fig)
 
     # -----------------------------------------------------------------------------
@@ -2941,10 +2952,17 @@ end
 
 # fig_all — kᵢ, calibration factors and z_init per directory (shared x)
 xs  = 1:nrow(df_all)
-fig = Figure(size = (1100, 1150))
+fig = Figure(size = (1450, 1150))
 Label(fig[0, 1], L"$n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$ | tail $I \geq %$(I_PLATEAU)$ A"; fontsize = 17, tellwidth = false)
 dir_ticks = (collect(xs), string.(df_all.dir))
 ax_kw_all = (xticks = dir_ticks, xminorgridvisible = false, xminorticksvisible = false)
+# plain (unweighted) mean and median over the directories: mean → dotted, median → dash-dot, series colour
+ki_mn,  ki_md  = mean(df_all.ki),        median(df_all.ki)
+scq_mn, scq_md = mean(df_all.scale_cqd), median(df_all.scale_cqd)
+sqm_mn, sqm_md = mean(df_all.scale_qm),  median(df_all.scale_qm)
+zcq_mn, zcq_md = mean(1e3 .* df_all.zinit_cqd), median(1e3 .* df_all.zinit_cqd)   # μm
+zqm_mn, zqm_md = mean(1e3 .* df_all.zinit_qm),  median(1e3 .* df_all.zinit_qm)    # μm
+leg_all = (halign = :left, valign = :center, tellheight = false, labelsize = 14, framevisible = false, backgroundcolor = :transparent, patchsize = (35, 10))   # legends in column 2, right of each panel
 
 p_kall = Axis(fig[1, 1]; ax_kw_all..., ylabel = L"$k_{i}\ \left(\times 10^{-6}\right)$")
 hspan!(p_kall, ki_wmean - ki_wmerr, ki_wmean + ki_wmerr; color = (:blue, 0.2))
@@ -2955,14 +2973,20 @@ errorbars!(p_kall, xs, df_all.ki, df_all.ki_err; color = :blue, linewidth = 2, w
 scatter!(p_kall, xs, df_all.ki; marker = :circle, markersize = 13, color = :white, strokecolor = :blue,
     strokewidth = 1, label = L"$k_{i}$ (stat $\oplus$ sys)")
 scatter!(p_kall, xs, df_all.ki; marker = :circle, markersize = 9, color = :blue, label = L"$k_{i}$ (stat)")
-axislegend(p_kall; position = :rt)
+hlines!(p_kall, ki_mn; color = :blue, linestyle = :dot,     linewidth = 1.5, label = L"mean $%$(fmt(ki_mn, 4))$")
+hlines!(p_kall, ki_md; color = :blue, linestyle = :dashdot, linewidth = 1.5, label = L"median $%$(fmt(ki_md, 4))$")
+Legend(fig[1, 2], p_kall; leg_all...)
 
 p_sall = Axis(fig[2, 1]; ax_kw_all..., ylabel = L"scale $s$")
 errorbars!(p_sall, xs, df_all.scale_cqd, df_all.scale_cqd_err; color = :red, whiskerwidth = 6)
 scatter!(p_sall, xs, df_all.scale_cqd; marker = :circle, markersize = 11, color = :red, label = L"$s_{\mathrm{CQD}}$")
 errorbars!(p_sall, xs, df_all.scale_qm, df_all.scale_qm_err; color = :purple, whiskerwidth = 6)
 scatter!(p_sall, xs, df_all.scale_qm; marker = :diamond, markersize = 11, color = :purple, label = L"$s_{\mathrm{QM}}$")
-axislegend(p_sall; position = :rt)
+hlines!(p_sall, scq_mn; color = :red,    linestyle = :dot,     linewidth = 1.5, label = L"mean $s_{\mathrm{CQD}} = %$(fmt(scq_mn, 4))$")
+hlines!(p_sall, scq_md; color = :red,    linestyle = :dashdot, linewidth = 1.5, label = L"median $s_{\mathrm{CQD}} = %$(fmt(scq_md, 4))$")
+hlines!(p_sall, sqm_mn; color = :purple, linestyle = :dot,     linewidth = 1.5, label = L"mean $s_{\mathrm{QM}} = %$(fmt(sqm_mn, 4))$")
+hlines!(p_sall, sqm_md; color = :purple, linestyle = :dashdot, linewidth = 1.5, label = L"median $s_{\mathrm{QM}} = %$(fmt(sqm_md, 4))$")
+Legend(fig[2, 2], p_sall; leg_all...)
 
 p_zall = Axis(fig[3, 1]; ax_kw_all..., ylabel = L"$z_{\mathrm{init}}$ ($\mathrm{\mu m}$)", xticklabelrotation = π / 4)
 hlines!(p_zall, 0.0; color = :black, linestyle = :dash, linewidth = 1)
@@ -2970,7 +2994,11 @@ errorbars!(p_zall, xs, 1e3 .* df_all.zinit_cqd, 1e3 .* df_all.zinit_cqd_err; col
 scatter!(p_zall, xs, 1e3 .* df_all.zinit_cqd; marker = :circle, markersize = 11, color = :red, label = L"$z_{\mathrm{init}}$ CQD")
 errorbars!(p_zall, xs, 1e3 .* df_all.zinit_qm, 1e3 .* df_all.zinit_qm_err; color = :purple, whiskerwidth = 6)
 scatter!(p_zall, xs, 1e3 .* df_all.zinit_qm; marker = :diamond, markersize = 11, color = :purple, label = L"$z_{\mathrm{init}}$ QM")
-axislegend(p_zall; position = :rt)
+hlines!(p_zall, zcq_mn; color = :red,    linestyle = :dot,     linewidth = 1.5, label = L"mean CQD $%$(fmt(zcq_mn, 3))\ \mathrm{\mu m}$")
+hlines!(p_zall, zcq_md; color = :red,    linestyle = :dashdot, linewidth = 1.5, label = L"median CQD $%$(fmt(zcq_md, 3))\ \mathrm{\mu m}$")
+hlines!(p_zall, zqm_mn; color = :purple, linestyle = :dot,     linewidth = 1.5, label = L"mean QM $%$(fmt(zqm_mn, 3))\ \mathrm{\mu m}$")
+hlines!(p_zall, zqm_md; color = :purple, linestyle = :dashdot, linewidth = 1.5, label = L"median QM $%$(fmt(zqm_md, 3))\ \mathrm{\mu m}$")
+Legend(fig[3, 2], p_zall; leg_all...)
 
 linkxaxes!(p_kall, p_sall, p_zall)
 xlims!(p_zall, 0.5, nrow(df_all) + 0.5)
@@ -3011,9 +3039,11 @@ function summary_all_directories_fig(I_lo)
     fig = Figure(size = (1700, 900))
     ax  = Axis(fig[1, 1]; LOGX..., LOGY...,
         # title  = L"All directories — $n_{z} = %$(NZ_EXP)$, $\lambda_{0} = %$(λ0_EXP)$, $\sigma_{\mathrm{conv}} = %$(1e3*σW_FIXED)\,\mathrm{\mu m}$",
-        xlabel = "SG current(A)", ylabel = L"Peak position $(\mathrm{mm})$",     # same labels as fig003, fig004 and every plot against current
-        xticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0]),
-        xminorticksvisible = true, yminorticksvisible = true,       # 2…9 × 10ⁿ (IntervalsBetween(9) from LOGX/LOGY)
+        xlabel = "SG current (A)", ylabel = L"Peak position $(\mathrm{mm})$",     # same labels as fig003, fig004 and every plot against current
+        # x range 0.95·I_THRESHOLD … 1.05 A holds less than two decades → explicit ticks (in A), minor ticks at 1…9 × 10ⁿ
+        xticks = ([0.020, 0.040, 0.080, 0.100, 0.200, 0.400, 0.800, 1.000], ["0.02", "0.04", "0.08", "0.1", "0.2", "0.4", "0.8", "1"]),
+        xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]), xminorgridvisible = true,
+        xminorticksvisible = true, yminorticksvisible = true,
         xminorticksize = 4, yminorticksize = 4,
         yticks = decade_ticks([1e-3, 1e-2, 1e-1, 1.0, 10.0]),
         xlabelsize = 22, ylabelsize = 22, xticklabelsize = 17, yticklabelsize = 17, titlesize = 18)
@@ -3029,14 +3059,14 @@ function summary_all_directories_fig(I_lo)
         label = L"Existing models: $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_qm_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_qm_med, 4))$")
     lines!(ax, I_sum[mk_cqd_sum], m_cqd_sum[mk_cqd_sum]; color = :red, linewidth = 2.5,
         label = L"Co-quantum dynamics: $\tilde{k}_{i} = %$(fmt(ki_med, 3))\times 10^{-6}$, $\tilde{z}_{\mathrm{init}} = %$(fmt(1e3*zi_cqd_med, 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(fmt(s_cqd_med, 4))$")
-    xlims!(ax, min(1e-2, 0.9 * I_THRESHOLD), 1.1)        # start at a decade so 10⁻² is labelled
+    xlims!(ax, 0.95 * I_THRESHOLD, 1.05 * 1.0)        # 0.95·I_THRESHOLD … 1.05 A (same as fig003, fig004)
     axislegend(ax; position = :lt, labelsize = fs_leg_dir,    # ~ : median over the directories
                backgroundcolor = :transparent, framevisible = false)
     return fig
 end
 save_fig(summary_all_directories_fig(I_THRESHOLD),
          joinpath(RUN_OUTDIR, "fig_summary_all_directories.$(FIG_EXT)"))
-save_fig(summary_all_directories_fig(0.9 * I_THRESHOLD),
+save_fig(summary_all_directories_fig(0.97 * I_THRESHOLD),
          joinpath(RUN_OUTDIR, "fig_summary_all_directories_ext.$(FIG_EXT)"))
 
 # combined archive (plain vectors; one entry per analysed directory)
@@ -3069,7 +3099,8 @@ end
 #                               measured points: current, field, gradient, zf1 position (+ errors)
 #   directories/<dir>/qm/       (z_init,QM + zqm(I))/s_QM on a dense current grid, with B and G
 #   directories/<dir>/cqd/      (z_init,CQD + ki_itp(I, kᵢ))/s_CQD on the same grid, with B and G
-#   global/qm/, global/cqd/     the same with the medians over the directories
+#   global/<stat>/qm/, global/<stat>/cqd/   parameters (ki, scale, zinit) and the same curves for
+#                               stat = median | wmean (weighted, + _error, _chi2, _dof) | mean (+ _error = std/√n, _std)
 # `_error` = statistical error of the final fit (Student-t half-width, 95 %);
 # `_sys`   = tail-choice systematic (spread over the plateau of the tail scan).
 # Model values are kept as computed: with z_init < 0 they can be ≤ 0 at the lowest currents.
@@ -3135,20 +3166,54 @@ jldopen(export_path, "w") do f
         end
     end
 
-    # global: medians over the directories (same as fig_summary_all_directories)
-    f["global/qm/qm_median_scale"]   = s_qm_med
-    f["global/qm/qm_median_zinit"]   = zi_qm_med
-    f["global/qm/current"]           = I_dense
-    f["global/qm/magnetic_field"]    = B_dense
-    f["global/qm/gradient"]          = G_dense
-    f["global/qm/zf1_position"]      = (zi_qm_med .+ zqm_dense) ./ s_qm_med
-    f["global/cqd/cqd_median_scale"] = s_cqd_med
-    f["global/cqd/cqd_median_zinit"] = zi_cqd_med
-    f["global/cqd/cqd_median_ki"]    = ki_med
-    f["global/cqd/current"]          = I_dense
-    f["global/cqd/magnetic_field"]   = B_dense
-    f["global/cqd/gradient"]         = G_dense
-    f["global/cqd/zf1_position"]     = (zi_cqd_med .+ ki_itp.(I_dense, Ref(ki_med))) ./ s_cqd_med
+    # global: three summaries of the per-directory parameters, each with its calibrated curves
+    #   global/median/  median over the directories (as fig_summary_all_directories)
+    #   global/wmean/   weighted mean, w = 1/(stat² + sys²); _error = 1/√Σw, plus chi2 and dof
+    #   global/mean/    arithmetic mean; _error = std/√n (standard error of the mean), _std = std
+    n_dir = nrow(df_all)
+    sem(v) = n_dir > 1 ? std(v) / sqrt(n_dir) : 0.0
+    sdv(v) = n_dir > 1 ? std(v) : 0.0
+    # z_init weighted means are in μm (nothing when FIT_ZINIT = false → plain mean, error 0)
+    wz(wm, v) = wm === nothing ? (mean = mean(v), err = 0.0, chi2 = NaN, dof = 0) :
+                                 (mean = wm.mean / 1e3, err = wm.err / 1e3, chi2 = wm.chi2, dof = wm.dof)
+    wz_cqd, wz_qm = wz(wm_zcq, df_all.zinit_cqd), wz(wm_zqm, df_all.zinit_qm)
+    stats = (
+        median = (ki = ki_med,           s_cqd = s_cqd_med,             z_cqd = zi_cqd_med,
+                  s_qm = s_qm_med,       z_qm = zi_qm_med),
+        wmean  = (ki = wm_ki.mean,       s_cqd = wm_scq.mean,           z_cqd = wz_cqd.mean,
+                  s_qm = wm_sqm.mean,    z_qm = wz_qm.mean),
+        mean   = (ki = mean(df_all.ki),  s_cqd = mean(df_all.scale_cqd), z_cqd = mean(df_all.zinit_cqd),
+                  s_qm = mean(df_all.scale_qm), z_qm = mean(df_all.zinit_qm)),
+    )
+    for (name, p) in pairs(stats)
+        g = "global/$(name)/"
+        f[g * "qm/scale"]           = p.s_qm
+        f[g * "qm/zinit"]           = p.z_qm
+        f[g * "qm/current"]         = I_dense
+        f[g * "qm/magnetic_field"]  = B_dense
+        f[g * "qm/gradient"]        = G_dense
+        f[g * "qm/zf1_position"]    = (p.z_qm .+ zqm_dense) ./ p.s_qm
+        f[g * "cqd/ki"]             = p.ki
+        f[g * "cqd/scale"]          = p.s_cqd
+        f[g * "cqd/zinit"]          = p.z_cqd
+        f[g * "cqd/current"]        = I_dense
+        f[g * "cqd/magnetic_field"] = B_dense
+        f[g * "cqd/gradient"]       = G_dense
+        f[g * "cqd/zf1_position"]   = (p.z_cqd .+ ki_itp.(I_dense, Ref(p.ki))) ./ p.s_cqd
+    end
+    # uncertainties of the weighted mean (1/√Σw) and its consistency χ²/dof
+    f["global/wmean/cqd/ki_error"]    = wm_ki.err;   f["global/wmean/cqd/ki_chi2"]    = wm_ki.chi2;   f["global/wmean/cqd/ki_dof"]    = wm_ki.dof
+    f["global/wmean/cqd/scale_error"] = wm_scq.err;  f["global/wmean/cqd/scale_chi2"] = wm_scq.chi2;  f["global/wmean/cqd/scale_dof"] = wm_scq.dof
+    f["global/wmean/cqd/zinit_error"] = wz_cqd.err;  f["global/wmean/cqd/zinit_chi2"] = wz_cqd.chi2;  f["global/wmean/cqd/zinit_dof"] = wz_cqd.dof
+    f["global/wmean/qm/scale_error"]  = wm_sqm.err;  f["global/wmean/qm/scale_chi2"]  = wm_sqm.chi2;  f["global/wmean/qm/scale_dof"]  = wm_sqm.dof
+    f["global/wmean/qm/zinit_error"]  = wz_qm.err;   f["global/wmean/qm/zinit_chi2"]  = wz_qm.chi2;   f["global/wmean/qm/zinit_dof"]  = wz_qm.dof
+    # spread of the arithmetic mean: standard error and standard deviation over the directories
+    for (k, v) in (("cqd/ki", df_all.ki), ("cqd/scale", df_all.scale_cqd), ("cqd/zinit", df_all.zinit_cqd),
+                   ("qm/scale", df_all.scale_qm), ("qm/zinit", df_all.zinit_qm))
+        f["global/mean/$(k)_error"] = sem(v)
+        f["global/mean/$(k)_std"]   = sdv(v)
+    end
+    f["global/n_directories"] = n_dir
 end
 @info cstr("Export file written: ", :green) * cstr(export_path, :magenta)
 
