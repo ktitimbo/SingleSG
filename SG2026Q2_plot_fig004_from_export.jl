@@ -4,16 +4,16 @@
 #
 # Units in the file: current A, field T, gradient T/m, positions mm, ki ×1e-6.
 # Figures are saved next to the export file:
-#   <run folder>/<dir>/fig004_from_export.png   (vs current)
-#   <run folder>/<dir>/fig005_from_export.png   (vs gradient)
-#   <run folder>/<dir>/fig006_from_export.png   (vs magnetic field)
+#   <run folder>/<dir>/fig004_from_export.<FIG_EXT>   (vs current)
+#   <run folder>/<dir>/fig005_from_export.<FIG_EXT>   (vs gradient)
+#   <run folder>/<dir>/fig006_from_export.<FIG_EXT>   (vs magnetic field)
 # and, for all directories together with the median-parameter CQD curve (vs current):
-#   <run folder>/fig_summary_all_directories_from_export.png          every point
-#   <run folder>/fig_summary_all_directories_dodge_from_export.png    every point, directories shifted sideways
-#   <run folder>/fig_summary_all_directories_mean_from_export.png     mean ± std per current
-#   <run folder>/fig_summary_all_directories_median_from_export.png   median ± NMAD per current
-#   <run folder>/fig_summary_all_directories_stacked_from_export.png  one 3:1 panel per directory, shared x
-#   <run folder>/fig_summary_all_directories_stacked_mean_from_export.png  the same + mean of the data in every panel
+#   <run folder>/fig_summary_all_directories_from_export.<FIG_EXT>          every point
+#   <run folder>/fig_summary_all_directories_dodge_from_export.<FIG_EXT>    every point, directories shifted sideways
+#   <run folder>/fig_summary_all_directories_mean_from_export.<FIG_EXT>     mean ± std per current
+#   <run folder>/fig_summary_all_directories_median_from_export.<FIG_EXT>   median ± NMAD per current
+#   <run folder>/fig_summary_all_directories_stacked_from_export.<FIG_EXT>  one 3:1 panel per directory, shared x
+#   <run folder>/fig_summary_all_directories_stacked_mean_from_export.<FIG_EXT>  the same + mean of the data in every panel
 
 using JLD2
 using CairoMakie
@@ -24,6 +24,7 @@ EXPORT_PATH = joinpath(@__DIR__, "data_studies",
                        "FIT2026_ki_scale_zinit_dirs_nz2_l0.010_20261124T132534290", "SG_fit_export.jld2")
 I_THRESHOLD = 0.020                 # (A) lowest current used in the fits
 I_LINE_LO   = 0.98 * I_THRESHOLD    # model curves start here
+FIG_EXT     = "png"               # extension of the saved figures: "png" | "pdf" | "svg"
 
 CairoMakie.activate!(type = "png", px_per_unit = 3)
 set_theme!(theme_latexfonts())
@@ -88,8 +89,8 @@ for d in directories
 
     outdir = joinpath(dirname(EXPORT_PATH), d)
     mkpath(outdir)
-    save(joinpath(outdir, "fig004_from_export.png"), fig)
-    println("saved ", joinpath(outdir, "fig004_from_export.png"))
+    save(joinpath(outdir, "fig004_from_export.$(FIG_EXT)"), fig)
+    println("saved ", joinpath(outdir, "fig004_from_export.$(FIG_EXT)"))
 end
 
 for d in directories
@@ -148,8 +149,8 @@ for d in directories
 
     outdir = joinpath(dirname(EXPORT_PATH), d)
     mkpath(outdir)
-    save(joinpath(outdir, "fig004_from_export.png"), fig)
-    println("saved ", joinpath(outdir, "fig004_from_export.png"))
+    save(joinpath(outdir, "fig004_from_export.$(FIG_EXT)"), fig)
+    println("saved ", joinpath(outdir, "fig004_from_export.$(FIG_EXT)"))
 end
 
 
@@ -204,8 +205,8 @@ for d in directories
 
     outdir = joinpath(dirname(EXPORT_PATH), d)
     mkpath(outdir)
-    save(joinpath(outdir, "fig005_from_export.png"), fig)
-    println("saved ", joinpath(outdir, "fig005_from_export.png"))
+    save(joinpath(outdir, "fig005_from_export.$(FIG_EXT)"), fig)
+    println("saved ", joinpath(outdir, "fig005_from_export.$(FIG_EXT)"))
 end
 
 ## ---- same plot vs the magnetic field (fig006) ------------------------------------
@@ -258,8 +259,8 @@ for d in directories
 
     outdir = joinpath(dirname(EXPORT_PATH), d)
     mkpath(outdir)
-    save(joinpath(outdir, "fig006_from_export.png"), fig)
-    println("saved ", joinpath(outdir, "fig006_from_export.png"))
+    save(joinpath(outdir, "fig006_from_export.$(FIG_EXT)"), fig)
+    println("saved ", joinpath(outdir, "fig006_from_export.$(FIG_EXT)"))
 end
 
 ## ---- summary: all directories + CQD with the median fit values (vs SG current) ----
@@ -269,11 +270,12 @@ colors_dir = [get(cgrad(:viridis), t) for t in range(0.0, 0.85; length = max(n_d
 shapes_dir = [:circle, :rect, :diamond, :utriangle, :dtriangle, :pentagon, :hexagon, :star5, :ltriangle, :rtriangle]
 
 # CQD curve with the medians over the directories
-I_med   = f["global/cqd/current"]
-z_med   = f["global/cqd/zf1_position"]
-ki_med  = f["global/cqd/cqd_median_ki"]
-s_med   = f["global/cqd/cqd_median_scale"]
-zi_med  = f["global/cqd/cqd_median_zinit"]          # mm
+# (global/median/ — also global/wmean/ and global/mean/ in exports written after 2026-11-25)
+I_med   = f["global/median/cqd/current"]
+z_med   = f["global/median/cqd/zf1_position"]
+ki_med  = f["global/median/cqd/ki"]
+s_med   = f["global/median/cqd/scale"]
+zi_med  = f["global/median/cqd/zinit"]          # mm
 keep_med = (I_med .>= I_LINE_LO) .& (z_med .> 0)
 
 fig = Figure(size = (1700, 900))
@@ -311,8 +313,8 @@ axislegend(ax; position = :lt, labelsize = 16,      # ~ : median over the direct
     patchsize = (45, 12))
 display(fig)
 
-save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_from_export.png"), fig)
-println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_from_export.png"))
+save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_from_export.$(FIG_EXT)"), fig)
+println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_from_export.$(FIG_EXT)"))
 
 ## ---- summary, version 1: same plot with each directory shifted slightly in current ----
 # On a log axis, multiplying the currents by a constant shifts the points sideways by the
@@ -350,8 +352,8 @@ axislegend(ax; position = :lt, labelsize = 16,
     patchsize = (45, 12))
 display(fig)
 
-save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_dodge_from_export.png"), fig)
-println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_dodge_from_export.png"))
+save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_dodge_from_export.$(FIG_EXT)"), fig)
+println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_dodge_from_export.$(FIG_EXT)"))
 
 ## ---- summary, versions 3a (mean ± std) and 3b (median ± NMAD) over the directories ----
 # The directories are measured at almost, but not exactly, the same currents, so the points
@@ -385,8 +387,8 @@ z_min    = [minimum(all_z[g]) for g in groups]
 z_max    = [maximum(all_z[g]) for g in groups]
 
 # one figure per statistic: (centre, spread, legend label, file name)
-for (z_c, z_s, lbl, fname) in ((z_mean,   z_std,  "mean ± std over $(n_dirs) directories",    "fig_summary_all_directories_mean_from_export.png"),
-                               (z_median, z_nmad, "median ± NMAD over $(n_dirs) directories", "fig_summary_all_directories_median_from_export.png"))
+for (z_c, z_s, lbl, fname) in ((z_mean,   z_std,  "mean ± std over $(n_dirs) directories",    "fig_summary_all_directories_mean_from_export.$(FIG_EXT)"),
+                               (z_median, z_nmad, "median ± NMAD over $(n_dirs) directories", "fig_summary_all_directories_median_from_export.$(FIG_EXT)"))
     local fig = Figure(size = (1700, 900))      # local: a global `fig` already exists
     local ax  = Axis(fig[1, 1];
         xscale = log10, yscale = log10,
@@ -466,8 +468,8 @@ rowgap!(fig.layout, 0)                              # panels touch: no space bet
 resize_to_layout!(fig)                              # figure size = panels + labels, no empty space
 display(fig)
 
-save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_from_export.png"), fig)
-println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_from_export.png"))
+save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_from_export.$(FIG_EXT)"), fig)
+println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_from_export.$(FIG_EXT)"))
 
 ## ---- summary, stacked version + mean of the data -----------------------------------
 # Same panels as above, and in every panel the mean over all directories at each current
@@ -521,8 +523,8 @@ rowgap!(fig.layout, 0)                              # panels touch: no space bet
 resize_to_layout!(fig)                              # figure size = panels + labels, no empty space
 display(fig)
 
-save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_mean_from_export.png"), fig)
-println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_mean_from_export.png"))
+save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_mean_from_export.$(FIG_EXT)"), fig)
+println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_mean_from_export.$(FIG_EXT)"))
 
 
 ##
