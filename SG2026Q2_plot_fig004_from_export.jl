@@ -1,35 +1,45 @@
-# Plot fig004 (F=1 peak position vs SG current), fig005 (vs magnetic-field gradient) and
-# fig006 (vs magnetic field), data + calibrated models, for every directory stored in an
-# SG_fit_export.jld2 file written by SG2026Q2_fitting_ki_zinit_summary_jld2.jl.
+# Plot the F=1 peak position vs SG current, vs magnetic-field gradient and vs magnetic
+# field, data + calibrated models, for every directory stored in an SG_fit_export.jld2
+# file written by SG2026Q2_fitting_ki_zinit_summary_jld2.jl, plus summary figures of all
+# directories together.
 #
 # Units in the file: current A, field T, gradient T/m, positions mm, ki ×1e-6.
-# Figures are saved next to the export file:
-#   <run folder>/<dir>/fig004_from_export.<FIG_EXT>   (vs current)
-#   <run folder>/<dir>/fig005_from_export.<FIG_EXT>   (vs gradient)
-#   <run folder>/<dir>/fig006_from_export.<FIG_EXT>   (vs magnetic field)
-# and, for all directories together with the median-parameter CQD curve (vs current):
-#   <run folder>/fig_summary_all_directories_from_export.<FIG_EXT>          every point
-#   <run folder>/fig_summary_all_directories_dodge_from_export.<FIG_EXT>    every point, directories shifted sideways
-#   <run folder>/fig_summary_all_directories_mean_from_export.<FIG_EXT>     mean ± std per current
-#   <run folder>/fig_summary_all_directories_median_from_export.<FIG_EXT>   median ± NMAD per current
-#   <run folder>/fig_summary_all_directories_stacked_from_export.<FIG_EXT>  one 3:1 panel per directory, shared x
-#   <run folder>/fig_summary_all_directories_stacked_mean_from_export.<FIG_EXT>  the same + mean of the data in every panel
+# Figures are saved next to the export file, once per format in FIG_EXTS (<ext> = png, pdf, svg):
+#   <run folder>/<dir>/<dir>_vsI.<ext>          vs current: data, existing models, CQD
+#   <run folder>/<dir>/<dir>_vsI_noCQD.<ext>    vs current: data and existing models only
+#   <run folder>/<dir>/<dir>_vsG.<ext>          vs field gradient
+#   <run folder>/<dir>/<dir>_vsB.<ext>          vs magnetic field
+#   <run folder>/summary_all.<ext>                 every point of every directory + CQD (median fit parameters)
+#   <run folder>/summary_points_mean.<ext>         mean ± std of the points per current
+#   <run folder>/summary_points_median.<ext>       median ± NMAD of the points per current
+#   <run folder>/summary_stacked_fitmedian.<ext>   one 3:1 panel per directory, CQD with the median fit parameters
+#   <run folder>/summary_stacked_fitmean.<ext>     the same, CQD with the mean fit parameters
 
 using JLD2
 using CairoMakie
-using Statistics          # mean, median, std for the summary versions 3a/3b
+using Statistics          # mean, median, std for the points mean / median summaries
 
 # ---- settings -------------------------------------------------------------------
-EXPORT_PATH = joinpath(@__DIR__, "data_studies",
-                       "FIT2026_ki_scale_zinit_dirs_nz2_l0.010_20261124T132534290", "SG_fit_export.jld2")
+# export of the most recent fitting run: data_studies/FIT2026_per_round_fit_<TIMESTAMP>/
+# (TIMESTAMP = yyyymmddTHHMMSSsss, fixed width, so the alphabetical maximum is the newest)
+RUN_PREFIX  = "FIT2026_per_round_fit_"
+run_folders = filter(d -> startswith(d, RUN_PREFIX) && isdir(joinpath(@__DIR__, "data_studies", d)),
+                     readdir(joinpath(@__DIR__, "data_studies")))
+isempty(run_folders) && error("No $(RUN_PREFIX)<TIMESTAMP> folder in data_studies")
+EXPORT_PATH = joinpath(@__DIR__, "data_studies", maximum(run_folders), "SG_fit_export.jld2")
+println("using ", EXPORT_PATH)
 I_THRESHOLD = 0.020                 # (A) lowest current used in the fits
 I_LINE_LO   = 0.98 * I_THRESHOLD    # model curves start here
-FIG_EXT     = "png"               # extension of the saved figures: "png" | "pdf" | "svg"
+FIG_EXTS    = ["png", "pdf", "svg"]   # every figure is saved once in each of these formats
+Z_LIMS      = (0.02, 2.5)         # (mm) y range of every peak-position axis, the same for every directory and figure
+SHOW_DIR_LABEL  = false            # true → directory code name (bold) in the bottom-right corner of every per-directory plot
+DIR_LABEL_COLOR = :gray65          # its colour (light gray; lower number = darker)
+DIR_LABEL_SIZE  = 18               # its font size
 
 CairoMakie.activate!(type = "png", px_per_unit = 3)
 set_theme!(theme_latexfonts())
 
-## ---- loop over the directories ---------------------------------------------------
+## ---- per directory: vs SG current (<dir>_vsI) --------------------------------------
 f = jldopen(EXPORT_PATH, "r")
 directories = f["meta/directories"]
 
@@ -38,9 +48,9 @@ for d in directories
 
     # measured points
     I  = f[g * "current"]
-    δI = f[g * "current_error"]
+    δI = f[g * "current_Err"]
     z  = f[g * "zf1_position"]
-    δz = f[g * "zf1_position_error"]
+    δz = f[g * "zf1_position_Err"]
 
     # calibrated model curves (dense grid); keep only I ≥ I_LINE_LO and z > 0 (log axes)
     I_qm  = f[g * "qm/current"];  z_qm  = f[g * "qm/zf1_position"]
@@ -48,22 +58,14 @@ for d in directories
     keep_qm  = (I_qm  .>= I_LINE_LO) .& (z_qm  .> 0)
     keep_cqd = (I_cqd .>= I_LINE_LO) .& (z_cqd .> 0)
 
-    ki = f[g * "ki"]
-
     fig = Figure(size = (1200, 600))
     ax  = Axis(fig[1, 1];
         xscale = log10, yscale = log10,
         xlabel = "SG current (mA)", ylabel = L"Peak position $(\mathrm{mm})$",
-        # xticks = ([0.020, 0.030, 0.050, 0.080, 0.100, 0.200, 0.300, 0.500, 0.800, 1.000], ["0.02", "0.03", "0.05", "0.08", "0.1", "0.2", "0.3", "0.5", "0.8", "1.0"]),
-        # xticks = ([0.020, 0.040, 0.080, 0.100, 0.200, 0.400, 0.800, 1.000], ["0.02", "0.04", "0.08", "0.1", "0.2", "0.4", "0.8", "1.0"]),
         xticks = ([0.020, 0.040, 0.080, 0.100, 0.200, 0.400, 0.800, 1.000], ["20", "40", "80", "100", "200", "400", "800", "1000"]),
         yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+        # x minor ticks at 1…9 × 10ⁿ (IntervalsBetween would split the custom major ticks unevenly)
         xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]),
-        # xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        # xticks = ([0.020, 0.030, 0.050, 0.080, 0.100, 0.200, 0.300, 0.500, 0.800, 1.000], ["0.020", "0.030",  "0.050", "0.080", "0.100", "0.200", "0.300", "0.500", "0.800", "1.000"]),
-        # yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        # x minor ticks at 2…9 × 10ⁿ (IntervalsBetween would split the custom major ticks unevenly)
-        # xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]),
         yminorticks = IntervalsBetween(9),
         xminorticksvisible = true, yminorticksvisible = true,
         xminorgridvisible = true, yminorgridvisible = true,              # minor grid lines
@@ -82,6 +84,9 @@ for d in directories
         label = "Coquantum dynamics")
 
     xlims!(ax, 19e-3, 1.05)
+    ylims!(ax, Z_LIMS...)              # fixed y range (mm): Z_LIMS in settings
+    SHOW_DIR_LABEL && text!(ax, 0.985, 0.03; text = d, space = :relative, align = (:right, :bottom),
+        font = :bold, color = DIR_LABEL_COLOR, fontsize = DIR_LABEL_SIZE)   # directory code name, bottom right
     axislegend(ax; position = :lt, labelsize = 16,
         framevisible = false, backgroundcolor = :transparent,
         patchsize = (45, 12))          # (width, height) of the legend symbols: longer line samples
@@ -89,41 +94,33 @@ for d in directories
 
     outdir = joinpath(dirname(EXPORT_PATH), d)
     mkpath(outdir)
-    save(joinpath(outdir, "fig004_from_export.$(FIG_EXT)"), fig)
-    println("saved ", joinpath(outdir, "fig004_from_export.$(FIG_EXT)"))
+    for ext in FIG_EXTS                 # png, pdf and svg (FIG_EXTS in settings)
+        save(joinpath(outdir, "$(d)_vsI.$(ext)"), fig)
+        println("saved ", joinpath(outdir, "$(d)_vsI.$(ext)"))
+    end
 end
 
+## ---- per directory: vs SG current without the CQD curve (<dir>_vsI_noCQD) ---------
 for d in directories
     g = "directories/" * d * "/"
 
     # measured points
     I  = f[g * "current"]
-    δI = f[g * "current_error"]
+    δI = f[g * "current_Err"]
     z  = f[g * "zf1_position"]
-    δz = f[g * "zf1_position_error"]
+    δz = f[g * "zf1_position_Err"]
 
-    # calibrated model curves (dense grid); keep only I ≥ I_LINE_LO and z > 0 (log axes)
+    # calibrated QM curve (dense grid); keep only I ≥ I_LINE_LO and z > 0 (log axes)
     I_qm  = f[g * "qm/current"];  z_qm  = f[g * "qm/zf1_position"]
-    I_cqd = f[g * "cqd/current"]; z_cqd = f[g * "cqd/zf1_position"]
     keep_qm  = (I_qm  .>= I_LINE_LO) .& (z_qm  .> 0)
-    keep_cqd = (I_cqd .>= I_LINE_LO) .& (z_cqd .> 0)
-
-    ki = f[g * "ki"]
 
     fig = Figure(size = (1200, 600))
     ax  = Axis(fig[1, 1];
         xscale = log10, yscale = log10,
         xlabel = "SG current (mA)", ylabel = L"Peak position $(\mathrm{mm})$",
-        # xticks = ([0.020, 0.030, 0.050, 0.080, 0.100, 0.200, 0.300, 0.500, 0.800, 1.000], ["0.02", "0.03", "0.05", "0.08", "0.1", "0.2", "0.3", "0.5", "0.8", "1.0"]),
-        # xticks = ([0.020, 0.040, 0.080, 0.100, 0.200, 0.400, 0.800, 1.000], ["0.02", "0.04", "0.08", "0.1", "0.2", "0.4", "0.8", "1.0"]),
         xticks = ([0.020, 0.040, 0.080, 0.100, 0.200, 0.400, 0.800, 1.000], ["20", "40", "80", "100", "200", "400", "800", "1000"]),
         yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
         xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]),
-        # xticks = ([1e-2, 1e-1, 1.0], [L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        # xticks = ([0.020, 0.030, 0.050, 0.080, 0.100, 0.200, 0.300, 0.500, 0.800, 1.000], ["0.020", "0.030",  "0.050", "0.080", "0.100", "0.200", "0.300", "0.500", "0.800", "1.000"]),
-        # yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        # x minor ticks at 2…9 × 10ⁿ (IntervalsBetween would split the custom major ticks unevenly)
-        # xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]),
         yminorticks = IntervalsBetween(9),
         xminorticksvisible = true, yminorticksvisible = true,
         xminorgridvisible = true, yminorgridvisible = true,              # minor grid lines
@@ -138,10 +135,11 @@ for d in directories
 
     lines!(ax, I_qm[keep_qm], z_qm[keep_qm]; color = :blue, linewidth = 1.75, linestyle = :dash,
         label = "Existing models")
-    # lines!(ax, I_cqd[keep_cqd], z_cqd[keep_cqd]; color = :red, linewidth = 2,
-    #     label = "Coquantum dynamics")
 
     xlims!(ax, 19e-3, 1.05)
+    ylims!(ax, Z_LIMS...)              # fixed y range (mm): Z_LIMS in settings
+    SHOW_DIR_LABEL && text!(ax, 0.985, 0.03; text = d, space = :relative, align = (:right, :bottom),
+        font = :bold, color = DIR_LABEL_COLOR, fontsize = DIR_LABEL_SIZE)   # directory code name, bottom right
     axislegend(ax; position = :lt, labelsize = 16,
         framevisible = false, backgroundcolor = :transparent,
         patchsize = (45, 12))          # (width, height) of the legend symbols: longer line samples
@@ -149,23 +147,22 @@ for d in directories
 
     outdir = joinpath(dirname(EXPORT_PATH), d)
     mkpath(outdir)
-    save(joinpath(outdir, "fig004_from_export.$(FIG_EXT)"), fig)
-    println("saved ", joinpath(outdir, "fig004_from_export.$(FIG_EXT)"))
+    for ext in FIG_EXTS                 # png, pdf and svg (FIG_EXTS in settings)
+        save(joinpath(outdir, "$(d)_vsI_noCQD.$(ext)"), fig)
+        println("saved ", joinpath(outdir, "$(d)_vsI_noCQD.$(ext)"))
+    end
 end
 
-
-
-## ---- same plot vs the magnetic-field gradient (fig005) ---------------------------
+## ---- per directory: vs magnetic-field gradient (<dir>_vsG) ---------------------------
 for d in directories
     g = "directories/" * d * "/"
 
     # measured points
     G  = f[g * "gradient"]
     # gradient error: written by newer runs; older export files have none (no x error bars then)
-    δG = haskey(f, g * "gradient_error") ? f[g * "gradient_error"] : zeros(length(G))
-    I  = f[g * "current"]
+    δG = haskey(f, g * "gradient_Err") ? f[g * "gradient_Err"] : zeros(length(G))
     z  = f[g * "zf1_position"]
-    δz = f[g * "zf1_position_error"]
+    δz = f[g * "zf1_position_Err"]
 
     # calibrated model curves on the same grid as the current plot, converted to gradient
     I_qm  = f[g * "qm/current"];  G_qm  = f[g * "qm/gradient"];  z_qm  = f[g * "qm/zf1_position"]
@@ -178,9 +175,9 @@ for d in directories
         xscale = log10, yscale = log10,
         xlabel = "Magnetic field gradient (T/m)", ylabel = L"Peak position $(\mathrm{mm})$",
         xticks = ([4, 5, 10, 20, 50, 100, 200, 300], ["4", "5", "10", "20", "50", "100", "200", "300"]),
-        # xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]),
         yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        xminorticks = IntervalsBetween(9), yminorticks = IntervalsBetween(9),
+        xminorticks = vcat((1:9) .* 1e-1, (1:9) .* 1e0, (1:9) .* 1e1, (1:9) .* 1e2,  [1.0]),
+        yminorticks = IntervalsBetween(9),
         xminorticksvisible = true, yminorticksvisible = true,
         xminorgridvisible = true, yminorgridvisible = true,              # minor grid lines
         xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05),   # lighter than the major grid
@@ -198,6 +195,9 @@ for d in directories
         label = "Coquantum dynamics")
 
     xlims!(ax, 4, 300)
+    ylims!(ax, Z_LIMS...)              # fixed y range (mm): Z_LIMS in settings
+    SHOW_DIR_LABEL && text!(ax, 0.985, 0.03; text = d, space = :relative, align = (:right, :bottom),
+        font = :bold, color = DIR_LABEL_COLOR, fontsize = DIR_LABEL_SIZE)   # directory code name, bottom right
     axislegend(ax; position = :lt, labelsize = 16,
         framevisible = false, backgroundcolor = :transparent,
         patchsize = (45, 12))          # (width, height) of the legend symbols: longer line samples
@@ -205,20 +205,22 @@ for d in directories
 
     outdir = joinpath(dirname(EXPORT_PATH), d)
     mkpath(outdir)
-    save(joinpath(outdir, "fig005_from_export.$(FIG_EXT)"), fig)
-    println("saved ", joinpath(outdir, "fig005_from_export.$(FIG_EXT)"))
+    for ext in FIG_EXTS                 # png, pdf and svg (FIG_EXTS in settings)
+        save(joinpath(outdir, "$(d)_vsG.$(ext)"), fig)
+        println("saved ", joinpath(outdir, "$(d)_vsG.$(ext)"))
+    end
 end
 
-## ---- same plot vs the magnetic field (fig006) ------------------------------------
+## ---- per directory: vs magnetic field (<dir>_vsB) ------------------------------------
 for d in directories
     g = "directories/" * d * "/"
 
     # measured points
     B  = f[g * "magnetic_field"]
     # field error: written by newer runs; older export files have none (no x error bars then)
-    δB = haskey(f, g * "magnetic_field_error") ? f[g * "magnetic_field_error"] : zeros(length(B))
+    δB = haskey(f, g * "magnetic_field_Err") ? f[g * "magnetic_field_Err"] : zeros(length(B))
     z  = f[g * "zf1_position"]
-    δz = f[g * "zf1_position_error"]
+    δz = f[g * "zf1_position_Err"]
 
     # calibrated model curves on the same grid as the current plot, converted to field
     I_qm  = f[g * "qm/current"];  B_qm  = f[g * "qm/magnetic_field"];  z_qm  = f[g * "qm/zf1_position"]
@@ -251,7 +253,10 @@ for d in directories
     lines!(ax, B_cqd[keep_cqd], z_cqd[keep_cqd]; color = :red, linewidth = 2,
         label = "Coquantum dynamics")
 
-    xlims!(ax, 0.011, 0.8)          # (lower, upper) in T
+    xlims!(ax, 0.01, 0.8)          # (lower, upper) in T
+    ylims!(ax, Z_LIMS...)              # fixed y range (mm): Z_LIMS in settings
+    SHOW_DIR_LABEL && text!(ax, 0.985, 0.03; text = d, space = :relative, align = (:right, :bottom),
+        font = :bold, color = DIR_LABEL_COLOR, fontsize = DIR_LABEL_SIZE)   # directory code name, bottom right
     axislegend(ax; position = :lt, labelsize = 16,
         framevisible = false, backgroundcolor = :transparent,
         patchsize = (45, 12))          # (width, height) of the legend symbols: longer line samples
@@ -259,23 +264,21 @@ for d in directories
 
     outdir = joinpath(dirname(EXPORT_PATH), d)
     mkpath(outdir)
-    save(joinpath(outdir, "fig006_from_export.$(FIG_EXT)"), fig)
-    println("saved ", joinpath(outdir, "fig006_from_export.$(FIG_EXT)"))
+    for ext in FIG_EXTS                 # png, pdf and svg (FIG_EXTS in settings)
+        save(joinpath(outdir, "$(d)_vsB.$(ext)"), fig)
+        println("saved ", joinpath(outdir, "$(d)_vsB.$(ext)"))
+    end
 end
 
-## ---- summary: all directories + CQD with the median fit values (vs SG current) ----
+## ---- summary_all: all directories + CQD with the median fit values (vs SG current) ----
 # one colour (viridis, without its pale-yellow end) and one marker shape per directory
 n_dirs     = length(directories)
 colors_dir = [get(cgrad(:viridis), t) for t in range(0.0, 0.85; length = max(n_dirs, 2))]
 shapes_dir = [:circle, :rect, :diamond, :utriangle, :dtriangle, :pentagon, :hexagon, :star5, :ltriangle, :rtriangle]
 
-# CQD curve with the medians over the directories
-# (global/median/ — also global/wmean/ and global/mean/ in exports written after 2026-11-25)
+# CQD curve with the medians of the fit parameters over the directories (global/median/cqd)
 I_med   = f["global/median/cqd/current"]
 z_med   = f["global/median/cqd/zf1_position"]
-ki_med  = f["global/median/cqd/ki"]
-s_med   = f["global/median/cqd/scale"]
-zi_med  = f["global/median/cqd/zinit"]          # mm
 keep_med = (I_med .>= I_LINE_LO) .& (z_med .> 0)
 
 fig = Figure(size = (1700, 900))
@@ -295,67 +298,28 @@ for (j, d) in enumerate(directories)
     g  = "directories/" * d * "/"
     I  = f[g * "current"]
     z  = f[g * "zf1_position"]
-    δz = f[g * "zf1_position_error"]
+    δz = f[g * "zf1_position_Err"]
     errorbars!(ax, I, z, min.(δz, 0.999 .* z), δz; color = (colors_dir[j], 0.8), whiskerwidth = 5, linewidth = 1)
     # open markers: transparent fill, the directory is told apart by stroke colour and shape
     scatter!(ax, I, z; marker = shapes_dir[mod1(j, length(shapes_dir))], markersize = 14,
         color = :transparent, strokecolor = colors_dir[j], strokewidth = 1.5, label = d)
 end
 
-lines!(ax, I_med[keep_med], z_med[keep_med]; color = :red, linewidth = 2.5,
-    # label = L"Coquantum dynamics: $\tilde{k}_{i} = %$(round(ki_med, sigdigits = 3))\times 10^{-6}$, $\tilde{z}_{\mathrm{init}} = %$(round(1e3 * zi_med, sigdigits = 3))\ \mathrm{\mu m}$, $\tilde{s} = %$(round(s_med, sigdigits = 4))$",
-    label = "Coquantum dynamics",
-    )
-
-xlims!(ax, 18e-3, 1.1)
-axislegend(ax; position = :lt, labelsize = 16,      # ~ : median over the directories
-    framevisible = false, backgroundcolor = :transparent,
-    patchsize = (45, 12))
-display(fig)
-
-save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_from_export.$(FIG_EXT)"), fig)
-println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_from_export.$(FIG_EXT)"))
-
-## ---- summary, version 1: same plot with each directory shifted slightly in current ----
-# On a log axis, multiplying the currents by a constant shifts the points sideways by the
-# same amount everywhere, so the directories sit next to each other instead of on top.
-DODGE_STEP = 0.018                  # relative shift between neighbouring directories (1.8 %)
-
-fig = Figure(size = (1700, 900))
-ax  = Axis(fig[1, 1];
-    xscale = log10, yscale = log10,
-    xlabel = "SG current(A)", ylabel = L"Peak position $(\mathrm{mm})$",
-    xticks = ([0.020, 0.030, 0.050, 0.080, 0.100, 0.200, 0.300, 0.500, 0.800, 1.000], ["0.020", "0.030", "0.050", "0.080", "0.100", "0.200", "0.300", "0.500", "0.800", "1.000"]),
-    yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-    xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]),
-    yminorticks = IntervalsBetween(9),
-    xminorticksvisible = true, yminorticksvisible = true,
-    xminorgridvisible = true, yminorgridvisible = true,
-    xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05),
-    xlabelsize = 22, ylabelsize = 22, xticklabelsize = 17, yticklabelsize = 17)
-
-for (j, d) in enumerate(directories)
-    g  = "directories/" * d * "/"
-    I  = f[g * "current"] .* (1 + DODGE_STEP * (j - (n_dirs + 1) / 2))     # shifted current
-    z  = f[g * "zf1_position"]
-    δz = f[g * "zf1_position_error"]
-    errorbars!(ax, I, z, min.(δz, 0.999 .* z), δz; color = (colors_dir[j], 0.8), whiskerwidth = 5, linewidth = 1)
-    scatter!(ax, I, z; marker = shapes_dir[mod1(j, length(shapes_dir))], markersize = 14,
-        color = :transparent, strokecolor = colors_dir[j], strokewidth = 1.5, label = d)
-end
-
 lines!(ax, I_med[keep_med], z_med[keep_med]; color = :red, linewidth = 2.5, label = "Coquantum dynamics")
 
-xlims!(ax, 18e-3, 1.1)
+xlims!(ax, 0.95*I_THRESHOLD, 1.05 * 1.0)
+ylims!(ax, Z_LIMS...)                  # fixed y range (mm): Z_LIMS in settings
 axislegend(ax; position = :lt, labelsize = 16,
     framevisible = false, backgroundcolor = :transparent,
     patchsize = (45, 12))
 display(fig)
 
-save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_dodge_from_export.$(FIG_EXT)"), fig)
-println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_dodge_from_export.$(FIG_EXT)"))
+for ext in FIG_EXTS                 # png, pdf and svg (FIG_EXTS in settings)
+    save(joinpath(dirname(EXPORT_PATH), "summary_all.$(ext)"), fig)
+    println("saved ", joinpath(dirname(EXPORT_PATH), "summary_all.$(ext)"))
+end
 
-## ---- summary, versions 3a (mean ± std) and 3b (median ± NMAD) over the directories ----
+## ---- summary_points_mean (mean ± std) and summary_points_median (median ± NMAD) of the points ----
 # The directories are measured at almost, but not exactly, the same currents, so the points
 # of all directories are sorted by current and grouped: a new group starts when the current
 # is more than GROUP_TOL above the first current of the current group.
@@ -387,8 +351,8 @@ z_min    = [minimum(all_z[g]) for g in groups]
 z_max    = [maximum(all_z[g]) for g in groups]
 
 # one figure per statistic: (centre, spread, legend label, file name)
-for (z_c, z_s, lbl, fname) in ((z_mean,   z_std,  "mean ± std over $(n_dirs) directories",    "fig_summary_all_directories_mean_from_export.$(FIG_EXT)"),
-                               (z_median, z_nmad, "median ± NMAD over $(n_dirs) directories", "fig_summary_all_directories_median_from_export.$(FIG_EXT)"))
+for (z_c, z_s, lbl, fname) in ((z_mean,   z_std,  "mean ± std over $(n_dirs) directories",    "summary_points_mean"),
+                               (z_median, z_nmad, "median ± NMAD over $(n_dirs) directories", "summary_points_median"))
     local fig = Figure(size = (1700, 900))      # local: a global `fig` already exists
     local ax  = Axis(fig[1, 1];
         xscale = log10, yscale = log10,
@@ -409,123 +373,83 @@ for (z_c, z_s, lbl, fname) in ((z_mean,   z_std,  "mean ± std over $(n_dirs) di
     lines!(ax, I_med[keep_med], z_med[keep_med]; color = :red, linewidth = 2.5, label = "Coquantum dynamics")
 
     xlims!(ax, 18e-3, 1.1)
+    ylims!(ax, Z_LIMS...)              # fixed y range (mm): Z_LIMS in settings
     axislegend(ax; position = :lt, labelsize = 16,
         framevisible = false, backgroundcolor = :transparent,
         patchsize = (45, 12))
     display(fig)
 
-    save(joinpath(dirname(EXPORT_PATH), fname), fig)
-    println("saved ", joinpath(dirname(EXPORT_PATH), fname))
+    for ext in FIG_EXTS                 # png, pdf and svg (FIG_EXTS in settings)
+        save(joinpath(dirname(EXPORT_PATH), fname * ".$(ext)"), fig)
+        println("saved ", joinpath(dirname(EXPORT_PATH), fname * ".$(ext)"))
+    end
 end
 
-## ---- summary, stacked version: one panel per directory in a single column ----------
+## ---- summary_stacked_fitmedian / _fitmean: one panel per directory in a single column ----
 # Shared current axis (tick labels only on the bottom panel), same y range in every
-# panel, each panel 3:1 (width:height); the median-parameter CQD curve in every panel.
+# panel, each panel 3:1 (width:height). Two figures, made by the same loop:
+#   summary_stacked_fitmedian   CQD curve with the MEDIAN fit parameters (global/median/cqd)
+#   summary_stacked_fitmean     CQD curve with the MEAN   fit parameters (global/mean/cqd)
+# In both: the data of every directory as black open circles, the global CQD curve in
+# solid blue, and the directory's own CQD fit (its kᵢ, z_init, scale) in dotted red.
 PANEL_W = 1050                      # panel width (px); height = PANEL_W/3
-fig = Figure(size = (1500, 420 * n_dirs))           # trimmed to the panels by resize_to_layout! below
-axs = Axis[]
-for (j, d) in enumerate(directories)
-    g  = "directories/" * d * "/"
-    I  = f[g * "current"]
-    z  = f[g * "zf1_position"]
-    δz = f[g * "zf1_position_error"]
+for (stat, fname) in (("median", "summary_stacked_fitmedian"),
+                      ("mean",   "summary_stacked_fitmean"))
+    # CQD curve with the median or mean fit parameters over the directories
+    I_glob    = f["global/$(stat)/cqd/current"]
+    z_glob    = f["global/$(stat)/cqd/zf1_position"]
+    keep_glob = (I_glob .>= I_LINE_LO) .& (z_glob .> 0)
 
-    local ax = Axis(fig[j, 1];                      # local: a global `ax` already exists
-        width = PANEL_W, height = PANEL_W / 3,      # panel width : height = 3 : 1
-        xscale = log10, yscale = log10,
-        xlabel = j == n_dirs ? "SG current (mA)" : "",
-        xticks = ([0.020, 0.040, 0.080, 0.100, 0.200, 0.400, 0.800, 1.000], ["20", "40", "80", "100", "200", "400", "800", "1000"]),
-        yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]),
-        yminorticks = IntervalsBetween(9),
-        xminorticksvisible = true, yminorticksvisible = true,
-        xminorgridvisible = true, yminorgridvisible = true,
-        xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05),
-        xlabelsize = 22, xticklabelsize = 17, yticklabelsize = 17)
-
-    errorbars!(ax, I, z, min.(δz, 0.999 .* z), δz; color = (colors_dir[j], 0.8), whiskerwidth = 5, linewidth = 1)
-    scatter!(ax, I, z; marker = shapes_dir[mod1(j, length(shapes_dir))], markersize = 14,
-        color = :transparent, strokecolor = colors_dir[j], strokewidth = 1.5, label = d)
-    lines!(ax, I_med[keep_med], z_med[keep_med]; color = :blue, linewidth = 2.5, label = "Coquantum dynamics", linestyle=:solid)
-    # this directory's own CQD fit (its kᵢ, z_init and scale), dashed vermillion
-    I_dir = f[g * "cqd/current"]
-    z_dir = f[g * "cqd/zf1_position"]
-    keep_dir = (I_dir .>= I_LINE_LO) .& (z_dir .> 0)
-    lines!(ax, I_dir[keep_dir], z_dir[keep_dir]; color = colorant"#D55E00", linewidth = 3, linestyle = :dash)
-    push!(axs, ax)
+    local fig = Figure(size = (1500, 420 * n_dirs))     # trimmed to the panels by resize_to_layout! below
+    local axs = Axis[]
+    for (j, d) in enumerate(directories)
+        g  = "directories/" * d * "/"
+        I  = f[g * "current"]
+        z  = f[g * "zf1_position"]
+        δz = f[g * "zf1_position_Err"]
+        local ax = Axis(fig[j, 1];                  # local: a global `ax` already exists
+            width = PANEL_W, height = PANEL_W / 3,      # panel width : height = 3 : 1
+            xscale = log10, yscale = log10,
+            xlabel = j == n_dirs ? "SG current (mA)" : "",
+            xticks = ([0.020, 0.040, 0.080, 0.100, 0.200, 0.400, 0.800, 1.000], ["20", "40", "80", "100", "200", "400", "800", "1000"]),
+            yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
+            xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]),
+            yminorticks = IntervalsBetween(9),
+            xminorticksvisible = true, yminorticksvisible = true,
+            xminorgridvisible = true, yminorgridvisible = true,
+            xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05),
+            xtickalign = 1, xminortickalign = 1,        # x ticks point inside: no room left for them between the panels
+            xlabelsize = 22, xticklabelsize = 17, yticklabelsize = 17)
+        # data: black open circles (the same in every panel)
+        errorbars!(ax, I, z, min.(δz, 0.999 .* z), δz; color = :black, whiskerwidth = 5, linewidth = 1)
+        scatter!(ax, I, z; marker = :circle, markersize = 14,
+            color = :transparent, strokecolor = :black, strokewidth = 1.5)
+        # CQD with the median / mean fit parameters: solid blue
+        lines!(ax, I_glob[keep_glob], z_glob[keep_glob]; color = :dodgerblue, linewidth = 2.5)
+        # this directory's own CQD fit, as reference: dotted red
+        I_dir = f[g * "cqd/current"]
+        z_dir = f[g * "cqd/zf1_position"]
+        keep_dir = (I_dir .>= I_LINE_LO) .& (z_dir .> 0)
+        lines!(ax, I_dir[keep_dir], z_dir[keep_dir]; color = :red, linewidth = 4, linestyle = :dot)
+        SHOW_DIR_LABEL && text!(ax, 0.985, 0.03; text = d, space = :relative, align = (:right, :bottom),
+            font = :bold, color = DIR_LABEL_COLOR, fontsize = DIR_LABEL_SIZE)   # directory code name, bottom right
+        push!(axs, ax)
+    end
+    linkaxes!(axs...)                                   # same x and y range in every panel
+    for a in axs[1:end-1]                               # x tick labels only on the bottom panel
+        hidexdecorations!(a; grid = false, minorgrid = false, ticks = false, minorticks = false)
+    end
+    xlims!(axs[end], 18e-3, 1.1)
+    ylims!(axs[end], Z_LIMS...)                         # fixed y range (mm): Z_LIMS in settings (linked: every panel)
+    Label(fig[1:n_dirs, 0], L"Peak position $(\mathrm{mm})$"; rotation = π / 2, fontsize = 22)   # one y label for all panels
+    rowgap!(fig.layout, 0)                              # panels touch: no space between them
+    resize_to_layout!(fig)                              # figure size = panels + labels, no empty space
+    display(fig)
+    for ext in FIG_EXTS                 # png, pdf and svg (FIG_EXTS in settings)
+        save(joinpath(dirname(EXPORT_PATH), fname * ".$(ext)"), fig)
+        println("saved ", joinpath(dirname(EXPORT_PATH), fname * ".$(ext)"))
+    end
 end
-
-linkaxes!(axs...)                                   # same x and y range in every panel
-for ax in axs[1:end-1]                              # x tick labels only on the bottom panel
-    hidexdecorations!(ax; grid = false, minorgrid = false, ticks = false, minorticks = false)
-end
-xlims!(axs[end], 18e-3, 1.1)
-# y range just around the data of all directories (less empty space in each panel)
-z_all = reduce(vcat, [f["directories/" * d * "/zf1_position"] for d in directories])
-ylims!(axs[end], 0.8 * minimum(z_all), 1.25 * maximum(z_all))
-Label(fig[1:n_dirs, 0], L"Peak position $(\mathrm{mm})$"; rotation = π / 2, fontsize = 22)   # one y label for all panels
-rowgap!(fig.layout, 0)                              # panels touch: no space between them
-resize_to_layout!(fig)                              # figure size = panels + labels, no empty space
-display(fig)
-
-save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_from_export.$(FIG_EXT)"), fig)
-println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_from_export.$(FIG_EXT)"))
-
-## ---- summary, stacked version + mean of the data -----------------------------------
-# Same panels as above, and in every panel the mean over all directories at each current
-# (I_grp, z_mean from versions 3a/3b) as black crosses, so each directory can be compared
-# with the average of the runs.
-fig = Figure(size = (1500, 420 * n_dirs))           # trimmed to the panels by resize_to_layout! below
-axs = Axis[]
-for (j, d) in enumerate(directories)
-    g  = "directories/" * d * "/"
-    I  = f[g * "current"]
-    z  = f[g * "zf1_position"]
-    δz = f[g * "zf1_position_error"]
-
-    local ax = Axis(fig[j, 1];                      # local: a global `ax` already exists
-        width = PANEL_W, height = PANEL_W / 3,      # panel width : height = 3 : 1
-        xscale = log10, yscale = log10,
-        xlabel = j == n_dirs ? "SG current (mA)" : "",
-        xticks = ([0.020, 0.040, 0.080, 0.100, 0.200, 0.400, 0.800, 1.000], ["20", "40", "80", "100", "200", "400", "800", "1000"]),
-        yticks = ([1e-3, 1e-2, 1e-1, 1.0], [L"10^{-3}", L"10^{-2}", L"10^{-1}", L"10^{0}"]),
-        xminorticks = vcat((1:9) .* 1e-3, (1:9) .* 1e-2, (1:9) .* 1e-1, [1.0]),
-        yminorticks = IntervalsBetween(9),
-        xminorticksvisible = true, yminorticksvisible = true,
-        xminorgridvisible = true, yminorgridvisible = true,
-        xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05),
-        xlabelsize = 22, xticklabelsize = 17, yticklabelsize = 17)
-
-    errorbars!(ax, I, z, min.(δz, 0.999 .* z), δz; color = (colors_dir[j], 0.8), whiskerwidth = 5, linewidth = 1)
-    # raw data: open circles in every panel (only the colour changes per directory)
-    scatter!(ax, I, z; marker = :circle, markersize = 18,
-        color = :transparent, strokecolor = :black, strokewidth = 2.5, label = d)
-    # lines!(ax, I_med[keep_med], z_med[keep_med]; color = :red, linewidth = 2.5, label = "Coquantum dynamics", linestyle=:solid)
-    # this directory's own CQD fit (its kᵢ, z_init and scale), dashed vermillion
-    I_dir = f[g * "cqd/current"]
-    z_dir = f[g * "cqd/zf1_position"]
-    keep_dir = (I_dir .>= I_LINE_LO) .& (z_dir .> 0)
-    lines!(ax, I_dir[keep_dir], z_dir[keep_dir]; color = :blue, linewidth = 3, linestyle = :solid)
-    lines!(ax, I_med[keep_med], z_med[keep_med]; color = :red, linewidth = 5.5, label = "Coquantum dynamics", linestyle=:dot)
-    # mean of the data over all directories at each current
-    # scatter!(ax, I_grp, z_mean; marker = :hline, markersize = 22, color = :red, label = "mean over the directories")   # :hline = horizontal bar ("−"); markersize = bar length
-    push!(axs, ax)
-end
-
-linkaxes!(axs...)                                   # same x and y range in every panel
-for ax in axs[1:end-1]                              # x tick labels only on the bottom panel
-    hidexdecorations!(ax; grid = false, minorgrid = false, ticks = false, minorticks = false)
-end
-xlims!(axs[end], 18e-3, 1.1)
-ylims!(axs[end], 0.8 * minimum(z_all), 1.25 * maximum(z_all))
-Label(fig[1:n_dirs, 0], L"Peak position $(\mathrm{mm})$"; rotation = π / 2, fontsize = 22)   # one y label for all panels
-rowgap!(fig.layout, 0)                              # panels touch: no space between them
-resize_to_layout!(fig)                              # figure size = panels + labels, no empty space
-display(fig)
-
-save(joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_mean_from_export.$(FIG_EXT)"), fig)
-println("saved ", joinpath(dirname(EXPORT_PATH), "fig_summary_all_directories_stacked_mean_from_export.$(FIG_EXT)"))
-
 
 ##
 close(f)
