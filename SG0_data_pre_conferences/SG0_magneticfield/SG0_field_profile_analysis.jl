@@ -167,7 +167,7 @@ const DIR_MODE = :geom
 # Inputs of Chapter 4 (SG0 field integral from the separation data at a given k_i): the
 # coupling k_i is held fixed and BL0 is fitted. N and f set the shape of the magnetometer-data
 # BL0(I) that is scaled in the global fit (by default the Chapter 3 values).
-const C4_KI    = 2.0e-6          # given k_i (dimensionless); 1.5226e-7 = fit note, f = 1
+const C4_KI    = 1.7e-6          # given k_i (dimensionless); 1.5226e-7 = fit note, f = 1
 const C4_N_BN  = N_BN               # threshold N (units of CQD_Bn) of the model BL0(I) shape
 const C4_F_DIV = F_DIV              # divisor f of the model BL0(I) shape
 
