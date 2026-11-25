@@ -85,7 +85,7 @@
 #    2. Build interpolants (once, common to all directories)
 #         • zqm(I)        : 1D cubic spline of the QM curve.
 #         • ki_itp(I, kᵢ) : 2D cubic spline of the CQD grid → fit surface.
-#       Sanity figures fig001–fig002.
+#       Sanity figures fig_ki_slices, fig_fit_surface.
 #    LOOP over DATA_DIRECTORIES → analyze_directory(dir), sections 3–A:
 #    3. Load the experimental points z(I) ± δz from the summary JLD2; fig001.
 #    4. Tail-convergence study: (kᵢ, s_CQD) and s_QM vs tail length; spread
@@ -112,19 +112,18 @@
 #         SIMULATIONS/2026Q2_SETUP/CQD_T205_8M_Bexp/cqd_8M_up_profiles.jld2
 #         EXPDATA_ANALYSIS/summary/<DATA_DIR>/<DATA_DIR>_report_summary.jld2
 #
-#  OUTPUTS  (RUN_OUTDIR = ./data_studies/FIT2026_ki_scale_zinit_dirs_nz<NZ>_l<λ0>_<timestamp>/)
+#  OUTPUTS  (RUN_OUTDIR = ./data_studies/FIT2026_per_round_fit_<timestamp>/)
 #  ------------------------------------------------------------------
 #    In RUN_OUTDIR (once):
-#      fig001  CQD z_max(kᵢ) slices vs QM at selected currents
-#      fig002  interpolated (I, kᵢ) surface and contour
+#      fig_ki_slices    CQD z_max(kᵢ) slices vs QM at selected currents
+#      fig_fit_surface  interpolated (I, kᵢ) surface and contour
 #      fig_ki_all_directories       kᵢ, s and z_init per directory, weighted mean of kᵢ
 #      fig_summary_all_directories  all directories' data + CQD/QM curves at the median kᵢ, z_init, s
-#      fig_summary_all_directories_ext  the same, model curves extended down to 0.9·I_THRESHOLD
 #      ki_all_directories.csv       one row per directory (kᵢ, s, errors, χ², ΔAIC, …)
-#      SG_ki_scale_all_directories.jld2  the same table + weighted mean
 #      SG_fit_export.jld2           per directory: fit values ± errors, z0, measured points
-#                                   (I, B, G, z_F1) and dense calibrated QM/CQD curves; global
-#                                   median-parameter QM/CQD curves
+#                                   (I, B, G, z_F1) and dense calibrated QM/CQD curves; under
+#                                   global/median, global/wmean, global/mean the parameters
+#                                   over the directories and their QM/CQD curves
 #    In RUN_OUTDIR/<DATA_DIR>/ (per directory; figures .<FIG_EXT>, default png):
 #      fig001  CQD family + QM + experiment (log–log)
 #      fig002_tail_convergence  kᵢ, s, z_init and R² vs calibration-tail length
@@ -159,30 +158,11 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# 0) Packages and global setup
+# 0) Packages
 # -----------------------------------------------------------------------------
 # Figures: CairoMakie (vector-quality PNG/PDF/SVG). LaTeX labels (L"...") are
 # rendered by MathTeXEngine; theme_latexfonts() gives Computer Modern text.
 using CairoMakie
-const PX_PER_UNIT = 3            # PNG resolution: pixels per figure unit (size=(900,800) → 2700×2400 px)
-CairoMakie.activate!(type = "png", px_per_unit = PX_PER_UNIT)
-set_theme!(merge(Theme(
-    fontsize = 15,
-    Axis = (
-        xgridvisible = true, ygridvisible = true,
-        xminorgridvisible = true, yminorgridvisible = true,
-        xminorticksvisible = true, yminorticksvisible = true,
-        xgridcolor = (:black, 0.12), ygridcolor = (:black, 0.12),
-        xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05),
-        titlefont = :regular,
-    ),
-    Axis3 = (titlefont = :regular,),
-    Legend = (framevisible = true, framecolor = :transparent,
-              backgroundcolor = (:white, 0.85), titlefont = :regular,
-              patchsize = (22, 12), rowgap = 0),
-    Colorbar = (minorticksvisible = false,),
-), theme_latexfonts()))
-FIG_EXT = "png"   # "png" | "pdf" | "svg"
 # Aesthetics and output formatting
 using Colors, ColorSchemes
 using LaTeXStrings, Printf, PrettyTables
@@ -201,40 +181,50 @@ using CSV, DataFrames, JLD2
 LinearAlgebra.BLAS.set_num_threads(2)
 @info "BLAS threads"  count = BLAS.get_num_threads()
 @info "Julia threads" count = Threads.nthreads()
-
-
 cd(@__DIR__);
-const BASE_PATH = raw"F:\SternGerlachExperiments";
 
-# -----------------------------------------------------------------------------
-# User-adjustable analysis settings (collected here; referenced below)
-# -----------------------------------------------------------------------------
-# Experimental data sets: each directory is analysed on its own (sections 3–A),
-# then all results are collected in one table (section ALL).
+
+##################################################################################################
+#  SETTINGS — every user-adjustable choice of the analysis, in one place
+##################################################################################################
+
+# ---- (a) Paths ------------------------------------------------------------------
+const BASE_PATH = raw"F:\SternGerlachExperiments";
+const table_qm_path  = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP", "QM_T205_8M_Bexp",
+                                "qm_screen_profiles_f1_table.jld2");
+const table_cqd_path = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP", "CQD_T205_8M_Bexp",
+                                "cqd_8M_up_profiles.jld2");
+summary_path(dir) = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", "summary", dir, dir * "_report_summary.jld2")
+
+# ---- (b) Experimental data ------------------------------------------------------
+# Each directory is analysed on its own (sections 3–A), then all results are
+# collected in one table (section ALL).
 #   EXPDATA_ANALYSIS/summary/<dir>/<dir>_report_summary.jld2
 const DATA_DIRECTORIES = [
                         #   "20260819",
                         #   "20260821", "20260826", "20260827", "20260831", "20260902",
                         #   "20260903",
-                        #   "20261105", 
-                          "20261111", "20261112", 
+                        #   "20261105",
+                          "20261111", "20261112",
                           "20261113", "20261116", "20261118"
                         ]
-const NZ_EXP   = 2              # z-bins of the experimental profile extraction   (file: meta/nz)
-const λ0_EXP   = 0.01           # raw smoothing parameter of the experiment       (file: meta/λ0)
+const NZ_EXP      = 2                     # z-bins of the experimental profile extraction   (file: meta/nz)
+const λ0_EXP      = 0.01                  # raw smoothing parameter of the experiment       (file: meta/λ0)
 const PEAK_KEY_F1 = :fw_F1_peak_pos_raw   # raw F=1 peak position (camera frame) and its error
 const PEAK_KEY_F2 = :fw_F2_peak_pos_raw   # raw F=2 peak position (used for the origin)
-# Analysis configuration shared by the QM and CQD tables
+const I_THRESHOLD = 0.020                 # (A) lowest current kept for all fits
+const δI_MODE     = :frac                 # :frac → δI = δI_FRAC·I | :phys → δI = ErrorCurrentsPhys from the file
+const δI_FRAC     = 0.001                 # δI placeholder used when δI_MODE = :frac
+
+# ---- (c) Simulation tables (configuration shared by the QM and CQD tables) ------
 const NX_FIXED  = 128       # x-bins (bookkeeping only)
 const NZ_FIXED  = 2         # z-bins used in profile extraction (simulation)
 const σW_FIXED  = 0.125     # (mm) Gaussian smoothing width of the profiles
 const λ0_FIXED  = 0.01      # raw smoothing parameter (simulation)
 const λ0_SPLINE = 0.001     # spline smoothing parameter (bookkeeping only)
-# Experimental data
-const I_THRESHOLD  = 0.020  # (A) lowest current kept for all fits
-const SHOW_DIR_LABEL = true # true → directory code name in the lower-right corner of fig004 and fig005
-const δI_MODE = :frac       # :frac → δI = δI_FRAC·I | :phys → δI = ErrorCurrentsPhys from the file
-const δI_FRAC = 0.001       # δI placeholder used when δI_MODE = :frac
+const KI_START, KI_STOP = 1, 30   # kᵢ grid indices of the 2D interpolant / Brent bracket (KI_STOP ≤ number of kᵢ in the table)
+
+# ---- (d) Fit --------------------------------------------------------------------
 # kᵢ-loss subset (counted in points; capped at the number of points of each directory)
 const FIT_KI_MODE   = :full # :full | :low | :high | :low_high
 const N_FRONT_PTS   = 12    # points in the low-current window
@@ -243,7 +233,8 @@ const N_BACK_PTS    = 8     # points in the high-current window
 const TAIL_SCALE_MODE = :log     # :linear | :log | :legacy — same for CQD and QM
 const I_PLATEAU       = 0.650    # (A) plateau = tails confined to I_min ≥ I_PLATEAU;
                                  #     the final tail = all points with I ≥ I_PLATEAU
-# Vertical offset of the models:  z_model(I) = (z_init + m(I))/s
+
+# ---- (e) Vertical offset of the models:  z_model(I) = (z_init + m(I))/s ---------
 const FIT_ZINIT    = true             # false → z_init ≡ 0 (reproduces the no-offset script)
 const ZINIT_BOUNDS = (-0.009, 0.009)  # (mm) DEFAULT search bracket of z_init; the lower side is
                                       #      also limited by z_init + m > 0 on the fit points
@@ -266,6 +257,32 @@ const ZINIT_BOUNDS_DIR = Dict{String, Union{Float64, Tuple{Float64, Float64}}}(
     "20261116" => 0.008,
     "20261118" => 0.009,
 )
+
+# ---- (f) Figures ----------------------------------------------------------------
+const FIG_EXT        = "png"   # extension of the saved figures: "png" | "pdf" | "svg"
+const PX_PER_UNIT    = 3       # PNG resolution: pixels per figure unit (size=(900,800) → 2700×2400 px)
+const SHOW_FIGS      = true    # display every figure (false: only save them — faster for many directories)
+const SHOW_DIR_LABEL = true    # true → directory code name in the lower-right corner of fig004 and fig005
+# fig_ki_slices: currents (A) of the three panels — top (linear, μm) | middle (log) | bottom (log)
+const I_compared  = [[0.0], [0.001, 0.005, 0.010, 0.015], [0.850, 0.900, 0.950, 1.000]];
+# fig_fit_surface: colour range of the surface/contour (mm) and top of the kᵢ axis of the contour (×10⁻⁶)
+const Z_CRANGE    = (1e-3, 5.0);
+const KI_MAX_PLOT = 100.0;
+# fig_summary_all_directories: marker size of the data points (also in the legend) and legend font size
+const ms_dir     = 14
+const fs_leg_dir = 16
+
+# ---- (g) Outputs ----------------------------------------------------------------
+const EXPORT_N_DENSE = 2000    # points of the dense current grid (0, 1] A in SG_fit_export.jld2
+const RUN_STAMP  = Dates.format(T_START, "yyyymmddTHHMMSSsss");
+const RUN_OUTDIR = joinpath(@__DIR__, "data_studies",
+                            "FIT2026_per_round_fit_" * RUN_STAMP);
+
+##################################################################################################
+#  END OF SETTINGS
+##################################################################################################
+
+# z_init bracket of a directory, from ZINIT_BOUNDS_DIR (A or (lo, hi)) or the default ZINIT_BOUNDS
 _as_bracket(A::Real)  = (-abs(Float64(A)), abs(Float64(A)))
 _as_bracket(b::Tuple) = (Float64(b[1]), Float64(b[2]))
 zinit_bounds(dir::AbstractString) = _as_bracket(get(ZINIT_BOUNDS_DIR, dir, ZINIT_BOUNDS))
@@ -275,12 +292,27 @@ for d in keys(ZINIT_BOUNDS_DIR)
 end
 const N_PAR_CQD = FIT_ZINIT ? 3 : 2   # free parameters (kᵢ, s, z_init) for χ²_red, AIC, BIC
 const N_PAR_QM  = FIT_ZINIT ? 2 : 1   # (s, z_init)
-# Figures
-const SHOW_FIGS = true      # display every figure (false: only save them — faster for many directories)
 
-const RUN_STAMP  = Dates.format(T_START, "yyyymmddTHHMMSSsss");
-const RUN_OUTDIR = joinpath(@__DIR__, "data_studies",
-                            "FIT2026_per_round_fit_" * RUN_STAMP);
+# Figure backend and theme
+CairoMakie.activate!(type = "png", px_per_unit = PX_PER_UNIT)
+set_theme!(merge(Theme(
+    fontsize = 15,
+    Axis = (
+        xgridvisible = true, ygridvisible = true,
+        xminorgridvisible = true, yminorgridvisible = true,
+        xminorticksvisible = true, yminorticksvisible = true,
+        xgridcolor = (:black, 0.12), ygridcolor = (:black, 0.12),
+        xminorgridcolor = (:black, 0.05), yminorgridcolor = (:black, 0.05),
+        titlefont = :regular,
+    ),
+    Axis3 = (titlefont = :regular,),
+    Legend = (framevisible = true, framecolor = :transparent,
+              backgroundcolor = (:white, 0.85), titlefont = :regular,
+              patchsize = (22, 12), rowgap = 0),
+    Colorbar = (minorticksvisible = false,),
+), theme_latexfonts()))
+
+# Output directory
 isdir(RUN_OUTDIR) || mkpath(RUN_OUTDIR);
 @info "Created output directory" RUN_OUTDIR
 @info "Running on host" hostname = gethostname()
@@ -298,18 +330,8 @@ include("./Modules/JLD2_MyTools.jl");
 JLD2_MyTools.save_script_copy(RUN_OUTDIR; script_path=@__FILE__, timestamp=RUN_STAMP)
 ##################################################################################################
 
-# =============================================================================
-# -----------------------------------------------------------------------------
-TheoreticalSimulation.set_magnetic_field!(:calibration)  # Calibration/Experimental field
-table_qm_path = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP", "QM_T205_8M_Bexp",
-                         "qm_screen_profiles_f1_table.jld2");
-table_cqd_path = joinpath(BASE_PATH, "SIMULATIONS", "2026Q2_SETUP", "CQD_T205_8M_Bexp",
-                          "cqd_8M_up_profiles.jld2");
-summary_path(dir) = joinpath(BASE_PATH, "EXPDATA_ANALYSIS", "summary", dir, dir * "_report_summary.jld2")
 missing_dirs = [d for d in DATA_DIRECTORIES if !isfile(summary_path(d))]
 isempty(missing_dirs) || @warn "Summary file missing — these directories will be skipped" missing_dirs
-# -----------------------------------------------------------------------------
-# =============================================================================
 
 # =============================================================================
 # 0a) Small numerical helpers
@@ -861,7 +883,6 @@ function fit_cqd_ki_scale_with_error(itp, data_org, selected_points;
 
     # ---- scale and its uncertainty ------------------------------------------
     ŝ, var_u_tail = scale_for(k̂, ẑ)
-    û    = log10(ŝ)
     u_at(ki, zi) = log10(scale_for(ki, zi)[1])
     dudk = (u_at(k̂ + h₀, ẑ) - u_at(k̂ - h₀, ẑ)) / (2h₀)
     dudz = fitz ? (u_at(k̂, ẑ + hz) - u_at(k̂, ẑ - hz)) / (2hz) : 0.0
@@ -1176,23 +1197,22 @@ function compute_metrics(A,X)
 end
  
 """
-    compare_datasets(x_ref, A, B, C; plot_errors=true)
- 
+    compare_datasets(x_ref, A, B, C)
+
 Compare two models against experiment on a common current grid `x_ref`:
 `A` = experimental z, `B` = CQD prediction, `C` = QM prediction (all > 0).
- 
+
 Prints a PrettyTables summary of `compute_metrics(A, B)` and
 `compute_metrics(A, C)` side by side (the better value of each row is
-highlighted in red) and, if `plot_errors`, displays a scatter of the log10
-errors of both models versus current.
+highlighted in red). The log10 errors of both models (`log_err` of each
+result) are plotted against current in fig003 (c).
  
 Returns `(CQD = metrics_B, QM = metrics_C)`.
 """
 function compare_datasets(x_ref::AbstractVector, # current
                             A::AbstractVector,   # Experimental
                             B::AbstractVector,   # CQD
-                            C::AbstractVector;   # QM
-                            plot_errors=true)
+                            C::AbstractVector)   # QM
     @assert length(x_ref) == length(A) == length(B) == length(C) "All vectors must have same length."
     @assert all(A .> 0) && all(B .> 0) && all(C .> 0) "All values must be > 0 for log comparison."
  
@@ -1237,33 +1257,14 @@ function compare_datasets(x_ref::AbstractVector, # current
         crayon"fg:red bold"  # red, bold; you can add bg if you like
     );
  
-    pretty_table(tbl,
+    print_table(tbl;
         alignment     = [:l,:c,:c],
         column_labels = header,
         formatters    = [fmt__printf("%8.6f", 2:3)],
         highlighters  = [hl_min_red],
-        style         = TextTableStyle(
-                        first_line_column_label = crayon"yellow bold",
-                        table_border  = crayon"blue bold",
-                        column_label  = crayon"yellow bold",
-                        ),
-        table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
-        equal_data_column_widths= true,
+        equal_data_column_widths = true,
     )
- 
-    # ---- Plot of log-errors ----
-    if plot_errors
-        fig = Figure(size = (800, 500))
-        ax  = Axis(fig[1, 1]; title = "Log Errors for CQD and QM",
-                   xlabel = "SG current (A)", ylabel = "Log Error")
-        scatter!(ax, x_ref, R_B.log_err; markersize = 7, color = :red,
-                 label = "log10(cqd) - log10(exp)")
-        scatter!(ax, x_ref, R_C.log_err; markersize = 7, color = :blue,
-                 label = "log10(qm) - log10(exp)")
-        axislegend(ax; position = :rt)
-        SHOW_FIGS && display(fig)
-    end
- 
+
     return (CQD = R_B, QM = R_C)
 end
  
@@ -1449,8 +1450,8 @@ end
  
 """
     FitStats
- 
-Container for the log-space goodness-of-fit metrics returned by
+
+Container for the log10-space goodness-of-fit metrics returned by
 `goodness_of_fit`: `logMSE`, `logRMSE`, `R2_log`, `chi2_log`, `chi2_red`
 (reduced χ²), `p_chi2` (χ² tail p-value), `AIC`, `BIC` and `NMAD`
 (normalised median absolute deviation of the residuals).
@@ -1466,43 +1467,44 @@ struct FitStats
     BIC::Float64
     NMAD::Float64
 end
- 
+
 """
     goodness_of_fit(x, y, ypred; σ=nothing, k=0)
- 
+
 Evaluate how well model predictions `ypred` match observations `y` (over
-support `x`), working in **natural-log** space where the SG curves are roughly
-power-law. `k` is the number of fitted model parameters (used for the degrees
-of freedom and by AIC/BIC). Residual sign convention: model − data.
- 
+support `x`), working in **log10** space (as everywhere in this script) where
+the SG curves are roughly power-law: `r = log10(ypred) − log10(y)`. `k` is the
+number of fitted model parameters (used for the degrees of freedom and by
+AIC/BIC). Residual sign convention: model − data.
+
 Always returns `logMSE`, `logRMSE`, `R2_log` and the robust scatter `NMAD`.
-When per-point uncertainties `σ` are given they are propagated to log space
-(`σ_log ≈ σ/y`) and the χ² statistic, reduced χ² (`χ²/(N−k)`), χ² p-value and
-χ²-based AIC/BIC are computed; otherwise those are `NaN` and AIC/BIC fall back
-to a `logMSE`-based surrogate.
- 
+When per-point uncertainties `σ` are given they are propagated to log10 space
+(`σ_log ≈ σ/(y ln10)`) and the χ² statistic, reduced χ² (`χ²/(N−k)`), χ²
+p-value and χ²-based AIC/BIC are computed (these do not depend on the log base);
+otherwise those are `NaN` and AIC/BIC fall back to a `logMSE`-based surrogate.
+
 Returns a `FitStats`.
 """
 function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
     @assert length(x) == length(y) == length(ypred)
     N = length(y)
- 
-    logy    = log.(y)
-    logpred = log.(ypred)
+
+    logy    = log10.(y)
+    logpred = log10.(ypred)
     r       = logpred .- logy
- 
+
     logMSE  = mean(r .^ 2)
     logRMSE = sqrt(logMSE)
     R2_log  = 1 - sum(r .^ 2) / sum((logy .- mean(logy)) .^ 2)
     NMAD    = 1.4826 * median(abs.(r))
- 
+
     if isnothing(σ)
         chi2_log = NaN; chi2_red = NaN; p_chi2 = NaN
         AIC = 2k + N * log(logMSE)          # logMSE as variance surrogate
         BIC = k * log(N) + N * log(logMSE)
     else
         @assert length(σ) == N
-        σlog     = σ ./ y                   # δ(ln y) ≈ σ/y
+        σlog     = σ ./ (y .* log(10.0))    # δ(log10 y) ≈ σ/(y ln10)
         chi2_log = sum((r ./ σlog) .^ 2)
         dof      = max(N - k, 1)
         chi2_red = chi2_log / dof
@@ -1510,7 +1512,7 @@ function goodness_of_fit(x, y, ypred; σ = nothing, k::Int = 0)
         AIC = 2k + chi2_log                 # Gaussian likelihood, up to a constant
         BIC = k * log(N) + chi2_log
     end
- 
+
     return FitStats(logMSE, logRMSE, R2_log, chi2_log, chi2_red, p_chi2, AIC, BIC, NMAD)
 end
  
@@ -1524,6 +1526,24 @@ end
 # For richer styling (256 colours, backgrounds) `PrettyTables.Crayons` is
 # already available: `c = crayon"yellow bold"; "$(c)text$(inv(c))"`.
 # =============================================================================
+
+"""
+    print_table(M; kw...)
+    print_table(io, M; kw...)
+
+`pretty_table` with the common look of every table in this script: yellow column
+labels, blue rounded border, red title. All other keywords (`title`,
+`column_labels`, `formatters`, `alignment`, `highlighters`, …) are passed on and
+may also override the defaults. The `io` form (e.g. a text file) is written
+without colours.
+"""
+const TABLE_STYLE  = TextTableStyle(first_line_column_label = crayon"yellow bold",
+                                    table_border = crayon"blue bold",
+                                    column_label = crayon"yellow bold",
+                                    title = crayon"bold red")
+const TABLE_FORMAT = TextTableFormat(borders = text_table_borders__unicode_rounded)
+print_table(M; kw...)          = pretty_table(M; style = TABLE_STYLE, table_format = TABLE_FORMAT, kw...)
+print_table(io::IO, M; kw...)  = pretty_table(io, M; table_format = TABLE_FORMAT, kw...)
 
 """
     _ANSI
@@ -1693,8 +1713,6 @@ cqd_meta = OrderedDict{Symbol,Any}(
 );
 n_ki = length(cqd_meta[:ki]);
 
-# kᵢ grid indices used for the 2D interpolant / Brent bracket
-const KI_START, KI_STOP = 1, 30#n_ki
 
 ki_lo, ki_hi = cqd_meta[:ki][KI_START], cqd_meta[:ki][KI_STOP];
 @info cstr("kᵢ search bracket for the fit (2D interpolant range): ", :cyan) *
@@ -1744,17 +1762,16 @@ end
 
 ##################################################################################################
 #  2) THE (I, kᵢ) INTERPOLANT AND DIRECTORY-INDEPENDENT FIGURES (saved in RUN_OUTDIR)
-section("2", "THE (I, kᵢ) INTERPOLANT — fig001, fig002 (common to all directories)")
+section("2", "THE (I, kᵢ) INTERPOLANT — fig_ki_slices, fig_fit_surface (common to all directories)")
 ##################################################################################################
 
 # -----------------------------------------------------------------------------
-# fig001 — CQD z_max(kᵢ) slices vs QM at selected currents
+# fig_ki_slices — CQD z_max(kᵢ) slices vs QM at selected currents
 # -----------------------------------------------------------------------------
-# currents (A) of the three panels: top (linear, μm) | middle (log) | bottom (log).
+# currents (A) of the three panels: I_compared in SETTINGS (f) — top (linear, μm) | middle (log) | bottom (log).
 # One colour per current from the :rainbow palette; the reddest goes to the top panel.
-I_compared = [[0.0], [0.001, 0.005, 0.010, 0.015], [0.850, 0.900, 0.950, 1.000]];
 fig = plot_cqd_vs_qm(z_up_ki, zmax_QM, Icoils, cqd_meta[:ki], I_compared);
-save_fig(fig, joinpath(RUN_OUTDIR, "fig001.$(FIG_EXT)"); show = true)
+save_fig(fig, joinpath(RUN_OUTDIR, "fig_ki_slices.$(FIG_EXT)"); show = true)
 
 
 
@@ -1768,9 +1785,18 @@ ki_bounds = (ki_lo, ki_hi);
 @info "kᵢ interpolation range (micro-units)" ki_min = ki_bounds[1] ki_max = ki_bounds[2] n = KI_STOP - KI_START + 1
 ki_itp = Spline2D(Icoils, cqd_meta[:ki][KI_START:KI_STOP], z_up_ki[:, KI_START:KI_STOP];
                   kx=3, ky=3, s=0.0);
+
+# -----------------------------------------------------------------------------
+# Calibrated models (mm) — the one place where the model formula is written:
+#     z_model(I) = (z_init + m(I)) / s        m = zqm(I)  or  ki_itp(I, kᵢ)
+# I may be a number or a vector; kᵢ in units of 10⁻⁶, z_init in mm.
+# (The fitters in section 0b take the bare models zqm / ki_itp as arguments.)
+# -----------------------------------------------------------------------------
+model_qm(I, zi, s)      = (zi .+ zqm.(I)) ./ s
+model_cqd(I, ki, zi, s) = (zi .+ ki_itp.(I, Ref(ki))) ./ s
  
 # -----------------------------------------------------------------------------
-# fig002 — interpolated surface and contour (log10 z)
+# fig_fit_surface — interpolated surface and contour (log10 z)
 # -----------------------------------------------------------------------------
 # log-spaced currents: the I axes below are logarithmic, so a linear grid would
 # give a few very wide cells (vertical bands) at low current
@@ -1781,8 +1807,8 @@ Z = [ki_itp(x, y) for y in ki_surface, x in i_surface];
 logZ    = log10.(max.(abs.(Z), 1e-12));            # clamp away from log10(0)
 lo, hi  = floor(minimum(logZ)), ceil(maximum(logZ));
 decades = collect(lo:1:hi);
-# fixed colour range of fig002 (mm): values outside it take the end colours
-Z_CRANGE   = (1e-3, 5.0);
+# fixed colour range of fig_fit_surface (mm): values outside it take the end colours
+# Z_CRANGE (fixed colour range, mm; values outside take the end colours) is set in SETTINGS (f)
 crange     = log10.(Z_CRANGE);
 cbar_vals  = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0];
 
@@ -1804,7 +1830,7 @@ zlims!(ax_surf, log10(2e-4), log10(10.0));
 # only covers the fit bracket (≤ ki_hi), so the panel uses its own plotting-only
 # spline over every grid kᵢ ≤ KI_MAX_PLOT, built in (I, log10 kᵢ) because the kᵢ
 # grid is log-spaced. The fit itself is unaffected.
-KI_MAX_PLOT = 100.0;                                   # (×10⁻⁶) top of the kᵢ axis
+# KI_MAX_PLOT (×10⁻⁶, top of the kᵢ axis) is set in SETTINGS (f)
 sel_plot    = findall(<=(KI_MAX_PLOT), cqd_meta[:ki]);
 itp_plot    = Spline2D(Icoils, log10.(cqd_meta[:ki][sel_plot]), z_up_ki[:, sel_plot];
                        kx = 3, ky = 3, s = 0.0);
@@ -1836,7 +1862,7 @@ Colorbar(fit_figs[2, 2], cf; labelsize = 22, ticklabelsize = 16,
     ticks = (log10.(cbar_vals), string.(cbar_vals)), minorticksvisible = false,
     label = L"$ z \ \mathrm{(mm)}$");
 rowsize!(fit_figs.layout, 1, Relative(0.55));
-save_fig(fit_figs, joinpath(RUN_OUTDIR, "fig002.$(FIG_EXT)"); show = true)
+save_fig(fit_figs, joinpath(RUN_OUTDIR, "fig_fit_surface.$(FIG_EXT)"); show = true)
 
 
 
@@ -1953,16 +1979,11 @@ function analyze_directory(DATA_DIR::AbstractString)
 
     # ---- 4a. tables of the points NOT used in the fits (printed before the main table)
     # same style as the main table below
-    show_points(M, title, labels, units, fmts) = pretty_table(M;
+    show_points(M, title, labels, units, fmts) = print_table(M;
         alignment     = :c,
         title         = title,
         column_labels = [labels, units],
         formatters    = fmts,
-        style         = TextTableStyle(first_line_column_label = crayon"yellow bold",
-                                       table_border = crayon"blue bold",
-                                       column_label = crayon"yellow bold",
-                                       title = crayon"bold red"),
-        table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
         equal_data_column_widths = true,
         show_row_number_column = true,
         fit_table_in_display_horizontally = false, fit_table_in_display_vertically = false)
@@ -2020,17 +2041,12 @@ function analyze_directory(DATA_DIR::AbstractString)
     N_data  = size(data, 1);
     I_scan  = logspace10(I_THRESHOLD, 1.00; n = 801);
 
-    pretty_table(hcat(data, δz_s, dzdI_s);
+    print_table(hcat(data, δz_s, dzdI_s);
         alignment     = :c,
         title         = "EXPERIMENTAL DATA — $(DATA_DIR), nz = $(NZ_EXP), λ0 = $(λ0_EXP)  (δI mode: $(δI_MODE))",
         column_labels = [["Ic", "δIc", "z", "δz total", "δz (pos.)", "dz/dI"],
                          ["(A)", "(A)", "(mm)", "(mm)", "(mm)", "(mm/A)"]],
         formatters    = [fmt__printf("%1.5f", 1:2), fmt__printf("%1.4f", 3:5), fmt__printf("%1.3f", [6])],
-        style         = TextTableStyle(first_line_column_label = crayon"yellow bold",
-                                       table_border = crayon"blue bold",
-                                       column_label = crayon"yellow bold",
-                                       title = crayon"bold red"),
-        table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
         equal_data_column_widths = true,
         show_row_number_column = true)
     # brief legend of the table above
@@ -2277,8 +2293,8 @@ function analyze_directory(DATA_DIR::AbstractString)
     end
 
     # calibrated model curves used by every figure below:  (z_init + model)/s
-    m_qm_scan  = (fit_qs.z_init .+ zqm.(I_scan))                    ./ fit_qs.scale;
-    m_cqd_scan = (fit_cs.z_init .+ ki_itp.(I_scan, Ref(fit_cs.ki))) ./ fit_cs.scale;
+    m_qm_scan  = model_qm(I_scan, fit_qs.z_init, fit_qs.scale);
+    m_cqd_scan = model_cqd(I_scan, fit_cs.ki, fit_cs.z_init, fit_cs.scale);
     mask_qm_scan  = log_mask(I_scan, m_qm_scan);      # z_init < 0 can make the lowest currents ≤ 0
     mask_cqd_scan = log_mask(I_scan, m_cqd_scan);
 
@@ -2294,8 +2310,8 @@ function analyze_directory(DATA_DIR::AbstractString)
     ##################################################################################################
 
     I_d, δI_d, z_d, σ_d = data[:, 1], data[:, 2], data[:, 3], data[:, 4];
-    m_qm_d  = (fit_qs.z_init .+ zqm.(I_d))                    ./ fit_qs.scale;
-    m_cqd_d = (fit_cs.z_init .+ ki_itp.(I_d, Ref(fit_cs.ki))) ./ fit_cs.scale;
+    m_qm_d  = model_qm(I_d, fit_qs.z_init, fit_qs.scale);
+    m_cqd_d = model_cqd(I_d, fit_cs.ki, fit_cs.z_init, fit_cs.scale);
     # log-space metrics below need positive predictions (guaranteed on the fit
     # subset; with FIT_KI_MODE ≠ :full a negative z_init may break it elsewhere)
     @assert all(m_qm_d .> 0) && all(m_cqd_d .> 0) "Calibrated model ≤ 0 at a measured current (z_init too negative); use FIT_KI_MODE = :full or narrow ZINIT_BOUNDS_DIR[\"$(DATA_DIR)\"]"
@@ -2324,7 +2340,7 @@ function analyze_directory(DATA_DIR::AbstractString)
                       marker, markersize = 8, markercolor = c, strokecolor = c, strokewidth = 0.8)
 
     println("Model comparison — log-space metrics (calibrated models vs raw data)")
-    metrics_d = compare_datasets(I_d, z_d, m_cqd_d, m_qm_d; plot_errors = false);   # log errors → fig003 (c)
+    metrics_d = compare_datasets(I_d, z_d, m_cqd_d, m_qm_d);   # log errors → fig003 (c)
     println("""
     Metrics  (e = log10(model) − log10(exp) per point, N = $(length(z_d)); red = the smaller value of the row;
               all are lower-is-better and none uses the error bars δz)
@@ -2479,8 +2495,8 @@ function analyze_directory(DATA_DIR::AbstractString)
     I_line_lo = 0.95 * I_THRESHOLD
     I_sg      = logspace10(I_line_lo, 1.00; n = 801)
     G_sg      = gradvsI.(I_sg)
-    m_qm_sg   = (fit_qs.z_init .+ zqm.(I_sg))                    ./ fit_qs.scale
-    m_cqd_sg  = (fit_cs.z_init .+ ki_itp.(I_sg, Ref(fit_cs.ki))) ./ fit_cs.scale
+    m_qm_sg   = model_qm(I_sg, fit_qs.z_init, fit_qs.scale)
+    m_cqd_sg  = model_cqd(I_sg, fit_cs.ki, fit_cs.z_init, fit_cs.scale)
     sg_qm     = log_mask(I_sg, m_qm_sg)          # drops points where z_init makes the model ≤ 0
     sg_cqd    = log_mask(I_sg, m_cqd_sg)
     function sg_series!(ax, xd, δxd, xm)
@@ -2556,30 +2572,25 @@ function analyze_directory(DATA_DIR::AbstractString)
         end,
         crayon"fg:black bg:#fff7a1");
 
-    pretty_table(gof_table;
+    print_table(gof_table;
         title         = "Goodness of fit — calibrated models vs data $(DATA_DIR) (k: CQD = $(N_PAR_CQD), QM = $(N_PAR_QM))",
         column_labels = ["CQD", "QM"],
         row_labels    = metrics,
         row_label_column_alignment = :l,
         highlighters  = [hl_best],
         alignment     = [:c, :c],
-        style         = TextTableStyle(first_line_column_label = crayon"yellow bold",
-                                       table_border = crayon"blue bold",
-                                       column_label = crayon"yellow bold",
-                                       title = crayon"bold red"),
-        table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
         equal_data_column_widths = true)
     println("""
-    Metrics  (r = ln(model) − ln(exp) per point, N = $(length(z_sc)), σ_r = δz/z; k = fitted parameters;
+    Metrics  (r = log10(model) − log10(exp) per point, N = $(length(z_sc)), σ_r = δz/(z ln10); k = fitted parameters;
               highlighted = the better model of the row)
-      logMSE, logRMSE : mean of r², and its root (natural log: logRMSE ≈ typical fractional error).   lower is better
-      R2_log          : 1 − Σr² / Σ(ln exp − mean)²; fraction of the log-variation of the data reproduced.  higher is better
+      logMSE, logRMSE : mean of r², and its root (log10: 10^logRMSE − 1 ≈ typical fractional error).    lower is better
+      R2_log          : 1 − Σr² / Σ(log10 exp − mean)²; fraction of the log-variation of the data reproduced.  higher is better
       chi2_log        : χ² = Σ (r/σ_r)²; residuals in units of the error bars.                          lower is better
       chi2_red        : χ²/(N − k); ≈ 1 if the model is right and δz is correct, ≫ 1 = significant misfit. lower is better
       p_chi2          : P(χ² ≥ observed | model correct), dof = N − k; < 0.05 → model rejected at 95 %.  higher is better
       AIC             : χ² + 2k;     compares models, penalising parameters. ΔAIC > 2 notable, > 10 decisive. lower is better
       BIC             : χ² + k ln N; like AIC with a stronger parameter penalty.                         lower is better
-      NMAD            : 1.4826 × median|r|; robust (outlier-insensitive) scatter of the log residuals.   lower is better
+      NMAD            : 1.4826 × median|r|; robust (outlier-insensitive) scatter of the log10 residuals. lower is better
     The χ²-based rows (chi2_log … BIC) use the error bars; the others do not. ΔAIC/ΔBIC (CQD − QM) are printed above.
     """)
     CSV.write(joinpath(OUTDIR, "goodness_of_fit.csv"),
@@ -2738,19 +2749,17 @@ function analyze_directory(DATA_DIR::AbstractString)
 
     archive_keys = list_jld2_entries(archive_path)     # names-only reference of the archive layout
 
-    df = jldopen(archive_path, "r") do f
-        I0 = f["experiment/Current_A"]
-        DataFrame(
-            Current_A   = I0,
-            B_T         = TheoreticalSimulation.BvsI.(I0),
-            G_Tm        = TheoreticalSimulation.GvsI.(I0),
-            Experiment      = f["experiment/zF1_mm"],
-            ErrorExperiment = f["experiment/zF1Err_mm"],
-            CQD_up_mm       = f["experiment/CQD_up_mm"],
-            QM_F1_mm        = f["experiment/QM_zF1_mm"],
-        )
-    end
-    CSV.write(joinpath(OUTDIR,"model_data.csv"), df)
+    # data and calibrated models at the measured currents (the same values as experiment/ in the archive)
+    df = DataFrame(
+        Current_A       = I_sc,
+        B_T             = TheoreticalSimulation.BvsI.(I_sc),
+        G_Tm            = G_sc,
+        Experiment      = z_sc,
+        ErrorExperiment = δz_sc,
+        CQD_up_mm       = m_cqd_sc,
+        QM_F1_mm        = m_qm_sc,
+    )
+    CSV.write(joinpath(OUTDIR, "model_data.csv"), df)
 
 
     @info cstr("Directory $(DATA_DIR) done → ", :green) * cstr(OUTDIR, :magenta)
@@ -2827,19 +2836,28 @@ df_all = DataFrame([r for r in dir_results])    # concrete NamedTuple eltype
 df_all.ki_err_tot = sqrt.(df_all.ki_err .^ 2 .+ df_all.ki_sys .^ 2)    # stat ⊕ sys (×10⁻⁶)
 CSV.write(joinpath(RUN_OUTDIR, "ki_all_directories.csv"), df_all)
 
+"""
+    weighted_mean(v, σ) -> (mean, err, chi2, dof)
+
+Inverse-variance weighted mean of `v` with per-point errors `σ`, its error
+`1/√Σw`, and the consistency `χ² = Σ w (v − mean)²` with `dof = n − 1`.
+"""
+function weighted_mean(v, σ)
+    w  = 1 ./ σ .^ 2
+    μ  = sum(w .* v) / sum(w)
+    return (mean = μ, err = 1 / sqrt(sum(w)), chi2 = sum(w .* (v .- μ) .^ 2), dof = max(length(v) - 1, 1))
+end
+
 # inverse-variance weighted mean of kᵢ over the directories (stat ⊕ sys), and
 # its consistency χ²/dof (≫ 1 → directory-to-directory scatter beyond the errors)
-w_ki      = 1 ./ df_all.ki_err_tot .^ 2
-ki_wmean  = sum(w_ki .* df_all.ki) / sum(w_ki)
-ki_wmerr  = 1 / sqrt(sum(w_ki))
-ki_chi2   = sum(w_ki .* (df_all.ki .- ki_wmean) .^ 2)
-ki_dof    = max(nrow(df_all) - 1, 1)
+wm_ki = weighted_mean(df_all.ki, df_all.ki_err_tot)
+ki_wmean, ki_wmerr, ki_chi2, ki_dof = wm_ki.mean, wm_ki.err, wm_ki.chi2, wm_ki.dof
 ki_mean, ki_std = mean(df_all.ki), (nrow(df_all) > 1 ? std(df_all.ki) : NaN)
 
 tbl_all = hcat(Matrix(df_all[:, [:ki, :ki_err, :ki_sys, :scale_cqd, :scale_cqd_err, :scale_qm, :scale_qm_err]]),
                1e3 .* Matrix(df_all[:, [:zinit_cqd, :zinit_cqd_err, :zinit_qm, :zinit_qm_err]]),     # μm
                Matrix(df_all[:, [:chi2red_cqd, :chi2red_qm, :dAIC_cqd_minus_qm, :n_points, :n_tail, :I_tail_min]]))
-pretty_table(tbl_all;
+print_table(tbl_all;
     title         = "kᵢ FIT PER DIRECTORY (with z_init) — nz = $(NZ_EXP), λ0 = $(λ0_EXP), tail I ≥ $(I_PLATEAU) A ($(TAIL_SCALE_MODE))",
     row_labels    = df_all.dir,
     row_label_column_alignment = :l,
@@ -2851,11 +2869,6 @@ pretty_table(tbl_all;
     formatters    = [fmt__printf("%.4f", 1:7), fmt__printf("%.2f", 8:11), fmt__printf("%.3g", 12:14),
                      fmt__printf("%d", 15:16), fmt__printf("%.3f", [17])],
     alignment     = :c,
-    style         = TextTableStyle(first_line_column_label = crayon"yellow bold",
-                                   table_border = crayon"blue bold",
-                                   column_label = crayon"yellow bold",
-                                   title = crayon"bold red"),
-    table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
     equal_data_column_widths = true)
 
 @info cstr("kᵢ over $(nrow(df_all)) directories", :green, :bold) *
@@ -2871,22 +2884,10 @@ pretty_table(tbl_all;
 # 1/(stat² + sys²)), quoted with its error and the consistency χ²/dof.
 # Printed to the console and written to final_table.txt.
 # -----------------------------------------------------------------------------
-"""
-    weighted_mean(v, σ) -> (mean, err, chi2, dof)
-
-Inverse-variance weighted mean of `v` with per-point errors `σ`, its error
-`1/√Σw`, and the consistency `χ² = Σ w (v − mean)²` with `dof = n − 1`.
-"""
-function weighted_mean(v, σ)
-    w  = 1 ./ σ .^ 2
-    μ  = sum(w .* v) / sum(w)
-    return (mean = μ, err = 1 / sqrt(sum(w)), chi2 = sum(w .* (v .- μ) .^ 2), dof = max(length(v) - 1, 1))
-end
-
 pm3(v, s, y; d = 4) = @sprintf("%.*f ± %.*f ± %.*f", d, v, d, s, d, y)     # value ± stat ± sys
 pm2(v, e; d = 4)    = @sprintf("%.*f ± %.*f", d, v, d, e)                   # value ± total
 
-wm_ki  = weighted_mean(df_all.ki,        sqrt.(df_all.ki_err .^ 2        .+ df_all.ki_sys .^ 2))
+# (wm_ki — the kᵢ weighted mean — was computed above, with the same stat ⊕ sys errors)
 wm_scq = weighted_mean(df_all.scale_cqd, sqrt.(df_all.scale_cqd_err .^ 2 .+ df_all.scale_cqd_sys .^ 2))
 wm_sqm = weighted_mean(df_all.scale_qm,  sqrt.(df_all.scale_qm_err .^ 2  .+ df_all.scale_qm_sys .^ 2))
 # z_init in μm; with FIT_ZINIT = false all errors are 0 → no weighted mean
@@ -2910,16 +2911,11 @@ final_tbl = vcat(
 final_title  = "FINAL RESULTS (with z_init) — nz = $(NZ_EXP), λ0 = $(λ0_EXP) | tail I ≥ $(I_PLATEAU) A ($(TAIL_SCALE_MODE)) | value ± stat ± sys"
 final_labels = [["Directory", "CQD  kᵢ", "CQD  scale s", "CQD  z_init", "QM  scale s", "QM  z_init"],
                 ["",          "(×10⁻⁶)", "",             "(μm)",        "",            "(μm)"]]
-pretty_table(final_tbl;
+print_table(final_tbl;
     title         = final_title,
     column_labels = final_labels,
     alignment     = [:l, :c, :c, :c, :c, :c],
     highlighters  = [TextHighlighter((tbl, i, j) -> i > nrow(df_all), crayon"bold magenta")],
-    style         = TextTableStyle(first_line_column_label = crayon"yellow bold",
-                                   table_border = crayon"blue bold",
-                                   column_label = crayon"yellow bold",
-                                   title = crayon"bold red"),
-    table_format  = TextTableFormat(borders = text_table_borders__unicode_rounded),
     fit_table_in_display_horizontally = false,
     fit_table_in_display_vertically   = false)
 zb_lines = join([@sprintf("    %-10s [%.2f, %.2f] μm", d, 1e3 * zinit_bounds(d)[1], 1e3 * zinit_bounds(d)[2])
@@ -2942,9 +2938,8 @@ $(zb_lines)
 """
 println(final_legend)
 open(joinpath(RUN_OUTDIR, "final_table.txt"), "w") do io
-    pretty_table(io, final_tbl; title = final_title, column_labels = final_labels,
+    print_table(io, final_tbl; title = final_title, column_labels = final_labels,
                  alignment = [:l, :c, :c, :c, :c, :c],
-                 table_format = TextTableFormat(borders = text_table_borders__unicode_rounded),
                  fit_table_in_display_horizontally = false,
                  fit_table_in_display_vertically   = false)
     println(io, final_legend)
@@ -3022,17 +3017,13 @@ dirs_ok  = [d for d in df_all.dir if haskey(DIR_DATA, d)]
 # stroke colours: viridis without its pale-yellow end, so every open marker stays visible on white
 cols_dir  = [get(cgrad(:viridis), t) for t in range(0.0, 0.85; length = max(length(dirs_ok), 2))][1:length(dirs_ok)]
 mks_dir   = [:circle, :rect, :diamond, :utriangle, :dtriangle, :pentagon, :hexagon, :star5, :ltriangle, :rtriangle]
-ms_dir    = 14          # marker size of the data points in fig_summary_all_directories (also used by its legend)
-fs_leg_dir = 16         # legend font size of fig_summary_all_directories
 
-# One function draws both versions of the summary figure, so their styling stays identical;
-# only the lowest current of the median model curves differs:
-#   fig_summary_all_directories      curves from I_THRESHOLD
-#   fig_summary_all_directories_ext  curves extended down to 0.9·I_THRESHOLD (as fig004/fig005)
+# fig_summary_all_directories; I_lo = lowest current of the median model curves
+# (the x axis starts at 0.95·I_THRESHOLD, so I_lo < I_THRESHOLD extends them to the left edge)
 function summary_all_directories_fig(I_lo)
     I_sum      = logspace10(I_lo, 1.00; n = 801)
-    m_cqd_sum  = (zi_cqd_med .+ ki_itp.(I_sum, Ref(ki_med))) ./ s_cqd_med
-    m_qm_sum   = (zi_qm_med  .+ zqm.(I_sum))                 ./ s_qm_med
+    m_cqd_sum  = model_cqd(I_sum, ki_med, zi_cqd_med, s_cqd_med)
+    m_qm_sum   = model_qm(I_sum, zi_qm_med, s_qm_med)
     mk_cqd_sum = log_mask(I_sum, m_cqd_sum)
     mk_qm_sum  = log_mask(I_sum, m_qm_sum)
 
@@ -3066,99 +3057,98 @@ function summary_all_directories_fig(I_lo)
 end
 save_fig(summary_all_directories_fig(I_THRESHOLD),
          joinpath(RUN_OUTDIR, "fig_summary_all_directories.$(FIG_EXT)"))
-save_fig(summary_all_directories_fig(0.97 * I_THRESHOLD),
-         joinpath(RUN_OUTDIR, "fig_summary_all_directories_ext.$(FIG_EXT)"))
-
-# combined archive (plain vectors; one entry per analysed directory)
-all_path = joinpath(RUN_OUTDIR, "SG_ki_scale_all_directories.jld2")
-jldopen(all_path, "w") do f
-    f["meta/script"]        = @__FILE__
-    f["meta/run_stamp"]     = RUN_STAMP
-    f["meta/directories"]   = String.(df_all.dir)
-    f["meta/failed"]        = first.(dir_failed)
-    f["settings/nz_exp"]    = NZ_EXP
-    f["settings/λ0_exp"]    = λ0_EXP
-    f["settings/nz"]        = NZ_FIXED
-    f["settings/λ0"]        = λ0_FIXED
-    f["settings/σw_mm"]     = σW_FIXED
-    f["settings/I_plateau_A"] = I_PLATEAU
-    for c in names(df_all)
-        c == "dir" && continue
-        f["results/" * c] = collect(df_all[!, c])
-    end
-    f["combined/ki_wmean"]  = ki_wmean * 1e-6
-    f["combined/ki_wmerr"]  = ki_wmerr * 1e-6
-    f["combined/ki_chi2"]   = ki_chi2
-    f["combined/ki_dof"]    = ki_dof
-end
 
 # -----------------------------------------------------------------------------
-# Export file: per directory the fit results, the measured points and the dense
-# calibrated model curves; globally the median-parameter curves.
-#   directories/<dir>/          ki, ki_error, cqd_/qm_ scale & zinit (+ _error), z0 (+ _error),
-#                               measured points: current, field, gradient, zf1 position (+ errors)
+# Export file SG_fit_export.jld2 — every result of the run in one file
+# (it replaces the former SG_ki_scale_all_directories.jld2):
+#   meta/                       script, run stamp, analysed and failed directories, units, model
+#   settings/                   experimental and simulation configuration, plateau, threshold
+#   directories/<dir>/          fit results: ki, cqd_/qm_ scale & zinit, each with _ErrStat and _ErrSys,
+#                               ki_ErrTot, profile interval of ki, correlations, χ²_red, ΔAIC/ΔBIC,
+#                               z0 (+ _Err), tail and point counts;
+#                               measured points: current, field, gradient, zf1 position (+ _Err)
 #   directories/<dir>/qm/       (z_init,QM + zqm(I))/s_QM on a dense current grid, with B and G
 #   directories/<dir>/cqd/      (z_init,CQD + ki_itp(I, kᵢ))/s_CQD on the same grid, with B and G
 #   global/<stat>/qm/, global/<stat>/cqd/   parameters (ki, scale, zinit) and the same curves for
-#                               stat = median | wmean (weighted, + _error, _chi2, _dof) | mean (+ _error = std/√n, _std)
-# `_error` = statistical error of the final fit (Student-t half-width, 95 %);
-# `_sys`   = tail-choice systematic (spread over the plateau of the tail scan).
+#                               stat = median | wmean (+ _Err = 1/√Σw, _chi2, _dof) | mean (+ _Err = std/√n, _std)
+# Error suffixes:
+#   _ErrStat = statistical error of the final fit (Student-t half-width, 95 %)
+#   _ErrSys  = tail-choice systematic (spread over the plateau of the tail scan)
+#   _ErrTot  = _ErrStat ⊕ _ErrSys;   _Err = uncertainty of a measured or combined value
 # Model values are kept as computed: with z_init < 0 they can be ≤ 0 at the lowest currents.
 # Units: current A, field T, gradient T/m, positions and z_init/z0 mm, kᵢ in units of 10⁻⁶.
 # -----------------------------------------------------------------------------
-const EXPORT_N_DENSE = 2000                                   # points of the dense current grid
 I_dense = collect(range(1.0 / EXPORT_N_DENSE, 1.0; length = EXPORT_N_DENSE))   # (0, 1] A, step 0.5 mA
 B_dense = TheoreticalSimulation.BvsI.(I_dense)                # T
 G_dense = TheoreticalSimulation.GvsI.(I_dense)                # T/m
-zqm_dense = zqm.(I_dense)                                     # QM model, mm (before calibration)
+# δf ≈ |f(I+δI) − f(I−δI)|/2 for f = B or G (neither is linear through the origin)
+prop_err(fun, I, δI) = abs.(fun.(I .+ δI) .- fun.(max.(I .- δI, 0.0))) ./ 2
 
 export_path = joinpath(RUN_OUTDIR, "SG_fit_export.jld2")
 jldopen(export_path, "w") do f
-    f["meta/script"]     = @__FILE__
-    f["meta/run_stamp"]  = RUN_STAMP
+    f["meta/script"]      = @__FILE__
+    f["meta/run_stamp"]   = RUN_STAMP
     f["meta/directories"] = String.(df_all.dir)
+    f["meta/failed"]      = first.(dir_failed)            # directories that could not be analysed
     f["meta/units"] = "current A, field T, gradient T/m, positions/zinit/z0 mm, ki ×1e-6; " *
-                      "_error = stat (95 % t half-width), _sys = tail-choice systematic"
+                      "_ErrStat = stat (95 % t half-width), _ErrSys = tail-choice systematic, " *
+                      "_ErrTot = stat ⊕ sys, _Err = uncertainty of a measured or combined value"
     f["meta/model"] = "QM: (zinit + zqm(I))/scale;  CQD: (zinit + z_CQD(I, ki))/scale"
+
+    f["settings/nz_exp"]        = NZ_EXP
+    f["settings/λ0_exp"]        = λ0_EXP
+    f["settings/nz"]            = NZ_FIXED
+    f["settings/λ0"]            = λ0_FIXED
+    f["settings/σw_mm"]         = σW_FIXED
+    f["settings/I_plateau_A"]   = I_PLATEAU
+    f["settings/I_threshold_A"] = I_THRESHOLD
 
     for r in eachrow(df_all)
         d  = String(r.dir)
         g  = "directories/" * d * "/"
         dd = DIR_DATA[d]
         # fit results
-        f[g * "ki"]               = r.ki
-        f[g * "ki_error"]         = r.ki_err
-        f[g * "ki_sys"]           = r.ki_sys
-        f[g * "cqd_scale"]        = r.scale_cqd
-        f[g * "cqd_scale_error"]  = r.scale_cqd_err
-        f[g * "cqd_scale_sys"]    = r.scale_cqd_sys
-        f[g * "cqd_zinit"]        = r.zinit_cqd
-        f[g * "cqd_zinit_error"]  = r.zinit_cqd_err
-        f[g * "cqd_zinit_sys"]    = r.zinit_cqd_sys
-        f[g * "qm_scale"]         = r.scale_qm
-        f[g * "qm_scale_error"]   = r.scale_qm_err
-        f[g * "qm_scale_sys"]     = r.scale_qm_sys
-        f[g * "qm_zinit"]         = r.zinit_qm
-        f[g * "qm_zinit_error"]   = r.zinit_qm_err
-        f[g * "qm_zinit_sys"]     = r.zinit_qm_sys
-        f[g * "z0"]               = r.z0_mm
-        f[g * "z0_error"]         = r.z0_err_mm
+        f[g * "ki"]                 = r.ki
+        f[g * "ki_ErrStat"]         = r.ki_err
+        f[g * "ki_ErrSys"]          = r.ki_sys
+        f[g * "ki_ErrTot"]          = r.ki_err_tot
+        f[g * "ki_ci_profile"]      = [r.ki_ci_lo, r.ki_ci_hi]     # profile-likelihood interval (95 %)
+        f[g * "cqd_scale"]          = r.scale_cqd
+        f[g * "cqd_scale_ErrStat"]  = r.scale_cqd_err
+        f[g * "cqd_scale_ErrSys"]   = r.scale_cqd_sys
+        f[g * "cqd_zinit"]          = r.zinit_cqd
+        f[g * "cqd_zinit_ErrStat"]  = r.zinit_cqd_err
+        f[g * "cqd_zinit_ErrSys"]   = r.zinit_cqd_sys
+        f[g * "qm_scale"]           = r.scale_qm
+        f[g * "qm_scale_ErrStat"]   = r.scale_qm_err
+        f[g * "qm_scale_ErrSys"]    = r.scale_qm_sys
+        f[g * "qm_zinit"]           = r.zinit_qm
+        f[g * "qm_zinit_ErrStat"]   = r.zinit_qm_err
+        f[g * "qm_zinit_ErrSys"]    = r.zinit_qm_sys
+        f[g * "corr_ki_zinit"]      = r.corr_ki_zinit
+        f[g * "corr_ki_scale"]      = r.corr_ki_scale
+        f[g * "chi2red_cqd"]        = r.chi2red_cqd
+        f[g * "chi2red_qm"]         = r.chi2red_qm
+        f[g * "dAIC_cqd_minus_qm"]  = r.dAIC_cqd_minus_qm
+        f[g * "dBIC_cqd_minus_qm"]  = r.dBIC_cqd_minus_qm
+        f[g * "z0"]                 = r.z0_mm
+        f[g * "z0_Err"]             = r.z0_err_mm
+        f[g * "n_points"]           = r.n_points
+        f[g * "n_tail"]             = r.n_tail
+        f[g * "I_tail_min"]         = r.I_tail_min
+        f[g * "outdir"]             = r.outdir
         # measured points used in the fits (I ≥ I_THRESHOLD)
-        f[g * "current"]          = dd.I
-        f[g * "current_error"]    = dd.δI
-        f[g * "magnetic_field"]   = TheoreticalSimulation.BvsI.(dd.I)
-        # δB ≈ |B(I+δI) − B(I−δI)|/2, propagated from δI like the gradient error below
-        f[g * "magnetic_field_error"] = abs.(TheoreticalSimulation.BvsI.(dd.I .+ dd.δI) .-
-                                             TheoreticalSimulation.BvsI.(max.(dd.I .- dd.δI, 0.0))) ./ 2
-        f[g * "gradient"]         = TheoreticalSimulation.GvsI.(dd.I)
-        # δG ≈ |G(I+δI) − G(I−δI)|/2 (same as the gradient plot; G is not linear through 0)
-        f[g * "gradient_error"]   = abs.(TheoreticalSimulation.GvsI.(dd.I .+ dd.δI) .-
-                                         TheoreticalSimulation.GvsI.(max.(dd.I .- dd.δI, 0.0))) ./ 2
+        f[g * "current"]            = dd.I
+        f[g * "current_Err"]        = dd.δI
+        f[g * "magnetic_field"]     = TheoreticalSimulation.BvsI.(dd.I)
+        f[g * "magnetic_field_Err"] = prop_err(TheoreticalSimulation.BvsI, dd.I, dd.δI)
+        f[g * "gradient"]           = TheoreticalSimulation.GvsI.(dd.I)
+        f[g * "gradient_Err"]       = prop_err(TheoreticalSimulation.GvsI, dd.I, dd.δI)
         f[g * "zf1_position"]       = dd.z
-        f[g * "zf1_position_error"] = dd.δz
+        f[g * "zf1_position_Err"]   = dd.δz
         # calibrated model curves on the dense grid
-        for (m, z) in (("qm",  (r.zinit_qm  .+ zqm_dense) ./ r.scale_qm),
-                       ("cqd", (r.zinit_cqd .+ ki_itp.(I_dense, Ref(r.ki))) ./ r.scale_cqd))
+        for (m, z) in (("qm",  model_qm(I_dense, r.zinit_qm, r.scale_qm)),
+                       ("cqd", model_cqd(I_dense, r.ki, r.zinit_cqd, r.scale_cqd)))
             f[g * m * "/current"]        = I_dense
             f[g * m * "/magnetic_field"] = B_dense
             f[g * m * "/gradient"]       = G_dense
@@ -3168,8 +3158,8 @@ jldopen(export_path, "w") do f
 
     # global: three summaries of the per-directory parameters, each with its calibrated curves
     #   global/median/  median over the directories (as fig_summary_all_directories)
-    #   global/wmean/   weighted mean, w = 1/(stat² + sys²); _error = 1/√Σw, plus chi2 and dof
-    #   global/mean/    arithmetic mean; _error = std/√n (standard error of the mean), _std = std
+    #   global/wmean/   weighted mean, w = 1/(stat² + sys²); _Err = 1/√Σw, plus chi2 and dof
+    #   global/mean/    arithmetic mean; _Err = std/√n (standard error of the mean), _std = std
     n_dir = nrow(df_all)
     sem(v) = n_dir > 1 ? std(v) / sqrt(n_dir) : 0.0
     sdv(v) = n_dir > 1 ? std(v) : 0.0
@@ -3192,29 +3182,31 @@ jldopen(export_path, "w") do f
         f[g * "qm/current"]         = I_dense
         f[g * "qm/magnetic_field"]  = B_dense
         f[g * "qm/gradient"]        = G_dense
-        f[g * "qm/zf1_position"]    = (p.z_qm .+ zqm_dense) ./ p.s_qm
+        f[g * "qm/zf1_position"]    = model_qm(I_dense, p.z_qm, p.s_qm)
         f[g * "cqd/ki"]             = p.ki
         f[g * "cqd/scale"]          = p.s_cqd
         f[g * "cqd/zinit"]          = p.z_cqd
         f[g * "cqd/current"]        = I_dense
         f[g * "cqd/magnetic_field"] = B_dense
         f[g * "cqd/gradient"]       = G_dense
-        f[g * "cqd/zf1_position"]   = (p.z_cqd .+ ki_itp.(I_dense, Ref(p.ki))) ./ p.s_cqd
+        f[g * "cqd/zf1_position"]   = model_cqd(I_dense, p.ki, p.z_cqd, p.s_cqd)
     end
     # uncertainties of the weighted mean (1/√Σw) and its consistency χ²/dof
-    f["global/wmean/cqd/ki_error"]    = wm_ki.err;   f["global/wmean/cqd/ki_chi2"]    = wm_ki.chi2;   f["global/wmean/cqd/ki_dof"]    = wm_ki.dof
-    f["global/wmean/cqd/scale_error"] = wm_scq.err;  f["global/wmean/cqd/scale_chi2"] = wm_scq.chi2;  f["global/wmean/cqd/scale_dof"] = wm_scq.dof
-    f["global/wmean/cqd/zinit_error"] = wz_cqd.err;  f["global/wmean/cqd/zinit_chi2"] = wz_cqd.chi2;  f["global/wmean/cqd/zinit_dof"] = wz_cqd.dof
-    f["global/wmean/qm/scale_error"]  = wm_sqm.err;  f["global/wmean/qm/scale_chi2"]  = wm_sqm.chi2;  f["global/wmean/qm/scale_dof"]  = wm_sqm.dof
-    f["global/wmean/qm/zinit_error"]  = wz_qm.err;   f["global/wmean/qm/zinit_chi2"]  = wz_qm.chi2;   f["global/wmean/qm/zinit_dof"]  = wz_qm.dof
+    for (k, w) in (("cqd/ki", wm_ki), ("cqd/scale", wm_scq), ("cqd/zinit", wz_cqd),
+                   ("qm/scale", wm_sqm), ("qm/zinit", wz_qm))
+        f["global/wmean/$(k)_Err"]  = w.err
+        f["global/wmean/$(k)_chi2"] = w.chi2
+        f["global/wmean/$(k)_dof"]  = w.dof
+    end
     # spread of the arithmetic mean: standard error and standard deviation over the directories
     for (k, v) in (("cqd/ki", df_all.ki), ("cqd/scale", df_all.scale_cqd), ("cqd/zinit", df_all.zinit_cqd),
                    ("qm/scale", df_all.scale_qm), ("qm/zinit", df_all.zinit_qm))
-        f["global/mean/$(k)_error"] = sem(v)
-        f["global/mean/$(k)_std"]   = sdv(v)
+        f["global/mean/$(k)_Err"] = sem(v)
+        f["global/mean/$(k)_std"] = sdv(v)
     end
     f["global/n_directories"] = n_dir
 end
+    archive_keys = list_jld2_entries(export_path)     # names-only reference of the archive layout
 @info cstr("Export file written: ", :green) * cstr(export_path, :magenta)
 
 @info cstr("Combined results written to ", :green) * cstr(RUN_OUTDIR, :magenta) *
