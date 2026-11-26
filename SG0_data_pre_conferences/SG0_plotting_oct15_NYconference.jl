@@ -55,17 +55,19 @@ end
 # ---------- CQD model and fit ----------
 # Double-stage (SG0 -> SG1) CQD model, fitted directly to the loaded `curves`.
 # Eq. n  = fit_20260706/cqd_sg0_fit_20260706.pdf;  [n] = source note cqd_sg0_analytical_model_2026_10_13F.pdf.
-# Same algorithm as fit_20260706/cqd_model.js + run_fits.js ("parallel first, then borrow k_i", PDF Sec. 4).
+# (Equation numbers follow the 2026-10-29 version of the fit note. The top-hat SG0 divisor f has no
+#  counterpart there: it is Eq. 21 of the 2026-10-16 version, git commit 4ebfdef.)
+# Same algorithm as fit_20260706/cqd_model.js + run_fits.js ("parallel first, then borrow k_i", PDF Sec. 5).
 # SG0 is a uniform field: standard QM ("Existing models") predicts DeltaD = 0 (source note, Sec. 23).
 
-# Fixed calibration inputs (PDF Sec. 3)
-const D0_PX = 13.0      # absolute zero-current separation (px): sets the scale of the model, Eq. 18
-const I_STAR = 1.03869  # B1 l1 / (beta0 l0) in A: SG0/SG1 dose link, Eq. 9
-const K_PIX = 6.47      # 2 mu_e G1 T1^2 / (M_a d_pix) in px, Eq. 19
+# Fixed calibration inputs (PDF Sec. 4)
+const D0_PX = 13.0      # absolute zero-current separation (px): sets the scale of the model, Eq. 27
+const I_STAR = 1.03869  # B1 l1 / (beta0 l0) in A: SG0/SG1 dose link, Eq. 9 with a top-hat BL0
+const K_PIX = 6.47      # 2 mu_e G1 T1^2 / (M_a d_pix) in px, Eq. 25
 const V_A = 600.5       # beam speed (m/s)
 const GAMMA_E = 1.76086e11          # |gamma_e| (rad s^-1 T^-1)
 const BL1 = 0.018931 * 0.070        # SG1 field-length product B1 l1 (T m)
-ki_from_dose(D1) = D1 * V_A / (GAMMA_E * BL1)   # k_i = Dc1 v_a / (|gamma_e| BL1), Eq. 7
+ki_from_dose(D1) = D1 * V_A / (GAMMA_E * BL1)   # k_i = Dc1 v_a / (|gamma_e| BL1), Eq. 10
 
 # Gauss-Legendre nodes and weights on [-1, 1] (Newton iteration on P_n)
 function gauss_legendre(n)
@@ -86,7 +88,7 @@ function gauss_legendre(n)
     return x, w
 end
 const GL48 = gauss_legendre(48)   # ensemble integrals over the entrance cosine c
-const GL24 = gauss_legendre(24)   # SG1 time integral of Eq. 13
+const GL24 = gauss_legendre(24)   # SG1 time integral of Eq. 17
 function integ(f, a, b, (X, W) = GL48)
     h, m = (b - a) / 2, (b + a) / 2
     return h * sum(W[i] * f(m + h * X[i]) for i in eachindex(X))
@@ -95,13 +97,13 @@ end
 # CQD transfer map (Eq. 8; [145]): translation of artanh(c) by q*D
 transfer(c, q, D) = (t = tanh(D); (c + q * t) / (1 + q * c * t))
 
-# Normalized SG1 response of one atom with entrance cosine c, q1 = +1, rho = DIR*Dc1 (Eq. 13; [204],[211])
+# Normalized SG1 response of one atom with entrance cosine c, q1 = +1, rho = DIR*Dc1 (Eq. 17; [204],[211])
 function z_ex(c, D1, rho)
     C = atanh(clamp(c, -1 + 1e-15, 1 - 1e-15))
     return integ(l -> (D1 + rho - l) * tanh(C + l), 0.0, D1, GL24) / (rho * D1 + D1^2 / 2)
 end
 
-# Heart-weighted ensemble responses (Eqs. 14-16; [217]-[221], [251])
+# Heart-weighted ensemble responses (Eqs. 19-22; [217]-[221], [251])
 Z_par(D0, D1, rho) = 0.5 * integ(c -> (1 + c) * z_ex(transfer(c, 1, D0), D1, rho), -1.0, 1.0)
 Z_ret(D0, D1, rho) = 0.5 * integ(c -> (1 + c) * z_ex(-transfer(c, 1, D0), D1, rho), -1.0, 1.0)
 function Z_geom(D0, D1, rho)   # strict mirror-and-rebranch rule; L+- have kinks at c = -/+ tanh(D0/2)
@@ -114,7 +116,7 @@ function Z_geom(D0, D1, rho)   # strict mirror-and-rebranch rule; L+- have kinks
     return 0.5 * (integ(g, -1.0, -k) + integ(g, -k, k) + integ(g, k, 1.0))
 end
 
-# DIR = Td/T1 from the 13-px baseline, 13 = K_pix (DIR + 1/2) Z0(Dc1, DIR)  (Eq. 19; [249]), by bisection
+# DIR = Td/T1 from the 13-px baseline, 13 = K_pix (DIR + 1/2) Z0(Dc1, DIR)  (Eq. 26; [249]), by bisection
 function solve_DIR(D1)
     g(DIR) = K_PIX * (DIR + 0.5) * Z_par(0.0, D1, DIR * D1) - D0_PX
     a, b = 0.01, 200.0
@@ -125,7 +127,7 @@ function solve_DIR(D1)
     return (a + b) / 2
 end
 
-# Responses at currents I for SG1 dose D1 and SG0 divisor f; Dc0 = Dc1 I0 / (f I_star) (Eqs. 9, 21)
+# Responses at currents I for SG1 dose D1 and SG0 divisor f; Dc0 = Dc1 I0 / (f I_star) (Eq. 9; f: Eq. 21 of the 2026-10-16 version)
 function cqd_responses(D1, f, I)
     DIR = solve_DIR(D1); rho = DIR * D1
     Z0 = Z_par(0.0, D1, rho)
@@ -133,12 +135,12 @@ function cqd_responses(D1, f, I)
     return (; DIR, Z0, D0, zp = [Z_par(d, D1, rho) for d in D0],
               zg = [Z_geom(d, D1, rho) for d in D0], zr = [Z_ret(d, D1, rho) for d in D0])
 end
-# Model curves DeltaD = 13 [Z/Z0 - 1] (Eq. 18), antiparallel mixture with weight w (Eq. 17)
+# Model curves DeltaD = 13 [Z/Z0 - 1] (Eq. 27), antiparallel mixture with weight w (Eq. 23)
 dD_par(r) = D0_PX .* (r.zp ./ r.Z0 .- 1)
 dD_anti(r, w) = D0_PX .* (((1 .- w) .* r.zg .+ w .* r.zr) ./ r.Z0 .- 1)
 w_ret(D0, p, form) = form === :lin ? min.(1.0, p .* D0) : 1 .- exp.(-p .* D0)   # Eq. 24
 
-chi2(model, y, s) = sum(((model .- y) ./ s) .^ 2)   # Eq. 22
+chi2(model, y, s) = sum(((model .- y) ./ s) .^ 2)   # Eq. 32
 
 # Golden-section minimization of a 1-D function on [a, b]
 function golden(fn, a, b; n = 60)
@@ -154,18 +156,22 @@ function golden(fn, a, b; n = 60)
     return fc < fd ? (c, fc) : (d, fd)
 end
 
-"""
-    fit_cqd(curves; f = 7.0, wform = :lin, Igrid = 0:0.01:3.7)
+# Plotting grid for the model curves: 0:0.01:3.7 A plus log-spaced points from 1 mA to 8 mA,
+# so the semilog plots reach the lowest nonzero current (5 mA)
+const IGRID = sort(vcat(10 .^ range(-3, -2.1; length = 10), 0:0.01:3.7))
 
-Two-step pure-CQD fit of the spin-resolved separations (PDF Sec. 4):
+"""
+    fit_cqd(curves; f = 7.0, wform = :lin, Igrid = IGRID)
+
+Two-step pure-CQD fit of the spin-resolved separations (PDF Sec. 5):
 1. parallel set only: minimize chi2 over Dc1 (log scan on [1e-3, 5], then golden section) -> k_i,
-   with the profile Delta-chi2 = 1 interval (Eqs. 22-23);
+   with the profile Delta-chi2 = 1 interval (Eqs. 32-33);
 2. antiparallel set with k_i fixed: fit only the retained-label weight
    (`wform = :lin`: w = kappa*Dc0, `:exp`: w = 1 - exp(-RLC*Dc0)), Eq. 24.
 `f` is the fixed SG0 field divisor (f = 7: Revision F). Returns the fit summary and the model curves
 on `Igrid` in the same shape as `extract_fit`: `(I_fit, dD)`.
 """
-function fit_cqd(curves; f = 7.0, wform = :lin, Igrid = 0:0.01:3.7)
+function fit_cqd(curves; f = 7.0, wform = :lin, Igrid = IGRID)
     ia = findfirst(c -> occursin("antiparallel", c.label), curves)
     ip = findfirst(c -> !occursin("antiparallel", c.label), curves)
     par, anti = curves[ip], curves[ia]
@@ -276,16 +282,21 @@ fitres, I_fit, dD = fit_cqd(curves; f = 7.0)   # dD[1] = parallel, dD[2] = antip
 dD = dD[1:2]                                   # plot the two fitted curves
 # To plot the precomputed fit instead:
 # I_fit, dD = extract_fit(load_fit_csv(joinpath(@__DIR__, "fit_20260706", "fit_curves_f7_20260706.csv")))
+fig0 = plot_curves(curves)                     # both fits, linear
 fig1 = plot_curves(curves; fit = (I_fit, dD))                     # both fits, linear
 fig2 = plot_curves(curves; fit = (I_fit, dD[1:1]))                # dD_parallel_px fit only, linear
 fig3 = plot_curves(curves; fit = (I_fit, dD), xlog = true)        # both fits, semilog
 fig4 = plot_curves(curves; fit = (I_fit, dD[1:1]), xlog = true)   # dD_parallel_px fit only, semilog
 
-save("spin_resolved_sep.pdf", fig1)
+save("spin_resolved_sep_nocqd.svg", fig0)
+save("spin_resolved_sep_nocqd.pdf", fig0)
 save("spin_resolved_sep.svg", fig1)
+save("spin_resolved_sep.pdf", fig1)
 save("spin_resolved_sep_parallel.pdf", fig2)
 save("spin_resolved_sep_semilog.pdf", fig3)
 save("spin_resolved_sep_parallel_semilog.pdf", fig4)
 
 # save_csv(curves, "spin_resolved_sep.csv")
 # plot_curves(load_csv("spin_resolved_sep.csv"))
+
+plot_curves(curves)
